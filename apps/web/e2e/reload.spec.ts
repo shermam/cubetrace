@@ -6,7 +6,8 @@ import { recordTimerViews, timerViews, viewAfter } from './helpers/timer-views';
 
 // Flow 4 of docs/PLAN.md, T1.9: a reload in the middle of a session. The session is read back from
 // the origin private file system (its id is in localStorage): its solve is listed at once, and the
-// next attempt, here the demo solve replayed again after the reload, is number 2 of the same session.
+// next attempt, here the demo solve replayed again after the reload, is number 2 of the same
+// session.
 
 test('a reload mid-session resumes it: the solve from the store, and the next attempt numbered 2', async ({
   page,

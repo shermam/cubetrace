@@ -2,12 +2,15 @@ import { type Page, test } from '@playwright/test';
 
 // A record of everything the Timer page renders, for the states the demo cube passes through within
 // a frame at speed 20: the armed attempt (the solution's first move comes as soon as the scramble's
-// last one has been taken in) and a mis-scramble's undo guidance (its inverse comes after a pause of
-// 50 ms). Polling the page could miss them. The app renders each of them at least once, because the
-// demo cube sets the timer of the move that ends them only after the move that starts them
+// last one has been taken in) and a mis-scramble's undo guidance (its inverse comes after a pause
+// of 50 ms). Polling the page could miss them. The app renders each of them at least once, because
+// the demo cube sets the timer of the move that ends them only after the move that starts them
 // (src/app/cube/demo.ts, `demoParts`), and a MutationObserver sees every render.
 
-/** What the Timer page shows at one moment (src/app/timer/timer-clock.ts, scramble-view.ts, …). */
+/**
+ * What the Timer page shows at one moment (src/app/timer/timer-clock.ts, scramble-view.ts and
+ * solve-list.ts).
+ */
 export interface TimerView {
   /** The status line's `data-phase`: `loading`, `scrambling`, `armed`, `solving`, … */
   readonly phase: string | null;
@@ -97,7 +100,8 @@ export function viewAfter(
   const index = views.findIndex((view, i) => i > after && is(view));
   if (index < 0) {
     throw new Error(
-      `The Timer page never showed ${what} after view ${String(after)} of ${String(views.length)} (see the timer-views attachment).`,
+      `The Timer page never showed ${what} after view ${String(after)} of ` +
+        `${String(views.length)} (see the timer-views attachment).`,
     );
   }
   return index;

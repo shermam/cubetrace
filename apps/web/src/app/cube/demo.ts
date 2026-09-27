@@ -1,8 +1,8 @@
 // Demo mode (docs/PLAN.md, T1.6a): the fake cube replays one of the first 30 solves of
 // fixtures/solves.json, its scramble first and then its solution, so the app can be seen and
 // tested without a cube; `?misscramble=` adds a wrong turn and its undo to the scramble (T1.9, for
-// the end-to-end suite and to try the undo guidance). The solves are a slim copy of the fixtures that
-// scripts/write-demo-solves.mts writes to public/demo/solves.json before every build and dev
+// the end-to-end suite and to try the undo guidance). The solves are a slim copy of the fixtures
+// that scripts/write-demo-solves.mts writes to public/demo/solves.json before every build and dev
 // server; the app fetches it only when a demo starts, so it is not in any bundle, and the service
 // worker does not prefetch it (ngsw-config.json caches JavaScript, CSS, images and fonts only).
 import { Injectable, inject } from '@angular/core';
@@ -92,9 +92,9 @@ export function parseDemoIndex(text: string | null, count: number): number | nul
 }
 
 /**
- * `?misscramble=`: the scramble move (1-based) after which the demo cube makes a wrong turn, a whole
- * number from 1; null when it is missing or anything else. {@link demoParts} ignores a move that the
- * scramble does not have, or its last one (a wrong turn there would start the solve).
+ * `?misscramble=`: the scramble move (1-based) after which the demo cube makes a wrong turn, a
+ * whole number from 1; null when it is missing or anything else. {@link demoParts} ignores a move
+ * that the scramble does not have, or its last one (a wrong turn there would start the solve).
  */
 export function parseDemoMisscramble(text: string | null): number | null {
   if (text === null || !/^\s*\d+\s*$/.test(text)) {
@@ -151,9 +151,9 @@ function timed(moves: readonly Move[]): ScheduledMove[] {
  * The wrong turn of a mis-scramble after move `after` (1-based) of `scramble`: a clockwise quarter
  * turn of the first face, in the order U R F D L B, that neither move `after` nor move `after + 1`
  * turns, nor the face opposite to either. So it cannot pass for a step along the scramble (half of
- * a half turn, or the next move of an opposite pair made first): the cube is off the scramble's path
- * until the turn is undone, and one quarter turn undone costs 2 extra moves (docs/DATA-MODEL.md §3).
- * Throws unless `after` is from 1 to one less than the number of moves.
+ * a half turn, or the next move of an opposite pair made first): the cube is off the scramble's
+ * path until the turn is undone, and one quarter turn undone costs 2 extra moves
+ * (docs/DATA-MODEL.md §3). Throws unless `after` is from 1 to one less than the number of moves.
  */
 export function misscrambleMove(scramble: readonly Move[], after: number): Move {
   if (!Number.isInteger(after) || after < 1 || after >= scramble.length) {
@@ -171,8 +171,8 @@ export function misscrambleMove(scramble: readonly Move[], after: number): Move 
 
 /**
  * One part of a demo replay: moves for one `FakeCube.play()`, started `pauseMs` after the previous
- * part has ended (in ms of the replay's own clock, divided by the speed like every gap; 0 is a timer
- * too, see {@link demoParts}).
+ * part has ended (in ms of the replay's own clock, divided by the speed like every gap; 0 is a
+ * timer too, see {@link demoParts}).
  */
 export interface DemoPart {
   readonly pauseMs: number;
@@ -183,17 +183,18 @@ export interface DemoPart {
  * What the demo cube plays, part after part: the scramble at one move per 100 ms
  * ({@link scrambleSchedule}), then the solution on its recorded timings. With `misscramble` k, the
  * scramble goes wrong after its move k: 100 ms later the cube makes {@link misscrambleMove}, and
- * {@link DEMO_MISSCRAMBLE_PAUSE_MS} after that its inverse, then the rest of the scramble. k must be
- * from 1 to one less than the number of scramble moves; any other value is ignored.
+ * {@link DEMO_MISSCRAMBLE_PAUSE_MS} after that its inverse, then the rest of the scramble. k must
+ * be from 1 to one less than the number of scramble moves; any other value is ignored.
  *
  * Each part after the first starts on a timer set once the previous part has ended, that is once
  * its last move has reached the app, which has then scheduled the page's update (Angular schedules
  * change detection on a zero-delay timer, or the next animation frame, when a signal changes). So
  * the page renders what that move led to before the next part begins, however fast the replay and
- * however late its timers fire: the undo guidance before the wrong turn's inverse, the armed attempt
- * before the solution's first move. The end-to-end suite relies on both. And the next part's
- * schedule counts from after that render, so the render does not delay its first move against the
- * others: the solve's time on the host clock stays the recorded one divided by the speed.
+ * however late its timers fire: the undo guidance before the wrong turn's inverse, the armed
+ * attempt before the solution's first move. The end-to-end suite relies on both. And the next
+ * part's schedule counts from after that render, so the render does not delay its first move
+ * against the others: the solve's time on the host clock stays the recorded one divided by the
+ * speed.
  */
 export function demoParts(solve: DemoSolve, misscramble: number | null = null): DemoPart[] {
   const scramble = parseMoves(solve.scramble);

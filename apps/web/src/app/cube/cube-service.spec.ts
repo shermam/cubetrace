@@ -439,8 +439,8 @@ describe('CubeService', () => {
       // At speed 10 the scramble moves are 10 ms apart; after move 2 (U) comes the wrong turn, R.
       await vi.advanceTimersByTimeAsync(20);
       expect(movesOf(cube)).toEqual(['R', 'U', 'R']);
-      // It stays for the pause, divided by the speed, before the cube undoes it (the fake clock runs
-      // the inverse's zero-delay timer, set by the pause's timer, 1 ms later).
+      // It stays for the pause, divided by the speed, before the cube undoes it (the fake clock
+      // runs the inverse's zero-delay timer, set by the pause's timer, 1 ms later).
       await vi.advanceTimersByTimeAsync(DEMO_MISSCRAMBLE_PAUSE_MS / 10 - 1);
       expect(movesOf(cube)).toEqual(['R', 'U', 'R']);
       await vi.advanceTimersByTimeAsync(2);

@@ -18,7 +18,8 @@ export interface SessionExport {
   readonly attempts: readonly AttemptRecord[];
 }
 
-// Draft 2020-12, with the options packages/core/src/schemas.ts documents; every error, not the first.
+// Draft 2020-12, with the options packages/core/src/schemas.ts documents; every error, not just the
+// first.
 const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
 const isSession = ajv.compile<SessionRecord>(SESSION_SCHEMA);
 const isAttempt = ajv.compile<AttemptRecord>(ATTEMPT_SCHEMA);
@@ -26,7 +27,8 @@ const isAttempt = ajv.compile<AttemptRecord>(ATTEMPT_SCHEMA);
 /**
  * `json` as a session export: an object whose `session` is valid against session.schema.json and
  * whose `attempts` are each valid against attempt.schema.json. Throws otherwise, with ajv's errors
- * (such as "attempts[0]/crossFace must be equal to one of the allowed values"), which fails the test.
+ * (such as "attempts[0]/crossFace must be equal to one of the allowed values"), which fails the
+ * test.
  */
 export function validateExport(json: unknown): SessionExport {
   if (typeof json !== 'object' || json === null) {
