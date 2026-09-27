@@ -81,15 +81,16 @@ test('two solves with the camera on: after a page load the session page lists bo
   const sessionId = (await currentSessionId(page)) ?? '';
   expect(sessionId).not.toBe('');
 
-  // The camera on: it records, and the sync check starts by itself (the session has none of this
-  // camera); Later ends it, and the timer is back on attempt 1's scramble.
+  // The camera on: it records, and the sync check is due by itself (the session has none of this
+  // camera), asking first for a framing rectangle around the cube (the whole frame is framed); Later
+  // hides it, and the timer is on attempt 1's scramble.
   await page.getByTestId('camera-section').locator('summary').click();
   await page.getByTestId('camera-toggle').click();
   await expect(page.getByTestId('recording-state')).toHaveAttribute('data-status', 'recording', {
     timeout: 15_000,
   });
   const check = page.getByTestId('sync-check');
-  await expect(check).toHaveAttribute('data-state', 'running');
+  await expect(check).toHaveAttribute('data-state', 'framing');
   await page.getByTestId('sync-later').click();
   await expect(check).toBeHidden();
   await expect(status).toHaveAttribute('data-phase', 'scrambling');
