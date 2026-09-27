@@ -2,8 +2,9 @@ import { type Page, test } from '@playwright/test';
 
 // A record of everything the Timer page renders, for the states the demo cube passes through within
 // a frame at speed 20: the armed attempt (the solution's first move comes as soon as the scramble's
-// last one has been taken in) and a mis-scramble's undo guidance (its inverse comes after a pause
-// of 50 ms). Polling the page could miss them. The app renders each of them at least once, because
+// last one has been taken in), a mis-scramble's undo guidance (its inverse comes after a pause of
+// 50 ms) and a half turn of the scramble made halfway (its second quarter turn comes 3 ms after the
+// first). Polling the page could miss them. The app renders each of them at least once, because
 // the demo cube sets the timer of the move that ends them only after the move that starts them
 // (src/app/cube/demo.ts, `demoParts`), and a MutationObserver sees every render.
 
@@ -24,6 +25,10 @@ export interface TimerView {
   readonly progress: string | null;
   /** The undo guidance's moves, while it is shown. */
   readonly undo: readonly string[] | null;
+  /** The scramble on screen, as text. */
+  readonly scramble: string;
+  /** The mark of each of its moves (`data-state`): `done`, `partial`, `wrong` or `pending`. */
+  readonly marks: readonly string[];
   /** The solve list, newest first: "<index> <status>" per row. */
   readonly rows: readonly string[];
 }
@@ -47,6 +52,7 @@ export async function recordTimerViews(page: Page): Promise<void> {
       const timer = byTestId('timer');
       const progress = byTestId('scramble-progress');
       const undo = byTestId('undo');
+      const scramble = byTestId('scramble');
       const view = {
         phase: status?.getAttribute('data-phase') ?? null,
         status: text(status),
@@ -55,6 +61,14 @@ export async function recordTimerViews(page: Page): Promise<void> {
         attempt: text(byTestId('attempt-index')),
         progress: progress === null ? null : text(progress),
         undo: undo === null ? null : Array.from(undo.querySelectorAll('li'), (li) => text(li)),
+        scramble: text(scramble),
+        marks:
+          scramble === null
+            ? []
+            : Array.from(
+                scramble.querySelectorAll('.move'),
+                (move) => move.getAttribute('data-state') ?? '',
+              ),
         rows: Array.from(
           document.querySelectorAll('[data-testid="solve-row"]'),
           (row) =>
