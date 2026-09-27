@@ -99,7 +99,8 @@
     @if (saved(); as clip) {
       <p class="about">
         In <code>{{ clip.folder }}</code
-        >, saved in {{ clip.latencyMs }} ms (cut, muxed and written by the worker):
+        >, saved in {{ clip.latencyMs }} ms (cut by the capture worker, muxed and written by the
+        clip worker):
       </p>
       <table data-testid="lab-clip-files">
         <tbody>

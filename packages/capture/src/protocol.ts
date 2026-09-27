@@ -1,6 +1,9 @@
-// The messages between the window (pipeline.ts) and the capture worker (capture-worker.ts), and the
-// settings and counters both sides share (docs/PLAN.md, T2.2; the clips of T2.3). Plain
-// TypeScript: nothing here touches a browser API.
+// The messages between the window (pipeline.ts), the capture worker (capture-worker.ts) and the clip
+// worker (clip-worker.ts), and the settings and counters they share (docs/PLAN.md, T2.2; the clips
+// of T2.3; the clip worker of T2.4). The window starts both workers and gives each an end of a
+// channel between them: the capture worker cuts a clip and moves the cut through it to the clip
+// worker, which muxes and writes it and answers the window. Plain TypeScript: nothing here touches a
+// browser API.
 import type { VideoClip, VideoSegment } from '@cubetrace/core';
 
 import { cutBuffers, type Cut } from './cut';
@@ -53,7 +56,10 @@ export interface CaptureError {
   readonly fatal: boolean;
 }
 
-/** The window starts the worker with the tracks' frames, which move to it (transferred). */
+/**
+ * The window starts the capture worker with the tracks' frames and its end of the channel to the
+ * clip worker, which all move to it (transferred).
+ */
 export interface StartMessage {
   readonly type: 'start';
   readonly video: ReadableStream<VideoFrame>;
@@ -61,6 +67,8 @@ export interface StartMessage {
   readonly config: ResolvedCaptureConfig;
   /** The video track's `frameRate` setting: the frame rate until the frames' timestamps tell. */
   readonly frameRate: number | null;
+  /** Where the capture worker sends the cuts of the clips to save: the clip worker's channel. */
+  readonly clips: MessagePort | null;
 }
 
 export interface CutRequest {
@@ -89,11 +97,31 @@ export interface SaveClipParams {
 }
 
 /**
- * The worker cuts `[startHostMs, endHostMs]`, muxes it into an MP4 and writes it with its
- * frames.json into the attempt's folder; the MP4 never crosses to the window.
+ * The capture worker cuts `[startHostMs, endHostMs]` and moves the cut to the clip worker, which
+ * muxes it into an MP4, writes it with its frames.json into the attempt's folder and answers the
+ * window; the MP4 never crosses to the window.
  */
 export interface MuxAndWriteRequest extends SaveClipParams {
   readonly type: 'mux-and-write';
+  readonly id: number;
+}
+
+/**
+ * A clip to remove (docs/PLAN.md, T2.4): that of an attempt that is gone, saved after it went. Its
+ * files are removed only while they are still that clip's, the one whose first frame is at
+ * `firstFrameHostMs` (its `video[]` entry's), and not a newer clip of the same name.
+ */
+export interface DeleteClipParams {
+  readonly sessionId: string;
+  readonly index: number;
+  readonly camera: string;
+  readonly segment: VideoSegment;
+  readonly firstFrameHostMs: number;
+}
+
+/** The window asks the clip worker to remove a clip (see `DeleteClipParams`). */
+export interface DeleteClipRequest extends DeleteClipParams {
+  readonly type: 'delete-clip';
   readonly id: number;
 }
 
@@ -102,6 +130,24 @@ export interface StopMessage {
 }
 
 export type WindowToWorker = StartMessage | CutRequest | MuxAndWriteRequest | StopMessage;
+
+/** The window gives the clip worker its end of the channel from the capture worker. */
+export interface ConnectMessage {
+  readonly type: 'connect';
+  readonly port: MessagePort;
+}
+
+export type WindowToClipWorker = ConnectMessage | DeleteClipRequest;
+
+/**
+ * From the capture worker to the clip worker: a clip's request and its cut, whose chunk bytes are
+ * copies that move with it (transferred), so that the capture worker only cuts.
+ */
+export interface ClipJob {
+  readonly type: 'clip-job';
+  readonly request: MuxAndWriteRequest;
+  readonly cut: Cut;
+}
 
 export interface StatsMessage {
   readonly type: 'stats';
@@ -134,6 +180,20 @@ export interface MuxAndWriteFailed {
   readonly message: string;
 }
 
+/** The answer to the `delete-clip` request with the same id: whether the files were removed. */
+export interface DeleteClipDone {
+  readonly type: 'delete-clip-done';
+  readonly id: number;
+  /** False when there was nothing to remove, or the files were another clip's. */
+  readonly deleted: boolean;
+}
+
+export interface DeleteClipFailed {
+  readonly type: 'delete-clip-failed';
+  readonly id: number;
+  readonly message: string;
+}
+
 export interface ErrorMessage extends CaptureError {
   readonly type: 'error';
 }
@@ -149,10 +209,12 @@ export type WorkerToWindow =
   | CutFailed
   | MuxAndWriteDone
   | MuxAndWriteFailed
+  | DeleteClipDone
+  | DeleteClipFailed
   | ErrorMessage
   | StoppedMessage;
 
-export type CaptureMessage = WindowToWorker | WorkerToWindow;
+export type CaptureMessage = WindowToWorker | WindowToClipWorker | ClipJob | WorkerToWindow;
 
 /** `postMessage` with a transfer list: a `Worker`, a worker's global scope or a `MessagePort`. */
 export interface MessageTarget {
@@ -167,12 +229,22 @@ export function post(target: MessageTarget, message: CaptureMessage): void {
   target.postMessage(message, transferList(message));
 }
 
-/** What a message moves rather than copies: the start's streams, a cut's chunk bytes. */
+/**
+ * What a message moves rather than copies: the start's streams and port, the connect's port, a
+ * cut's chunk bytes (of a cut answered to the window, or of a clip's job).
+ */
 export function transferList(message: CaptureMessage): Transferable[] {
   switch (message.type) {
     case 'start':
-      return message.audio === null ? [message.video] : [message.video, message.audio];
+      return [
+        message.video,
+        ...(message.audio === null ? [] : [message.audio]),
+        ...(message.clips === null ? [] : [message.clips]),
+      ];
+    case 'connect':
+      return [message.port];
     case 'cut-done':
+    case 'clip-job':
       return cutBuffers(message.cut);
     default:
       return [];
@@ -191,8 +263,14 @@ const WORKER_TYPES: ReadonlySet<unknown> = new Set<WorkerToWindow['type']>([
   'cut-failed',
   'mux-and-write-done',
   'mux-and-write-failed',
+  'delete-clip-done',
+  'delete-clip-failed',
   'error',
   'stopped',
+]);
+const CLIP_WORKER_TYPES: ReadonlySet<unknown> = new Set<WindowToClipWorker['type']>([
+  'connect',
+  'delete-clip',
 ]);
 
 /** Whether `data` (a `MessageEvent`'s) is a message for the worker. */
@@ -200,9 +278,27 @@ export function isWindowToWorker(data: unknown): data is WindowToWorker {
   return WINDOW_TYPES.has(typeOf(data));
 }
 
-/** Whether `data` (a `MessageEvent`'s) is a message from the worker. */
+/** Whether `data` (a `MessageEvent`'s) is a message from a worker to the window. */
 export function isWorkerToWindow(data: unknown): data is WorkerToWindow {
   return WORKER_TYPES.has(typeOf(data));
+}
+
+/** Whether `data` is a message from the window to the clip worker. */
+export function isWindowToClipWorker(data: unknown): data is WindowToClipWorker {
+  return CLIP_WORKER_TYPES.has(typeOf(data));
+}
+
+/** Whether `data` is a clip's job, from the capture worker to the clip worker. */
+export function isClipJob(data: unknown): data is ClipJob {
+  return typeOf(data) === 'clip-job';
+}
+
+/** An error as the answers give it: `RangeError: Nothing is buffered yet.` */
+export function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message === '' ? error.name : `${error.name}: ${error.message}`;
+  }
+  return String(error);
 }
 
 function typeOf(data: unknown): unknown {

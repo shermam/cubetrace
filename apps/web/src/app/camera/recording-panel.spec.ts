@@ -1,0 +1,101 @@
+import { TestBed } from '@angular/core/testing';
+
+import { bluetoothNavigator } from '../cube/cube-testing';
+import { FAKE_WEBCAM, FakeMediaDevices, settle } from '../device/fake-browser';
+import { ready, setup, turn } from '../session/session-harness';
+import { CameraService } from './camera-service';
+import { RecordingPanel } from './recording-panel';
+import { CAPTURE_STARTER, CLIP_TAIL_MS, ENCODER_SETTLE_MS } from './recording-service';
+import { FakeCaptureStarter, statsOf } from './recording-testing';
+
+describe('RecordingPanel', () => {
+  async function render() {
+    const media = new FakeMediaDevices([FAKE_WEBCAM]);
+    const starter = new FakeCaptureStarter();
+    const s = setup({
+      navigator: { ...bluetoothNavigator(true), mediaDevices: media },
+      providers: [{ provide: CAPTURE_STARTER, useValue: starter }],
+    });
+    const fixture = TestBed.createComponent(RecordingPanel);
+    const element = fixture.nativeElement as HTMLElement;
+    const update = async (): Promise<void> => {
+      TestBed.tick();
+      await settle();
+      await fixture.whenStable();
+    };
+    await update();
+    return { s, starter, element, update, camera: TestBed.inject(CameraService) };
+  }
+
+  function text(element: HTMLElement, testId: string): string | undefined {
+    return element
+      .querySelector(`[data-testid="${testId}"]`)
+      ?.textContent.replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  it('says why it does not record, then what it records', async () => {
+    const { s, starter, element, update, camera } = await render();
+    expect(text(element, 'recording-state')).toBe('Off: the camera is off.');
+
+    await camera.start();
+    await update();
+    expect(text(element, 'recording-state')).toBe(
+      'Off: it starts with the session, once a cube is connected.',
+    );
+
+    await ready(s);
+    await update();
+    expect(text(element, 'recording-state')).toBe('Starting…');
+    starter.last.emitStats(statsOf(12.34, { dropped: 1, bufferBytes: 1_500_000 }));
+    await update();
+    expect(text(element, 'recording-state')).toBe('Recording: every attempt gets its clips.');
+    expect(text(element, 'recording-badge')).toBe('REC');
+    const stats = element.querySelector('[data-testid="recording-stats"]');
+    expect(stats?.getAttribute('data-buffer-seconds')).toBe('12.34');
+    expect(stats?.getAttribute('data-dropped')).toBe('1');
+    expect(stats?.textContent).toContain('30 per second in, 30 encoded, 1 dropped');
+    expect(text(element, 'recording-buffer')).toBe('12.3 s, 1.5 MB');
+    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08, opus');
+    expect(element.querySelector('[data-testid="storage-meter"]')).not.toBeNull();
+  });
+
+  it('shows the last clip, a clip that failed until dismissed, and why recording stopped', async () => {
+    const { s, starter, element, update, camera } = await render();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await camera.start();
+    const fake = await ready(s);
+    await update();
+    starter.last.emitStats(statsOf(5));
+
+    turn(s, fake, 'R U F');
+    s.timers.advance(CLIP_TAIL_MS + ENCODER_SETTLE_MS);
+    await update();
+    starter.last.saveNext({ frames: 131, bytes: 2_345_678 });
+    await update();
+    expect(text(element, 'recording-last-clip')).toBe(
+      'Last clip: the scramble of attempt 1, 131 frames, 2.3 MB.',
+    );
+
+    turn(s, fake, "F' U' R'", 300);
+    s.timers.advance(CLIP_TAIL_MS + ENCODER_SETTLE_MS);
+    await update();
+    starter.last.failNext('Error: QuotaExceededError');
+    await update();
+    expect(text(element, 'recording-failure')).toBe(
+      "A clip could not be saved, and the session's notes say so: clip failed: solve of attempt 1: Error: QuotaExceededError Dismiss",
+    );
+    element.querySelector<HTMLButtonElement>('[data-testid="recording-failure"] button')?.click();
+    await update();
+    expect(element.querySelector('[data-testid="recording-failure"]')).toBeNull();
+
+    starter.last.emitError({ message: 'No audio encoder: recording video only.', fatal: false });
+    starter.last.emitError({ message: 'The video encoder failed: EncodingError', fatal: true });
+    await update();
+    expect(text(element, 'recording-notice')).toBe('No audio encoder: recording video only.');
+    expect(text(element, 'recording-error')).toBe(
+      'Recording stopped: The video encoder failed: EncodingError',
+    );
+    expect(text(element, 'recording-state')).toBe('Not recording.');
+  });
+});

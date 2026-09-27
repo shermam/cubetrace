@@ -1,5 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { MemorySessionStore, SOLVED, applyMoves, parseMoves } from '@cubetrace/core';
+import {
+  MemorySessionStore,
+  SOLVED,
+  applyMoves,
+  parseMoves,
+  type CameraInfo,
+  type VideoClip,
+} from '@cubetrace/core';
 import { FakeCube, type CubeConnection, type CubeEvent } from '@cubetrace/gan';
 import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 import { Subject } from 'rxjs';
@@ -8,7 +15,12 @@ import { DEMO_FILE, asGanCube } from '../cube/cube-testing';
 import { parseDemoSolves } from '../cube/demo';
 import { FakeLocalStorage, settle } from '../device/fake-browser';
 import { connect, inverse, ready, scripted, setup, turn } from './session-harness';
-import { CURRENT_SESSION_KEY, HARDWARE_WAIT_MS, UNKNOWN_CUBE } from './session-service';
+import {
+  CURRENT_SESSION_KEY,
+  HARDWARE_WAIT_MS,
+  UNKNOWN_CUBE,
+  type AttemptMilestone,
+} from './session-service';
 import { SESSION_A, testAttempt, testSession } from './session-testing';
 
 describe('SessionService', () => {
@@ -675,7 +687,10 @@ describe('SessionService', () => {
     const store = new MemorySessionStore();
     await store.createSession(testSession(SESSION_A, 1000));
     await store.saveAttempt(testAttempt(1, 10_000));
-    await store.saveAttempt(testAttempt(2, 12_000));
+    await store.saveAttempt({
+      ...testAttempt(2, 12_000),
+      video: [clip('scramble', 1_000_000), clip('solve', 2_500_000)],
+    });
     const localStorage = new FakeLocalStorage();
     localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
     const s = setup({ store, localStorage });
@@ -687,6 +702,8 @@ describe('SessionService', () => {
           session: testSession(SESSION_A, 1000),
           attempts: 2,
           mean: '11.00',
+          clips: 2,
+          clipBytes: 3_500_000,
           current: true,
           unreadable: [],
         },
@@ -715,4 +732,191 @@ describe('SessionService', () => {
     expect(s.service.saveError()).toBe('The disk is full.');
     expect(s.service.attempts()).toHaveLength(1);
   });
+
+  describe('for the recording (T2.4)', () => {
+    /** The milestones the service emits from now on. */
+    function milestones(s: ReturnType<typeof setup>): AttemptMilestone[] {
+      const seen: AttemptMilestone[] = [];
+      s.service.milestones$.subscribe((milestone) => seen.push(milestone));
+      return seen;
+    }
+
+    it('says when an attempt is armed and when it ended, with its record and its end', async () => {
+      const s = setup();
+      const seen = milestones(s);
+      const fake = await ready(s);
+      const session = s.service.session()?.id ?? '';
+      const shown = s.service.attempt()?.events.scrambleShown ?? 0;
+
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 500);
+
+      const record = s.service.attempts()[0];
+      const attempt = { session, index: 1, scrambleShown: shown };
+      expect(seen).toEqual([
+        {
+          type: 'armed',
+          attempt,
+          scrambleStart: record.events.scrambleStart,
+          scrambleDone: record.events.scrambleDone,
+        },
+        { type: 'ended', attempt, record, endMs: record.events.solveEnd },
+      ]);
+    });
+
+    it('says when an attempt goes without a record, and when a DNF ended, at its time', async () => {
+      const s = setup();
+      const seen = milestones(s);
+      const fake = await ready(s);
+      const session = s.service.session()?.id ?? '';
+
+      // Skipped while scrambling: dropped.
+      turn(s, fake, 'R');
+      const first = s.service.attempt()?.events.scrambleShown ?? 0;
+      s.service.skip();
+      expect(seen).toEqual([
+        { type: 'dropped', attempt: { session, index: 1, scrambleShown: first }, clips: [] },
+      ]);
+
+      // A DNF during the solve: it ended when it was marked.
+      turn(s, fake, inverse('R'));
+      await settle();
+      const second = s.service.attempt();
+      turn(s, fake, second?.scramble ?? '');
+      turn(s, fake, 'U', 400);
+      s.perf.advance(900);
+      const dnfMs = s.perf.hostMs;
+      s.service.dnf();
+      expect(seen.slice(1).map((milestone) => milestone.type)).toEqual(['armed', 'ended']);
+      expect(seen[2]).toMatchObject({
+        type: 'ended',
+        attempt: { session, index: 1, scrambleShown: second?.events.scrambleShown },
+        endMs: dnfMs,
+        record: { result: { status: 'dnf' } },
+      });
+    });
+
+    it('adds a clip to the attempt under way, to its record once saved, and replaces one of its kind', async () => {
+      const s = setup();
+      const fake = await ready(s);
+      const session = s.service.session()?.id ?? '';
+      const attempt = {
+        session,
+        index: 1,
+        scrambleShown: s.service.attempt()?.events.scrambleShown ?? 0,
+      };
+      turn(s, fake, 'R U F');
+
+      expect(await s.service.attachClip(attempt, clip('scramble', 10))).toBe('kept');
+      turn(s, fake, inverse('R U F'), 500);
+      const record = s.service.attempts()[0];
+      expect(record.video).toEqual([clip('scramble', 10)]);
+
+      expect(await s.service.attachClip(attempt, clip('solve', 20))).toBe('saved');
+      expect(await s.service.attachClip(attempt, clip('scramble', 30))).toBe('saved');
+      const [stored] = (await s.store.exportSession(session)).attempts;
+      expect(stored.video).toEqual([clip('scramble', 30), clip('solve', 20)]);
+      expect({ ...stored, video: [] }).toEqual({ ...record, video: [] });
+      expect(s.service.attempts()).toEqual([stored]);
+      expect(s.service.lastResult()).toEqual(stored);
+
+      // Another attempt with that index, or none: gone.
+      expect(await s.service.attachClip({ ...attempt, scrambleShown: 1 }, clip('solve', 1))).toBe(
+        'gone',
+      );
+      expect(await s.service.attachClip({ ...attempt, index: 7 }, clip('solve', 1))).toBe('gone');
+      expect(s.service.hasAttempt(attempt)).toBe(true);
+      expect(s.service.hasAttempt({ ...attempt, index: 7 })).toBe(false);
+
+      // After New session, the record of the earlier session is updated in the store.
+      s.service.newSession();
+      expect(s.service.session()?.id).not.toBe(session);
+      expect(s.service.hasAttempt(attempt)).toBe(true);
+      expect(await s.service.attachClip(attempt, clip('solve', 40))).toBe('saved');
+      const [earlier] = (await s.store.exportSession(session)).attempts;
+      expect(earlier.video).toEqual([clip('scramble', 30), clip('solve', 40)]);
+      expect(await s.service.attachClip({ ...attempt, index: 2 }, clip('solve', 1))).toBe('gone');
+
+      // A deleted session's attempts are gone.
+      await s.service.deleteSession(session);
+      expect(s.service.hasAttempt(attempt)).toBe(false);
+    });
+
+    it("puts the camera in the session's cameras, with the audio, and notes in its notes", async () => {
+      const s = setup();
+      const fake = await ready(s);
+      const session = s.service.session()?.id ?? '';
+      expect(s.service.session()).toMatchObject({ cameras: [], audio: true, notes: '' });
+
+      s.service.putCamera(camera('FaceTime HD Camera'), false);
+      s.service.putCamera(camera('FaceTime HD Camera'), false);
+      s.service.putCamera({ ...camera('Phone'), label: 'phone-front' }, false);
+      s.service.putCamera(camera('Studio Display Camera'), false);
+      await s.service.addNote(session, 'clip failed: scramble of attempt 1: first');
+      await s.service.addNote(session, 'clip failed: solve of attempt 1: second');
+      await s.service.whenSaved();
+
+      const stored = (await s.store.exportSession(session)).session;
+      expect(stored).toEqual(s.service.session());
+      expect(stored.cameras.map((entry) => [entry.label, entry.deviceLabel])).toEqual([
+        ['laptop', 'Studio Display Camera'],
+        ['phone-front', 'Phone'],
+      ]);
+      expect(stored.audio).toBe(false);
+      expect(stored.notes).toBe(
+        'clip failed: scramble of attempt 1: first\nclip failed: solve of attempt 1: second',
+      );
+
+      // A note for an earlier session goes to its session.json.
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 500);
+      s.service.newSession();
+      expect(s.service.session()?.id).not.toBe(session);
+      await s.service.addNote(session, 'third');
+      expect((await s.store.exportSession(session)).session.notes).toMatch(/second\nthird$/);
+      expect(s.service.session()?.notes).toBe('');
+    });
+
+    it('creates a session with the audio setting', async () => {
+      const s = setup();
+      s.settings.setRecordAudio(false);
+      await ready(s);
+      expect(s.service.session()?.audio).toBe(false);
+    });
+  });
 });
+
+/** A clip of `segment` of the laptop's camera, `bytes` long. */
+function clip(segment: 'scramble' | 'solve', bytes: number): VideoClip {
+  return {
+    camera: 'laptop',
+    segment,
+    file: `laptop.${segment}.mp4`,
+    bytes,
+    codec: 'vp09.00.40.08',
+    audio: 'opus',
+    width: 1920,
+    height: 1080,
+    crop: null,
+    fpsNominal: 30,
+    frames: 90,
+    firstFrameHostMs: 1_790_000_000_000,
+    framesFile: `laptop.${segment}.frames.json`,
+    syncResidualMs: null,
+  };
+}
+
+/** A camera entry of session.json, named `deviceLabel`. */
+function camera(deviceLabel: string): CameraInfo {
+  return {
+    label: 'laptop',
+    local: true,
+    facing: 'unknown',
+    deviceLabel,
+    settings: { width: 1920, height: 1080, frameRate: 30 },
+    capabilities: {},
+    constraints: {},
+    crop: null,
+    mode: 'full',
+  };
+}

@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, DestroyRef, computed, inject } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 
 import { CameraPanel } from '../camera/camera-panel';
@@ -8,6 +8,8 @@ import { demoRequestFrom } from '../cube/demo';
 import { LiveCubePanel } from '../cube/live-cube-panel';
 import { SessionService } from '../session/session-service';
 import { BreakdownChart } from './breakdown-chart';
+import { ClipViewer } from './clip-viewer';
+import { ClipViewing } from './clip-viewing';
 import { ScrambleView } from './scramble-view';
 import { SolveList } from './solve-list';
 import { TimerClock } from './timer-clock';
@@ -17,14 +19,23 @@ import { TimerClock } from './timer-clock';
  * on wider screens the scramble and the time on the left, the breakdown and the solves on the
  * right, with the live cube panel (T1.6a) in a collapsible "Cube" section below them, and the
  * camera panel (T2.1) in a "Camera" section below that, loaded after the page (its code is a chunk
- * of its own, which the page does not wait for). The keys:
+ * of its own, which the page does not wait for, and it records the clips, T2.4). A solve's clip
+ * badge opens its clips in the clip viewer, a chunk of its own too. The keys:
  * `Esc` marks a DNF, `Delete` deletes the last attempt, `N` skips the scramble (or starts the next
  * attempt), except while typing or while a dialog is open. `?demo=<index>&speed=<n>` connects the
  * demo cube once the stored session has been read, so that its first attempt continues it.
  */
 @Component({
   selector: 'app-timer-page',
-  imports: [BreakdownChart, CameraPanel, LiveCubePanel, ScrambleView, SolveList, TimerClock],
+  imports: [
+    BreakdownChart,
+    CameraPanel,
+    ClipViewer,
+    LiveCubePanel,
+    ScrambleView,
+    SolveList,
+    TimerClock,
+  ],
   host: { '(document:keydown)': 'onKeydown($event)' },
   template: `
     <h1>Timer</h1>
@@ -52,6 +63,11 @@ import { TimerClock } from './timer-clock';
         }
       </section>
     </div>
+    @if (viewed(); as attempt) {
+      @defer (on immediate) {
+        <app-clip-viewer [attempt]="attempt" />
+      }
+    }
   `,
   styles: `
     @use '../../styles/layout';
@@ -132,8 +148,19 @@ export class TimerPage {
   protected readonly session = inject(SessionService);
   private readonly cube = inject(CubeService);
   private readonly dialogs = inject(ConnectDialogService);
+  private readonly viewing = inject(ClipViewing);
+  /** The attempt whose clips the viewer shows; null while it is closed. */
+  protected readonly viewed = computed(() => {
+    const index = this.viewing.index();
+    return index === null
+      ? null
+      : (this.session.attempts().find((attempt) => attempt.index === index) ?? null);
+  });
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.viewing.close();
+    });
     this.session.prepare();
     const demo = demoRequestFrom(inject(ActivatedRoute).snapshot.queryParamMap);
     if (demo !== null) {

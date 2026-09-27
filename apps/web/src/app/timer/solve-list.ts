@@ -1,9 +1,11 @@
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, inject, input } from '@angular/core';
 import type { AttemptRecord } from '@cubetrace/core';
 
 import { sessionStats } from '../session/session-stats';
+import { formatBytes } from '../shared/format-bytes';
 import { formatTime } from '../shared/format-time';
 import { attemptPhases, barSegments, type BarSegment } from './breakdown';
+import { ClipViewing } from './clip-viewing';
 import { PhaseBar } from './phase-bar';
 
 /** A solve as the list shows it. */
@@ -15,6 +17,8 @@ interface SolveRow {
   readonly segments: readonly BarSegment[];
   /** `DNF`; `Corrected` (the scramble went off its path and back); `No replay` (a resync). */
   readonly flags: readonly string[];
+  /** Its clips (T2.4): "2 clips, 5.3 MB"; null without one. */
+  readonly clips: string | null;
 }
 
 function solveRow(attempt: AttemptRecord): SolveRow {
@@ -31,18 +35,25 @@ function solveRow(attempt: AttemptRecord): SolveRow {
   if (status === 'solved' && !replayOk) {
     flags.push('No replay');
   }
+  const bytes = attempt.video.reduce((sum, clip) => sum + clip.bytes, 0);
+  const count = attempt.video.length;
   return {
     index: attempt.index,
     status,
     time: status === 'solved' && timeMs !== null ? formatTime(timeMs) : 'DNF',
     segments: status === 'solved' ? barSegments(phases, total) : [],
     flags,
+    clips:
+      count === 0
+        ? null
+        : `${String(count)} ${count === 1 ? 'clip' : 'clips'}, ${formatBytes(bytes)}`,
   };
 }
 
 /**
  * The session's solves, newest first (docs/PLAN.md, T1.6b): number, time, the eight phases as a
- * mini bar, flags; above them the session's count, mean, best, ao5 and ao12.
+ * mini bar, flags, and a badge with the attempt's clips (T2.4) that opens them (`ClipViewing`);
+ * above them the session's count, mean, best, ao5 and ao12.
  */
 @Component({
   selector: 'app-solve-list',
@@ -89,6 +100,17 @@ function solveRow(attempt: AttemptRecord): SolveRow {
             <span class="flags">
               @for (flag of row.flags; track flag) {
                 <span class="flag" [class.dnf]="flag === 'DNF'">{{ flag }}</span>
+              }
+              @if (row.clips; as clips) {
+                <button
+                  type="button"
+                  class="clips"
+                  data-testid="clip-badge"
+                  [attr.aria-label]="'The clips of attempt ' + row.index + ': ' + clips"
+                  (click)="viewer.open(row.index)"
+                >
+                  {{ clips }}
+                </button>
               }
             </span>
           </li>
@@ -175,11 +197,22 @@ function solveRow(attempt: AttemptRecord): SolveRow {
         color: var(--danger);
       }
     }
+
+    .clips {
+      padding: 0 var(--space-1);
+      border: 1px solid var(--line);
+      border-radius: 0.25rem;
+      background: var(--surface-raised);
+      color: var(--accent);
+      font-size: 0.6875rem;
+      white-space: nowrap;
+    }
   `,
 })
 export class SolveList {
   /** The session's attempts, by index. */
   readonly attempts = input.required<readonly AttemptRecord[]>();
+  protected readonly viewer = inject(ClipViewing);
 
   protected readonly stats = computed(() => sessionStats(this.attempts()));
   protected readonly rows = computed(() => [...this.attempts()].reverse().map(solveRow));

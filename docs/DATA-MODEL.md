@@ -198,7 +198,11 @@ host's, while across the pauses between attempts both advance equally, so one li
 connection that spans pauses of minutes is off by hundreds of milliseconds at its ends (as in the
 example: ±600 ms over the 14 minutes of the owner's first laptop session, `docs/DEVICES.md`); to
 place a move on the host clock, use its attempt's `clock` (§7). `audio` is on by default (phase 2
-records it with the video). `summary` is counted from the attempts: each one is solved or a DNF.
+records it with the video): it is Settings' "Record audio" when the session began, and again when
+its camera last recorded; whether a clip has sound is its own `audio` (§7). `notes` is free text, to
+which the app adds one line per clip it could not save, `clip failed: <segment> of attempt <index>:
+<reason>` (`docs/PLAN.md`, T2.4), so that a missing clip has its reason. `summary` is counted from
+the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in
@@ -294,7 +298,12 @@ to the Bluetooth jitter, while one line through a session is off by 0.7% of ever
 host clock without the jitter of its `hostMs`, which is when its packet arrived.
 
 `video` lists the attempt's clips, one per camera and segment, files in the attempt's folder (§5):
-the scramble and the solve, each with a margin before and after (`docs/PLAN.md` T2.4). `file` is
+the scramble and the solve, each with a margin before and after (`docs/PLAN.md` T2.4): the
+scramble from 2 s before `scrambleStart` to 1 s after `scrambleDone`, the solve from 3 s before
+`solveStart` to 1 s after `solveEnd` or the DNF (none when the solve did not start). A clip begins
+at the keyframe at or before its margin, so up to one keyframe interval (a second) earlier:
+`firstFrameHostMs` is where it really begins. A camera that was off has no clips; a clip that could
+not be saved is missing, and `notes` in `session.json` (§6) says why. `file` is
 `<camera>.<segment>.mp4` and `framesFile` `<camera>.<segment>.frames.json`, the times of its
 frames (§9); `bytes` is the MP4's size; `codec` and `audio` are the codec strings of its video and
 audio tracks (`avc1.640028`, `mp4a.40.2`), `audio` null without an audio track; `width` and

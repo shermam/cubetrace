@@ -3,7 +3,7 @@ import { MemorySessionStore, type SessionStore } from '@cubetrace/core';
 import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
-import { FakeLocalStorage, settle } from '../device/fake-browser';
+import { FakeLocalStorage, FakeStorageManager, settle } from '../device/fake-browser';
 import { CURRENT_SESSION_KEY } from '../session/session-service';
 import { SESSION_STORAGE } from '../session/session-storage';
 import { SESSION_A, SESSION_B, testAttempt, testSession } from '../session/session-testing';
@@ -13,6 +13,7 @@ describe('SessionsPage', () => {
   let store: SessionStore;
   let blobs: Blob[];
   let fixture: ComponentFixture<SessionsPage>;
+  let storage: FakeStorageManager;
 
   async function render(): Promise<HTMLElement> {
     const localStorage = new FakeLocalStorage();
@@ -23,7 +24,7 @@ describe('SessionsPage', () => {
         {
           provide: BROWSER_GLOBALS,
           useValue: {
-            navigator: {},
+            navigator: { storage },
             localStorage,
             URL: {
               createObjectURL: (blob: Blob) => {
@@ -67,6 +68,7 @@ describe('SessionsPage', () => {
   }
 
   beforeEach(async () => {
+    storage = new FakeStorageManager({ usage: 1_500_000_000, quota: 10_000_000_000 });
     store = new MemorySessionStore();
     await store.createSession(testSession(SESSION_A, 1_790_000_000_000));
     await store.saveAttempt(testAttempt(1, 10_000));
@@ -92,6 +94,53 @@ describe('SessionsPage', () => {
     expect(newest.querySelector('.current')?.textContent).toBe('current');
     expect(oldest.querySelector('[data-testid="session-attempts"]')?.textContent).toBe('1 attempt');
     expect(oldest.querySelector('.current')).toBeNull();
+  });
+
+  it("says how many clips each session's attempts have and their size, and how full storage is", async () => {
+    const clip = (segment: 'scramble' | 'solve', bytes: number) => ({
+      camera: 'laptop',
+      segment,
+      file: `laptop.${segment}.mp4`,
+      bytes,
+      codec: 'vp09.00.40.08',
+      audio: null,
+      width: 1920,
+      height: 1080,
+      crop: null,
+      fpsNominal: 30,
+      frames: 90,
+      firstFrameHostMs: 1_790_000_000_000,
+      framesFile: `laptop.${segment}.frames.json`,
+      syncResidualMs: null,
+    });
+    await store.saveAttempt({
+      ...testAttempt(2, 12_000, { session: SESSION_B }),
+      video: [clip('scramble', 1_200_000), clip('solve', 4_100_000)],
+    });
+    const element = await render();
+    const [newest, oldest] = rows(element);
+
+    expect(newest.querySelector('[data-testid="session-clips"]')?.textContent).toBe(
+      '2 clips, 5.3 MB',
+    );
+    expect(newest.querySelector('[data-testid="session-clips"]')?.getAttribute('data-bytes')).toBe(
+      '5300000',
+    );
+    expect(oldest.querySelector('[data-testid="session-clips"]')).toBeNull();
+    expect(text(element, 'storage-meter-text')).toBe('1.5 GB of 10.0 GB (15%)');
+    expect(element.querySelector('[data-testid="storage-warning"]')).toBeNull();
+    expect(text(element, 'sessions-clips-note')).toContain(
+      'The clips of an attempt are downloaded from its clip badge',
+    );
+  });
+
+  it('warns when storage is 80% full', async () => {
+    storage.usage = 8_300_000_000;
+    const element = await render();
+
+    expect(text(element, 'storage-warning')).toBe(
+      'Storage is 83% full: export or delete sessions.',
+    );
   });
 
   it('exports a session as one JSON file of {session, attempts}', async () => {

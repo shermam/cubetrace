@@ -1,8 +1,4 @@
-import { ATTEMPT_SCHEMA, type VideoClip } from '@cubetrace/core';
-import { FakeDirectoryHandle } from '@cubetrace/storage';
-import { Ajv2020 } from 'ajv/dist/2020';
-import { ALL_FORMATS, BufferSource, Input } from 'mediabunny';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   CaptureWorker,
@@ -21,6 +17,8 @@ import {
   resolveCaptureConfig,
   transferList,
   type CaptureStats,
+  type ClipJob,
+  type MessageTarget,
   type MuxAndWriteRequest,
   type WorkerToWindow,
 } from './protocol';
@@ -246,8 +244,8 @@ function settle(): Promise<void> {
 
 interface Harness {
   readonly worker: CaptureWorker;
-  /** The origin private file system the worker writes clips into. */
-  readonly root: FakeDirectoryHandle;
+  /** What the worker sent the clip worker. */
+  readonly jobs: ClipJob[];
   readonly video: Source<FrameLike>;
   readonly audio: Source<AudioLike>;
   readonly posted: WorkerToWindow[];
@@ -261,11 +259,20 @@ interface Harness {
   now: number;
 }
 
+/** The clip worker's end of the channel, as the capture worker sees it: it keeps the jobs. */
+function clipPort(jobs: ClipJob[]): MessageTarget {
+  return {
+    postMessage(message: unknown): void {
+      jobs.push(message as ClipJob);
+    },
+  };
+}
+
 function harness(options: { audio?: boolean; frameRate?: number | null } = {}): Harness {
   const posted: WorkerToWindow[] = [];
+  const jobs: ClipJob[] = [];
   let tick: (() => void) | undefined;
   const state = { now: arrivalOf(0) - 1 };
-  const root = new FakeDirectoryHandle('', { syncAccessHandle: true });
   const env: WorkerEnvironment = {
     VideoEncoder: FakeVideoEncoder,
     AudioEncoder: FakeAudioEncoder,
@@ -280,7 +287,6 @@ function harness(options: { audio?: boolean; frameRate?: number | null } = {}): 
         tick = undefined;
       };
     },
-    opfsRoot: () => Promise.resolve(root),
   };
   const worker = new CaptureWorker(env);
   const video = new Source<FrameLike>();
@@ -291,10 +297,11 @@ function harness(options: { audio?: boolean; frameRate?: number | null } = {}): 
     options.audio === true ? audio.stream : null,
     resolveCaptureConfig(),
     options.frameRate ?? 30,
+    clipPort(jobs),
   );
   return {
     worker,
-    root,
+    jobs,
     video,
     audio,
     posted,
@@ -697,14 +704,19 @@ describe('CaptureWorker', () => {
 
 describe('CaptureWorker saving clips', () => {
   const SESSION = '3f1c2b7e-8a4d-4f2e-9b1a-0c5d6e7f8a9b';
+  const ports: MessagePort[] = [];
+
+  afterEach(() => {
+    for (const port of ports.splice(0)) {
+      port.close();
+    }
+  });
 
   /**
    * A worker whose buffer holds the recorded sample (fixtures/media/), pushed as its encoders would
-   * have, and a file system with the session's folder.
+   * have, started with `clips` as its channel to the clip worker.
    */
-  async function sampleWorker() {
-    const root = new FakeDirectoryHandle('', { syncAccessHandle: true });
-    await root.plant(`sessions/${SESSION}/session.json`, '{}');
+  function sampleWorker(clips: MessageTarget | null) {
     const posted: WorkerToWindow[] = [];
     const worker = new CaptureWorker({
       VideoEncoder: undefined,
@@ -715,8 +727,15 @@ describe('CaptureWorker saving clips', () => {
         posted.push(message);
       },
       every: () => () => undefined,
-      opfsRoot: () => Promise.resolve(root),
     });
+    // No frame comes: the buffer filled below is what there is.
+    void worker.start(
+      new ReadableStream<FrameLike>(),
+      null,
+      resolveCaptureConfig({ audio: false }),
+      30,
+      clips,
+    );
     const sample = readMediaSample();
     const buffer = worker.buffer;
     const { chunks: video, decoderConfig: videoConfig, ...videoTrack } = sample.video;
@@ -752,117 +771,107 @@ describe('CaptureWorker saving clips', () => {
       fpsNominal: 30,
       ...changes,
     });
-    return { worker, posted, root, sample, request };
+    return { worker, posted, sample, request };
   }
 
-  function clipOf(message: WorkerToWindow | undefined): VideoClip {
-    if (message?.type !== 'mux-and-write-done') {
-      throw new Error(`expected a clip, got ${JSON.stringify(message)}`);
-    }
-    return message.clip;
-  }
+  it("only cuts: the clip's request and a copy of its cut go to the clip worker, the window hears nothing", () => {
+    const jobs: ClipJob[] = [];
+    const { worker, posted, sample, request } = sampleWorker(clipPort(jobs));
 
-  it('cuts, muxes and writes the clip into the attempt folder, and answers with its video[] entry', async () => {
-    const { worker, posted, root, sample, request } = await sampleWorker();
+    worker.muxAndWrite(request(1, { segment: 'scramble' }));
 
-    await worker.muxAndWrite(request(1));
+    expect(posted).toEqual([]);
+    expect(jobs).toHaveLength(1);
+    const [job] = jobs;
+    expect(job.type).toBe('clip-job');
+    expect(job.request).toEqual(request(1, { segment: 'scramble' }));
+    expect(job.cut.video.chunks).toHaveLength(sample.video.chunks.length);
+    expect(job.cut.frames.t0HostMs).toBe(sample.frames.t0HostMs);
+    // The job moves its own copies of the bytes; the buffer keeps its own.
+    const buffers = transferList(job);
+    expect(buffers).toHaveLength(job.cut.video.chunks.length + (job.cut.audio?.chunks.length ?? 0));
+    const own = new Set<ArrayBuffer>(worker.buffer.video.map((chunk) => chunk.data));
+    expect(buffers.some((buffer) => own.has(buffer as ArrayBuffer))).toBe(false);
+  });
 
-    const clip = clipOf(posted.at(-1));
-    expect(posted.at(-1)).toMatchObject({ id: 1 });
-    const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
-    ajv.addSchema(ATTEMPT_SCHEMA);
-    const validate = ajv.getSchema(`${String(ATTEMPT_SCHEMA['$id'])}#/$defs/clip`);
-    expect(validate?.(clip), JSON.stringify(validate?.errors)).toBe(true);
-    expect(clip).toMatchObject({
-      camera: 'laptop',
-      segment: 'solve',
-      file: 'laptop.solve.mp4',
-      codec: 'vp09.00.40.08',
-      audio: 'opus',
-      width: 1920,
-      height: 1080,
-      fpsNominal: 30,
-      frames: sample.video.chunks.length,
-      firstFrameHostMs: sample.frames.t0HostMs,
-      framesFile: 'laptop.solve.frames.json',
-      crop: null,
-      syncResidualMs: null,
+  it('moves the copies through a channel: gone from the sender, whole at the clip worker, the buffer intact', async () => {
+    const channel = new MessageChannel();
+    ports.push(channel.port1, channel.port2);
+    const arriving = new Promise<ClipJob>((resolve) => {
+      channel.port2.addEventListener('message', (event: MessageEvent<ClipJob>) => {
+        resolve(event.data);
+      });
+      channel.port2.start();
     });
-    const folder = `sessions/${SESSION}/attempts/0003`;
-    const mp4 = root.files().get(`${folder}/laptop.solve.mp4`)?.bytes;
-    expect(mp4?.length).toBe(clip.bytes);
-    const input = new Input({
-      source: new BufferSource(mp4 ?? new Uint8Array(0)),
-      formats: ALL_FORMATS,
-    });
-    const videoTrack = await input.getPrimaryVideoTrack();
-    expect((await videoTrack?.computePacketStats())?.packetCount).toBe(clip.frames);
-    expect(
-      JSON.parse(root.files().get(`${folder}/laptop.solve.frames.json`)?.text ?? ''),
-    ).toMatchObject({ camera: 'laptop', segment: 'solve', dtMs: sample.frames.dtMs });
-    // The buffer's own bytes were muxed, neither copied into the answer nor moved away.
-    expect(transferList(posted[0])).toEqual([]);
+    const { worker, request } = sampleWorker(channel.port1);
+
+    worker.muxAndWrite(request(4));
+    const job = await arriving;
+
+    expect(job.request.id).toBe(4);
+    expect(job.cut.video.chunks.every((chunk) => chunk.data.byteLength === chunk.byteLength)).toBe(
+      true,
+    );
     expect(worker.buffer.video.every((chunk) => chunk.data.byteLength === chunk.byteLength)).toBe(
       true,
     );
   });
 
-  it('says why when there is no clip: nothing buffered, the start older than the buffer, no session folder', async () => {
-    const { worker, posted, sample, request } = await sampleWorker();
+  it('says why when there is nothing to cut, or no clip worker to send the cut to', () => {
+    const jobs: ClipJob[] = [];
+    const { worker, posted, sample, request } = sampleWorker(clipPort(jobs));
+    const alone = sampleWorker(null);
     const empty = new CaptureWorker({
       VideoEncoder: undefined,
       AudioEncoder: undefined,
       now: () => 0,
       post: (message) => posted.push(message),
       every: () => () => undefined,
-      opfsRoot: () => Promise.reject(new Error('unused')),
     });
+    void empty.start(
+      new ReadableStream<FrameLike>(),
+      null,
+      resolveCaptureConfig(),
+      30,
+      clipPort(jobs),
+    );
 
-    await empty.muxAndWrite(request(1));
-    await worker.muxAndWrite(request(2, { startHostMs: sample.startHostMs - 60_000 }));
-    await worker.muxAndWrite(request(3, { sessionId: 'gone' }));
-    await worker.muxAndWrite(request(4, { camera: 'Laptop' }));
+    empty.muxAndWrite(request(1));
+    worker.muxAndWrite(
+      request(2, { startHostMs: sample.endHostMs, endHostMs: sample.startHostMs }),
+    );
+    alone.worker.muxAndWrite(request(3));
 
+    expect(jobs).toEqual([]);
     expect(posted).toEqual([
       { type: 'mux-and-write-failed', id: 1, message: 'RangeError: Nothing is buffered yet.' },
       {
         type: 'mux-and-write-failed',
         id: 2,
-        message: expect.stringMatching(
-          /^Error: Cannot mux a cut whose start is older than the buffer \(truncatedStart\)/,
-        ) as unknown,
+        message: expect.stringMatching(/^RangeError: Cannot cut from/) as unknown,
       },
+    ]);
+    expect(alone.posted).toEqual([
       {
         type: 'mux-and-write-failed',
         id: 3,
-        message: 'Error: No session gone: its folder is missing.',
-      },
-      {
-        type: 'mux-and-write-failed',
-        id: 4,
-        message: expect.stringMatching(/^RangeError: "Laptop" is not a camera label/) as unknown,
+        message: 'This capture has no clip worker to save clips.',
       },
     ]);
   });
 
-  it('saves the clips one at a time, in the order asked, and stops once they are written', async () => {
-    const { worker, posted, root, request } = await sampleWorker();
+  it('cuts each clip when asked, so that emptying the buffer afterwards changes none', async () => {
+    const jobs: ClipJob[] = [];
+    const { worker, request } = sampleWorker(clipPort(jobs));
 
-    worker.handle(request(1, { segment: 'scramble' }));
-    worker.handle(request(2));
+    worker.muxAndWrite(request(1, { segment: 'scramble' }));
+    worker.muxAndWrite(request(2));
     await worker.stop();
 
-    // The cuts were taken when asked: the buffer emptied by the stop did not change them.
     expect(worker.buffer.video).toEqual([]);
-
-    expect(posted.map((message) => [message.type, 'id' in message ? message.id : null])).toEqual([
-      ['mux-and-write-done', 1],
-      ['mux-and-write-done', 2],
-      ['stopped', null],
-    ]);
-    expect([...root.files().keys()].filter((path) => path.endsWith('.mp4')).sort()).toEqual([
-      `sessions/${SESSION}/attempts/0003/laptop.scramble.mp4`,
-      `sessions/${SESSION}/attempts/0003/laptop.solve.mp4`,
+    expect(jobs.map((job) => [job.request.id, job.cut.video.chunks.length > 0])).toEqual([
+      [1, true],
+      [2, true],
     ]);
   });
 });

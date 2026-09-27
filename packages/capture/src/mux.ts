@@ -1,8 +1,8 @@
 // MP4 muxing (docs/PLAN.md, T2.3): a cut's encoded chunks, as the encoders made them, put into an
 // MP4 file with mediabunny, without re-encoding, and the frame times of its frames.json
-// (docs/DATA-MODEL.md §9). The capture worker muxes and writes the clip (capture-worker.ts,
-// clip-writer.ts), so mediabunny is in the worker's chunk only: the package's index does not export
-// this file. mediabunny's muxer touches no browser API, so this is tested in Node on a cut recorded
+// (docs/DATA-MODEL.md §9). The clip worker muxes and writes the clip (clip-worker.ts,
+// clip-writer.ts; the capture worker did until T2.4), so mediabunny is in that worker's chunk only:
+// the package's index does not export this file. mediabunny's muxer touches no browser API, so this is tested in Node on a cut recorded
 // from Chrome's fake camera (fixtures/media/).
 import type { FramesJson, VideoSegment } from '@cubetrace/core';
 import {

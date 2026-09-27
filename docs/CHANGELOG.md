@@ -32,8 +32,24 @@ versions follow [Semantic Versioning](https://semver.org/).
   browser's storage, each file written whole, so that a page closed in the middle leaves no half
   file. The timer does not record yet (T2.4); `/capture-lab` has "Mux and save the last … s", which
   saves a clip into a scratch folder, lists its files and plays it back.
+- Recording in the timer (T2.4). With the camera on and a session under way, every attempt gets two
+  clips in its folder, cut from the last 90 s kept in memory about a second after their end: its
+  scramble, from 2 s before the first turn to 1 s after the cube matches it, and its solve, from 3 s
+  before the first turn to 1 s after the cube is solved or the DNF. Each is listed in the attempt's
+  record (`video`) with the framing rectangle as its `crop`; the attempt's timing never waits for
+  them. The session lists the camera (`cameras`). The microphone's sound comes with the video unless
+  Settings → Camera → Record audio is off. The solve list has a clip badge on each attempt, which
+  opens a viewer: the clip plays next to the attempt's moves by time, the one on screen highlighted,
+  and Download saves both clips, their frame times and `attempt.json`. A storage meter in the Camera
+  section and on the Sessions page (which also gives each session's clips and their size) warns from
+  80% of the browser's quota, and from 95% the camera stops recording while the timer goes on. A clip
+  that could not be saved is said once and written in the session's notes.
 
 ### Changed
+
+- Clips are muxed and written by a second worker (T2.4), so that saving one never holds up the
+  camera's frames in the capture worker, which only cuts; the camera's frames and the microphone's
+  sound wait up to a third and half a second for a busy worker instead of being dropped.
 
 - The records are schema version 2 (T2.0, `docs/DATA-MODEL.md`). Every `attempt.json` keeps the
   cube clock fit of its own moves (`clock`), which places each move on the host clock without the

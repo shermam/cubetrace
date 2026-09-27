@@ -5,7 +5,7 @@
 //
 // in the origin private file system, each file written whole under a temporary name next to it and
 // then moved over its own name, as the session store writes its records (packages/storage, T1.11),
-// so that a clip file is never half written. The capture worker writes the files' bytes through
+// so that a clip file is never half written. The clip worker writes the files' bytes through
 // access handles (`createSyncAccessHandle`, dedicated workers only); where there are none, a
 // writable stream does it. Plain TypeScript over the structural OPFS types of @cubetrace/storage
 // (types only: see clip-files.ts), so it runs in Node's tests on the in-memory fake.
@@ -136,6 +136,45 @@ export async function deleteClip(
       }
     }
   }
+}
+
+/**
+ * Removes the clip of `camera` for `segment` from the folder of attempt `index` of session
+ * `sessionId`, as `deleteClip` does, only while its frames file says its first frame is at
+ * `firstFrameHostMs` (`t0HostMs`): so a clip saved for an attempt that is gone goes, and a newer clip
+ * of the same name (the next attempt with that index) stays. Resolves to whether it removed it:
+ * false when the frames file is missing, unreadable, or another clip's. Rejects as `deleteClip`.
+ */
+export async function deleteClipIf(
+  root: OpfsDirectoryHandle,
+  sessionId: string,
+  index: number,
+  camera: string,
+  segment: VideoSegment,
+  firstFrameHostMs: number,
+): Promise<boolean> {
+  const names = clipFiles(camera, segment);
+  const path = attemptPath(sessionId, index);
+  checkSessionId(sessionId);
+  const dir = await attemptDir(root, path, false);
+  if (dir === null) {
+    return false;
+  }
+  let t0HostMs: unknown;
+  try {
+    const text = await (await (await dir.getFileHandle(names.framesFile)).getFile()).text();
+    t0HostMs = (JSON.parse(text) as { t0HostMs?: unknown }).t0HostMs;
+  } catch (error: unknown) {
+    if (isNotFound(error) || error instanceof SyntaxError) {
+      return false;
+    }
+    throw error;
+  }
+  if (t0HostMs !== firstFrameHostMs) {
+    return false;
+  }
+  await deleteClip(root, sessionId, index, camera, segment);
+  return true;
 }
 
 /** Whether `error` is the `NotFoundError` DOMException the File System API rejects with. */

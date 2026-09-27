@@ -2,9 +2,12 @@ import { Component, DOCUMENT, inject, signal } from '@angular/core';
 import { describeProblem, type StorageProblem } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
+import { StorageService } from '../device/storage-service';
 import { SessionService, type SessionList, type SessionListItem } from '../session/session-service';
 import { downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
+import { formatBytes } from '../shared/format-bytes';
+import { StorageMeter } from '../shared/storage-meter';
 
 const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -20,12 +23,20 @@ export function exportFileName(sessionId: string): string {
  * `session.json` cannot be read (a write cut short, issue #12) is a row that names the file and
  * what is wrong with it, and can be deleted; an unreadable `attempt.json` is named in its
  * session's row, and left out of its count, mean and export. The page-level error is for a listing
- * that failed; an export or a deletion that failed is said in its row.
+ * that failed; an export or a deletion that failed is said in its row. Since T2.4 each row says how
+ * many clips its attempts have and their size, and the storage meter is above the list; the export
+ * stays the JSON records only, and a note says where the clips are downloaded.
  */
 @Component({
   selector: 'app-sessions-page',
+  imports: [StorageMeter],
   template: `
     <h1>Sessions</h1>
+    <app-storage-meter />
+    <p class="muted note" data-testid="sessions-clips-note">
+      Export saves a session's records as one JSON file, without its video. The clips of an attempt
+      are downloaded from its clip badge in the Timer's list of solves (the current session's).
+    </p>
     @if (error(); as message) {
       <p class="error" role="alert" data-testid="sessions-error">{{ message }}</p>
     } @else if (list(); as list) {
@@ -76,6 +87,12 @@ export function exportFileName(sessionId: string): string {
                   {{ item.session.host.label }} · {{ item.session.cube.model }} ·
                   <span data-testid="session-attempts">{{ attemptCount(item.attempts) }}</span> ·
                   mean <span class="mono">{{ item.mean }}</span>
+                  @if (item.clips > 0) {
+                    ·
+                    <span data-testid="session-clips" [attr.data-bytes]="item.clipBytes">{{
+                      clipsText(item)
+                    }}</span>
+                  }
                 </p>
                 @for (problem of item.unreadable; track problem.path) {
                   <p class="warning path" data-testid="session-left-out">
@@ -116,6 +133,11 @@ export function exportFileName(sessionId: string): string {
 
     .muted {
       color: var(--text-muted);
+    }
+
+    .note {
+      margin: var(--space-2) 0 var(--space-4);
+      font-size: 0.875rem;
     }
 
     .error {
@@ -192,6 +214,7 @@ export function exportFileName(sessionId: string): string {
 })
 export class SessionsPage {
   private readonly session = inject(SessionService);
+  private readonly storage = inject(StorageService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
 
@@ -215,6 +238,13 @@ export class SessionsPage {
 
   protected attemptCount(count: number): string {
     return `${String(count)} ${count === 1 ? 'attempt' : 'attempts'}`;
+  }
+
+  /** "2 clips, 5.3 MB" */
+  protected clipsText(item: SessionListItem): string {
+    return (
+      `${String(item.clips)} ${item.clips === 1 ? 'clip' : 'clips'}, ` + formatBytes(item.clipBytes)
+    );
   }
 
   protected describe(problem: StorageProblem): string {
@@ -259,6 +289,8 @@ export class SessionsPage {
     } catch (error: unknown) {
       this.failure.set({ id, message: `The session could not be deleted: ${errorMessage(error)}` });
     }
+    // The meter goes down with it, and a camera stopped by full storage records again.
+    void this.storage.refresh();
     await this.load();
   }
 

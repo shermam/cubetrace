@@ -230,3 +230,46 @@ muxed nowhere else). Next to each item, write the device, the camera and Chrome'
   `avc1.640028` or `avc1.4d0028`, expected on both devices) and `audio` (`mp4a.40.2` or `opus`).
 - [ ] Cut length 30, wait 35 s, "Mux and save the last 30 s": write down the time it says it took
   and the MP4's size; the counters' dropped frames stay as they were.
+
+## T2.4 — recording
+
+On https://shermam.github.io/cubetrace/, Timer page, with the GAN 12 ui FreePlay, on the MacBook's
+FaceTime camera and on the ThinkPhone's front camera (the phone on a stand, as the owner solves),
+then once with the rear camera. Next to each item, write the device, the camera, Chrome's version
+and the numbers asked for. The clips of CI's runs are VP9 and Opus; these are the first H.264 and AAC
+clips of the timer.
+
+- [ ] Camera on, cube connected: the Camera section's Recording part says "Recording: every attempt
+  gets its clips" (REC next to its title, "recording" in the section's summary), with the frames in,
+  encoded and dropped, the seconds in memory and the codecs (write them down: H.264 `avc1.…` and
+  `mp4a.40.2` expected). Chrome asks once for the microphone; with Settings → Camera → Record audio
+  off, it does not, and the codecs say "no audio".
+- [ ] Three solves: each row of the solve list gets a badge "2 clips, … MB" about a second after the
+  solve (write down the sizes of one: the design expects about 4.4 MB per attempt at 1080p30).
+- [ ] The badge opens the viewer: the solve's clip plays, upright, with sound; the moves on the right
+  follow the video (the one the video shows is highlighted), and a click on a move goes to it. The
+  scramble's clip plays too. Write down whether the highlighted move matches the cube in the picture
+  within a frame or two (the clips' times come from the camera's frames; the moves' from Bluetooth).
+- [ ] The scramble clip begins about 2 s (at most 3 s) before the first turn of the scramble, and
+  ends about 1 s after its last turn; the solve clip begins about 3 s (at most 4 s) before the first
+  turn of the solve and ends about 1 s after the cube is solved. Check it in the viewer: the first
+  move's time in the list is the lead (2.xx s for the scramble, 3.xx s for the solve).
+- [ ] Download in the viewer gives five files: both MP4s, both frames files and attempt.json (Chrome
+  may ask once to allow multiple downloads: Allow). The MP4s play in the system's player (QuickTime,
+  VLC or the phone's gallery).
+- [ ] A DNF (Esc) during a solve: its row gets both clips, the solve clip ending about 1 s after the
+  Esc. A DNF right after the scramble (before the first turn of the solve): only the scramble clip.
+- [ ] "Mark as solved" in the middle of a solve: no row, and in the attempt's folder no clip is left
+  (the scramble clip saved for it is removed; with the camera still on, the restarted attempt gets
+  its own clips).
+- [ ] The Sessions page shows the storage meter ("… of … (…%)") and, on each session with clips, "N
+  clips, … MB". The export is still one JSON file (the clips are downloaded per attempt).
+- [ ] Twenty minutes of solves with the camera on, on the phone on its stand, plugged in: write down
+  how warm it gets (touch: cool, warm, hot), whether Chrome or the phone slows down, the dropped
+  frames in the Recording part at the end (0 expected), and how much the storage meter went up.
+- [ ] A failed clip: with the camera on, turn it off right after a solve (within a second): the
+  solve's clip is still saved (the clips waiting for their time are saved at once when recording
+  stops). To see a failure, start the camera and a solve at once (the first scramble within 2 s of
+  Turn on): the Recording part says "A clip could not be saved…" once, Chrome's console (on the
+  phone, `chrome://inspect`) has one line `cubetrace: clip failed: scramble of attempt N: …`, and the
+  session's export has that line in `notes`; the attempt itself is saved as usual.

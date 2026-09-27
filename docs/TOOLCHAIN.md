@@ -426,6 +426,7 @@ cube.
 | Mark as solved (T1.14) | `reset.spec.ts` | Demo solve 0 at speed 0.25: "Mark as solved" in the Cube section while the scramble is part-way: the net shows solved, the demo cube stays connected, attempt 1 begins again (0 / 21, the same scramble), no row; the recorded views show the scrambling attempt just before. A page load with `?demo=0&speed=20` then solves attempt 1 in the same session, and the export has that one attempt. |
 | Idle setting (T1.14) | `cube.spec.ts`, last test | Settings shows the idle disconnection at 5 minutes; 1 survives a reload; 61 is refused with its message. The timer itself is tested in the unit tests, on a fake clock. |
 | Scramble marks (T1.13) | `scramble-colours.spec.ts` | Demo solve 1 at speed 20: each of its 11 half turns marked partial after its first quarter turn, then done; every view while scrambling agrees with its progress; all moves but the last done before the attempt arms, all done while armed, none from the solve on. `&misscramble=5` (demo solve 0): move 6 marked wrong exactly while the undo guidance shows, then done; all done while armed. |
+| Recording (T2.4) | `recording.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: four replays with the camera off, then four with it on, each waiting for the last one's clips; every attempt recorded has its two clips in OPFS, their frames files valid, each clip from its margin (2 s before the scramble's first turn, 3 s before the solve's) to at most one GOP earlier and to about 1 s after its segment; the viewer plays the last solve clip (`loadedmetadata`) with its moves, and Download gives the five files with the sizes of the record; the export validates; the median `timeMs` with the camera on is within 5 ms of the median with it off. In the capture lab, a 10 s clip saved mid-way: no frame dropped and no double interval in the second after it. The file's two tests run one after the other (`mode: 'default'`): each encodes 1080p30 in software. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
 export), without its time check, which flow 1 makes on a settled page (below). The helpers in
@@ -464,7 +465,9 @@ export), without its time check, which flow 1 makes on a settled page (below). T
 
 The whole suite (34 tests, two workers) took 44 s and 59 s in CI in the pull request's first two
 runs (the `npm run e2e` step, servers included; T1.6b's suite took 40 s), and 58 to 60 s locally on
-four CPUs in three runs in a row on 2026-09-27.
+four CPUs in three runs in a row on 2026-09-27. With T2.4 it has 49 tests and took 2.3 min locally
+(Playwright's count) in each of four runs in a row, 2 min 20 s with the servers; it was 1.6 min
+before T2.4 (47 tests), the recording flow alone taking about 30 s.
 
 ## packages/capture
 
@@ -722,3 +725,71 @@ it, as a double `dtMs`), while the counters' frames per second dipped to 29 and 
 T2.4 saves a solve's clip a second after it ends; if a lost frame in the next attempt's scramble
 matters, a larger `maxBufferSize` for the processor (`pipeline.ts`) or muxing in a second worker
 would avoid it (not done here).
+
+## Recording in the timer (T2.4)
+
+Added by T2.4 on 2026-09-27: `RecordingService` (`apps/web/src/app/camera/recording-service.ts`)
+records the clips of every attempt, and `packages/capture` saves them in a second worker.
+
+**Two workers.** The capture worker only cuts now. `saveClip` still asks it (`mux-and-write`); it
+cuts the interval with copies of the chunks' bytes (`cut(…, {copy: true})`, a memory copy) and moves
+the cut, with the request, through a `MessageChannel` to the clip worker (`clip-worker.ts`), which
+muxes it with mediabunny, writes it with the clip writer and answers the window. `startCapture`
+starts both workers and gives each an end of the channel (`start.clips`, `connect`), so the bytes
+never pass through the window; `stop()` terminates both once the clips being saved are answered.
+The clip worker is a chunk of its own, started by the same `new Worker(new URL('./clip-worker.ts',
+import.meta.url))` form as the capture worker, and mediabunny, the muxer and the clip writer moved
+into it. It also removes, when the window asks (`CaptureHandle.deleteClip`), a clip saved for an
+attempt that went meanwhile, but only while the clip's frames file still names the first frame asked
+for (`deleteClipIf`), so that a newer clip of the same name, the next attempt with that index, stays.
+Measured with the capture lab on the fake camera (throwaway runs, not committed), a save no longer
+costs a frame: 30 s (921 frames, 5.1 MB) saved in 125 ms from the request and 60 s (1,818 frames,
+10.2 MB) in 198 ms, with no double interval in the frames of the second after either, the frame rate
+at 30 throughout and none dropped; T2.3's single worker lost one and two frames on the same saves
+(above). `recording.spec.ts` checks a 10 s save the same way at every run.
+
+**The processors' buffers.** `MediaStreamTrackProcessor` keeps the frames a late reader has not
+taken, up to its `maxBufferSize`, and then drops the oldest. The pipeline now asks for 10 video frames
+(a third of a second at 30 fps) and 50 audio buffers (half a second of the microphone's 10 ms
+buffers), for a garbage collection or a busy moment in the capture worker. Frames wait there only
+while the worker is behind, so the steady state holds none. On the real cameras, whose frames come
+from a pool of capture buffers, the owner's round checks that recording for twenty minutes drops no
+frame (`docs/MANUAL-TESTS.md`, T2.4).
+
+**When it records.** While the camera is on and a session is under way, or a cube is connected (the
+first attempt of a new session begins with the connection, and its scramble clip needs the two
+seconds before it in memory), and the storage is under 95% of the quota. A new stream (another
+camera, another resolution) or a change of Settings' "Record audio" starts it again; the camera
+off, no session and no cube, or storage from 95% stop it. The microphone comes from its own
+`getUserMedia({audio: true})`; a refusal records the video alone and says so. `SessionService`
+emits `milestones$` (an attempt `armed`, `ended` with its record and its end, or `dropped` without a
+record); the service saves the scramble clip `[scrambleStart − 2 s, scrambleDone + 1 s]` and the solve
+clip `[solveStart − 3 s, end + 1 s]` a second and a quarter after their end, the quarter second for
+the last frames to come out of the encoder (tens of milliseconds, more on a busy machine), so that
+the cut is whole. `SessionService.attachClip` keeps a clip for the record of an attempt under way,
+or saves the record again with the clip (its timing untouched); a clip of an attempt that went is
+removed. The unit tests (`recording-service.spec.ts`) drive a real `SessionService` with the fake
+cube on a fake clock (`session-harness.ts`) and a fake pipeline (`recording-testing.ts`).
+
+**Timing with the camera on.** One replay of a demo solve at speed 20 varies by a few milliseconds
+either way, from the fake cube's timers: its time is when the last move's timer fired minus when the
+first one's did, and the page's own work can hold either back. With the camera on, the preview's
+sharpness meter (T2.1) is the page's longest task: in headless Chromium, whose canvas is software,
+its measurement took up to 30 ms (a long-animation-frame entry of the `requestVideoFrameCallback`),
+which delayed the moves around it by up to 29 ms in a throwaway run; the recording itself (the
+pipeline, the clips' messages) showed no long task. Single replays with the camera on were 1,066 to
+1,131 ms against 1,067 to 1,071 with it off (the fixture's 1,074.9 ms at speed 20), so the e2e
+compares the medians of four replays each: they differed by 0.1 to 1.9 ms over six runs. On real
+devices the canvas is the GPU's and the measurement is shorter; measuring the sharpness less often,
+or not while solving, would take it out of the solve's timing.
+
+**Sizes** (`ng build`, 2026-09-27, against `main` at d483f06): the initial bundle is 264.26 kB raw,
+72.41 kB transferred (263.80 and 72.35): `main` grew by 465 bytes, Angular's instructions for the
+new lazy components (one more export) and no app file. The capture worker is 12.1 kB raw, 4.2 kB
+transferred (136.4 and 33.4 before, with mediabunny); the clip worker, new, 126.5 kB (30.4 kB). The
+Camera section's chunk, which the Timer page loads right after it renders and which holds
+`RecordingService` (9.1 kB) and the recording panel (5.7 kB), is 42.2 kB (11.8 kB), against 29.7
+(8.8); the Timer page's 34.1 kB (9.3 kB), against 32.6 (8.9); the clip viewer, a chunk of its own
+that loads when a badge is clicked, 10.0 kB (3.4 kB); the Sessions page 8.1 kB (2.5 kB), against 7.6
+(2.4); the storage meter, shared by the Camera section and the Sessions page, 2.3 kB (1.0 kB); the
+chunk of `SessionService` and the store 23.1 kB (6.7 kB), against 20.3.

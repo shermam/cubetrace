@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { cut, type Cut } from './cut';
+import { cut, cutBuffers, type Cut } from './cut';
 import {
+  describeError,
+  isClipJob,
+  isWindowToClipWorker,
   isWindowToWorker,
   isWorkerToWindow,
   post,
@@ -9,6 +12,7 @@ import {
   transferList,
   type CaptureMessage,
   type CutDone,
+  type MuxAndWriteRequest,
   type StartMessage,
 } from './protocol';
 import { RingBuffer } from './ring-buffer';
@@ -91,19 +95,39 @@ describe('resolveCaptureConfig', () => {
 });
 
 describe('transferList', () => {
-  it("moves the start's streams, video and audio", () => {
+  it("moves the start's streams, video and audio, and its port to the clip worker", () => {
     const video = new ReadableStream<VideoFrame>();
     const audio = new ReadableStream<AudioData>();
+    const { port1 } = channel();
     const start: StartMessage = {
       type: 'start',
       video,
       audio,
       config: resolveCaptureConfig(),
       frameRate: 30,
+      clips: port1,
     };
 
-    expect(transferList(start)).toEqual([video, audio]);
-    expect(transferList({ ...start, audio: null })).toEqual([video]);
+    expect(transferList(start)).toEqual([video, audio, port1]);
+    expect(transferList({ ...start, audio: null, clips: null })).toEqual([video]);
+  });
+
+  it("moves the connect's port, and a clip job's cut like a cut answered", () => {
+    const { port2 } = channel();
+    expect(transferList({ type: 'connect', port: port2 })).toEqual([port2]);
+    const result = aCut();
+    const request: MuxAndWriteRequest = {
+      type: 'mux-and-write',
+      id: 3,
+      startHostMs: 0,
+      endHostMs: 1,
+      sessionId: 'a',
+      index: 1,
+      camera: 'laptop',
+      segment: 'solve',
+      fpsNominal: 30,
+    };
+    expect(transferList({ type: 'clip-job', request, cut: result })).toEqual(cutBuffers(result));
   });
 
   it("moves each of a cut's chunk buffers once, and nothing of other messages", () => {
@@ -131,6 +155,17 @@ describe('transferList', () => {
         fpsNominal: 30,
       },
       { type: 'mux-and-write-failed', id: 2, message: 'Nothing is buffered yet.' },
+      {
+        type: 'delete-clip',
+        id: 3,
+        sessionId: 'a',
+        index: 1,
+        camera: 'laptop',
+        segment: 'solve',
+        firstFrameHostMs: 5,
+      },
+      { type: 'delete-clip-done', id: 3, deleted: true },
+      { type: 'delete-clip-failed', id: 3, message: 'NotFoundError' },
       { type: 'stop' },
       { type: 'stopped' },
       { type: 'error', message: 'The camera stopped sending frames.', fatal: true },
@@ -176,6 +211,7 @@ describe('post', () => {
       audio: null,
       config: resolveCaptureConfig({ audio: false }),
       frameRate: null,
+      clips: null,
     });
 
     const received = (await arriving) as StartMessage;
@@ -199,9 +235,29 @@ describe('message guards', () => {
     expect(isWorkerToWindow({ type: 'mux-and-write' })).toBe(false);
     expect(isWorkerToWindow({ type: 'stopped' })).toBe(true);
     expect(isWorkerToWindow({ type: 'start' })).toBe(false);
+    expect(isWorkerToWindow({ type: 'delete-clip-done' })).toBe(true);
+    expect(isWorkerToWindow({ type: 'delete-clip-failed' })).toBe(true);
+    expect(isWindowToClipWorker({ type: 'connect' })).toBe(true);
+    expect(isWindowToClipWorker({ type: 'delete-clip' })).toBe(true);
+    expect(isWindowToClipWorker({ type: 'mux-and-write' })).toBe(false);
+    expect(isWindowToWorker({ type: 'delete-clip' })).toBe(false);
+    expect(isClipJob({ type: 'clip-job' })).toBe(true);
+    expect(isClipJob({ type: 'mux-and-write' })).toBe(false);
     for (const other of [null, undefined, 'stop', 3, {}, { type: 3 }, []]) {
       expect(isWindowToWorker(other)).toBe(false);
       expect(isWorkerToWindow(other)).toBe(false);
+      expect(isWindowToClipWorker(other)).toBe(false);
+      expect(isClipJob(other)).toBe(false);
     }
+  });
+});
+
+describe('describeError', () => {
+  it('names the error and says its message', () => {
+    expect(describeError(new RangeError('Nothing is buffered yet.'))).toBe(
+      'RangeError: Nothing is buffered yet.',
+    );
+    expect(describeError(new DOMException('', 'QuotaExceededError'))).toBe('QuotaExceededError');
+    expect(describeError('a string')).toBe('a string');
   });
 });
