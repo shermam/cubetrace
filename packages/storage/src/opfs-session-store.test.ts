@@ -336,6 +336,63 @@ describe('OpfsSessionStore', () => {
     expect(await store.listProblems()).toEqual([]);
   });
 
+  it('reads the records of schema version 1 as version 2, and leaves their files as they are', async () => {
+    const { root, store } = setup();
+    // As cubetrace 0.1 wrote them: schema 1, and an attempt without its clock fit.
+    const oldSession = JSON.stringify({ ...session(A, 1000), schema: 1 }, null, 2);
+    const oldAttempt = { ...attempt(A, 1), schema: 1, clock: undefined };
+    await root.plant(`sessions/${A}/session.json`, oldSession);
+    await root.plant(`sessions/${A}/attempts/0001/attempt.json`, JSON.stringify(oldAttempt));
+
+    const upgraded = { ...attempt(A, 1), clock: null };
+    expect(await store.listSessions()).toEqual([session(A, 1000)]);
+    expect(await store.exportSession(A)).toEqual({
+      session: session(A, 1000),
+      attempts: [upgraded],
+    });
+    expect(await store.listProblems()).toEqual([]);
+    expect(file(root, `sessions/${A}/session.json`).text).toBe(oldSession);
+
+    // What the app saves next is version 2, next to the version 1 attempt.
+    const saved = { ...session(A, 1000), summary: { attempts: 2, solved: 2, dnf: 0 } };
+    await store.saveAttempt(attempt(A, 2));
+    await store.saveSession(saved);
+    const schemaOf = (path: string): unknown =>
+      Reflect.get(JSON.parse(file(root, path).text), 'schema');
+    expect(schemaOf(`sessions/${A}/session.json`)).toBe(2);
+    expect(schemaOf(`sessions/${A}/attempts/0001/attempt.json`)).toBe(1);
+    expect(schemaOf(`sessions/${A}/attempts/0002/attempt.json`)).toBe(2);
+    expect(await store.exportSession(A)).toEqual({
+      session: saved,
+      attempts: [upgraded, attempt(A, 2)],
+    });
+  });
+
+  it('sets aside a record that breaks the schema of its version, naming the field', async () => {
+    const { root, store } = setup();
+    await store.createSession(session(A, 1000));
+    const broken = attempt(A, 1);
+    broken.moves[0].m = 'M';
+    await root.plant(`sessions/${A}/attempts/0001/attempt.json`, JSON.stringify(broken));
+    await root.plant(
+      `sessions/${B}/session.json`,
+      JSON.stringify({ ...session(B, 2000), summary: undefined }),
+    );
+    await root.plant(
+      `sessions/${C}/session.json`,
+      JSON.stringify({ ...session(C, 3000), schema: 3 }),
+    );
+
+    expect(await store.listSessions()).toEqual([session(A, 1000)]);
+    expect(await store.loadAttempts(A)).toEqual([]);
+    // Sorted by path: C, A and B's ids begin with 0, 3 and 9.
+    expect((await store.listProblems()).map(describeProblem)).toEqual([
+      `sessions/${C}/session.json is not a valid session.json (schema must be 1 or 2, got 3).`,
+      `sessions/${A}/attempts/0001/attempt.json is not a valid attempt.json (moves[0].m must be a face turn such as R, U' or F2, got "M").`,
+      `sessions/${B}/session.json is not a valid session.json (summary is missing).`,
+    ]);
+  });
+
   it('lists the problems that the latest reads found', async () => {
     const { root, store } = setup();
     await store.createSession(session(A, 1000));

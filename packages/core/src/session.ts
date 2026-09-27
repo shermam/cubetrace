@@ -1,6 +1,7 @@
-// session.json (docs/DATA-MODEL.md §6): the record of one session, created when it starts and
-// saved again as it goes (the summary after every attempt, the cube clock fit).
-import type { AttemptRecord } from './attempt';
+// session.json (docs/DATA-MODEL.md §6), schema version 2: the record of one session, created when it
+// starts and saved again as it goes (the summary after every attempt, the cube clock fit, later the
+// cameras and their clock sync).
+import type { AttemptRecord, CropRect } from './attempt';
 import type { CubeClockParams } from './clock';
 
 /** The device that runs the session and holds the cube (`host` in session.json). */
@@ -34,9 +35,61 @@ export interface SessionSummary {
   dnf: number;
 }
 
-/** session.json, schema version 1 (docs/DATA-MODEL.md §6). */
+/** A camera of the session: an entry of `cameras` in session.json (docs/DATA-MODEL.md §6). */
+export interface CameraInfo {
+  /**
+   * Unique within the session, and the first part of its clips' file names: lowercase letters and
+   * digits in words joined by hyphens, such as `laptop` or `phone-front` (docs/DATA-MODEL.md §5).
+   */
+  label: string;
+  /** The host's own camera; phase 2 has no other. */
+  local: true;
+  /** Which way the camera faces, when the browser says (`facingMode`). */
+  facing: 'user' | 'environment' | 'unknown';
+  /** The camera's name as the browser gives it (`MediaDeviceInfo.label`). */
+  deviceLabel: string;
+  /** `MediaStreamTrack.getSettings()` when the camera was opened, as JSON. */
+  settings: Record<string, unknown>;
+  /** `MediaStreamTrack.getCapabilities()`, as JSON. */
+  capabilities: Record<string, unknown>;
+  /** The constraints the app opened the camera with, as JSON. */
+  constraints: Record<string, unknown>;
+  /** The framing rectangle the model trains on; null for the whole frame. */
+  crop: CropRect | null;
+  /** `full`: whole frames are recorded (phase 2); `crop`: only the `crop` rectangle. */
+  mode: 'full' | 'crop';
+}
+
+/** One turn of the clapperboard matched to the motion it made in a camera's frames. */
+export interface ClapperboardSample {
+  /** The turn, on the host clock. */
+  moveHostMs: number;
+  /** The motion onset in the camera's frames, on the host clock. */
+  onsetHostMs: number;
+}
+
+/** The clock sync of one camera: an entry of `clock.cameras` in session.json (§6). */
+export interface CameraClock {
+  /**
+   * How far the camera's frames lag the cube: the median of `onsetHostMs − moveHostMs` over the
+   * clapperboard's turns. A clip's `syncResidualMs` is this value when it was recorded.
+   */
+  offsetMs: number;
+  /** The round-trip time of a remote camera's clock sync (phase 4); 0 for a local camera. */
+  rttMs: number;
+  /** The drift of a remote camera's clock against the host's, in ppm (phase 4); 0 for a local one. */
+  driftPpm: number;
+  /** The spread of the clapperboard's offsets (95th minus 5th percentile). */
+  clapperboardResidualMs: number;
+  /** The clapperboard's turns matched to a motion onset. */
+  clapperboardSamples: number;
+  /** The matched pairs, when kept. */
+  samples?: ClapperboardSample[];
+}
+
+/** session.json, schema version 2 (docs/DATA-MODEL.md §6). */
 export interface SessionRecord {
-  schema: 1;
+  schema: 2;
   /** A UUID v4, which names the session's folder (docs/DATA-MODEL.md §5). */
   id: string;
   /** Host clock when the session was created. */
@@ -44,13 +97,16 @@ export interface SessionRecord {
   app: { version: string; commit: string };
   host: HostInfo;
   cube: CubeInfo;
-  /** Phase 2: the cameras. Always empty in phase 1. */
-  cameras: [];
+  /** The cameras; empty without one. */
+  cameras: CameraInfo[];
   clock: {
-    /** The cube clock fit (`CubeClockFit.params`). */
+    /**
+     * A coarse summary: the cube clock fit (`CubeClockFit.params`) of the connection during which
+     * the last attempt ended. Each attempt's own fit (`AttemptRecord.clock`) is the one to use.
+     */
     cube: CubeClockParams;
-    /** Phase 2: the clock sync of each camera. Always empty in phase 1. */
-    cameras: Record<string, never>;
+    /** The clock sync of each camera, by label. */
+    cameras: Record<string, CameraClock>;
   };
   /** The cameras record audio with their video (phase 2); on by default. */
   audio: boolean;
@@ -91,7 +147,7 @@ export function createSession(input: {
   }
   const { host, cube, settings } = input;
   return {
-    schema: 1,
+    schema: 2,
     id,
     createdMs: input.nowMs,
     app: { version: input.appVersion, commit: input.commit },

@@ -7,8 +7,11 @@
 // with the semantics that SessionStore documents and MemorySessionStore implements. Since T1.11
 // (issue #12) a file is written under a temporary name and then moved over its own, so that a page
 // that goes away in the middle of a write leaves the previous file, and a file that cannot be read
-// is set aside and reported (`listProblems`) instead of failing every read that meets it.
+// is set aside and reported (`listProblems`) instead of failing every read that meets it. Since
+// T2.0 the records are read with core's parseSession and parseAttempt: schema versions 1 and 2 are
+// read, as version 2, and written as version 2; a version 1 file stays as it is until it is saved.
 import type { AttemptRecord, SessionRecord, SessionStore } from '@cubetrace/core';
+import { RecordError, parseAttempt, parseSession } from '@cubetrace/core';
 
 import type { OpfsDirectoryHandle, OpfsFileHandle } from './opfs';
 import { isNotFound } from './opfs';
@@ -43,8 +46,10 @@ export interface StorageProblem {
   readonly path: string;
   /**
    * What is wrong with it, worded to follow "<path> is": `empty`, `not JSON (<the parser's
-   * message>)`, `not the session.json of session <id>`, `not the attempt.json of attempt <index> of
-   * session <id>`, or `not a file`.
+   * message>)`, `not a valid session.json (<the field and what is wrong with it>)` or the same of
+   * an attempt.json (a record that breaks the schema of its version, or of a version other than 1
+   * and 2: core's parseSession and parseAttempt), `not the session.json of session <id>`, `not the
+   * attempt.json of attempt <index> of session <id>`, or `not a file`.
    */
   readonly reason: string;
 }
@@ -107,11 +112,11 @@ function toJson(record: SessionRecord | AttemptRecord): string {
  * that goes away during a write (a reload, a closed tab) leaves the previous file, or none, and at
  * worst a temporary file, which the reads ignore and remove when they see one.
  *
- * A file that does not hold the record its path names (empty, not JSON, another record, or a
- * folder) is unreadable: `listSessions` leaves out a session whose `session.json` is unreadable,
- * and `loadAttempts` and `exportSession` an unreadable `attempt.json`; {@link listProblems} lists
- * them. A failure to read (other than a missing file) still rejects: the store sets aside only
- * what it could read.
+ * A file that does not hold the record its path names (empty, not JSON, not a valid record,
+ * another record, or a folder) is unreadable: `listSessions` leaves out a session whose
+ * `session.json` is unreadable, and `loadAttempts` and `exportSession` an unreadable
+ * `attempt.json`; {@link listProblems} lists them. A failure to read (other than a missing file)
+ * still rejects: the store sets aside only what it could read.
  * The operations on one session (`saveSession`, `saveAttempt`, `loadAttempts`, `deleteAttempt`,
  * `exportSession`) reject for a session whose `session.json` is unreadable, naming the file;
  * `deleteSession` removes it like any other.
@@ -532,32 +537,43 @@ function parse(text: string): { value: unknown } | { problem: string } {
   }
 }
 
-function field(value: unknown, key: string): unknown {
-  return typeof value === 'object' && value !== null ? (Reflect.get(value, key) as unknown) : null;
+/**
+ * The record in `value` as `read` makes it (core's parseSession or parseAttempt), or why it is not
+ * one: `not a valid session.json (summary.attempts is missing)`.
+ */
+function record<T>(
+  value: unknown,
+  read: (json: unknown) => T,
+): { record: T } | { problem: string } {
+  try {
+    return { record: read(value) };
+  } catch (error: unknown) {
+    if (error instanceof RecordError) {
+      return { problem: `not a valid ${error.file} (${error.detail})` };
+    }
+    throw error;
+  }
 }
 
-/** The record in the text of a session.json, checked to be session `id`'s; or why it is not. */
+/**
+ * The record in the text of a session.json, of schema version 1 or 2, as version 2, checked to be
+ * session `id`'s; or why it is not.
+ */
 function sessionRecord(text: string, id: string): { record: SessionRecord } | { problem: string } {
   const parsed = parse(text);
   if ('problem' in parsed) {
     return parsed;
   }
-  return isSessionOf(parsed.value, id)
-    ? { record: parsed.value }
-    : { problem: `not the session.json of session ${id}` };
-}
-
-function isSessionOf(value: unknown, id: string): value is SessionRecord {
-  return (
-    field(value, 'schema') === 1 &&
-    field(value, 'id') === id &&
-    typeof field(value, 'createdMs') === 'number'
-  );
+  const read = record(parsed.value, parseSession);
+  if ('problem' in read || read.record.id === id) {
+    return read;
+  }
+  return { problem: `not the session.json of session ${id}` };
 }
 
 /**
- * The record in the text of an attempt.json, checked to be attempt `index` of `sessionId`; or why
- * it is not.
+ * The record in the text of an attempt.json, of schema version 1 or 2, as version 2, checked to be
+ * attempt `index` of `sessionId`; or why it is not.
  */
 function attemptRecord(
   text: string,
@@ -568,15 +584,9 @@ function attemptRecord(
   if ('problem' in parsed) {
     return parsed;
   }
-  return isAttemptOf(parsed.value, sessionId, index)
-    ? { record: parsed.value }
-    : { problem: `not the attempt.json of attempt ${String(index)} of session ${sessionId}` };
-}
-
-function isAttemptOf(value: unknown, sessionId: string, index: number): value is AttemptRecord {
-  return (
-    field(value, 'schema') === 1 &&
-    field(value, 'session') === sessionId &&
-    field(value, 'index') === index
-  );
+  const read = record(parsed.value, parseAttempt);
+  if ('problem' in read || (read.record.session === sessionId && read.record.index === index)) {
+    return read;
+  }
+  return { problem: `not the attempt.json of attempt ${String(index)} of session ${sessionId}` };
 }

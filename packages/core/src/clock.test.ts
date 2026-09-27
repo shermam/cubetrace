@@ -113,7 +113,9 @@ describe('CubeClockFit', () => {
     // Once there is a packetLast sample, the others no longer serve.
     fit.addSample(1400, 6400, false);
     expect(fit.toHost(1500)).toBe(6550);
+    expect(fit.hasLine).toBe(false);
     fit.addSample(2200, 7300, true);
+    expect(fit.hasLine).toBe(true);
     const { a, b, residualP95Ms, samples } = fit.params;
     expect(a).toBeCloseTo(1.05, 12);
     expect(b).toBeCloseTo(4990, 9);
@@ -126,6 +128,7 @@ describe('CubeClockFit', () => {
     const fit = new CubeClockFit();
     fit.addSample(1000, 5000, true);
     fit.addSample(1000, 5010, true);
+    expect(fit.hasLine).toBe(false);
     expect(fit.params).toEqual({ a: 1, b: 4010, residualP95Ms: 0, samples: 2 });
     expect(fit.toHost(1100)).toBe(5110);
   });

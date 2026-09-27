@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/attempt.schema.json",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/attempt.v1.schema.json",
   "title": "attempt.json",
-  "description": "One attempt of a cubetrace session, schema version 2 (docs/DATA-MODEL.md §7; version 1 is attempt.v1.schema.json). Times are host milliseconds (performance.timeOrigin + performance.now() on the host device), except cubeMs, the cube's own clock.",
+  "description": "One attempt of a cubetrace session, schema version 1 (docs/DATA-MODEL.md §7). Times are host milliseconds (performance.timeOrigin + performance.now() on the host device), except cubeMs, the cube's own clock.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,13 +14,12 @@
     "crossFace",
     "events",
     "moves",
-    "clock",
     "result",
     "phases",
     "video"
   ],
   "properties": {
-    "schema": { "const": 2 },
+    "schema": { "const": 1 },
     "session": {
       "description": "The id of the session: a lowercase UUID v4.",
       "type": "string",
@@ -69,26 +68,6 @@
       "description": "Every move the cube reported, in order, corrections of a mis-scramble included.",
       "type": "array",
       "items": { "$ref": "#/$defs/move" }
-    },
-    "clock": {
-      "description": "The cube clock fit of this attempt, host ≈ a·cube + b, by least squares over its moves that ended their Bluetooth packet, from its first move to solveEnd or the DNF (docs/DATA-MODEL.md §7, docs/DEVICES.md); null without two of them at different cube times.",
-      "type": ["object", "null"],
-      "additionalProperties": false,
-      "required": ["a", "b", "residualP95Ms", "samples"],
-      "properties": {
-        "a": { "description": "Host ms per cube ms.", "type": "number" },
-        "b": { "description": "Host ms at cube ms 0.", "type": "number" },
-        "residualP95Ms": {
-          "description": "95th percentile (nearest rank) of the absolute residuals of the samples (the last 2000 if there are more).",
-          "type": "number",
-          "minimum": 0
-        },
-        "samples": {
-          "description": "The samples in the fit.",
-          "type": "integer",
-          "minimum": 2
-        }
-      }
     },
     "result": {
       "type": "object",
@@ -147,9 +126,9 @@
       "items": { "$ref": "#/$defs/phase" }
     },
     "video": {
-      "description": "The video clips of the attempt: one per camera and segment (docs/DATA-MODEL.md §7).",
+      "description": "Phase 2: the video segments. Empty in schema version 1.",
       "type": "array",
-      "items": { "$ref": "#/$defs/clip" }
+      "maxItems": 0
     }
   },
   "$defs": {
@@ -191,93 +170,6 @@
       },
       "then": { "required": ["slot"] },
       "else": { "not": { "required": ["slot"] } }
-    },
-    "cameraLabel": {
-      "description": "A camera's label, unique within its session: lowercase letters and digits in words joined by hyphens (docs/DATA-MODEL.md §5).",
-      "type": "string",
-      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
-    },
-    "crop": {
-      "description": "The framing rectangle in whole pixels of the camera's frames, as recorded (docs/DATA-MODEL.md §6); null for the whole frame.",
-      "type": ["object", "null"],
-      "additionalProperties": false,
-      "required": ["x", "y", "w", "h"],
-      "properties": {
-        "x": { "type": "integer", "minimum": 0 },
-        "y": { "type": "integer", "minimum": 0 },
-        "w": { "type": "integer", "minimum": 1 },
-        "h": { "type": "integer", "minimum": 1 }
-      }
-    },
-    "clip": {
-      "description": "One video clip of the attempt, in the attempt's folder (docs/DATA-MODEL.md §5 and §7).",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "camera",
-        "segment",
-        "file",
-        "bytes",
-        "codec",
-        "audio",
-        "width",
-        "height",
-        "crop",
-        "fpsNominal",
-        "frames",
-        "firstFrameHostMs",
-        "framesFile",
-        "syncResidualMs"
-      ],
-      "properties": {
-        "camera": { "$ref": "#/$defs/cameraLabel" },
-        "segment": { "enum": ["scramble", "solve"] },
-        "file": {
-          "description": "The MP4 file: <camera>.<segment>.mp4.",
-          "type": "string",
-          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.mp4$"
-        },
-        "bytes": { "description": "The MP4 file's size.", "type": "integer", "minimum": 1 },
-        "codec": {
-          "description": "The video codec string, such as avc1.640028.",
-          "type": "string",
-          "minLength": 1
-        },
-        "audio": {
-          "description": "The audio codec string, such as mp4a.40.2; null without an audio track.",
-          "type": ["string", "null"],
-          "minLength": 1
-        },
-        "width": { "description": "Of the encoded frames.", "type": "integer", "minimum": 1 },
-        "height": { "description": "Of the encoded frames.", "type": "integer", "minimum": 1 },
-        "crop": {
-          "description": "The framing rectangle when the clip was recorded; null for the whole frame.",
-          "$ref": "#/$defs/crop"
-        },
-        "fpsNominal": {
-          "description": "The frame rate the camera's track reported.",
-          "type": "number",
-          "exclusiveMinimum": 0
-        },
-        "frames": {
-          "description": "The number of frames in the clip.",
-          "type": "integer",
-          "minimum": 1
-        },
-        "firstFrameHostMs": {
-          "description": "The host time of the clip's first frame: t0HostMs of its frames file.",
-          "type": "number"
-        },
-        "framesFile": {
-          "description": "The clip's frame times (frames.schema.json): <camera>.<segment>.frames.json.",
-          "type": "string",
-          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.frames\\.json$"
-        },
-        "syncResidualMs": {
-          "description": "How far the camera lagged the cube when the clip was recorded: offsetMs of the camera's clock in session.json; null before a sync check.",
-          "type": ["number", "null"]
-        }
-      }
     }
   }
 }

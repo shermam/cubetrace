@@ -52,11 +52,24 @@ export type {
   AttemptRecord,
   AttemptResult,
   AttemptState,
+  CropRect,
   CubeMoveInput,
+  FramesJson,
   MovePhase,
+  VideoClip,
+  VideoSegment,
 } from './attempt';
 export { AttemptMachine } from './attempt';
-export type { CubeInfo, HostInfo, SessionRecord, SessionSettings, SessionSummary } from './session';
+export type {
+  CameraClock,
+  CameraInfo,
+  ClapperboardSample,
+  CubeInfo,
+  HostInfo,
+  SessionRecord,
+  SessionSettings,
+  SessionSummary,
+} from './session';
 export { createSession, summarize } from './session';
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CubeClockFit } from './clock';
@@ -65,4 +78,13 @@ export { DNF, aoN, attemptTimes, best, mean, phaseAverages } from './stats';
 export type { SessionStore } from './store';
 export { MemorySessionStore } from './store';
 export type { JsonSchema } from './schemas';
-export { ATTEMPT_SCHEMA, SESSION_SCHEMA } from './schemas';
+export {
+  ATTEMPT_SCHEMA,
+  ATTEMPT_SCHEMA_V1,
+  FRAMES_SCHEMA,
+  SESSION_SCHEMA,
+  SESSION_SCHEMA_V1,
+} from './schemas';
+// T2.0 — reading records of schema versions 1 and 2
+export type { RecordFile } from './records';
+export { RecordError, parseAttempt, parseSession } from './records';

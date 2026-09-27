@@ -64,7 +64,7 @@ describe('createSession', () => {
   it('creates session.json as docs/DATA-MODEL.md §6 describes it', () => {
     const s = create();
     expect(s).toEqual({
-      schema: 1,
+      schema: 2,
       id: ID,
       createdMs: 1_730_640_000_000.5,
       app: { version: '0.1.0', commit: 'abc1234' },

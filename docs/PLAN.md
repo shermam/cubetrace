@@ -677,7 +677,7 @@ pipeline, §9 the data model).
 
 | Id | Task | Depends on | Status |
 |---|---|---|---|
-| T2.0 | `core`: schema 2 (per-attempt clock fit, video and camera entries, `frames.json`), readers for schemas 1 and 2 | — | ⬜ |
+| T2.0 | `core`: schema 2 (per-attempt clock fit, video and camera entries, `frames.json`), readers for schemas 1 and 2 | — | 🟨 #24 |
 | T2.1 | `capture`+`web`: camera panel: choose, open, preview, controls, sharpness meter, framing rectangle | — | ⬜ |
 | T2.2 | `capture`: encoder pipeline in a worker, ring buffer, cuts | — | ⬜ |
 | T2.3 | `capture`: MP4 muxing (mediabunny) and OPFS clip writing | T2.2 | ⬜ |

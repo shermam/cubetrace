@@ -1,9 +1,13 @@
-// The cube clock fit (docs/DATA-MODEL.md §1 and §6): host ≈ a·cube + b, a least-squares line of the
-// host time on the cube time of the session's moves, updated online. A Bluetooth packet carries up
-// to seven moves that all get the packet's arrival time, although the older ones happened earlier,
-// so only the newest move of each packet (`packetLast`) is a sample of the line.
+// The cube clock fit (docs/DATA-MODEL.md §1, §6 and §7): host ≈ a·cube + b, a least-squares line of
+// the host time on the cube time of a series of moves, updated online: an attempt's moves for its
+// `clock` in attempt.json, a connection's for the coarse `clock.cube` of session.json. A Bluetooth
+// packet carries up to seven moves that all get the packet's arrival time, although the older ones
+// happened earlier, so only the newest move of each packet (`packetLast`) is a sample of the line.
 
-/** The fit as `session.json` stores it in `clock.cube` (docs/DATA-MODEL.md §6). */
+/**
+ * The fit as the records store it: `clock` in attempt.json (docs/DATA-MODEL.md §7) and
+ * `clock.cube` in session.json (§6).
+ */
 export interface CubeClockParams {
   /** Host ms per cube ms: 1 plus the cube clock's drift (1.0002 is 200 ppm). */
   a: number;
@@ -35,8 +39,8 @@ interface Sample {
  *
  * The sums are kept as Welford's running means and co-moments of each sample's offset from the
  * first one, so that host times of about 1.7e12 ms (`performance.timeOrigin` is a wall clock) lose
- * no precision. The fit weighs every sample of the session equally; the residual percentile only
- * looks at the last `window` samples. Pure and synchronous, like the rest of the package.
+ * no precision. The fit weighs every sample equally; the residual percentile only looks at the last
+ * `window` samples. Pure and synchronous, like the rest of the package.
  */
 export class CubeClockFit {
   readonly #window: number;
@@ -113,10 +117,18 @@ export class CubeClockFit {
     return anchor === null ? cubeMs : anchor.hostMs + (cubeMs - anchor.cubeMs);
   }
 
-  /** The fit's parameters, as `session.json` stores them. */
+  /** The fit's parameters, as the records store them. */
   get params(): CubeClockParams {
     this.#params ??= this.#computeParams();
     return { ...this.#params };
+  }
+
+  /**
+   * Whether the samples make a line: at least two, at different cube times. Without one, the
+   * parameters are the fallback of the class comment (`a` = 1), which attempt.json records as null.
+   */
+  get hasLine(): boolean {
+    return this.#line() !== null;
   }
 
   /**

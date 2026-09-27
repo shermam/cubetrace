@@ -46,8 +46,8 @@ synchronous so it can be unit-tested by replaying fixtures through it.
 
 ## Time
 
-All timestamps are host milliseconds. Cube time is mapped by a per-session linear fit of
-(cubeMs, hostMs) pairs. Remote phones (phase 2) are mapped by a data-channel ping protocol;
+All timestamps are host milliseconds. Cube time is mapped by a linear fit of (cubeMs, hostMs) pairs
+per attempt (docs/DEVICES.md). Remote phones (phase 2) are mapped by a data-channel ping protocol;
 video frames carry their arrival time in Chrome; a "clapperboard" of five deliberate turns at
 session start measures each camera's constant latency. See the private design for the
 measurements and the reasoning.
