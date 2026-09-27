@@ -2,7 +2,7 @@
   "name": "@cubetrace/capture",
   "version": "0.1.0",
   "private": true,
-  "description": "The host's own camera: constraints, snapshots and manual controls, the sharpness metric and the framing rectangle; later the encoder pipeline and the clips. Plain TypeScript; never imports Angular.",
+  "description": "The host's own camera: constraints, snapshots and manual controls, the sharpness metric and the framing rectangle; the encoder pipeline in a worker, its ring buffer and cuts; later the clips. Plain TypeScript; never imports Angular.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

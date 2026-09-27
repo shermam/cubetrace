@@ -5,3 +5,15 @@
 export * from './camera';
 export * from './framing';
 export * from './sharpness';
+
+// T2.2 — capture pipeline: encoding in a worker, the ring buffer, cuts. capture-worker.ts is not
+// exported: it is the worker's own chunk (docs/TOOLCHAIN.md, "packages/capture").
+export type { ArrivalFit, Cut, CutAudio, CutFrames, CutVideo } from './cut';
+export { arrivalFit, cut, cutBuffers, frameIntervals } from './cut';
+export type {
+  AudioTrackInfo,
+  EncodedChunkRecord,
+  RingBufferBounds,
+  VideoTrackInfo,
+} from './ring-buffer';
+export { DEFAULT_BOUNDS, RingBuffer } from './ring-buffer';
