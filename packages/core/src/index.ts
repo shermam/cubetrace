@@ -11,3 +11,23 @@ export {
   parseMoves,
   quarterTurns,
 } from './notation';
+export type { Facelets } from './cube';
+export {
+  FACE_ORDER,
+  SOLVED,
+  applyMove,
+  applyMoves,
+  assertFacelets,
+  faceletsOf,
+  isSolved,
+  isSolvedIgnoringOrientation,
+} from './cube';
+export type { CornerPos, EdgePos } from './pieces';
+export {
+  CORNER_FACELETS,
+  EDGE_FACELETS,
+  adjacentFaces,
+  cornerAt,
+  edgeAt,
+  opposite,
+} from './pieces';
