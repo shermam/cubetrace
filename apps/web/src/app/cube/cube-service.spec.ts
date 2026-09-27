@@ -331,13 +331,15 @@ describe('CubeService', () => {
       expect(cube.battery()).toBe(100);
       await vi.runAllTimersAsync();
 
-      expect(movesOf(cube)).toEqual(['F2', "D'", 'D', 'F', 'F']);
-      expect(states[1]).toBe(solve.scrambledFacelets);
+      // F2 as a real cube sends it: two quarter turns.
+      expect(movesOf(cube)).toEqual(['F', 'F', "D'", 'D', 'F', 'F']);
+      expect(states[2]).toBe(solve.scrambledFacelets);
       expect(cube.solved()).toBe(true);
       const cubeMs = cube.moves().map((e) => e.cubeMs);
-      // The scramble 100 ms apart, then the solution's own gaps (90 and 5 ms) on the cube clock.
-      expect(cubeMs[1] - cubeMs[0]).toBe(100);
-      expect(cubeMs.slice(2).map((ms) => ms - cubeMs[2])).toEqual([0, 90, 95]);
+      // The scramble 100 ms apart (F2's second quarter turn 60 ms after its first), then the
+      // solution's own gaps (90 and 5 ms) on the cube clock.
+      expect(cubeMs.slice(0, 3).map((ms) => ms - cubeMs[0])).toEqual([0, 60, 100]);
+      expect(cubeMs.slice(3).map((ms) => ms - cubeMs[3])).toEqual([0, 90, 95]);
     });
 
     it('downloads the demo solves and plays the one the address asks for', async () => {

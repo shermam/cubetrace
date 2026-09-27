@@ -38,7 +38,9 @@ function logRows(page: Page): Promise<string[][]> {
 /** Waits for demo solve `index` to be replayed completely at `speed`, then checks the panel. */
 async function expectReplayed(page: Page, file: DemoFile, index: number): Promise<void> {
   const solve = file.solves[index];
-  const total = solve.scramble.split(' ').length + solve.moves.length;
+  const total =
+    solve.scramble.split(' ').reduce((n, move) => n + (move.endsWith('2') ? 2 : 1), 0) +
+    solve.moves.length;
   await expect(page.getByTestId('cube-status')).toHaveText('Fake cube · 100%');
   await expect(page.getByTestId('move-log')).toHaveAttribute('data-move-count', String(total), {
     timeout: 15_000,
