@@ -175,7 +175,8 @@ median, over the turns matched, of the motion's onset in the frames minus the tu
 (`offsetMs` of `clock.cameras`), and the spread of those lags (95th minus 5th percentile,
 `clapperboardResidualMs`); with the capture worker's time per frame to measure the motion (the
 capture lab's Sync check). For the owner's round 2 (`docs/MANUAL-TESTS.md`, T2.5): two checks per
-camera, whose offsets should agree within 10 ms, each spread under 40 ms.
+camera, whose offsets should agree within 10 ms, each spread under the limit of 50 ms plus a frame
+interval (83 ms at 30 fps, 67 at 60).
 
 | Camera | Date, Chrome | Check 1: offset / spread / turns | Check 2: offset / spread / turns | Per frame: median / p95 |
 |---|---|---|---|---|

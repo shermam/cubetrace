@@ -449,7 +449,8 @@ after it, the timer tracks no attempt, so its turns are in no record.
   seconds and see that the timer keeps waiting; hold still, and the timer is back on the same
   scramble and attempt number (the cube solved again), with none of those turns in the scramble.
 - [ ] The offset is stable: "Sync check" (the line under the picture), the same turns: it says "…;
-  was X ms". The two offsets are within 10 ms of each other and both spreads under 40 ms. Write down
+  was X ms". The two offsets are within 10 ms of each other and both spreads under 83 ms (the limit
+  at 30 fps: 50 ms plus a frame interval; 67 ms at 60 fps). Write down
   both checks.
 - [ ] A failure says why and offers Retry and "Download check data": 20 s without turning ("the cube
   did not move"); the turns with the lens covered ("no motion seen in the framing rectangle"); the

@@ -683,18 +683,30 @@ pipeline, §9 the data model).
 | T2.3 | `capture`: MP4 muxing (mediabunny) and OPFS clip writing | T2.2 | ✅ #27 |
 | T2.4 | `web`: recording in the timer: two clips per attempt, storage meter, clip viewer, downloads | T2.0, T2.1, T2.3 | ✅ #28 |
 | T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | ✅ #29 |
-| T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | 🟨 #31 |
+| T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | ✅ #31 (tag `v0.2.0` after the owner's round 2) |
 | T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | ✅ #30 |
-| T2.8 | `capture`+`web`: sync check that works on real cameras: event-locked motion detection, changed-area metric, diagnostics download | T2.5 | 🟨 #35 |
-| T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ⬜ |
-| T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ⬜ |
+| T2.8 | `capture`+`web`: sync check that works on real cameras: event-locked motion detection, changed-area metric, diagnostics download | T2.5 | ✅ #35 |
+| T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ✅ #37 |
+| T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ✅ #36 |
 
-Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6. Rules for every phase 2 task: nothing of
+Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6 → {T2.8, T2.9, T2.10} (from the owner's
+first recordings, issues #33 and #34; all merged on 2026-09-27). Rules for every phase 2 task: nothing of
 the capture code in the initial bundle (lazy chunks; check `ng build`); the worker code is plain
 TypeScript in `packages/capture` (no Angular), tested in Node where it is pure and in Playwright
 with Chrome's fake camera (`--use-fake-device-for-media-stream`, see `apps/web/e2e/probe.spec.ts`)
 where it needs a browser; every new dependency named and justified in the PR (mediabunny is the
 one expected); no personal data in fixtures.
+
+Follow-ups found with the owner's first recordings, not scheduled (candidates for tasks after
+round 2): (a) the worker's clock against the page's after the machine sleeps: each context has its
+own `timeOrigin` and the monotonic clock stops in sleep, so the frame and clip times of a worker
+created after a sleep could be off by the sleep, which the sync check's frame-clock self-check
+(T2.8) would report as "the frame clock is wrong"; the fix measures the worker–page offset and
+corrects frame and clip times; (b) sub-frame onsets in the sync check: the spread is quantized to
+frames on top of the cube's Bluetooth jitter (T2.8); (c) a quality or audio change mid-attempt
+restarts the pipeline and empties the buffer, so that attempt's clips begin late (flagged
+`truncatedStart` since T2.9): a guard could defer the restart to the end of the attempt;
+(d) crop-at-source (the design's later phase), the biggest lever left on clip size after T2.10.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -899,7 +911,8 @@ when a camera is on, and on demand), `session.json.clock.cameras[label]` (T2.0's
 never enter a record) and watches 20 s, or until all ten turns are matched; onsets = frames where the energy rises above 4× the baseline's median
 after at least 500 ms of quiet; each onset is matched to the nearest cube move within 500 ms;
 offset = median of (onsetHostMs − moveHostMs), spread = p95 − p5; fewer than 4 matches or a
-spread over 40 ms (a frame at 30 fps) → "Sync check failed: …" with the reason and a Retry; the
+spread over 40 ms (a frame at 30 fps; since T2.8 the onsets are found around each turn on the changed
+area of the picture and the limit is 50 ms plus a frame interval) → "Sync check failed: …" with the reason and a Retry; the
 result is written to `clock.cameras[label]` with the five pairs, and shown as "camera lags the
 cube by X ms (±Y)". Later clips carry `syncResidualMs = offsetMs`.
 
@@ -908,7 +921,7 @@ Playwright: the flow with the fake camera and the demo cube reaches a result or 
 failure (the fake camera has no onsets; the test asserts the failure text and the Retry).
 
 **Acceptance.**
-- [ ] On the owner's devices in round 2 the spread is under 40 ms and the offset is stable across two checks (recorded in `docs/DEVICES.md`).
+- [ ] On the owner's devices in round 2 the spread is under the limit (50 ms plus a frame interval since T2.8: 83 ms at 30 fps) and the offset is stable across two checks (recorded in `docs/DEVICES.md`).
 
 ### T2.7 — `web`: timer layout, last 12 solves, session history page
 
