@@ -19,14 +19,17 @@ import {
   type AttemptEvents,
   type AttemptRecord,
   type AttemptState,
+  type CameraInfo,
   type CubeInfo,
   type Facelets,
   type ScrambleProgress,
   type SessionRecord,
   type SessionStore,
+  type VideoClip,
 } from '@cubetrace/core';
 import type { CubeEvent, CubeMoveEvent } from '@cubetrace/gan';
 import type { StorageProblem } from '@cubetrace/storage';
+import { Subject, type Observable } from 'rxjs';
 
 import { APP_BUILD } from '../../environments/version';
 import { CubeService } from '../cube/cube-service';
@@ -107,6 +110,9 @@ export interface SessionListItem {
   readonly attempts: number;
   /** As the solve list writes the mean: a time, `DNF` or `–`. */
   readonly mean: string;
+  /** The clips of its attempts (their `video` entries), and their MP4s' bytes (T2.4). */
+  readonly clips: number;
+  readonly clipBytes: number;
   /** The session the timer is recording. */
   readonly current: boolean;
   /** Its `attempt.json` files that could not be read, left out of `attempts` and `mean`. */
@@ -121,11 +127,75 @@ export interface SessionList {
   readonly unreadable: readonly StorageProblem[];
 }
 
+/**
+ * An attempt, as the recording (T2.4) names it: its session, its index, and when its scramble was
+ * shown (`events.scrambleShown`), which tells it from an attempt begun again with the same index
+ * (after "Mark as solved", or when "Delete last" freed the index).
+ */
+export interface AttemptRef {
+  readonly session: string;
+  readonly index: number;
+  readonly scrambleShown: number;
+}
+
+/**
+ * What happens to an attempt, for the recording (T2.4), which saves a clip of its scramble and one
+ * of its solve: `armed`, its scramble is done (the time of its first move, or of the scramble's
+ * end when no move was seen, and of the scramble's end); `ended`, its record is saved (solved or a
+ * DNF: `endMs` is `solveEnd`, or the time of the DNF); `dropped`, it went without a record (a
+ * skip, "Mark as solved", a new connection of the demo cube, a new session, its session deleted),
+ * with the clips kept for it (`attachClip`), whose files are now nobody's.
+ */
+export type AttemptMilestone =
+  | {
+      readonly type: 'armed';
+      readonly attempt: AttemptRef;
+      readonly scrambleStart: number;
+      readonly scrambleDone: number;
+    }
+  | {
+      readonly type: 'ended';
+      readonly attempt: AttemptRef;
+      readonly record: AttemptRecord;
+      readonly endMs: number;
+    }
+  | {
+      readonly type: 'dropped';
+      readonly attempt: AttemptRef;
+      readonly clips: readonly VideoClip[];
+    };
+
+/** What `attachClip` did with a clip: kept for a record to come, saved in one, or nothing. */
+export type ClipAttachment = 'kept' | 'saved' | 'gone';
+
 /** An attempt under way or just ended, with what its machine does not expose. */
 interface Current {
   readonly machine: AttemptMachine;
+  readonly session: string;
   readonly index: number;
   readonly scramble: string;
+  /** Clips saved while it was under way, for its record (T2.4). */
+  clips: VideoClip[];
+}
+
+/** `clips` with `clip`, which replaces the clip of the same camera and segment. */
+function withClip(clips: readonly VideoClip[], clip: VideoClip): VideoClip[] {
+  const at = clips.findIndex((c) => c.camera === clip.camera && c.segment === clip.segment);
+  return at < 0 ? [...clips, clip] : clips.map((c, k) => (k === at ? clip : c));
+}
+
+/** Whether `record` is the attempt `ref` names. */
+function isAttempt(record: AttemptRecord, ref: AttemptRef): boolean {
+  return (
+    record.session === ref.session &&
+    record.index === ref.index &&
+    record.events.scrambleShown === ref.scrambleShown
+  );
+}
+
+/** `notes` with one more line. */
+function withNote(notes: string, line: string): string {
+  return notes === '' ? line : `${notes}\n${line}`;
 }
 
 /** The states of an attempt under way: not over yet. */
@@ -133,6 +203,15 @@ type ActiveState = Extract<AttemptState, 'scrambling' | 'armed' | 'solving'>;
 
 function isActive(state: AttemptState): state is ActiveState {
   return state === 'scrambling' || state === 'armed' || state === 'solving';
+}
+
+/** The attempt `current` as the recording names it. */
+function refOf(current: Current): AttemptRef {
+  return {
+    session: current.session,
+    index: current.index,
+    scrambleShown: current.machine.events.scrambleShown,
+  };
 }
 
 function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
@@ -175,6 +254,10 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  *   cube to say what it is, up to {@link HARDWARE_WAIT_MS}); its id is kept in `localStorage`, so a
  *   reload resumes it. The screen is kept on while a cube is connected and a session is open, and
  *   persistent storage is asked for once, with the first session created.
+ * - For the recording (T2.4, `RecordingService`): `milestones$` says when an attempt's scramble is
+ *   done, when it ended and when it went without a record; `attachClip` adds a clip to the
+ *   attempt's record (saved again, nothing else changed), `putCamera` the camera to the session's
+ *   `cameras`, and `addNote` a line to its `notes`.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
@@ -299,6 +382,11 @@ export class SessionService {
   readonly canNewSession = this.canDeleteLast;
 
   private current: Current | null = null;
+  /** The sessions deleted while the page is open: their attempts are gone. */
+  private readonly deletedSessions = new Set<string>();
+  private readonly milestones = new Subject<AttemptMilestone>();
+  /** See {@link AttemptMilestone}; emitted as they happen, in the cube event's own turn. */
+  readonly milestones$: Observable<AttemptMilestone> = this.milestones.asObservable();
   private clockFit = new CubeClockFit();
   private undoGuide: UndoGuide = NO_UNDO;
   /** The cube's latest orientation, and the one the pickup is measured from. */
@@ -373,7 +461,7 @@ export class SessionService {
     }
     const current = this.current;
     if (current !== null && isActive(current.machine.state)) {
-      this.current = null;
+      this.dropCurrent();
     } else if (this.queuedSignal() !== null) {
       this.queuedSignal.set(null);
     } else {
@@ -433,7 +521,7 @@ export class SessionService {
     const current = this.current;
     if (current?.machine.state === 'scrambling') {
       this.queuedSignal.set(current.scramble);
-      this.current = null;
+      this.dropCurrent();
       this.awaitingSignal.set(true);
     } else if (current?.index === last.index) {
       this.current = null;
@@ -459,7 +547,7 @@ export class SessionService {
     if (current?.machine.state === 'scrambling') {
       this.queuedSignal.set(current.scramble);
     }
-    this.current = null;
+    this.dropCurrent();
     this.forgetSession();
     const hardware = this.cube.hardware();
     if (this.cube.status() === 'connected' && hardware !== null) {
@@ -483,13 +571,18 @@ export class SessionService {
     const problems = (await this.store.listProblems?.()) ?? [];
     const currentId = this.sessionSignal()?.id;
     return {
-      sessions: sessions.map((session, k) => ({
-        session,
-        attempts: attempts[k].length,
-        mean: sessionMean(attempts[k]),
-        current: session.id === currentId,
-        unreadable: problems.filter((p) => p.kind === 'attempt' && p.sessionId === session.id),
-      })),
+      sessions: sessions.map((session, k) => {
+        const clips = attempts[k].flatMap((attempt) => attempt.video);
+        return {
+          session,
+          attempts: attempts[k].length,
+          mean: sessionMean(attempts[k]),
+          clips: clips.length,
+          clipBytes: clips.reduce((sum, clip) => sum + clip.bytes, 0),
+          current: session.id === currentId,
+          unreadable: problems.filter((p) => p.kind === 'attempt' && p.sessionId === session.id),
+        };
+      }),
       unreadable: problems.filter((p) => p.kind === 'session'),
     };
   }
@@ -505,17 +598,134 @@ export class SessionService {
    * (an attempt under way is dropped) and the next attempt starts a new session.
    */
   async deleteSession(id: string): Promise<void> {
+    this.deletedSessions.add(id);
     if (this.sessionSignal()?.id === id) {
       const current = this.current;
       if (current !== null && isActive(current.machine.state)) {
         this.queuedSignal.set(current.scramble);
       }
-      this.current = null;
+      this.dropCurrent();
       this.forgetSession();
       this.awaitingSignal.set(true);
       this.refresh();
     }
     await this.save((store) => store.deleteSession(id));
+  }
+
+  /**
+   * Adds `clip` to the attempt `ref` (T2.4), replacing a clip of the same camera and segment: while
+   * the attempt is under way it is kept for its record (`kept`); once it has ended, its record is
+   * saved again with the clip in `video` and nothing else changed (`saved`), also when the session
+   * is no longer the current one. Resolves to `gone`, changing nothing, when the attempt went
+   * without a record or was deleted. Rejects when the record could not be saved (the timer says so
+   * too, as for any save).
+   */
+  async attachClip(ref: AttemptRef, clip: VideoClip): Promise<ClipAttachment> {
+    const current = this.current;
+    if (
+      current !== null &&
+      isActive(current.machine.state) &&
+      current.session === ref.session &&
+      current.index === ref.index &&
+      current.machine.events.scrambleShown === ref.scrambleShown
+    ) {
+      current.clips = withClip(current.clips, clip);
+      return 'kept';
+    }
+    if (this.sessionSignal()?.id === ref.session) {
+      const record = this.attemptsSignal().find((attempt) => isAttempt(attempt, ref));
+      if (record === undefined) {
+        return 'gone';
+      }
+      const updated: AttemptRecord = { ...record, video: withClip(record.video, clip) };
+      this.attemptsSignal.update((attempts) => attempts.map((a) => (a === record ? updated : a)));
+      if (this.lastResultSignal() === record) {
+        this.lastResultSignal.set(updated);
+      }
+      await this.save((store) => store.saveAttempt(updated));
+      return 'saved';
+    }
+    // The session changed since (New session right after the solve): its record in the store.
+    let outcome: ClipAttachment = 'gone';
+    await this.save(async (store) => {
+      const record = (await store.loadAttempts(ref.session)).find((a) => isAttempt(a, ref));
+      if (record !== undefined) {
+        await store.saveAttempt({ ...record, video: withClip(record.video, clip) });
+        outcome = 'saved';
+      }
+    });
+    return outcome;
+  }
+
+  /**
+   * Whether the attempt `ref` is still there: under way, or saved in the current session. An
+   * attempt of another session counts as there (its record is in the store) unless that session was
+   * deleted.
+   */
+  hasAttempt(ref: AttemptRef): boolean {
+    if (this.deletedSessions.has(ref.session)) {
+      return false;
+    }
+    const current = this.current;
+    if (
+      current !== null &&
+      isActive(current.machine.state) &&
+      current.session === ref.session &&
+      current.index === ref.index &&
+      current.machine.events.scrambleShown === ref.scrambleShown
+    ) {
+      return true;
+    }
+    if (this.sessionSignal()?.id !== ref.session) {
+      return true;
+    }
+    return this.attemptsSignal().some((attempt) => isAttempt(attempt, ref));
+  }
+
+  /**
+   * Puts `camera` in the current session's `cameras` (T2.4), replacing the entry with its label, and
+   * `audio` in its `audio`, and saves session.json; nothing without a session, or when both are
+   * already so.
+   */
+  putCamera(camera: CameraInfo, audio: boolean): void {
+    const session = this.sessionSignal();
+    if (session === null) {
+      return;
+    }
+    const at = session.cameras.findIndex((entry) => entry.label === camera.label);
+    if (
+      at >= 0 &&
+      session.audio === audio &&
+      JSON.stringify(session.cameras[at]) === JSON.stringify(camera)
+    ) {
+      return;
+    }
+    const cameras =
+      at < 0
+        ? [...session.cameras, camera]
+        : session.cameras.map((entry, k) => (k === at ? camera : entry));
+    const saved: SessionRecord = { ...session, cameras, audio };
+    this.sessionSignal.set(saved);
+    void this.save((store) => store.saveSession(saved));
+  }
+
+  /**
+   * Adds `line` to the `notes` of session `sessionId` and saves its session.json (T2.4: a clip that
+   * could not be saved), also when it is no longer the current session. Rejects when it could not be
+   * saved.
+   */
+  async addNote(sessionId: string, line: string): Promise<void> {
+    const session = this.sessionSignal();
+    if (session?.id === sessionId) {
+      const saved: SessionRecord = { ...session, notes: withNote(session.notes, line) };
+      this.sessionSignal.set(saved);
+      await this.save((store) => store.saveSession(saved));
+      return;
+    }
+    await this.save(async (store) => {
+      const stored = (await store.exportSession(sessionId)).session;
+      await store.saveSession({ ...stored, notes: withNote(stored.notes, line) });
+    });
   }
 
   /**
@@ -590,7 +800,7 @@ export class SessionService {
     const current = this.activeCurrent();
     if (demo !== null) {
       // The demo cube starts solved and replays its solve from the start.
-      this.current = null;
+      this.dropCurrent();
       this.queuedSignal.set(demo.scramble);
       this.awaitingSignal.set(true);
       this.refresh();
@@ -648,7 +858,7 @@ export class SessionService {
     const current = this.activeCurrent();
     if (current !== null) {
       this.queuedSignal.set(current.scramble);
-      this.current = null;
+      this.dropCurrent();
       this.awaitingSignal.set(true);
       this.pausedAtSignal.set(null);
       this.refresh();
@@ -686,6 +896,16 @@ export class SessionService {
     if (state === 'armed' && before !== 'armed') {
       this.pickupFrom = this.lastGyro;
     }
+    const { scrambleStart, scrambleDone } = current.machine.events;
+    if (before === 'scrambling' && scrambleDone !== null) {
+      // A resync may have gone past armed at once: the scramble is done all the same.
+      this.milestones.next({
+        type: 'armed',
+        attempt: refOf(current),
+        scrambleStart: scrambleStart ?? scrambleDone,
+        scrambleDone,
+      });
+    }
     if (state === 'solving' && before !== 'solving') {
       // Ready by the end of the solve, so that auto-advance shows it at once.
       this.fillReserve();
@@ -697,13 +917,16 @@ export class SessionService {
     }
   }
 
-  /** Saves the record of an attempt that ended, with the session's summary and clock fit. */
+  /**
+   * Saves the record of an attempt that ended, with the session's summary and clock fit, and the
+   * clips saved while it was under way.
+   */
   private finish(current: Current): void {
     const session = this.sessionSignal();
     if (session === null) {
       return;
     }
-    const record = current.machine.toRecord();
+    const record: AttemptRecord = { ...current.machine.toRecord(), video: current.clips };
     const attempts = [
       ...this.attemptsSignal().filter((a) => a.index !== record.index),
       record,
@@ -722,6 +945,12 @@ export class SessionService {
     void this.save(async (store) => {
       await store.saveAttempt(record);
       await store.saveSession(saved);
+    });
+    this.milestones.next({
+      type: 'ended',
+      attempt: refOf(current),
+      record,
+      endMs: record.events.solveEnd ?? current.machine.dnfMs ?? this.now(),
     });
     this.ensureAttempt();
   }
@@ -768,7 +997,7 @@ export class SessionService {
       return;
     }
     this.dropScramble(queued !== null);
-    this.current = { machine, index, scramble };
+    this.current = { machine, session: session.id, index, scramble, clips: [] };
     this.awaitingSignal.set(false);
     this.pickupFrom = null;
     this.undoGuide = NO_UNDO;
@@ -798,6 +1027,7 @@ export class SessionService {
         inspection15s: this.settings.inspection(),
         autoAdvance: this.settings.autoAdvance(),
       },
+      audio: this.settings.recordAudio(),
       appVersion: APP_BUILD.version,
       commit: APP_BUILD.commit,
       nowMs: this.now(),
@@ -885,6 +1115,15 @@ export class SessionService {
   private activeCurrent(): Current | null {
     const current = this.current;
     return current !== null && isActive(current.machine.state) ? current : null;
+  }
+
+  /** Forgets the current attempt; one under way goes without a record (`dropped`). */
+  private dropCurrent(): void {
+    const current = this.current;
+    this.current = null;
+    if (current !== null && isActive(current.machine.state)) {
+      this.milestones.next({ type: 'dropped', attempt: refOf(current), clips: current.clips });
+    }
   }
 
   /** Armed or solving: the scramble is done and the solve is about to start, or running. */

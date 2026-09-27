@@ -2,6 +2,7 @@ import { Component, type ElementRef, computed, inject, signal, viewChild } from 
 
 import { type StoragePersistence, StorageService } from '../device/storage-service';
 import { WAKE_LOCK_TEXT, WakeLockService } from '../device/wake-lock-service';
+import { formatBytes } from '../shared/format-bytes';
 import {
   CAMERA_FRAME_RATES,
   CAMERA_RESOLUTIONS,
@@ -161,13 +162,6 @@ export class SettingsPage {
 
   /** Decimal units, as Chrome shows storage: "0 B", "12.3 kB", "1.2 GB". */
   protected bytes(count: number): string {
-    const units = ['B', 'kB', 'MB', 'GB', 'TB'];
-    let value = count;
-    let unit = 0;
-    while (value >= 1000 && unit < units.length - 1) {
-      value /= 1000;
-      unit++;
-    }
-    return `${unit === 0 ? String(value) : value.toFixed(1)} ${units[unit] ?? ''}`;
+    return formatBytes(count);
   }
 }

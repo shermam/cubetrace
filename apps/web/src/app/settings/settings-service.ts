@@ -97,6 +97,7 @@ interface StoredSettings {
   readonly cameraResolution: CameraResolution;
   readonly cameraFrameRate: CameraFrameRate;
   readonly sharpnessThreshold: number;
+  readonly recordAudio: boolean;
   readonly cameraPicks: readonly CameraPick[];
   readonly cameraControls: readonly CameraControlsEntry[];
   readonly cameraFramings: readonly CameraFramingEntry[];
@@ -113,6 +114,7 @@ const DEFAULTS: StoredSettings = {
   cameraResolution: '1080p',
   cameraFrameRate: 'best',
   sharpnessThreshold: SHARPNESS_THRESHOLD_DEFAULT,
+  recordAudio: true,
   cameraPicks: [],
   cameraControls: [],
   cameraFramings: [],
@@ -131,7 +133,8 @@ export function macAddressProblem(text: string): string {
  * sessions record, the cubes' MAC addresses by Bluetooth name, the idle disconnection (T1.14), the
  * demo speed, inspection and auto-advance; and the camera's (T2.1): on or off, the resolution and
  * frame rate asked for, the sharpness threshold, the camera chosen on each host (by host label),
- * and per camera (by its label) the manual controls chosen and the framing rectangles. Signals,
+ * and per camera (by its label) the manual controls chosen and the framing rectangles; and whether
+ * the recording has the microphone's audio (T2.4, on by default, as the design has it). Signals,
  * kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every
  * change. Where the browser blocks storage the settings last until the page closes, and
  * `saveError` says so.
@@ -168,6 +171,8 @@ export class SettingsService {
   readonly cameraFrameRate = computed(() => this.stored().cameraFrameRate);
   /** The sharpness meter says "good" from this value up. */
   readonly sharpnessThreshold = computed(() => this.stored().sharpnessThreshold);
+  /** The clips have the microphone's audio with the video (T2.4); on by default. */
+  readonly recordAudio = computed(() => this.stored().recordAudio);
   /** The framing rectangles of every camera, oldest first. */
   readonly cameraFramings = computed(() => this.stored().cameraFramings);
   /** Why the last change could not be stored; null when it was. */
@@ -258,6 +263,12 @@ export class SettingsService {
 
   setCameraFrameRate(rate: CameraFrameRate): void {
     this.update({ cameraFrameRate: rate });
+  }
+
+  setRecordAudio(on: boolean): void {
+    if (on !== this.stored().recordAudio) {
+      this.update({ recordAudio: on });
+    }
   }
 
   /** Sets the sharpness threshold; returns false, changing nothing, unless it is above 0. */
@@ -357,6 +368,7 @@ function readSettings(storage: Storage | null): StoredSettings {
   const cameraResolution = member(parsed, 'cameraResolution');
   const cameraFrameRate = member(parsed, 'cameraFrameRate');
   const sharpnessThreshold = member(parsed, 'sharpnessThreshold');
+  const recordAudio = member(parsed, 'recordAudio');
   return {
     hostLabel:
       typeof hostLabel === 'string' && hostLabel.trim() !== ''
@@ -380,6 +392,7 @@ function readSettings(storage: Storage | null): StoredSettings {
       typeof sharpnessThreshold === 'number' && isSharpnessThreshold(sharpnessThreshold)
         ? sharpnessThreshold
         : DEFAULTS.sharpnessThreshold,
+    recordAudio: typeof recordAudio === 'boolean' ? recordAudio : DEFAULTS.recordAudio,
     cameraPicks: readList(member(parsed, 'cameraPicks'), readCameraPick).slice(-MAX_CAMERA_ENTRIES),
     cameraControls: readList(member(parsed, 'cameraControls'), readCameraControls).slice(
       -MAX_CAMERA_ENTRIES,

@@ -244,6 +244,21 @@ describe('SettingsPage', () => {
     expect(settings.sharpnessThreshold()).toBe(12.5);
   });
 
+  it('keeps Record audio, on by default', async () => {
+    const fixture = await render();
+    const box = input(fixture, '[data-testid="record-audio"]');
+    expect(box.checked).toBe(true);
+
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    await update(fixture);
+
+    expect(TestBed.inject(SettingsService).recordAudio()).toBe(false);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
+      recordAudio: false,
+    });
+  });
+
   it('keeps the host label, inspection, auto-advance and the demo speed', async () => {
     const fixture = await render();
     const host = input(fixture, '#host-label');

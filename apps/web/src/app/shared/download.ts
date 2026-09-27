@@ -11,11 +11,25 @@ export function downloadJson(
   fileName: string,
   value: unknown,
 ): void {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' });
+  downloadBlob(globals, document, fileName, blob);
+}
+
+/**
+ * Hands the user `blob` (a file read from the origin private file system, say) as a file called
+ * `fileName`, through an object URL and a click on a download link. Throws where the browser
+ * cannot make object URLs.
+ */
+export function downloadBlob(
+  globals: BrowserGlobals,
+  document: Document,
+  fileName: string,
+  blob: Blob,
+): void {
   const urls = globals.URL;
   if (urls === undefined) {
     throw new Error('this browser cannot save files (no URL.createObjectURL).');
   }
-  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' });
   const href = urls.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = href;

@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import type { AttemptRecord } from '@cubetrace/core';
 
 import { testAttempt } from '../session/session-testing';
+import { ClipViewing } from './clip-viewing';
 import { SolveList } from './solve-list';
 
 async function render(attempts: readonly AttemptRecord[]): Promise<HTMLElement> {
@@ -45,6 +46,41 @@ describe('SolveList', () => {
     expect(text(element, 'stat-best')).toBe('10.00');
     expect(text(element, 'stat-ao5')).toBe('12.00');
     expect(text(element, 'stat-ao12')).toBe('–');
+  });
+
+  it("shows each attempt's clips on a badge that opens them", async () => {
+    const clip = (segment: 'scramble' | 'solve', bytes: number) => ({
+      camera: 'laptop',
+      segment,
+      file: `laptop.${segment}.mp4`,
+      bytes,
+      codec: 'vp09.00.40.08',
+      audio: 'opus',
+      width: 1920,
+      height: 1080,
+      crop: null,
+      fpsNominal: 30,
+      frames: 90,
+      firstFrameHostMs: 1_790_000_000_000,
+      framesFile: `laptop.${segment}.frames.json`,
+      syncResidualMs: null,
+    });
+    const element = await render([
+      { ...testAttempt(1, 12_340), video: [clip('scramble', 800_000), clip('solve', 3_450_000)] },
+      testAttempt(2, 10_000),
+      { ...testAttempt(3, 11_000), video: [clip('scramble', 900_000)] },
+    ]);
+    const badges = Array.from(
+      element.querySelectorAll<HTMLButtonElement>('[data-testid="clip-badge"]'),
+    );
+
+    expect(badges.map((badge) => badge.textContent.trim())).toEqual([
+      '1 clip, 900.0 kB',
+      '2 clips, 4.3 MB',
+    ]);
+    expect(badges[1].getAttribute('aria-label')).toBe('The clips of attempt 1: 2 clips, 4.3 MB');
+    badges[1].click();
+    expect(TestBed.inject(ClipViewing).index()).toBe(1);
   });
 
   it('has no rows before the first attempt', async () => {

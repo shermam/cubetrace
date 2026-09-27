@@ -40,7 +40,7 @@ export interface SavedClip {
     readonly durationMs: number;
     readonly keyframes: readonly number[];
   };
-  /** From the request to the answer, ms: cutting, muxing and writing in the worker. */
+  /** From the request to the answer, ms: cutting, then muxing and writing in the clip worker. */
   readonly latencyMs: number;
 }
 
@@ -61,9 +61,9 @@ interface CameraOption {
  * owner's rounds on the real devices. It encodes the chosen camera into the in-memory ring buffer,
  * shows the pipeline's counters once per second and cuts the last seconds, printing what came out
  * as JSON (with the frame times docs/DEVICES.md measures `VideoFrame.timestamp` from). "Mux and
- * save" (T2.3) has the worker mux the last seconds into an MP4 and write it with its frames.json
- * into a scratch folder of the origin private file system, and plays it back from there. Not in the
- * navigation: it is reached by its address, like a tool.
+ * save" (T2.3) has the workers cut the last seconds, mux them into an MP4 and write it with its
+ * frames.json into a scratch folder of the origin private file system, and plays it back from
+ * there. Not in the navigation: it is reached by its address, like a tool.
  */
 @Component({
   selector: 'app-capture-lab-page',
@@ -241,7 +241,7 @@ export class CaptureLabPage {
   }
 
   /**
-   * Has the worker cut, mux and write the last seconds as the solve clip of attempt 1 of the lab's
+   * Has the workers cut, mux and write the last seconds as the solve clip of attempt 1 of the lab's
    * scratch folder (`LAB_SESSION`), then reads the files back: their names and sizes, the frames
    * file, and the MP4 as an object URL for the `<video>`.
    */

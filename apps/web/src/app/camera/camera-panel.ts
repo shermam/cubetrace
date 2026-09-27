@@ -32,6 +32,8 @@ import {
 } from './camera-format';
 import { CameraControls } from './camera-controls';
 import { CameraService } from './camera-service';
+import { RecordingPanel } from './recording-panel';
+import { RecordingService } from './recording-service';
 
 /** A corner is taken hold of within this many CSS pixels of it (a finger's width). */
 const HANDLE_REACH_PX = 24;
@@ -65,16 +67,19 @@ interface Drag {
  * preview measures (a phone may claim 60 fps and deliver 30), the sharpness meter, the framing
  * rectangle over the preview (drag it to move it, drag a corner to resize it, by mouse or touch; the
  * arrow keys move it and Shift + arrows resize it; kept per camera), the camera's manual controls,
- * and in plain words why the camera did not open or opened otherwise than asked.
+ * and in plain words why the camera did not open or opened otherwise than asked; below them, the
+ * recording (T2.4, `RecordingPanel`), which this panel's `RecordingService` runs from the moment the
+ * Timer page loads it.
  */
 @Component({
   selector: 'app-camera-panel',
-  imports: [CameraControls],
+  imports: [CameraControls, RecordingPanel],
   templateUrl: './camera-panel.html',
   styleUrl: './camera-panel.scss',
 })
 export class CameraPanel {
   protected readonly camera = inject(CameraService);
+  private readonly recording = inject(RecordingService);
   private readonly prefs = inject(SettingsService);
   private readonly preview = viewChild<ElementRef<HTMLVideoElement>>('preview');
   private readonly frame = viewChild<ElementRef<HTMLElement>>('frame');
@@ -108,7 +113,11 @@ export class CameraPanel {
       case 'on': {
         const size = this.camera.frameSize();
         const fps = this.camera.measuredFps();
-        const parts = [size === null ? null : sizeText(size), fps === null ? null : fpsText(fps)];
+        const parts = [
+          size === null ? null : sizeText(size),
+          fps === null ? null : fpsText(fps),
+          this.recording.status() === 'recording' ? 'recording' : null,
+        ];
         return parts.filter((part) => part !== null).join(' · ') || 'On';
       }
     }

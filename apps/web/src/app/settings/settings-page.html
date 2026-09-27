@@ -235,6 +235,21 @@
     Chrome's test camera). To set it for a camera: with the cube sharp in the framing rectangle,
     note the meter; blur it (move it or cover the lens) and note it again; take a value in between.
   </p>
+  <label class="switch">
+    <input
+      #audioBox
+      type="checkbox"
+      data-testid="record-audio"
+      [checked]="settings.recordAudio()"
+      (change)="settings.setRecordAudio(audioBox.checked)"
+    />
+    Record audio
+  </label>
+  <p class="hint">
+    The clips have the microphone's sound with the video (the cube's clicks help to line both up);
+    Chrome asks once for the microphone. Off, they are silent. A recording under way starts again
+    with the change.
+  </p>
 </section>
 
 <section aria-labelledby="demo-heading">

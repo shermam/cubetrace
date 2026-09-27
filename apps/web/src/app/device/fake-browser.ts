@@ -528,6 +528,44 @@ export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
   }
 }
 
+/** A microphone's audio track (for the recording's audio, T2.4); `stop()` ends it. */
+export class FakeAudioTrack extends EventTarget implements MediaStreamTrack {
+  contentHint = '';
+  enabled = true;
+  readonly id = `fake-audio-${String(++fakeTrackCount)}`;
+  readonly kind = 'audio';
+  readonly label = 'Fake microphone';
+  readonly muted = false;
+  onended: MediaStreamTrack['onended'] = null;
+  onmute: MediaStreamTrack['onmute'] = null;
+  onunmute: MediaStreamTrack['onunmute'] = null;
+  readyState: MediaStreamTrackState = 'live';
+
+  applyConstraints(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  clone(): MediaStreamTrack {
+    return new FakeAudioTrack();
+  }
+
+  getCapabilities(): MediaTrackCapabilities {
+    return {};
+  }
+
+  getConstraints(): MediaTrackConstraints {
+    return {};
+  }
+
+  getSettings(): MediaTrackSettings {
+    return { sampleRate: 48_000, channelCount: 1 };
+  }
+
+  stop(): void {
+    this.readyState = 'ended';
+  }
+}
+
 /** A `MediaStream` of fake tracks. */
 export class FakeMediaStream extends EventTarget implements MediaStream {
   readonly id = `fake-stream-${String(++fakeTrackCount)}`;
@@ -592,6 +630,8 @@ export function mediaError(name: string, message = '', constraint?: string): DOM
  * it opens the camera that `deviceId: {exact}` names (an unknown id: an OverconstrainedError on
  * deviceId) or the first, refusing `frameRate: {exact}` above the camera's rate (an
  * OverconstrainedError on frameRate). `hold` makes it wait (a permission prompt) until `release()`.
+ * An audio-only request (`{audio: true}`, the recording's microphone) opens the microphone, or fails
+ * with the errors queued in `microphoneFailures`, or as without one when `microphone` is false.
  */
 export class FakeMediaDevices extends EventTarget implements MediaDevices {
   ondevicechange: MediaDevices['ondevicechange'] = null;
@@ -599,6 +639,10 @@ export class FakeMediaDevices extends EventTarget implements MediaDevices {
   readonly failures: unknown[] = [];
   readonly requests: MediaStreamConstraints[] = [];
   readonly tracks: FakeVideoTrack[] = [];
+  /** This device has a microphone. */
+  microphone = true;
+  readonly microphoneFailures: unknown[] = [];
+  readonly audioTracks: FakeAudioTrack[] = [];
   private held: (() => void)[] | null = null;
 
   constructor(public cameras: readonly FakeCamera[]) {
@@ -634,6 +678,17 @@ export class FakeMediaDevices extends EventTarget implements MediaDevices {
       await new Promise<void>((resolve) => {
         this.held?.push(resolve);
       });
+    }
+    if (constraints.video === undefined && constraints.audio !== undefined) {
+      if (this.microphoneFailures.length > 0) {
+        throw this.microphoneFailures.shift();
+      }
+      if (!this.microphone) {
+        throw mediaError('NotFoundError', 'Requested device not found');
+      }
+      const track = new FakeAudioTrack();
+      this.audioTracks.push(track);
+      return new FakeMediaStream([track]);
     }
     if (this.failures.length > 0) {
       throw this.failures.shift();
