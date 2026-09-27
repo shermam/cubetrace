@@ -49,20 +49,25 @@ scramble, the solve, the time and the breakdown. "Try the demo", next to "Connec
 Timer page, replays a random one at the speed set in Settings. The demo solves are downloaded when a
 demo starts, so demo mode needs the network.
 
-**Recording.** Turn the camera on in the Camera section of the Timer page (below the Cube section;
-choose the camera, frame the cube with the rectangle, and check the sharpness meter). While it is on
-and a session is under way, the app keeps the last 90 s of the camera and the microphone in memory,
+**Recording.** Turn the camera on in Camera settings on the Timer page (below the Cube section;
+choose the camera, frame the cube with the rectangle under Framing → Edit, and check the sharpness
+meter). Its picture then stays beside the time (under it on a phone), with the frame rate, the
+sharpness, the recording and the storage in one line under it, so that the cube can be kept in frame
+while scrambling and solving. While the camera is on and a session is under way, the app keeps the
+last 90 s of the camera and the microphone in memory,
 and every attempt gets two clips: its scramble, from 2 s before the first turn to 1 s after the cube
 matches the scramble, and its solve, from 3 s before the first turn to 1 s after the cube is solved
 (a clip begins at a keyframe, up to a second earlier). They are MP4 files, saved about a second after
 their end into the attempt's folder with the time of each frame, and listed in the attempt's record;
-the timing of the attempt never waits for them. The solve list shows a badge on each attempt with
-clips, which opens a viewer: the clip plays next to the attempt's moves by time, the one on screen
-highlighted, and Download saves both clips, their frame times and `attempt.json`. The Camera section
-and the Sessions page show how much of the browser's storage is used: from 80% they warn, and from
-95% the camera stops recording (the timer goes on) until sessions are exported or deleted. Settings
-→ Camera → Record audio turns the microphone off. A clip that could not be saved is said once and
-written in the session's notes.
+the timing of the attempt never waits for them. The Timer page lists the session's last 12 solves;
+"See all" under them, or a session's date on the Sessions page, opens the session's page, with all its
+attempts, its statistics (ao100 too) and the storage its clips take. Each list shows a badge on each
+attempt with clips, which opens a viewer: the clip plays next to the attempt's moves by time, the one
+on screen highlighted, and Download saves both clips, their frame times and `attempt.json`. Camera
+settings and the Sessions page show how much of the browser's storage is used: from 80% they warn,
+and from 95% the camera stops recording (the timer goes on) until sessions are exported or deleted.
+Record audio, in Camera settings and in Settings → Camera, turns the microphone off. A clip that
+could not be saved is said once and written in the session's notes.
 
 **Install it** from Chrome's menu (Install app, or Add to Home screen on Android) or with the
 install button in the address bar on a laptop. The installed app opens offline, and Chrome grants it
@@ -78,16 +83,17 @@ Phase 3 adds cloud storage, so that the sessions of every device end up in one d
 ## Screenshots
 
 Demo mode at real-time speed, taken with Playwright from a production build served as GitHub Pages
-serves it. The timer on a laptop after two solves: the next scramble and its picture, the last time,
-the CFOP breakdown and the solve list.
+serves it, with Chrome's test camera standing in for a real one. The timer on a laptop after two
+solves: the next scramble and its picture, the last time with the camera's picture beside it, the
+CFOP breakdown and the solve list.
 
-![The Timer page on a laptop: a scramble with its picture on the left, the time 14.99 under it with "#2 · Saved" and "Attempt 3", and on the right the CFOP breakdown of the last solve and of the session average, and the solve list with its statistics](docs/screenshots/timer-laptop.png)
+![The Timer page on a laptop: a scramble with its picture at the top left, under it the time 14.99 with "#2 · Saved · Attempt 3" and, beside it, the camera's picture (Chrome's green test pattern) with its frame rate, sharpness, recording and storage under it; on the right the CFOP breakdown of the last solve and of the session average, and the solve list with its statistics and "2 solves in this session · See all"](docs/screenshots/timer-laptop.png)
 
 The same on a phone in portrait, 390 px wide, and the connect dialog in Chrome without the MAC
 address flag, once the cube is chosen:
 
 <p>
-  <img src="docs/screenshots/timer-phone.png" width="260" alt="The Timer page on a phone: scramble, picture, time, breakdown and solves stacked in one column">
+  <img src="docs/screenshots/timer-phone.png" width="260" alt="The Timer page on a phone: the scramble with its picture, the time, and the camera's picture under it, in one screen">
   <img src="docs/screenshots/connect-dialog.png" width="400" alt="The connect dialog asking for the cube's MAC address, with an address typed, Connect and Cancel, and under it, unfolded, the flag that lets Chrome read the address: its address with a Copy button and the three steps to enable it">
 </p>
 
