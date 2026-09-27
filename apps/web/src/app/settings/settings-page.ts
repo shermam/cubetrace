@@ -5,24 +5,13 @@ import { WAKE_LOCK_TEXT, WakeLockService } from '../device/wake-lock-service';
 import { formatBytes } from '../shared/format-bytes';
 import {
   CAMERA_FRAME_RATES,
+  CAMERA_FRAME_RATE_TEXT,
   CAMERA_RESOLUTIONS,
-  type CameraFrameRate,
-  type CameraResolution,
+  CAMERA_RESOLUTION_TEXT,
   type CubeMac,
   SHARPNESS_THRESHOLD_DEFAULT,
   SettingsService,
 } from './settings-service';
-
-const RESOLUTION_TEXT: Readonly<Record<CameraResolution, string>> = {
-  '1080p': '1920×1080',
-  '720p': '1280×720',
-};
-
-const FRAME_RATE_TEXT: Readonly<Record<CameraFrameRate, string>> = {
-  best: 'Best (asks for 60 fps)',
-  '60': 'Exactly 60 fps',
-  '30': '30 fps',
-};
 
 const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
   unsupported: 'This browser has no Storage API, so it cannot be asked to keep the data.',
@@ -64,11 +53,11 @@ export class SettingsPage {
   protected readonly thresholdError = signal<string | null>(null);
   protected readonly resolutions = CAMERA_RESOLUTIONS.map((value) => ({
     value,
-    label: RESOLUTION_TEXT[value],
+    label: CAMERA_RESOLUTION_TEXT[value],
   }));
   protected readonly frameRates = CAMERA_FRAME_RATES.map((value) => ({
     value,
-    label: FRAME_RATE_TEXT[value],
+    label: CAMERA_FRAME_RATE_TEXT[value],
   }));
   protected readonly sharpnessDefault = SHARPNESS_THRESHOLD_DEFAULT;
 

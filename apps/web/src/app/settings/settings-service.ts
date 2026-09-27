@@ -46,6 +46,19 @@ export type CameraFrameRate = 'best' | '60' | '30';
 export const CAMERA_RESOLUTIONS: readonly CameraResolution[] = ['1080p', '720p'];
 export const CAMERA_FRAME_RATES: readonly CameraFrameRate[] = ['best', '60', '30'];
 
+/** How the resolutions read in Settings and in the Timer page's Camera settings. */
+export const CAMERA_RESOLUTION_TEXT: Readonly<Record<CameraResolution, string>> = {
+  '1080p': '1920×1080',
+  '720p': '1280×720',
+};
+
+/** How the frame rates read in Settings and in the Timer page's Camera settings. */
+export const CAMERA_FRAME_RATE_TEXT: Readonly<Record<CameraFrameRate, string>> = {
+  best: 'Best (asks for 60 fps)',
+  '60': 'Exactly 60 fps',
+  '30': '30 fps',
+};
+
 /**
  * The sharpness meter says "good" from this value up, by default: calibrated on Chrome's fake camera
  * (@cubetrace/capture's SHARPNESS_THRESHOLD_DEFAULT, repeated here so that this file imports no
@@ -98,6 +111,8 @@ interface StoredSettings {
   readonly cameraFrameRate: CameraFrameRate;
   readonly sharpnessThreshold: number;
   readonly recordAudio: boolean;
+  /** Whether the Timer page's Camera settings are open; null until they were opened or closed. */
+  readonly cameraSettingsOpen: boolean | null;
   readonly cameraPicks: readonly CameraPick[];
   readonly cameraControls: readonly CameraControlsEntry[];
   readonly cameraFramings: readonly CameraFramingEntry[];
@@ -115,6 +130,7 @@ const DEFAULTS: StoredSettings = {
   cameraFrameRate: 'best',
   sharpnessThreshold: SHARPNESS_THRESHOLD_DEFAULT,
   recordAudio: true,
+  cameraSettingsOpen: null,
   cameraPicks: [],
   cameraControls: [],
   cameraFramings: [],
@@ -134,7 +150,8 @@ export function macAddressProblem(text: string): string {
  * demo speed, inspection and auto-advance; and the camera's (T2.1): on or off, the resolution and
  * frame rate asked for, the sharpness threshold, the camera chosen on each host (by host label),
  * and per camera (by its label) the manual controls chosen and the framing rectangles; and whether
- * the recording has the microphone's audio (T2.4, on by default, as the design has it). Signals,
+ * the recording has the microphone's audio (T2.4, on by default, as the design has it), and
+ * whether the Timer page's Camera settings are open (T2.7). Signals,
  * kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every
  * change. Where the browser blocks storage the settings last until the page closes, and
  * `saveError` says so.
@@ -173,6 +190,11 @@ export class SettingsService {
   readonly sharpnessThreshold = computed(() => this.stored().sharpnessThreshold);
   /** The clips have the microphone's audio with the video (T2.4); on by default. */
   readonly recordAudio = computed(() => this.stored().recordAudio);
+  /**
+   * Whether the Camera settings of the Timer page are open (T2.7): as they were left, or null
+   * before they were first opened or closed.
+   */
+  readonly cameraSettingsOpen = computed(() => this.stored().cameraSettingsOpen);
   /** The framing rectangles of every camera, oldest first. */
   readonly cameraFramings = computed(() => this.stored().cameraFramings);
   /** Why the last change could not be stored; null when it was. */
@@ -268,6 +290,12 @@ export class SettingsService {
   setRecordAudio(on: boolean): void {
     if (on !== this.stored().recordAudio) {
       this.update({ recordAudio: on });
+    }
+  }
+
+  setCameraSettingsOpen(open: boolean): void {
+    if (open !== this.stored().cameraSettingsOpen) {
+      this.update({ cameraSettingsOpen: open });
     }
   }
 
@@ -369,6 +397,7 @@ function readSettings(storage: Storage | null): StoredSettings {
   const cameraFrameRate = member(parsed, 'cameraFrameRate');
   const sharpnessThreshold = member(parsed, 'sharpnessThreshold');
   const recordAudio = member(parsed, 'recordAudio');
+  const cameraSettingsOpen = member(parsed, 'cameraSettingsOpen');
   return {
     hostLabel:
       typeof hostLabel === 'string' && hostLabel.trim() !== ''
@@ -393,6 +422,8 @@ function readSettings(storage: Storage | null): StoredSettings {
         ? sharpnessThreshold
         : DEFAULTS.sharpnessThreshold,
     recordAudio: typeof recordAudio === 'boolean' ? recordAudio : DEFAULTS.recordAudio,
+    cameraSettingsOpen:
+      typeof cameraSettingsOpen === 'boolean' ? cameraSettingsOpen : DEFAULTS.cameraSettingsOpen,
     cameraPicks: readList(member(parsed, 'cameraPicks'), readCameraPick).slice(-MAX_CAMERA_ENTRIES),
     cameraControls: readList(member(parsed, 'cameraControls'), readCameraControls).slice(
       -MAX_CAMERA_ENTRIES,
