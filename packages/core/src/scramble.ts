@@ -1,8 +1,8 @@
 // Scrambles (docs/PLAN.md, T1.2): WCA random-state scrambles from cubing.js, the state a scramble
 // leads to, and a tracker that follows the cube through a scramble with "you are here" and "undo
 // this" guidance (docs/DATA-MODEL.md §3: scramble_start, scramble_done, scramble_extra_moves).
-import { randomScrambleForEvent } from 'cubing/scramble';
-import { setSearchDebug } from 'cubing/search';
+// Types only: cubing.js itself is imported when the first scramble is asked for.
+import type { setSearchDebug as SetSearchDebug } from 'cubing/search';
 
 import type { Facelets } from './cube';
 import { SOLVED, applyMove, applyMoves, assertFacelets } from './cube';
@@ -18,7 +18,14 @@ import { opposite } from './pieces';
  * token outside our notation (see {@link normalizeScramble}).
  */
 export async function generateScramble(): Promise<string> {
-  configureCubing();
+  // Imported on the first call, not with this module: an app that imports anything from the
+  // package (the cube pill in its first screen, say) does not download cubing.js until it asks for
+  // a scramble (docs/TOOLCHAIN.md, "cubing.js").
+  const [{ randomScrambleForEvent }, { setSearchDebug }] = await Promise.all([
+    import('cubing/scramble'),
+    import('cubing/search'),
+  ]);
+  configureCubing(setSearchDebug);
   const alg = await randomScrambleForEvent('333');
   return normalizeScramble(alg.toString());
 }
@@ -35,7 +42,7 @@ let cubingConfigured = false;
  *   nothing is bundled, the workaround finds the same file.
  * - No console warning with the duration of every scramble search.
  */
-function configureCubing(): void {
+function configureCubing(setSearchDebug: typeof SetSearchDebug): void {
   if (!cubingConfigured) {
     setSearchDebug({ prioritizeEsbuildWorkaroundForWorkerInstantiation: true, logPerf: false });
     cubingConfigured = true;

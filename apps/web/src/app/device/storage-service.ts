@@ -58,8 +58,8 @@ export class StorageService {
 
   /**
    * Asks for persistent storage (`navigator.storage.persist()`); resolves to whether it is
-   * granted. Settings has a button for it; the timer will call it when the first session
-   * starts (T1.6).
+   * granted. Settings has a button for it; the timer calls it when it creates its first session
+   * (`SessionService`).
    */
   async persist(): Promise<boolean> {
     const storage = this.storage;

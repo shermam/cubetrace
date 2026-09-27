@@ -23,7 +23,7 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | rxjs, tslib | 7.8.2, 2.8.1 | `apps/web/package.json`; rxjs also `packages/gan/package.json` | Angular runtime dependencies; rxjs is also the type of `CubeConnection.events$` |
 | gan-web-bluetooth (the owner's fork) | 3.0.2 plus 3 commits: git `52417a1` | `packages/gan/package.json` | GAN cube driver, a git dependency pinned to that commit; see "GAN driver" below |
 | `@angular/service-worker` | 22.2.0 | `apps/web/package.json` | added by `ng add @angular/pwa@22.2.0` (T1.7); `@angular/pwa` itself is only the schematic and is not installed |
-| cubing (cubing.js) | 0.63.7 | `packages/core/package.json` | added by T1.2 for scrambles (the cube picture comes with T1.6); MPL-2.0 or GPL-3.0; needs Node 22.3 or later; see "cubing.js" below |
+| cubing (cubing.js) | 0.63.7 | `packages/core/package.json`, `apps/web/package.json` | added by T1.2 for scrambles; the app uses it directly for the scramble picture (`cubing/twisty`, T1.6b); MPL-2.0 or GPL-3.0; needs Node 22.3 or later; see "cubing.js" below |
 
 ## Commands
 
@@ -240,7 +240,10 @@ opens the dialog (through `ConnectDialogService`, which stays in `main`). The pi
 render, shared with the Timer page. The initial bundle grew from 247.2 to 261.2 kB raw (69.6 to
 73.5 kB transferred): 12.9 kB of Angular's `@defer` runtime, the placeholder, the dialog's open
 state and the shared styles. The GAN driver is still a chunk of its own that loads when a real
-cube connects.
+cube connects. Checked again with T1.6b, once `scramble.ts` imported cubing.js lazily (see "cubing.js"):
+an eager pill and dialog then bring no cubing.js along, but still cost 42 kB raw (13.8 kB
+transferred) on the initial bundle, 305.4 kB against 263.3 kB, because the chunk optimizer then
+merges core's attempt, phase and scramble modules into `main`; the `@defer` blocks stay.
 
 **The demo solves are a file in `public/`, fetched when a demo starts.**
 `apps/web/scripts/write-demo-solves.mts` writes `apps/web/public/demo/solves.json`: the first 30
@@ -259,7 +262,11 @@ Added by T1.2 on 2026-09-27. Version 0.63.7, a dependency of `@cubetrace/core` (
 such as `three` and `type-fest`, come through the lock file). `packages/core/src/scramble.ts`
 imports two of its ES module entry points, `cubing/scramble` (`randomScrambleForEvent`) and
 `cubing/search` (`setSearchDebug`); their types resolve with the base `tsconfig` as it is
-(`moduleResolution: bundler`, `"types": []`). cubing.js searches in a module worker: a Web Worker
+(`moduleResolution: bundler`, `"types": []`). Since T1.6b it imports them dynamically, on the first
+call of `generateScramble()`: with static imports, any chunk that the build gave `scramble.ts` (the
+chunk optimizer groups it with the core code that the cube pill needs) also pulled cubing.js's
+static chunks, so every page downloaded about 100 kB of cubing.js after its first render (checked on
+`/settings`: 101 kB of cubing.js before, none after). cubing.js searches in a module worker: a Web Worker
 in the browser, a `node:worker_threads` worker in Node (found through
 `process.getBuiltinModule`, hence its Node 22.3 minimum), unreferenced so that it never keeps Node
 alive.
@@ -292,3 +299,34 @@ alive.
 - *Checked end to end:* `apps/web/e2e/scramble.spec.ts` expects a scramble on the Timer page, and
   a worker, on the dev server, on the production build under `/cubetrace/`, and on that build
   offline after the service worker has cached it.
+- *The scramble picture (T1.6b):* the Timer page shows cubing.js's `<twisty-player>` (2D, the
+  scramble as `experimental-setup-alg`), a custom element that `cubing/twisty` defines when it is
+  imported. `apps/web` depends on `cubing` itself for it, at core's version, and the scramble view
+  imports `cubing/twisty` dynamically (`TWISTY_LOADER`, which the unit tests replace), so it is a
+  lazy chunk: 116.4 kB raw, 28.7 kB transferred, plus 4 kB of shared helpers. The 2D player never
+  loads the 3D renderer, a 509 kB chunk of its own (checked with Playwright's network log on the
+  production build).
+
+## Timer and sessions
+
+Added by T1.6b on 2026-09-27.
+
+**`@cubetrace/storage` is a workspace package like `core` and `gan`** (plain TypeScript, `src/index.ts`
+through the `@cubetrace/*` paths, Vitest in Node, `sideEffects: false`). `OpfsSessionStore` writes the
+files of `docs/DATA-MODEL.md` §5 through the File System API; it takes the root directory handle (or
+the promise `navigator.storage.getDirectory()` returns), so its tests run against
+`FakeDirectoryHandle`, an in-memory OPFS with Chrome's errors, and the `SessionStore` semantics are
+tested on it and on `MemorySessionStore` alike. The real OPFS is exercised in Chromium by
+`apps/web/e2e/timer.spec.ts`, whose session survives page loads. The app picks the store through
+`SESSION_STORAGE` (`MemorySessionStore`, with a warning on the Timer page, where the browser has no
+OPFS); unit tests provide a `MemorySessionStore`.
+
+**The timer's unit tests drive a real `SessionService`** (`src/app/session/session-harness.ts`): the
+fake cube connected as a GAN cube on a fake host clock (`FakePerformance`), fixed scrambles
+(`SCRAMBLE_SOURCE`), animation frames that run when the test says (`FakeAnimationFrames`) and an
+in-memory store. `BROWSER_GLOBALS` now also carries `performance`, `requestAnimationFrame` and `URL`.
+
+**Sizes** (production build, 2026-09-27): the initial bundle is 263.3 kB raw, 72.3 kB transferred
+(261.2 and 73.5 before T1.6b); the Timer page's chunk 27.5 kB (7.7 kB), `SessionService` with the
+store 18.3 kB (5.3 kB, shared with the Sessions page), the Sessions page 5.4 kB (2.0 kB), and the
+scramble picture as above.

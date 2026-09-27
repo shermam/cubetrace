@@ -1,59 +1,36 @@
+// The semantics of SessionStore (packages/core/src/store.ts), checked on both implementations: the
+// in-memory store of core and the OPFS store over the in-memory file system of fake-opfs.ts.
+import type { SessionStore } from '@cubetrace/core';
+import { MemorySessionStore } from '@cubetrace/core';
 import { describe, expect, it } from 'vitest';
 
-import type { AttemptRecord, SessionRecord } from './index';
-import { AttemptMachine, MemorySessionStore, createSession, parseMoves } from './index';
+import { FakeDirectoryHandle } from './fake-opfs';
+import { OpfsSessionStore } from './opfs-session-store';
+import { A, B, C, attempt, session } from './test-records';
 
-const A = '3f1c9a2e-5b7d-4c1e-9f3a-2b8d6e4c1a7f';
-const B = '9e8d7c6b-5a4f-4e3d-a2c1-b0a9f8e7d6c5';
-const C = '0b6f7c1d-2e3a-4f5b-8c9d-a1b2c3d4e5f6';
+const stores: [string, () => SessionStore][] = [
+  ['MemorySessionStore', () => new MemorySessionStore()],
+  ['OpfsSessionStore', () => new OpfsSessionStore(new FakeDirectoryHandle())],
+];
 
-function session(id: string, createdMs: number): SessionRecord {
-  return createSession({
-    host: {
-      label: 'phone',
-      userAgent: 'Mozilla/5.0 (Linux; Android 15)',
-      platform: 'Android',
-      isPhone: true,
-    },
-    cube: { model: 'GAN 356 i3', hardware: '1.0', firmware: '1.0', gyro: false },
-    settings: { inspection15s: true, autoAdvance: true },
-    appVersion: '0.1.0',
-    commit: 'abc1234',
-    nowMs: createdMs,
-    id,
-  });
-}
-
-/** An attempt of `sessionId` on `R U F`, solved, or a DNF with `dnf`. */
-function attempt(sessionId: string, index: number, dnf = false): AttemptRecord {
-  const machine = new AttemptMachine({
-    session: sessionId,
-    index,
-    scramble: 'R U F',
-    scrambleShownMs: 0,
-  });
-  for (const [k, m] of parseMoves("R U F F' U' R'").entries()) {
-    machine.onMove({ m, cubeMs: 100 * k, hostMs: 100 * k + 50 });
+describe.each(stores)('%s', (_name, makeStore) => {
+  async function storeWith(...sessions: ReturnType<typeof session>[]): Promise<SessionStore> {
+    const store = makeStore();
+    for (const s of sessions) {
+      await store.createSession(s);
+    }
+    return store;
   }
-  if (dnf) {
-    machine.markDnf(1000);
-  }
-  return machine.toRecord();
-}
 
-async function storeWith(...sessions: SessionRecord[]): Promise<MemorySessionStore> {
-  const store = new MemorySessionStore();
-  for (const s of sessions) {
-    await store.createSession(s);
-  }
-  return store;
-}
-
-describe('MemorySessionStore', () => {
   it('lists the sessions it has, newest first', async () => {
     const store = await storeWith(session(A, 2000), session(B, 3000), session(C, 1000));
     expect((await store.listSessions()).map((s) => s.id)).toEqual([B, A, C]);
-    expect(await new MemorySessionStore().listSessions()).toEqual([]);
+    expect(await makeStore().listSessions()).toEqual([]);
+  });
+
+  it('orders sessions created at the same time by id', async () => {
+    const store = await storeWith(session(B, 1000), session(A, 1000));
+    expect((await store.listSessions()).map((s) => s.id)).toEqual([A, B]);
   });
 
   it('creates a session once, and saves only a session it has', async () => {
@@ -80,7 +57,16 @@ describe('MemorySessionStore', () => {
     const loaded = await store.loadAttempts(A);
     expect(loaded.map((a) => a.index)).toEqual([1, 2, 3]);
     expect(loaded[2]).toEqual(replaced);
+    expect(loaded[2].result.status).toBe('dnf');
     expect(await store.loadAttempts(B)).toEqual([attempt(B, 1)]);
+  });
+
+  it('sorts attempts by index, not by name, past 9999', async () => {
+    const store = await storeWith(session(A, 1000));
+    for (const index of [10000, 2, 9999, 10]) {
+      await store.saveAttempt(attempt(A, index));
+    }
+    expect((await store.loadAttempts(A)).map((a) => a.index)).toEqual([2, 10, 9999, 10000]);
   });
 
   it('rejects the attempts of a session it does not have', async () => {
@@ -88,6 +74,7 @@ describe('MemorySessionStore', () => {
     await expect(store.saveAttempt(attempt(B, 1))).rejects.toThrow(/No session/);
     await expect(store.loadAttempts(B)).rejects.toThrow(/No session/);
     await expect(store.exportSession(B)).rejects.toThrow(/No session/);
+    await expect(store.deleteAttempt(B, 1)).rejects.toThrow(/No session/);
   });
 
   it('deletes a session with its attempts; an unknown one is already gone', async () => {
@@ -113,7 +100,6 @@ describe('MemorySessionStore', () => {
     await store.deleteAttempt(A, 7);
     expect(await store.loadAttempts(A)).toEqual([attempt(A, 1)]);
     expect(await store.loadAttempts(B)).toEqual([attempt(B, 2)]);
-    await expect(store.deleteAttempt(C, 1)).rejects.toThrow(/No session/);
     // The index is free again: "Delete last" reuses the number.
     await store.saveAttempt(attempt(A, 2));
     expect((await store.loadAttempts(A)).map((a) => a.index)).toEqual([1, 2]);
@@ -144,5 +130,14 @@ describe('MemorySessionStore', () => {
       session: session(A, 1000),
       attempts: [attempt(A, 1)],
     });
+  });
+
+  it('copies a record when the call is made, before its promise settles', async () => {
+    const store = await storeWith(session(A, 1000));
+    const a = attempt(A, 1);
+    const saving = store.saveAttempt(a);
+    a.result.timeMs = 1;
+    await saving;
+    expect(await store.loadAttempts(A)).toEqual([attempt(A, 1)]);
   });
 });

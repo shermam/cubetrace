@@ -225,10 +225,14 @@ function member(value: unknown, key: string): unknown {
 }
 
 /**
- * A short name for this device from its platform, such as "macOS laptop" or "Android phone":
- * from the user-agent client hints (Chrome) or else the user-agent string.
+ * This device's platform (such as `macOS` or `Android`; empty when unknown) and whether it is a
+ * phone, for `host` in session.json: from the user-agent client hints (Chrome) or else the
+ * user-agent string.
  */
-export function defaultHostLabel(navigator: Partial<Navigator> | undefined): string {
+export function hostPlatform(navigator: Partial<Navigator> | undefined): {
+  platform: string;
+  mobile: boolean;
+} {
   const hints = member(navigator, 'userAgentData');
   const hintedPlatform = member(hints, 'platform');
   const hintedMobile = member(hints, 'mobile');
@@ -238,6 +242,16 @@ export function defaultHostLabel(navigator: Partial<Navigator> | undefined): str
       ? hintedPlatform
       : platformFromUserAgent(userAgent);
   const mobile = typeof hintedMobile === 'boolean' ? hintedMobile : /Mobi/.test(userAgent);
+  return { platform, mobile };
+}
+
+/**
+ * A short name for this device from its platform, such as "macOS laptop" or "Android phone":
+ * from the user-agent client hints (Chrome) or else the user-agent string.
+ */
+export function defaultHostLabel(navigator: Partial<Navigator> | undefined): string {
+  const { platform, mobile } = hostPlatform(navigator);
+  const userAgent = typeof navigator?.userAgent === 'string' ? navigator.userAgent : '';
   switch (platform) {
     case 'Android':
       return mobile ? 'Android phone' : 'Android tablet';
