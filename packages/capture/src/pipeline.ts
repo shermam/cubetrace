@@ -102,7 +102,7 @@ export function startCapture(
 /**
  * The capture worker as a module worker. Angular's application builder recognises exactly this
  * `new Worker(new URL('…', import.meta.url))` form, bundles capture-worker.ts on its own and
- * rewrites the URL to the emitted chunk (docs/TOOLCHAIN.md, "packages/capture").
+ * rewrites the URL to the emitted chunk (docs/TOOLCHAIN.md, "The capture pipeline").
  */
 export function createCaptureWorker(): Worker {
   return new Worker(new URL('./capture-worker.ts', import.meta.url), { type: 'module' });

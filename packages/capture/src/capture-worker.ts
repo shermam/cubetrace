@@ -1,7 +1,7 @@
 // The capture worker (docs/PLAN.md, T2.2): it reads the camera's frames and the microphone's audio
 // from the streams the window transfers, encodes them with WebCodecs into the ring buffer, sends
 // the counters once per second and answers cuts. Angular's builder emits it as a chunk of its own
-// (docs/TOOLCHAIN.md, "packages/capture"); `startCapture` (pipeline.ts) starts it. Plain
+// (docs/TOOLCHAIN.md, "The capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain
 // TypeScript: no Angular. The encoders, the clock and the timer come in through
 // `WorkerEnvironment`, so the logic also runs in Node's tests with fakes; the last lines wire it to
 // the worker's global scope.

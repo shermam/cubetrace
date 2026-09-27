@@ -7,7 +7,7 @@ export * from './framing';
 export * from './sharpness';
 
 // T2.2 — capture pipeline: encoding in a worker, the ring buffer, cuts. capture-worker.ts is not
-// exported: it is the worker's own chunk (docs/TOOLCHAIN.md, "packages/capture").
+// exported: it is the worker's own chunk (docs/TOOLCHAIN.md, "The capture pipeline").
 export type { CaptureConfig, CaptureError, CaptureStats, ResolvedCaptureConfig } from './protocol';
 export { resolveCaptureConfig } from './protocol';
 export type { CaptureHandle, CaptureSupport } from './pipeline';
