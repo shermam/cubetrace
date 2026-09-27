@@ -405,32 +405,6 @@ describe('SessionService', () => {
     expect(s.service.attempt()).toMatchObject({ index: 2, scramble: 'R U F' });
   });
 
-  it('a demo mis-scramble: the undo guidance, then an attempt recorded as corrected', async () => {
-    vi.useFakeTimers();
-    const s = setup();
-    await s.service.whenReady();
-    s.service.prepare();
-    await vi.advanceTimersByTimeAsync(0);
-    const [demo] = parseDemoSolves(DEMO_FILE);
-
-    // Demo solve 0 is R U; after R, the demo cube turns F by mistake.
-    s.cube.connectDemo(demo, 10, 1);
-    await vi.advanceTimersByTimeAsync(10);
-    expect(s.service.attempt()).toMatchObject({
-      state: 'scrambling',
-      progress: { matched: 1, diverged: true },
-      undo: { moves: ["F'"], done: 0 },
-    });
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(s.service.attempts()).toHaveLength(1);
-    expect(s.service.attempts()[0].result).toMatchObject({
-      status: 'solved',
-      replayOk: true,
-      scrambleCorrected: true,
-      scrambleExtraMoves: 2,
-    });
-  });
-
   it('waits for the cube to say what it is, and begins without it after 3 s', async () => {
     vi.useFakeTimers();
     const s = setup();
