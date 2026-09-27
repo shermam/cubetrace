@@ -27,10 +27,21 @@ adds items; the owner ticks them when done (date and any detail that others need
 
 ## Needed for phase 3 (Firebase)
 
-- [ ] Create the Firebase project (Blaze plan; a budget alert at, say, US$ 20/month) and
-  paste the web app config into `apps/web/src/environments/environment.prod.ts` as
-  documented there. Enable Google sign-in in Authentication and create the Firestore
-  database (production mode; rules come from the repo).
+- [x] 2026-09-27 — Firebase project created: `cubetrace-cacd9`
+  (https://console.firebase.google.com/project/cubetrace-cacd9/overview). Still to do there
+  before phase 3 starts, in this order (each is a few clicks in the console):
+  - [ ] Upgrade to the Blaze plan and set a budget alert (say US$ 20/month) in the linked
+    Google Cloud billing account.
+  - [ ] Authentication → Sign-in method → enable **Google**.
+  - [ ] Firestore Database → Create database → production mode, region `southamerica-east1`
+    (São Paulo) or `us-central1` (the bucket's region, decided below); the rules come from
+    the repo.
+  - [ ] Project settings → Your apps → Add app → Web (nickname `cubetrace`, no Firebase
+    Hosting yet): the config object it shows (apiKey, authDomain, projectId, …) is not a
+    secret; paste it where `apps/web/src/environments/environment.prod.ts` will say when
+    phase 3 lands.
+  - [ ] Phase 3 also needs the Firebase CLI logged in once on your machine (`firebase login`)
+    to deploy the Cloud Function that mints signed URLs; the coordinator will say when.
 - [ ] Decide the bucket: Cloudflare R2 (recommended in the design: free egress) or Google
   Cloud Storage. Both are supported by configuration; the decision sets which secret the
   Cloud Function gets. For R2: create the bucket and an API token with object write; for
