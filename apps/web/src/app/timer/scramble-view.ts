@@ -60,7 +60,8 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
 
 /**
  * The scramble at the top of the timer (docs/PLAN.md, T1.6b): its moves in large monospace, its
- * picture (cubing.js's `<twisty-player>`, 2D, the scramble as its setup), the progress through it
+ * picture beside them (cubing.js's `<twisty-player>`, 2D, the scramble as its setup; smaller on a
+ * phone, T2.7), the progress through it
  * and, when the cube leaves its path, the moves that undo the detour, greyed as they are made.
  * While the attempt is scrambling, each move is outlined as the cube makes it (T1.13, see
  * {@link scrambleTokens}): green once made, yellow while a half turn is half made, red where the
@@ -70,25 +71,9 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
   selector: 'app-scramble-view',
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   template: `
-    <div class="head">
-      <h2>{{ forAttempt() ? 'Scramble' : 'Next scramble' }}</h2>
-      @if (progress(); as progress) {
-        <p class="progress" data-testid="scramble-progress">
-          {{ progress.matched }} / {{ progress.total }}
-        </p>
-      }
-    </div>
+    <!-- The picture first: it floats at the top right, the heading and the moves beside it and
+         then under it (T2.7), so that the scramble takes little height. -->
     @if (session.scramble(); as scramble) {
-      <!-- One element per move, with a plain space between two (&ngsp; is a space that Angular
-           keeps), so that the text is the scramble itself. -->
-      <p class="moves" data-testid="scramble">
-        @for (token of tokens(); track $index) {
-          @if (!$first) {
-            &ngsp;
-          }
-          <span class="move" [attr.data-state]="token.state">{{ token.move }}</span>
-        }
-      </p>
       @if (pictureError() === null) {
         <twisty-player
           class="picture"
@@ -101,6 +86,26 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
           [attr.experimental-setup-alg]="scramble"
         ></twisty-player>
       }
+    }
+    <div class="head">
+      <h2>{{ forAttempt() ? 'Scramble' : 'Next scramble' }}</h2>
+      @if (progress(); as progress) {
+        <p class="progress" data-testid="scramble-progress">
+          {{ progress.matched }} / {{ progress.total }}
+        </p>
+      }
+    </div>
+    @if (session.scramble()) {
+      <!-- One element per move, with a plain space between two (&ngsp; is a space that Angular
+           keeps), so that the text is the scramble itself. -->
+      <p class="moves" data-testid="scramble">
+        @for (token of tokens(); track $index) {
+          @if (!$first) {
+            &ngsp;
+          }
+          <span class="move" [attr.data-state]="token.state">{{ token.move }}</span>
+        }
+      </p>
     } @else if (session.scrambleError(); as message) {
       <p class="error" role="alert">No scramble: {{ message }}</p>
     } @else {
@@ -119,8 +124,8 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
   `,
   styles: `
     :host {
-      display: grid;
-      gap: var(--space-2);
+      display: flow-root;
+      container-type: inline-size;
     }
 
     .head {
@@ -128,6 +133,7 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
       gap: var(--space-3);
       align-items: baseline;
       justify-content: space-between;
+      margin-bottom: var(--space-2);
     }
 
     h2,
@@ -177,9 +183,26 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
       }
     }
 
+    /* Beside the heading and the first lines of the moves, which go on under it. */
     .picture {
-      width: min(100%, 12rem);
-      height: 9rem;
+      float: right;
+      width: 7rem;
+      height: 5.25rem;
+      margin-left: var(--space-3);
+    }
+
+    @container (min-width: 32rem) {
+      .picture {
+        width: 12rem;
+        height: 9rem;
+      }
+    }
+
+    /* A phone's lines closer together: the time and the camera's preview come under the moves. */
+    @container (max-width: 31.99rem) {
+      .moves {
+        line-height: 1.45;
+      }
     }
 
     .muted {
@@ -191,6 +214,8 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
     }
 
     .undo {
+      clear: both;
+      margin-top: var(--space-2);
       padding: var(--space-2) var(--space-3);
       border-radius: var(--radius);
       background: color-mix(in srgb, var(--warn) 18%, var(--surface));

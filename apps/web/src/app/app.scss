@@ -146,6 +146,11 @@ main {
   max-width: var(--page-max);
   margin-inline: auto;
   padding: var(--gutter);
+
+  // The Timer page is wider: the camera's preview sits beside the time (T2.7).
+  &:has(> app-timer-page) {
+    max-width: 80rem;
+  }
 }
 
 .app-footer {

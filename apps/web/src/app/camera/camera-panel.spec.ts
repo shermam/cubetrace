@@ -111,50 +111,122 @@ describe('CameraPanel', () => {
     await update();
   }
 
-  it('is off at first; turned on, it shows the preview, the track and what is measured', async () => {
+  /** Edit: the framing rectangle over the larger picture. */
+  async function edit(): Promise<void> {
+    element('camera-framing-edit')?.click();
+    await update();
+  }
+
+  it('is off at first; turned on, it shows the picture, the track and what is measured', async () => {
     await render();
 
     const section = element('camera-section');
     expect(section?.tagName).toBe('DETAILS');
     expect(section?.hasAttribute('open')).toBe(false);
+    expect(section?.querySelector('summary h2')?.textContent).toBe('Camera settings');
     expect(text('camera-state')).toBe('Off');
     expect(text('camera-toggle')).toBe('Turn on');
     expect(element('camera-off')).not.toBeNull();
-    expect(element('camera-preview')).toBeNull();
+    expect(element('camera-framing-video')).toBeNull();
 
     await turnOn();
     expect(text('camera-toggle')).toBe('Turn off');
-    const video = element('camera-preview') as HTMLVideoElement;
+    const camera = TestBed.inject(CameraService);
+    // The larger picture only while the framing is edited.
+    expect(element('camera-framing-video')).toBeNull();
+    expect(text('camera-framing-edit')).toBe('Edit');
+    await edit();
+    expect(text('camera-framing-edit')).toBe('Done');
+    expect(element('camera-framing-edit')?.getAttribute('aria-pressed')).toBe('true');
+    const video = element('camera-framing-video') as HTMLVideoElement;
     expect(video.muted).toBe(true);
-    expect(video.srcObject).toBe(TestBed.inject(CameraService).stream());
+    expect(video.srcObject).toBe(camera.stream());
+    // It is for the framing: the preview beside the clock measures the frames.
+    expect(frames.waiting).toBe(0);
     expect(text('camera-track')).toBe('1920×1080 at 20 fps');
     expect(text('camera-measured')).toBe('measuring…');
     expect(text('camera-framing-rect')).toBe('full frame, 1920×1080');
     expect(text('camera-sharpness-value')).toBe('–');
 
+    const preview = document.createElement('video');
+    camera.watchPreview(preview);
     frames.present(20, 50);
     await update();
     expect(text('camera-measured')).toBe('20.0 fps, frames 1920×1080');
     expect(text('camera-state')).toBe('1920×1080 · 20.0 fps');
+    // Twice a second: at the first frame and 500 ms after it.
     expect(element('camera-sharpness')?.getAttribute('data-samples')).toBe('2');
     expect(element('camera-sharpness')?.getAttribute('data-good')).toBe('true');
     expect(Number(text('camera-sharpness-value'))).toBeGreaterThan(1000);
     expect(text('camera-sharpness-verdict')).toBe('good');
 
+    await edit();
+    expect(element('camera-framing-video')).toBeNull();
     element('camera-toggle')?.click();
     await update();
     expect(text('camera-state')).toBe('Off');
-    expect(element('camera-preview')).toBeNull();
+    expect(element('camera-framing-edit')).toBeNull();
     expect(media.liveTracks()).toEqual([]);
   });
 
-  it('opens at first when the camera was on', async () => {
+  it('opens by itself the first time the camera is on, then stays as it was left', async () => {
     await render();
+    const settings = TestBed.inject(SettingsService);
+    const details = (): HTMLDetailsElement => element('camera-section') as HTMLDetailsElement;
+    expect(settings.cameraSettingsOpen()).toBeNull();
+
     await turnOn();
+    expect(details().open).toBe(true);
+    expect(settings.cameraSettingsOpen()).toBe(true);
+
+    // Closed by hand: kept closed, also when the camera is turned on again and after a reload.
+    details().open = false;
+    details().dispatchEvent(new Event('toggle'));
+    await update();
+    expect(settings.cameraSettingsOpen()).toBe(false);
+    element('camera-toggle')?.click();
+    await update();
+    await turnOn();
+    expect(details().open).toBe(false);
     fixture.destroy();
     fixture = TestBed.createComponent(CameraPanel);
     await update();
-    expect(element('camera-section')?.hasAttribute('open')).toBe(true);
+    expect(details().open).toBe(false);
+
+    // Opened by hand: open after a reload.
+    details().open = true;
+    details().dispatchEvent(new Event('toggle'));
+    await update();
+    expect(settings.cameraSettingsOpen()).toBe(true);
+    fixture.destroy();
+    fixture = TestBed.createComponent(CameraPanel);
+    await update();
+    expect(details().open).toBe(true);
+  });
+
+  it('has the resolution, frame rate and audio of Settings', async () => {
+    await render();
+    const settings = TestBed.inject(SettingsService);
+    const resolution = element('camera-panel-resolution') as HTMLSelectElement;
+    const rate = element('camera-panel-frame-rate') as HTMLSelectElement;
+    const audio = element('camera-panel-audio') as HTMLInputElement;
+    expect(Array.from(resolution.options, (option) => option.text.trim())).toEqual([
+      '1920×1080',
+      '1280×720',
+    ]);
+    expect(resolution.value).toBe('1080p');
+    expect(rate.value).toBe('best');
+    expect(audio.checked).toBe(true);
+
+    resolution.value = '720p';
+    resolution.dispatchEvent(new Event('change'));
+    rate.value = '30';
+    rate.dispatchEvent(new Event('change'));
+    audio.click();
+    await update();
+    expect(settings.cameraResolution()).toBe('720p');
+    expect(settings.cameraFrameRate()).toBe('30');
+    expect(settings.recordAudio()).toBe(false);
   });
 
   it('names the cameras Front and Rear on a phone, and mirrors only the front one', async () => {
@@ -167,6 +239,7 @@ describe('CameraPanel', () => {
       'Rear camera',
     ]);
     expect(select.value).toBe('phone-front');
+    await edit();
     expect(element('camera-frame')?.classList.contains('mirrored')).toBe(true);
 
     select.value = 'phone-rear';
@@ -288,6 +361,7 @@ describe('CameraPanel', () => {
     it('moves when its inside is dragged and resizes from a corner; kept when let go', async () => {
       await render();
       await turnOn();
+      await edit();
       layout();
       TestBed.inject(CameraService).setFraming({ x: 480, y: 270, w: 960, h: 540 });
       await update();
@@ -328,6 +402,7 @@ describe('CameraPanel', () => {
     it('on a mirrored preview, follows the pointer as seen', async () => {
       await render([FAKE_PHONE_FRONT], ANDROID);
       await turnOn();
+      await edit();
       layout();
       TestBed.inject(CameraService).setFraming({ x: 480, y: 270, w: 960, h: 540 });
       await update();
@@ -350,6 +425,7 @@ describe('CameraPanel', () => {
     it('moves with the arrow keys and resizes with Shift and the arrow keys', async () => {
       await render();
       await turnOn();
+      await edit();
       TestBed.inject(CameraService).setFraming({ x: 480, y: 270, w: 960, h: 540 });
       await update();
       const framing = element('camera-framing');

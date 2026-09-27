@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-// The Camera section when Chrome refuses the camera: the fake camera and a prompt answered "Block"
+// The Camera settings when Chrome refuses the camera: the fake camera and a prompt answered "Block"
 // (`--use-fake-ui-for-media-stream=deny`). Launch options force a browser of their own for this file.
 test.use({
   launchOptions: {

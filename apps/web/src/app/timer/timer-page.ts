@@ -2,6 +2,7 @@ import { Component, DestroyRef, computed, inject } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 
 import { CameraPanel } from '../camera/camera-panel';
+import { CameraPreview } from '../camera/camera-preview';
 import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { CubeService } from '../cube/cube-service';
 import { demoRequestFrom } from '../cube/demo';
@@ -14,22 +15,29 @@ import { ScrambleView } from './scramble-view';
 import { SolveList } from './solve-list';
 import { TimerClock } from './timer-clock';
 
+/** The Timer page lists this many solves, the newest; the session's page has them all (T2.7). */
+export const TIMER_SOLVES = 12;
+
 /**
- * `/`: the timer (docs/PLAN.md, T1.6b). Stacked on a phone (scramble, time, breakdown and solves);
- * on wider screens the scramble and the time on the left, the breakdown and the solves on the
- * right, with the live cube panel (T1.6a) in a collapsible "Cube" section below them, and the
- * camera panel (T2.1) in a "Camera" section below that, loaded after the page (its code is a chunk
- * of its own, which the page does not wait for, and it records the clips, T2.4). A solve's clip
- * badge opens its clips in the clip viewer, a chunk of its own too. The keys:
- * `Esc` marks a DNF, `Delete` deletes the last attempt, `N` skips the scramble (or starts the next
- * attempt), except while typing or while a dialog is open. `?demo=<index>&speed=<n>` connects the
- * demo cube once the stored session has been read, so that its first attempt continues it.
+ * `/`: the timer (docs/PLAN.md, T1.6b; laid out for the camera by T2.7). On a phone, one column:
+ * the scramble, the time, the camera's preview under it, the breakdown, the last solves, then the
+ * collapsible Cube section (T1.6a) and Camera settings (T2.1). On wider screens the scramble and,
+ * under it, the time with the camera's preview beside it (so that the scramble, the time and the
+ * picture are in view together), then the two sections; on the right the breakdown, the session's
+ * statistics and its last {@link TIMER_SOLVES} solves, with "See all" to the session's page. The
+ * camera's preview and settings are chunks of their own, loaded after the page (which does not wait
+ * for them); they record the clips (T2.4). A solve's clip badge opens its clips in the clip viewer,
+ * a chunk of its own too. The keys: `Esc` marks a DNF, `Delete` deletes the last attempt, `N` skips
+ * the scramble (or starts the next attempt), except while typing or while a dialog is open.
+ * `?demo=<index>&speed=<n>` connects the demo cube once the stored session has been read, so that
+ * its first attempt continues it.
  */
 @Component({
   selector: 'app-timer-page',
   imports: [
     BreakdownChart,
     CameraPanel,
+    CameraPreview,
     ClipViewer,
     LiveCubePanel,
     ScrambleView,
@@ -38,17 +46,31 @@ import { TimerClock } from './timer-clock';
   ],
   host: { '(document:keydown)': 'onKeydown($event)' },
   template: `
-    <h1>Timer</h1>
+    <!-- The navigation says where this is; the space goes to the scramble, the time and the camera. -->
+    <h1 class="visually-hidden">Timer</h1>
     <div class="timer-layout">
       <section class="scramble" aria-label="Scramble">
         <app-scramble-view />
       </section>
-      <section class="clock" aria-label="Time">
-        <app-timer-clock />
-      </section>
+      <div class="live">
+        <div class="live-row">
+          <section class="clock" aria-label="Time">
+            <app-timer-clock />
+          </section>
+          @defer (on immediate) {
+            <app-camera-preview />
+          }
+        </div>
+      </div>
       <section class="solves" aria-label="Breakdown and solves">
         <app-breakdown-chart [attempts]="session.attempts()" />
-        <app-solve-list [attempts]="session.attempts()" />
+        <app-solve-list
+          [attempts]="session.attempts()"
+          [limit]="solves"
+          [sessionId]="session.session()?.id ?? null"
+        />
+      </section>
+      <div class="sections">
         <details class="cube" data-testid="cube-section">
           <summary>
             <h2>Cube</h2>
@@ -59,9 +81,9 @@ import { TimerClock } from './timer-clock';
         @defer (on immediate) {
           <app-camera-panel />
         } @placeholder {
-          <p class="camera-loading"><span class="title">Camera</span></p>
+          <p class="camera-loading"><span class="title">Camera settings</span></p>
         }
-      </section>
+      </div>
     </div>
     @if (viewed(); as attempt) {
       @defer (on immediate) {
@@ -72,27 +94,45 @@ import { TimerClock } from './timer-clock';
   styles: `
     @use '../../styles/layout';
 
-    h1 {
-      margin-bottom: var(--space-3);
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
     }
 
+    /* A phone keeps its spacing tight, so that the scramble, the time and the preview fit its
+       screen together. */
     .timer-layout {
+      --section-gap: var(--space-3);
+      --section-padding: var(--space-3);
+
       display: grid;
-      grid-template-areas: 'scramble' 'clock' 'solves';
-      gap: var(--space-4);
+      grid-template-areas: 'scramble' 'live' 'solves' 'sections';
+      gap: var(--section-gap);
 
       @include layout.from(layout.$two-columns) {
-        grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-        /* The scramble keeps its height when the right-hand column is the taller one. */
-        grid-template-rows: auto 1fr;
-        grid-template-areas: 'scramble solves' 'clock solves';
+        --section-gap: var(--space-4);
+        --section-padding: var(--space-4);
+
+        grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+        /* The left column keeps its heights when the right-hand one is the taller. */
+        grid-template-rows: auto auto 1fr;
+        grid-template-areas: 'scramble solves' 'live solves' 'sections solves';
         align-items: start;
       }
     }
 
-    section {
+    section,
+    .sections > details,
+    .sections > app-camera-panel,
+    .camera-loading {
       min-width: 0;
-      padding: var(--space-4);
+      padding: var(--section-padding);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--surface);
@@ -102,14 +142,50 @@ import { TimerClock } from './timer-clock';
       grid-area: scramble;
     }
 
-    .clock {
-      grid-area: clock;
+    /* The time and, beside it where the column is wide enough (under it otherwise), the camera's
+       preview: a box of 16:9 that is 15rem (240 px) high at most. */
+    .live {
+      grid-area: live;
+      container: live / inline-size;
+    }
+
+    .live-row {
+      display: flex;
+      flex-direction: column;
+      gap: var(--section-gap);
+    }
+
+    app-camera-preview {
+      width: 100%;
+      max-width: calc(15rem * 16 / 9);
+    }
+
+    @container live (min-width: 46rem) {
+      .live-row {
+        flex-direction: row;
+        align-items: flex-start;
+      }
+
+      .clock {
+        flex: 1 1 0;
+      }
+
+      app-camera-preview {
+        flex: none;
+        width: calc(15rem * 16 / 9);
+      }
     }
 
     .solves {
       grid-area: solves;
       display: grid;
       gap: var(--space-5);
+    }
+
+    .sections {
+      grid-area: sections;
+      display: grid;
+      gap: var(--section-gap);
     }
 
     .cube summary {
@@ -133,7 +209,7 @@ import { TimerClock } from './timer-clock';
       font-size: 0.875rem;
     }
 
-    /* Where the Camera section appears once its code has loaded. */
+    /* Where Camera settings appear once their code has loaded. */
     .camera-loading {
       margin: 0;
 
@@ -146,6 +222,7 @@ import { TimerClock } from './timer-clock';
 })
 export class TimerPage {
   protected readonly session = inject(SessionService);
+  protected readonly solves = TIMER_SOLVES;
   private readonly cube = inject(CubeService);
   private readonly dialogs = inject(ConnectDialogService);
   private readonly viewing = inject(ClipViewing);

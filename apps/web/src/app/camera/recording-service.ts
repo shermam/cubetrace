@@ -142,6 +142,7 @@ export class RecordingService {
   private readonly noticeSignal = signal<string | null>(null);
   private readonly lastClipSignal = signal<SavedClip | null>(null);
   private readonly failureSignal = signal<string | null>(null);
+  private readonly savingSignal = signal(0);
 
   /** See {@link RecordingStatus}. */
   readonly status = this.statusSignal.asReadonly();
@@ -155,6 +156,8 @@ export class RecordingService {
   readonly lastClip = this.lastClipSignal.asReadonly();
   /** The last clip that could not be saved, as its note says; null once dismissed. */
   readonly failure = this.failureSignal.asReadonly();
+  /** How many clips are being saved (cut, muxed and written) now: the Camera preview says so. */
+  readonly savingClips = this.savingSignal.asReadonly();
   /** The origin's storage: usage, quota and the share in use; null until read. */
   readonly storage = computed<StorageMeterValue | null>(() => {
     const usage = this.storageService.usage();
@@ -439,7 +442,11 @@ export class RecordingService {
     const save = (): Promise<void> => {
       const saving = this.save(handle, entry, attempt, segment, startMs, endMs);
       this.saving.add(saving);
-      void saving.finally(() => this.saving.delete(saving));
+      this.savingSignal.set(this.saving.size);
+      void saving.finally(() => {
+        this.saving.delete(saving);
+        this.savingSignal.set(this.saving.size);
+      });
       return saving;
     };
     const delay = Math.max(0, endMs + ENCODER_SETTLE_MS - hostNow(this.globals));

@@ -62,7 +62,7 @@ import { RecordingService, STORAGE_FULL } from './recording-service';
         While the camera is on and a session is under way, the last 90 s are kept in memory, and
         every attempt gets two clips in its folder: its scramble from 2 s before the first turn to 1
         s after, and its solve from 3 s before the first turn to 1 s after. The solve list shows
-        them. Audio: Settings, Camera.
+        them. Audio: Record audio, above.
       </p>
     </section>
   `,
