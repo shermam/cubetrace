@@ -192,7 +192,9 @@ describe('LumaDownscaler', () => {
     const [width, height] = [331, 187];
     const grey = Uint8Array.from({ length: width * height }, () => Math.floor(random() * 256));
     const rgbx = new Uint8Array(width * height * 4);
-    grey.forEach((value, i) => rgbx.set([value, value, value, 255], i * 4));
+    grey.forEach((value, i) => {
+      rgbx.set([value, value, value, 255], i * 4);
+    });
     const size = { width: 97, height: 55 };
     const fast = new Uint8Array(size.width * size.height);
     const general = new Uint8Array(size.width * size.height);
