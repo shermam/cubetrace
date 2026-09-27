@@ -44,6 +44,15 @@ versions follow [Semantic Versioning](https://semver.org/).
   section and on the Sessions page (which also gives each session's clips and their size) warns from
   80% of the browser's quota, and from 95% the camera stops recording while the timer goes on. A clip
   that could not be saved is said once and written in the session's notes.
+- The sync check (T2.5): how far the camera's frames lag the cube, for the training to subtract. When
+  a session records with the camera on, the Camera section asks for five single turns of the cube
+  with a pause of about a second between them, counts down 20 s with the turns and the motion onsets
+  it has seen in the framing rectangle, and says "Camera lags the cube by X ms (±Y)", or why it could
+  not tell, with Retry. The lag is kept in the session (`clock.cameras`, with the turns matched), and
+  every later clip of that camera carries it (`syncResidualMs`). "Sync check" runs it again (the
+  message then gives the lag before) and "Later" hides it. `/capture-lab` has a Sync check section
+  that runs it with any cube, the demo cube included, without a session, and says what measuring the
+  frames cost.
 
 ### Changed
 

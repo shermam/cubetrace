@@ -309,3 +309,40 @@ console, or `chrome://inspect` on the phone).
   by hand, they stay closed across a reload, and opened, open. The camera picker, Turn on and off,
   the resolution, the frame rate, Record audio, the exposure, focus, white balance, zoom and torch
   (the ThinkPhone), and the framing (Edit, Full frame) are all in them.
+
+## T2.5 — sync check
+
+On https://shermam.github.io/cubetrace/, Timer page, with the GAN 12 ui FreePlay, on the MacBook's
+FaceTime camera and on the ThinkPhone's front camera (the phone on its stand), then its rear camera.
+Next to each item, write the device, the camera, Chrome's version and the numbers asked for. The
+check measures how far the camera's frames lag the cube (`docs/PLAN.md`, T2.5): the lag goes into
+the session (`clock.cameras`) and into every later clip of that camera (`syncResidualMs`), for the
+training pipeline to subtract.
+
+- [ ] Camera on, framing rectangle around the cube and the hands, cube connected, a new session
+  (Sessions → New session, or the day's first attempt): once the Recording part says "Recording",
+  the Camera section shows "Sync check" with "Make five single turns with a pause of about a second
+  between them", a countdown from 20 s, and the turns and motion onsets it has seen. Turn one face
+  five times, a quarter turn at a time, holding the cube and the hands still for a second between
+  turns: about a second after the fifth turn it says "Camera lags the cube by X ms (±Y)". Write down
+  X and Y. The turns count as the scramble's: its guide shows how to undo them; then scramble as
+  usual.
+- [ ] The offset is stable: "Sync check" (the line under the Recording part), the same five turns:
+  it says "…; was X ms". The two offsets are within 10 ms of each other and both spreads under 40 ms.
+  Write down both checks.
+- [ ] A failure says why and offers Retry: 20 s without turning ("the cube did not move"); the five
+  turns with the lens covered ("no motion seen in the framing rectangle"); five quick turns without
+  pauses ("fewer than 4 matches …"). Retry runs it again; Later hides it, and the line under the
+  Recording part then says "this camera has no check in this session".
+- [ ] Three solves after a check, then Sessions → Export: in `session.json`,
+  `clock.cameras.<camera>` has `offsetMs` (X), `rttMs` and `driftPpm` 0, `clapperboardResidualMs`
+  (Y), `clapperboardSamples` (5, or 4 when a turn was not seen) and the matched `samples`; the
+  attempts recorded after the check have `syncResidualMs` X in their `video` entries, those recorded
+  before it null. Paste the `clock.cameras` entry here.
+- [ ] https://shermam.github.io/cubetrace/capture-lab, each camera: Start, connect the cube with the
+  cube button at the top, Sync check, the five turns (the lab watches the whole frame: keep the rest
+  of the picture still). Write down the lag it says and "Measuring a frame took the capture worker
+  … ms (95th percentile … ms)": the plan allows 2 ms per frame. When a check fails for no clear
+  reason, copy "What it found (JSON)" into an issue.
+- [ ] Fill in the "Camera lag" table of `docs/DEVICES.md` from the numbers above (or paste them into
+  the round's issue for the coordinator).

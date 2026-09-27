@@ -865,3 +865,65 @@ The camera's code that the Timer page loads right after it renders is Camera set
 kB), the preview, 6.1 kB (2.4 kB), and `CameraService` with `RecordingService`, which they share, 21.0
 kB (6.9 kB), against one chunk of 42.2 kB (13.2 kB). The session's page, new, is 9.1 kB (3.3 kB); the
 Sessions page 8.3 kB (2.8 kB), against 8.1 (2.8).
+
+## The sync check (T2.5)
+
+Added by T2.5 on 2026-09-27: the motion of the frames in the capture worker
+(`packages/capture/src/motion.ts`), the clapperboard (`clapperboard.ts`), and the check in the app
+(`apps/web/src/app/camera/sync-run.ts`, `sync-service.ts`, `sync-check.ts`, and a section of the
+capture lab).
+
+**The motion is read with `VideoFrame.copyTo`, not drawn into a canvas.** Measured on 2026-09-27 in
+Playwright's Chromium 141 with the fake camera (1080p30 I420 frames), 150 frames each way in a
+throwaway page and worker: drawing the framing rectangle of a frame into a 160-pixel-wide
+`OffscreenCanvas` and reading it back took 10 to 20 ms a frame (12 ms at the median), with
+`willReadFrequently` or without, and through `createImageBitmap` with a resize alike (the canvas is
+software there); copying the rectangle's planes out with `copyTo({rect})` took 0.4 to 0.7 ms at the
+median (Chrome copies a frame that is in memory within the call; the promise resolves at once), and
+averaging 2 × 2 points for each pixel of the 160-pixel plane 0.3 to 0.5 ms more. So the worker
+copies the rectangle, on even pixels as 4:2:0 planes need, and reads its first plane: the luma of
+I420, NV12 and the other 8-bit YUV formats, or RGBA and BGRA pixels weighed into luma. Frames it
+cannot copy (no pixel format, or a frame marked to be shown turned or mirrored, which newer
+browsers do instead of turning its pixels) are drawn into an `OffscreenCanvas` by the sharpness
+meter's `LumaSampler` at 160 pixels. The worker measures a frame after handing it to the encoder, and
+only while a check runs; the e2e runs measured 1.1 to 1.2 ms a frame at the median and 1.5 to 4.9 ms
+at the 95th percentile while the same worker encoded 1080p30 VP9 (`docs/DEVICES.md`, "Camera lag").
+The unit tests hold the median under 2 ms on synthetic 1080p frames (about 0.6 to 0.9 ms in Node).
+
+**The frames' times** are those of the clips (`docs/DATA-MODEL.md` §9): each sample carries the
+frame's timestamp and its arrival in the worker, and the check places its frames at their timestamp
+plus the median arrival offset, so the onsets have none of the arrival's jitter. A move's time is
+its `hostMs`, the arrival of its Bluetooth packet, as `docs/DATA-MODEL.md` §6 defines the offset.
+
+**The clapperboard** follows the plan (an onset is the first frame above 4 times the still
+picture's median energy after 500 ms under it, matched one to one to the nearest turn within 500 ms;
+the offset is the median lag, the residual the spread from the 5th to the 95th percentile; fewer than
+4 matches or a spread over 40 ms fail), with two additions. The threshold is at least 0.5 luma
+levels, for a picture that does not change at all (its baseline is then 0; a camera's noise alone
+keeps it above that). And only single turns are matched: moves with no other move within 500 ms
+either way, as the check asks for. The demo cube's scramble and solve (and a solver's) come so close
+together that any onset finds one within a few ms, so on the fake camera, whose test pattern jumps
+every half second or so, a check could otherwise pass on noise and keep a wrong lag: before this rule
+the lab's e2e check paired 6 and 7 of the pattern's onsets with the demo's turns at speed 1 (spreads
+of 195 and 482 ms), and at the recording test's speed of 20, whose turns come 5 to 50 ms apart, every
+onset during a replay finds a turn within 25 ms, which can make a narrow spread out of nothing.
+
+**The check in the Timer** starts by itself when a session is under way with the camera recording, a
+cube connected and no check of that camera in the session's `clock.cameras`, once per session and
+camera, and not while a solve is about to start, is under way or is paused; "Sync check" runs it
+again at any time outside a solve, and "Later" ends it and hides it. It ends at 20 s, or as soon as
+five turns are matched within the spread and a second has passed since the last turn and the last
+onset. The turns go to the attempt under way like any others: the first attempt of a session
+usually has them in its scramble (the undo guide shows how to undo them, and the record counts them
+as `scrambleExtraMoves`), which the check does not try to hide. On success `SessionService` keeps the
+lag with the matched pairs in `clock.cameras[label]` (`putCameraClock`), and `attachClip` gives each
+clip of that camera attached from then on its `offsetMs` as `syncResidualMs`: clips saved before the
+check keep null, and one saved within a second after it, whose frames were before it, gets the lag
+too.
+
+**Sizes** (`ng build`, 2026-09-27, against `main` at 220cc02): the initial bundle is unchanged, 264.26
+kB raw. The motion code is in the capture worker only, 18.2 kB raw, 6.2 kB transferred (12.1 and 4.2
+before). The clapperboard and `SyncRun`, which the Camera section and the capture lab share, joined
+the window side of `packages/capture` in the chunk the two load, 20.1 kB raw (14.0 before); the
+Camera section's chunk, with `SyncService` and the panel, is 50.3 kB (13.6 kB transferred), against
+42.2 (11.8); the capture lab's 19.2 kB, against 16.0.
