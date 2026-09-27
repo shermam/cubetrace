@@ -52,8 +52,11 @@ with `M S E` and doubles is a training-time step, described in the private desig
 Moves between `scramble_start` and `scramble_done` have `phase: "scramble"`; between
 `solve_start` and `solve_end`, `phase: "solve"`; moves after `scramble_done` and before
 `solve_start` cannot exist by definition (the first one *is* `solve_start`). Extra moves
-during a mis-scramble are part of the scramble phase; `result.scramble_corrected` is true
-and `result.scramble_extra_moves` counts the moves beyond the scramble's own.
+during a mis-scramble are part of the scramble phase; `result.scrambleCorrected` is true (the
+cube left the scramble's path at some point) and `result.scrambleExtraMoves` counts the moves
+beyond the scramble's own, in quarter turns (the cube reports every move as a quarter turn, so
+one wrong turn undone counts 2). Only the first `pickup` counts. Moves after `solve_end`, or
+after the solver marks a DNF, are not part of the attempt.
 
 ## 4. CFOP phases
 
@@ -137,6 +140,14 @@ sessions/<sessionId>/
 }
 ```
 
+`id` is lowercase, as `crypto.randomUUID()` writes it. `clock.cube` is the least-squares fit
+of the host time on the cube time over the moves that were the newest of their Bluetooth
+packet (the older moves of a packet carry the packet's arrival time, so they are not samples):
+`residualP95Ms` is the 95th percentile (nearest rank) of the absolute residuals of the last
+2000 of them, `samples` their number, and before the first one the fit is
+`{"a": 1, "b": 0, "residualP95Ms": 0, "samples": 0}`. `audio` is on by default (phase 2
+records it with the video). `summary` is counted from the attempts: each one is solved or a DNF.
+
 ## 7. `attempt.json`
 
 ```jsonc
@@ -167,9 +178,30 @@ sessions/<sessionId>/
 }
 ```
 
-`movesQtm` counts quarter turns (a `2` counts two). `tps = movesQtm / (timeMs / 1000)`.
-The `moves` array is the raw stream in the order the cube reported it, one entry per face
-turn, including the corrections of a mis-scramble.
+`index` is 1-based. `scrambledFacelets` is the scramble applied to a solved cube, the state at
+`scrambleDone`, where the solve starts. `movesQtm` counts the quarter turns of the solve's moves
+(a `2` counts two); it equals Cubeast's `quarter_turns` on all 300 fixtures.
+`tps = movesQtm / (timeMs / 1000)`, rounded to two decimals. Cubeast's `tps` is not comparable:
+it divides its `slice_turns` (two turns of one face merged into one double, turns of opposite
+faces into one slice) by the time, so it is lower (3.39 against our 3.87 on average over the
+fixtures). The `moves` array is the raw stream in the order the cube reported it, one entry per
+face turn, including the corrections of a mis-scramble. `slot` appears on the four f2l phases
+only.
+
+A **DNF** (`status: "dnf"`, which the solver can mark at any moment before solved) has `timeMs`,
+`tps` and `events.solveEnd` null and `replayOk` false; `phases` are the phases completed before
+it and `crossFace` is null if the cross was not; `movesQtm` counts the solve's moves made. If the
+solve had not started, `events.solveStart` and `inspectionMs` are null too, and so is
+`events.scrambleDone` if the scramble was not done; `scrambleExtraMoves` then counts the extra
+moves made so far.
+
+When moves went unseen (the cube's reported state differs from the simulated one), the app adopts
+the reported state (a resync); an event that state completes (`scrambleDone`, `solveStart`,
+`solveEnd`) takes the time of the report, and the unseen moves are missing from `moves`, so
+`replayOk` is false if they were solve moves.
+
+`packages/core/schema/session.schema.json` and `attempt.schema.json` (JSON Schema draft
+2020-12) are §6 and this section in machine-readable form.
 
 ## 8. Fixtures
 
