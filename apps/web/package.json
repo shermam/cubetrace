@@ -6,12 +6,16 @@
   "license": "MIT",
   "scripts": {
     "ng": "ng",
+    "postinstall": "node scripts/write-version.mts",
+    "prestart": "node scripts/write-version.mts",
     "start": "ng serve",
+    "prebuild": "node scripts/write-version.mts",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
-    "typecheck": "tsc -p tsconfig.node.json"
+    "typecheck": "tsc -p tsconfig.node.json",
+    "icons": "node scripts/generate-icons.mts"
   },
   "dependencies": {
     "@angular/common": "^22.2.0",
@@ -20,6 +24,7 @@
     "@angular/forms": "^22.2.0",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
+    "@angular/service-worker": "^22.2.0",
     "@cubetrace/core": "*",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"

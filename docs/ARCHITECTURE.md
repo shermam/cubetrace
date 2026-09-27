@@ -19,6 +19,8 @@ Chrome only, on Android, macOS and Windows: Web Bluetooth rules out Safari and F
 ```
 apps/web (Angular, PWA)
   timer UI · scramble view (cubing.js twisty-player) · CFOP chart · session list · settings · probe page
+  device services: wake lock · storage persistence · browser support (read the browser through the
+                   BROWSER_GLOBALS token; fakes in apps/web/src/app/device/fake-browser.ts)
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider

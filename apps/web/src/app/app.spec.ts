@@ -1,31 +1,87 @@
-import { TestBed } from '@angular/core/testing';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+
+import { APP_BUILD } from '../environments/version';
 import { App } from './app';
 import { routes } from './app.routes';
+import { BROWSER_GLOBALS, type BrowserGlobals } from './device/browser-globals';
+import { FakeStorageManager, FakeVideoEncoder, FakeWakeLock } from './device/fake-browser';
+
+/** Chrome on a phone or a laptop: every API the app needs (Web Bluetooth is not in the DOM types). */
+function chrome(): BrowserGlobals {
+  const navigator = {
+    bluetooth: {},
+    wakeLock: new FakeWakeLock(),
+    storage: new FakeStorageManager({}),
+  };
+  return { navigator, VideoEncoder: FakeVideoEncoder };
+}
 
 describe('App', () => {
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({
+  async function render(browser: BrowserGlobals): Promise<ComponentFixture<App>> {
+    TestBed.configureTestingModule({
       imports: [App],
-      providers: [provideRouter(routes)],
-    }).compileComponents();
-  });
-
-  it('shows the brand and a top navigation to the four pages', async () => {
+      providers: [provideRouter(routes), { provide: BROWSER_GLOBALS, useValue: browser }],
+    });
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
-    const element = fixture.nativeElement as HTMLElement;
+    return fixture;
+  }
 
-    expect(element.querySelector('.brand')?.textContent).toBe('cubetrace');
-    const links = Array.from(element.querySelectorAll('nav a'), (a) => [
-      a.textContent.trim(),
-      a.getAttribute('href'),
-    ]);
+  function query(fixture: ComponentFixture<App>, selector: string): HTMLElement | null {
+    return (fixture.nativeElement as HTMLElement).querySelector(selector);
+  }
+
+  it('shows the brand and a top navigation to the four pages', async () => {
+    const fixture = await render(chrome());
+
+    expect(query(fixture, '.brand')?.textContent).toBe('cubetrace');
+    const nav = (fixture.nativeElement as HTMLElement).querySelectorAll('nav a');
+    const links = Array.from(nav, (a) => [a.textContent.trim(), a.getAttribute('href')]);
     expect(links).toEqual([
       ['Timer', '/'],
       ['Sessions', '/sessions'],
       ['Settings', '/settings'],
       ['Probe', '/probe'],
     ]);
+  });
+
+  it("shows the build's version and commit in the footer", async () => {
+    const fixture = await render(chrome());
+
+    expect(query(fixture, '[data-testid="app-version"]')?.textContent).toBe(
+      `cubetrace ${APP_BUILD.version} · ${APP_BUILD.commit}`,
+    );
+  });
+
+  it('shows the wake lock status in the header', async () => {
+    const fixture = await render(chrome());
+
+    const status = query(fixture, '[data-testid="wake-lock-status"]');
+    expect(status?.textContent.trim()).toBe('Screen may sleep');
+    expect(status?.dataset['status']).toBe('inactive');
+  });
+
+  it('shows no banner in a browser with every API', async () => {
+    const fixture = await render(chrome());
+
+    expect(query(fixture, '[data-testid="support-banner"]')).toBeNull();
+  });
+
+  it('lists the missing APIs in a banner that can be dismissed', async () => {
+    const fixture = await render({ navigator: {} });
+
+    expect(query(fixture, '[data-testid="support-banner"]')?.textContent).toContain(
+      'This browser lacks Web Bluetooth (connecting the cube), the origin private file system ' +
+        '(saving sessions) and WebCodecs (recording video): cubetrace needs Chrome on Android, ' +
+        'macOS or Windows.',
+    );
+    expect(query(fixture, '[data-testid="wake-lock-status"]')?.textContent.trim()).toBe(
+      'No wake lock',
+    );
+
+    query(fixture, '[data-testid="support-banner"] button')?.click();
+    await fixture.whenStable();
+    expect(query(fixture, '[data-testid="support-banner"]')).toBeNull();
   });
 });

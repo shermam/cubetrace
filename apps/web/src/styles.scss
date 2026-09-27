@@ -1,25 +1,125 @@
-/* Global styles. Pages keep their own styles in their components. */
+/* Global styles: the design tokens and the base look of plain elements. Pages keep their own
+   styles in their components and build on these tokens; breakpoints are in styles/_layout.scss. */
 :root {
-  color-scheme: light dark;
-  --line: #d0d4da;
-  --hover: #eef0f3;
-  --accent: #1f6feb;
-  --on-accent: #ffffff;
+  /* One dark theme: easy on the eyes during long sessions and on OLED phones on a stand. */
+  color-scheme: dark;
 
-  @media (prefers-color-scheme: dark) {
-    --line: #30363d;
-    --hover: #21262d;
-    --accent: #388bfd;
-    --on-accent: #0d1117;
+  /* Colours. `--bg` is also the manifest's theme and background colour and the icons' tile. */
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface-raised: #21262d;
+  --line: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8d96a0;
+  --accent: #4493f8;
+  --on-accent: #0d1117;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --danger: #f85149;
+
+  /* Type. Times use the monospace face with tabular digits so they do not jitter. */
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+
+  /* Spacing scale. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  /* Shapes and the page container. */
+  --radius: 0.5rem;
+  --page-max: 72rem;
+  --gutter: var(--space-4);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  /* Long words and URLs wrap instead of widening the page. */
+  overflow-wrap: break-word;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
+}
+
+h1 {
+  margin: 0 0 var(--space-4);
+  font-size: 1.5rem;
+}
+
+h2 {
+  margin: var(--space-5) 0 var(--space-3);
+  font-size: 1.125rem;
+}
+
+a {
+  color: var(--accent);
+}
+
+button {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: var(--text-muted);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  &.primary {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
   }
 }
 
-html,
-body {
+input[type='checkbox'] {
+  width: 1.125rem;
+  height: 1.125rem;
   margin: 0;
+  accent-color: var(--accent);
 }
 
-body {
-  font-family: system-ui, sans-serif;
-  line-height: 1.5;
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+pre {
+  overflow-x: auto;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
 }
