@@ -35,3 +35,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Cube connection (T1.6a): a cube pill and a connect dialog for GAN cubes, a live Cube panel on the
   Timer page, a demo cube (`?demo=<n>&speed=<x>`), and settings for the host label, cube MAC
   addresses, inspection, auto-advance and demo speed.
+- The timer (T1.6b): the scramble with its picture and undo guidance, the time driven by the cube
+  (with an optional inspection countdown), the CFOP breakdown of the last solve and of the session,
+  the solve list with mean, best, ao5 and ao12, Skip, DNF, Delete last and New session (also N, Esc
+  and Delete), sessions kept in the browser and resumed after a reload, and a Sessions page to
+  export a session as JSON or delete it.

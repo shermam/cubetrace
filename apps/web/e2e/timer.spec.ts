@@ -64,9 +64,12 @@ test('a demo solve is timed, broken down and listed; the session survives a relo
   await expect(rows.first()).toHaveAttribute('data-status', 'solved');
   // Eight phases in the chart, each a segment of the last solve's bar.
   await expect(page.getByTestId('breakdown-last').locator('[data-phase]')).toHaveCount(8);
-  // Auto-advance: the next attempt is there at once, with a scramble from cubing.js.
+  // Auto-advance: the next attempt, with a scramble from cubing.js (made while the page loaded; its
+  // worker's first search builds tables, so allow for it as scramble.spec.ts does).
   await expect(page.getByTestId('attempt-index')).toHaveText('Attempt 2');
-  await expect(page.getByTestId('timer-status')).toHaveAttribute('data-phase', 'scrambling');
+  await expect(page.getByTestId('timer-status')).toHaveAttribute('data-phase', 'scrambling', {
+    timeout: 30_000,
+  });
   await expect(page.getByTestId('scramble')).toHaveText(/^([UDRLFB][2']? ?){15,30}$/);
   expect(await page.evaluate(() => customElements.get('twisty-player') !== undefined)).toBe(true);
 

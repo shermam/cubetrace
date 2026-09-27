@@ -44,7 +44,7 @@ with `M S E` and doubles is a training-time step, described in the private desig
 | `scramble_shown` | the scramble was displayed | app |
 | `scramble_start` | first cube move after `scramble_shown` | cube |
 | `scramble_done` | cube state equals the scramble's target state (the attempt is *armed*) | simulator |
-| `pickup` | optional: gyro quaternion changed beyond a threshold after `scramble_done` (cubes with a gyro) | cube |
+| `pickup` | optional: gyro quaternion changed beyond a threshold after `scramble_done` (cubes with a gyro; the app uses a rotation of more than 15° from the orientation at `scramble_done`) | cube |
 | `solve_start` | first cube move after `scramble_done` | cube |
 | `solve_end` | cube state is solved | simulator |
 
@@ -145,8 +145,12 @@ of the host time on the cube time over the moves that were the newest of their B
 packet (the older moves of a packet carry the packet's arrival time, so they are not samples):
 `residualP95Ms` is the 95th percentile (nearest rank) of the absolute residuals of the last
 2000 of them, `samples` their number, and before the first one the fit is
-`{"a": 1, "b": 0, "residualP95Ms": 0, "samples": 0}`. `audio` is on by default (phase 2
-records it with the video). `summary` is counted from the attempts: each one is solved or a DNF.
+`{"a": 1, "b": 0, "residualP95Ms": 0, "samples": 0}`. The cube's clock restarts at 0 whenever
+the cube connects again, so the fit starts over with each connection: `clock.cube` is the fit of
+the connection during which the session's last attempt ended, saved with every attempt (a session
+recorded over several connections has moves on several cube clocks; every move keeps its
+`hostMs`). `audio` is on by default (phase 2 records it with the video). `summary` is counted from
+the attempts: each one is solved or a DNF.
 
 ## 7. `attempt.json`
 

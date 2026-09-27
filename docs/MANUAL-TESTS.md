@@ -9,8 +9,8 @@ and the result next to each item.
 Through the connect dialog (T1.6a: click the cube pill in the header, or "Connect a cube" on the
 Timer page), in a current Chrome (the driver needs the Observable API). The flag below is
 `chrome://flags/#enable-web-bluetooth-new-permissions-backend` (`docs/TOOLCHAIN.md`, "GAN driver");
-the dialog names it, with a Copy button. The moves are read in the Timer page's Cube panel, whose
-move log lists the last 20 moves, newest first: the move, its cube ms, the gap to the move before on
+the dialog names it, with a Copy button. The moves are read in the Timer page's Cube section (click
+"Cube", under the solve list, to open it), whose move log lists the last 20 moves, newest first: the move, its cube ms, the gap to the move before on
 the cube's clock ("Gap") and on this device's clock ("Host"), and ■ on the last move of each
 Bluetooth packet.
 
@@ -34,15 +34,41 @@ Bluetooth packet.
 
 ## T1.6 — timer
 
-- [ ] Ten attempts in a row: each is armed exactly when the cube matches the scramble;
-  the timer starts on the first turn and stops on solved; the time matches a stopwatch
-  within 0.2 s.
-- [ ] Mis-scramble on purpose (one wrong turn): the undo guidance shows the inverse move,
-  clears when done, the attempt arms afterwards and is tagged as corrected.
-- [ ] CFOP breakdown looks right for a solve you narrate (cross, four pairs, two-look OLL,
-  PLL).
-- [ ] Reload the page mid-session: the session and its attempts are still there.
-- [ ] Export the session: the JSON validates against `docs/DATA-MODEL.md`.
+On the Timer page, with a cube connected as in T1.5. The page shows the scramble (moves and picture)
+with its progress, the time with the attempt's number, the buttons Skip scramble (N), DNF (Esc),
+Delete last (Delete) and New session, the CFOP breakdown, the solve list with its statistics, and
+the Cube section. Sessions are kept in the browser's origin private file system (a warning under the
+time says so when a browser has none).
+
+- [ ] Connect the cube while it is scrambled: the page says "Solve the cube first"; solve it: attempt
+  1 begins with the scramble on screen, and the picture matches it (white on top, green in front).
+- [ ] Ten attempts in a row: each is armed exactly when the cube matches the scramble (the progress
+  reads n / n, the status says Ready); the timer starts on the first turn and stops on solved; the
+  time matches a stopwatch within 0.2 s; the next scramble is there at once.
+- [ ] Mis-scramble on purpose (one wrong turn): the undo list shows the inverse move, greys it out
+  when made and clears; the attempt arms afterwards, and its row in the solve list says Corrected.
+- [ ] CFOP breakdown looks right for a solve you narrate (cross, four pairs, two-look OLL, PLL): the
+  last solve's bar has its eight phases in order; hovering (or tapping) a segment gives its ms and
+  moves; "Numbers" lists them next to the session average.
+- [ ] Esc during a solve: the time and the row say DNF, and the next attempt begins when the cube is
+  solved again. Delete right after a solve: the row goes, and the attempt on screen takes its number.
+  N before the first turn: a new scramble, and nothing is recorded.
+- [ ] Settings → 15-second inspection on: once armed, the time counts down from 15 (red at 0; no
+  penalty is recorded). On the GAN 12 ui (it has a gyroscope), lift the cube once armed: the count
+  starts again from the pickup (a turn of more than 15° from where the cube was when armed). Write
+  down whether putting the cube down after the last scramble move already counts as the pickup.
+- [ ] Settings → "Next scramble right after a solve" off: after a solve the time stays, and Next
+  scramble (N) begins the next attempt.
+- [ ] Turn the cube off in the middle of a solve: the time stops; turn it on and Reconnect: the same
+  attempt goes on and ends when the cube is solved.
+- [ ] Reload the page mid-session, then close the browser and open the app again: the solve list is
+  still there and the next attempt has the next number (the session is read back from the origin
+  private file system).
+- [ ] Sessions page: the session is listed with its date, host label, cube model, attempts and mean.
+  Export downloads `cubetrace-session-<id>.json` with `session` and `attempts`; it validates against
+  `packages/core/schema/` (docs/DATA-MODEL.md §6 and §7). Delete asks first, then removes it.
+- [ ] While a cube is connected during a session the header says "Screen on"; after the cube
+  disconnects it says "Screen may sleep" again.
 
 ## T1.7 — PWA on the phone
 
