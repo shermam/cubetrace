@@ -61,10 +61,14 @@ export async function recording(r: Rig): Promise<{ fake: FakeCube; capture: Fake
   return { fake, capture };
 }
 
+/** How many turns each fake cube has made for the check: the next one turns U, or turns it back. */
+const turned = new WeakMap<FakeCube, number>();
+
 /**
  * The camera's frames for `ms` from now, one every 33.3 ms on the fake clock, sent to the motion
  * watch under way with `energy(frame time)`; the cube turns at those of `turns` (host ms) that come
- * in that time, in their place among the frames. The timers due on the way run (the check's ticks).
+ * in that time, in their place among the frames, as the check asks: U, then back (U'), and again.
+ * The timers due on the way run (the check's ticks).
  */
 export async function film(
   r: Rig,
@@ -83,7 +87,9 @@ export async function film(
     const turnAt = pending[0] as number | undefined;
     if (turnAt !== undefined && turnAt <= next) {
       r.s.timers.advance(turnAt - r.s.perf.hostMs);
-      turn(r.s, fake, 'U', 0);
+      const count = turned.get(fake) ?? 0;
+      turned.set(fake, count + 1);
+      turn(r.s, fake, count % 2 === 0 ? 'U' : "U'", 0);
       pending.shift();
       continue;
     }
@@ -102,8 +108,8 @@ export async function film(
 }
 
 /**
- * Five turns 1.2 s apart from `start`, each lagged by `lags` (ms) in the frames: a turn at a frame's
- * time minus its lag, so that its motion begins on that frame.
+ * One turn per lag, 1.2 s apart from `start`, each lagged by its lag (ms) in the frames: a turn at a
+ * frame's time minus its lag, so that its motion begins on that frame.
  */
 export function clapperboard(start: number, lags: readonly number[]) {
   const onsets = lags.map((_, k) => start + FRAME_MS * 36 * (k + 1));

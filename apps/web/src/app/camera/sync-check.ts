@@ -10,14 +10,16 @@ type PanelState = 'running' | 'passed' | 'failed' | 'idle';
 const BLOCKED: Readonly<Record<SyncBlock, string>> = {
   'not-recording': 'Once the camera records (a session under way).',
   'no-cube': 'Once a cube is connected.',
+  scrambling: "Before the scramble's first turn, or after the solve.",
   solving: 'After the solve.',
   running: 'A check is under way.',
 };
 
 /**
  * The sync check's part of the Camera section (docs/PLAN.md, T2.5): while a check runs, what to do
- * (five single turns with pauses), a countdown and how many turns and motion onsets it has seen;
- * then the camera's lag behind the cube, or why the check failed, with Retry; "Later" hides it.
+ * (one face turned and turned back, five times, with pauses), a countdown and how many turns and
+ * motion onsets it has seen; then the camera's lag behind the cube, or why the check failed, with
+ * Retry; "Later" hides it.
  * Hidden, one line says the lag this session has for the camera, with "Sync check" to run one. The
  * logic is `SyncService`'s; this only shows it.
  */
@@ -35,7 +37,7 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
         @switch (state()) {
           @case ('running') {
             @if (sync.run(); as run) {
-              <p class="ask">Make five single turns with a pause of about a second between them.</p>
+              <p class="ask">Turn one face, pause, turn it back; repeat five times.</p>
               <p
                 class="count"
                 data-testid="sync-count"
@@ -47,8 +49,9 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
                 {{ counts() }}
               </p>
               <p class="hint">
-                Any face, with the cube in the framing rectangle. The turns count as the scramble's,
-                and its guide then shows how to undo them.
+                Any face, with the cube in the framing rectangle and a pause of about a second after
+                every turn. The timer waits meanwhile: the attempt begins again, with its scramble,
+                once the check ends and the cube is solved.
               </p>
             }
           }

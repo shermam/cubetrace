@@ -14,10 +14,11 @@ import { SyncRun, type SyncOutcome } from './sync-run';
 const SOLVING: ReadonlySet<TimerPhase> = new Set<TimerPhase>(['armed', 'solving', 'paused']);
 
 /**
- * Why a check cannot start now: no recording to measure, no cube to turn, a solve about to start or
- * under way, or a check running.
+ * Why a check cannot start now: no recording to measure, no cube to turn, a scramble begun (the
+ * check starts from where the attempt starts, the cube as the scramble found it), a solve about to
+ * start or under way, or a check running.
  */
-export type SyncBlock = 'not-recording' | 'no-cube' | 'solving' | 'running';
+export type SyncBlock = 'not-recording' | 'no-cube' | 'scrambling' | 'solving' | 'running';
 
 /** A check that ended, as the panel says it. */
 export interface SyncCheckResult {
@@ -33,15 +34,19 @@ export interface SyncCheckResult {
 /**
  * The sync check of the Timer page (docs/PLAN.md, T2.5): how far the camera's frames lag the cube.
  * When a session is under way with the camera recording, a cube connected and no check of this
- * camera in the session's `clock.cameras`, the check starts by itself, once per session and camera
- * (not while a solve is about to start, under way or paused), and the panel shows it; "Sync check"
- * starts one again whenever one could start by itself (`blocked` says why not), and "Later" hides
- * the panel, ending a check under way. A check (`SyncRun`) watches up to 20 s of the camera's
- * motion in the framing rectangle, measured by the capture worker, and the cube's moves, and the
- * clapperboard gives the lag. On success the lag goes into the session's
- * `clock.cameras[label]` (`rttMs` and `driftPpm` 0: the camera is this device's; the matched pairs
- * kept), replacing an earlier check's, and the camera's later clips carry it as their
- * `syncResidualMs` (`SessionService.attachClip`). A check ends as failed when the recording stops.
+ * camera in the session's `clock.cameras`, the check starts by itself, once per session and camera,
+ * when the cube is where an attempt starts (not once its scramble has begun, nor while a solve is
+ * about to start, under way or paused), and the panel shows it; "Sync check" starts one again
+ * whenever one could start by itself (`blocked` says why not), and "Later" hides the panel, ending
+ * a check under way. A check asks for one face turned and turned back, five times, so that the cube
+ * ends as it began, and the timer tracks no attempt meanwhile (`SessionService.suspendForSyncCheck`):
+ * the attempt that had not started its scramble begins again afterwards with its scramble and
+ * number. A check (`SyncRun`) watches up to 20 s of the camera's motion in the framing rectangle,
+ * measured by the capture worker, and the cube's moves, and the clapperboard gives the lag. On
+ * success the lag goes into the session's `clock.cameras[label]` (`rttMs` and `driftPpm` 0: the
+ * camera is this device's; the matched pairs kept), replacing an earlier check's, and the camera's
+ * later clips carry it as their `syncResidualMs` (`SessionService.attachClip`). A check ends as
+ * failed when the recording stops or the cube disconnects.
  */
 @Injectable({ providedIn: 'root' })
 export class SyncService {
@@ -88,7 +93,13 @@ export class SyncService {
     if (this.cube.status() !== 'connected') {
       return 'no-cube';
     }
-    return SOLVING.has(this.session.phase()) ? 'solving' : null;
+    if (SOLVING.has(this.session.phase())) {
+      return 'solving';
+    }
+    const attempt = this.session.attempt();
+    return attempt?.state === 'scrambling' && attempt.events.scrambleStart !== null
+      ? 'scrambling'
+      : null;
   });
 
   /** The session and camera labels the check started by itself for: once each. */
@@ -113,7 +124,8 @@ export class SyncService {
         }
       });
     });
-    // A check ends when the recording stops (the camera off or switched, storage full).
+    // A check ends when the recording stops (the camera off or switched, storage full); the cube's
+    // disconnection ends it too (`SyncRun`).
     effect(() => {
       const recording = this.recording.status() === 'recording';
       untracked(() => {
@@ -128,31 +140,36 @@ export class SyncService {
     });
   }
 
-  /** Starts a check and shows the panel, unless one cannot start now (`blocked`). */
+  /**
+   * Starts a check and shows the panel, unless one cannot start now (`blocked`, or the timer
+   * refuses to suspend its attempts); the timer tracks no attempt until the check ends.
+   */
   start(): void {
     const label = this.label();
-    if (this.blocked() !== null || label === null) {
+    if (this.blocked() !== null || label === null || !this.session.suspendForSyncCheck()) {
       return;
     }
     const previousOffsetMs = this.stored()?.offsetMs ?? null;
-    const run = new SyncRun({
-      watch: (rect, onSample, onError) => this.recording.watchMotion(rect, onSample, onError),
-      rect: this.camera.framing(),
-      events$: this.cube.events$,
-      now: () => hostNow(this.globals),
-      setTimeout: (callback, ms) => this.setTimer(callback, ms),
-      clearTimeout: (handle) => {
-        this.clearTimer(handle);
-      },
-    });
-    this.runSignal.set(run);
     this.resultSignal.set(null);
     this.visibleSignal.set(true);
-    void run.done.then((outcome) => {
-      if (outcome !== null && this.runSignal() === run) {
-        this.finish(label, previousOffsetMs, outcome);
-      }
-    });
+    this.runSignal.set(
+      new SyncRun({
+        watch: (rect, onSample, onError) => this.recording.watchMotion(rect, onSample, onError),
+        rect: this.camera.framing(),
+        events$: this.cube.events$,
+        now: () => hostNow(this.globals),
+        setTimeout: (callback, ms) => this.setTimer(callback, ms),
+        clearTimeout: (handle) => {
+          this.clearTimer(handle);
+        },
+        onEnd: (outcome) => {
+          this.session.resumeAfterSyncCheck();
+          if (outcome !== null) {
+            this.finish(label, previousOffsetMs, outcome);
+          }
+        },
+      }),
+    );
   }
 
   /** "Later": hides the panel, and ends a check under way without a result. */

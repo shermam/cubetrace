@@ -15,10 +15,16 @@ import type { Observable, Subscription } from 'rxjs';
 export const SYNC_TICK_MS = 250;
 
 /**
- * A check ends early once this many turns are matched, the spread is within the limit and a second
+ * A check asks for one face turned and turned back, five times: the cube ends as it began, after
+ * this many single turns.
+ */
+export const SYNC_TURNS = 10;
+
+/**
+ * A check ends early once all its turns are matched, the spread is within the limit and a second
  * has passed since the last turn and the last onset: it has what it asked for.
  */
-export const SYNC_EARLY_MATCHES = 5;
+export const SYNC_EARLY_MATCHES = SYNC_TURNS;
 export const SYNC_EARLY_QUIET_MS = 1000;
 
 /** Starts measuring the camera's motion in `rect`; returns the stop, or null without a capture. */
@@ -33,7 +39,10 @@ export interface SyncRunOptions {
   readonly watch: MotionWatch;
   /** The framing rectangle in frame pixels, or null for the whole frame. */
   readonly rect: FramingRect | null;
-  /** The cube's events (`CubeService.events$`): the host times of its moves are taken. */
+  /**
+   * The cube's events (`CubeService.events$`): the host times of its moves are taken, and its
+   * disconnection ends the check, at once (before another connection can begin).
+   */
   readonly events$: Observable<CubeEvent>;
   /** How long it watches, ms; `SYNC_CHECK_MS` (20 s) by default. */
   readonly durationMs?: number;
@@ -41,6 +50,11 @@ export interface SyncRunOptions {
   readonly now: () => number;
   readonly setTimeout: (callback: () => void, ms: number) => number;
   readonly clearTimeout: (handle: number) => void;
+  /**
+   * Called once when the check ends, at once (within the call that ends it, even during the
+   * construction when the camera does not record): with the outcome, or null when cancelled.
+   */
+  readonly onEnd?: (outcome: SyncOutcome | null) => void;
 }
 
 /** What the camera's frames cost to measure, ms: the capture worker's time per frame. */
@@ -75,9 +89,9 @@ export type SyncRunState = 'running' | 'done' | 'cancelled';
  * One sync check (docs/PLAN.md, T2.5): for `durationMs` it collects the motion of the camera's
  * frames (the capture worker's `sync-sample`s) and the host times of the cube's moves, updating a
  * countdown and the counts of frames, moves and onsets four times a second, then runs the
- * clapperboard (@cubetrace/capture's `detectClapperboard`) on them. It ends early once five turns
- * are matched within the spread and a second has passed since the last one. The Timer page's check
- * (`SyncService`) and the capture lab's run it.
+ * clapperboard (@cubetrace/capture's `detectClapperboard`) on them. It ends early once its ten
+ * turns (`SYNC_TURNS`) are matched within the spread and a second has passed since the last one.
+ * The Timer page's check (`SyncService`) and the capture lab's run it.
  */
 export class SyncRun {
   private readonly stateSignal = signal<SyncRunState>('running');
@@ -98,8 +112,6 @@ export class SyncRun {
   readonly onsets = this.onsetsSignal.asReadonly();
   /** How it ended; null while it runs, and when it was cancelled. */
   readonly outcome = this.outcomeSignal.asReadonly();
-  /** Resolves with the outcome, or null when cancelled. */
-  readonly done: Promise<SyncOutcome | null>;
 
   private readonly options: SyncRunOptions;
   private readonly durationMs: number;
@@ -109,20 +121,21 @@ export class SyncRun {
   private stopWatch: (() => void) | null = null;
   private subscription: Subscription | null = null;
   private timer: number | null = null;
-  private resolve: (outcome: SyncOutcome | null) => void = () => undefined;
 
   constructor(options: SyncRunOptions) {
     this.options = options;
     this.durationMs = options.durationMs ?? SYNC_CHECK_MS;
     this.startMs = options.now();
     this.secondsLeftSignal.set(Math.ceil(this.durationMs / 1000));
-    this.done = new Promise((resolve) => {
-      this.resolve = resolve;
-    });
     this.subscription = options.events$.subscribe((event) => {
-      if (event.type === 'move' && this.stateSignal() === 'running') {
+      if (this.stateSignal() !== 'running') {
+        return;
+      }
+      if (event.type === 'move') {
         this.moveTimes.push(event.hostMs);
         this.movesSignal.set(this.moveTimes.length);
+      } else if (event.type === 'disconnected') {
+        this.interrupt('the cube disconnected');
       }
     });
     const stop = options.watch(
@@ -156,7 +169,7 @@ export class SyncRun {
     }
     this.release();
     this.stateSignal.set('cancelled');
-    this.resolve(null);
+    this.options.onEnd?.(null);
   }
 
   /** Ends the check as failed, for `message` (the recording stopped, say). */
@@ -191,7 +204,7 @@ export class SyncRun {
     this.schedule();
   }
 
-  /** Five turns matched within the spread, and a second of stillness since. */
+  /** All the turns matched within the spread, and a second of stillness since. */
   private complete(result: ClapperboardResult, now: number): boolean {
     if (!result.ok || result.clapperboardSamples < SYNC_EARLY_MATCHES) {
       return false;
@@ -212,7 +225,7 @@ export class SyncRun {
     this.secondsLeftSignal.set(0);
     this.outcomeSignal.set(outcome);
     this.stateSignal.set('done');
-    this.resolve(outcome);
+    this.options.onEnd?.(outcome);
   }
 
   private release(): void {
