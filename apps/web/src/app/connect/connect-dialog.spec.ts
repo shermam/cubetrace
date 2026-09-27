@@ -261,4 +261,16 @@ describe('ConnectDialog', () => {
     expect(dialog().textContent).toContain('It replays demo solve 1 at 20× speed');
     await cube.disconnect();
   });
+
+  it("Demo cube passes the address's ?misscramble on", async () => {
+    await render({});
+    await TestBed.inject(Router).navigateByUrl('/?demo=0&speed=20&misscramble=1');
+    const startDemo = vi.spyOn(cube, 'startDemo');
+
+    button('Demo cube').click();
+    await stable();
+
+    expect(startDemo).toHaveBeenCalledWith({ demo: '0', speed: '20', misscramble: '1' });
+    await cube.disconnect();
+  });
 });

@@ -99,10 +99,17 @@ export class ConnectDialog {
     void (this.cube.canReconnect() ? this.cube.reconnect() : this.cube.connect());
   }
 
-  /** The demo cube: the solve and speed of the address's `?demo=` and `?speed=`, if any. */
+  /**
+   * The demo cube: the solve, speed and mis-scramble of the address's `?demo=`, `?speed=` and
+   * `?misscramble=`, if any.
+   */
   protected demoCube(): void {
     const query = this.router.routerState.snapshot.root.queryParamMap;
-    void this.cube.startDemo({ demo: query.get('demo'), speed: query.get('speed') });
+    void this.cube.startDemo({
+      demo: query.get('demo'),
+      speed: query.get('speed'),
+      misscramble: query.get('misscramble'),
+    });
   }
 
   protected disconnect(): void {

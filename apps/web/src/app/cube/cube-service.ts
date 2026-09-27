@@ -22,7 +22,9 @@ import {
   ANY_DEMO,
   DemoSolves,
   chooseDemo,
-  scrambleSchedule,
+  demoParts,
+  parseDemoMisscramble,
+  type DemoPart,
   type DemoRequest,
   type DemoSolve,
 } from './demo';
@@ -51,7 +53,12 @@ export interface MacPrompt {
 /** What `reconnect()` repeats: the last connection that was established. */
 type Source =
   | { readonly kind: 'gan' }
-  | { readonly kind: 'demo'; readonly solve: DemoSolve; readonly speed: number };
+  | {
+      readonly kind: 'demo';
+      readonly solve: DemoSolve;
+      readonly speed: number;
+      readonly misscramble: number | null;
+    };
 
 /**
  * The app's one cube connection (docs/PLAN.md, T1.6a): a GAN cube through `connectGanCube`, or
@@ -179,28 +186,23 @@ export class CubeService {
 
   /**
    * Connects the demo cube (a `FakeCube` at `speed`): it starts solved, turns the scramble at one
-   * move per 100 ms, then the solution on its recorded timings, every gap divided by `speed`.
+   * move per 100 ms, then the solution on its recorded timings, every gap divided by `speed`. With
+   * `misscramble` k, it makes one wrong turn after scramble move k and undoes it (`demoParts`).
    */
-  connectDemo(solve: DemoSolve, speed: number): void {
+  connectDemo(solve: DemoSolve, speed: number, misscramble: number | null = null): void {
     const cube = new FakeCube({ speed });
     this.begin('fake');
     this.demoSignal.set(solve);
     this.demoSpeedSignal.set(speed);
-    this.attach(cube, { kind: 'demo', solve, speed });
-    const report = (error: unknown): void => {
-      if (this.connection === cube) {
-        this.lastErrorSignal.set(`The demo stopped: ${errorMessage(error)}`);
-      }
-    };
-    // Plays queue, so the solution starts when the scramble has ended.
-    cube.play(scrambleSchedule(solve)).catch(report);
-    cube.play(solve.moves).catch(report);
+    this.attach(cube, { kind: 'demo', solve, speed, misscramble });
+    void this.replay(cube, demoParts(solve, misscramble), speed);
   }
 
   /**
    * Downloads the demo solves (once) and connects the demo cube with the one `request` asks for
-   * (`?demo=<index>&speed=<n>`): a random one, and the speed from Settings, where it asks for
-   * nothing valid. Never rejects: a failure sets `lastError`.
+   * (`?demo=<index>&speed=<n>`, and `&misscramble=<k>` for a wrong turn after scramble move k): a
+   * random one, and the speed from Settings, where it asks for nothing valid. Never rejects: a
+   * failure sets `lastError`.
    */
   async startDemo(request: DemoRequest = ANY_DEMO): Promise<void> {
     const generation = this.begin('fake');
@@ -217,7 +219,7 @@ export class CubeService {
       return;
     }
     const { index, speed } = chooseDemo(request, solves.length, this.settings.demoSpeed());
-    this.connectDemo(solves[index], speed);
+    this.connectDemo(solves[index], speed, parseDemoMisscramble(request.misscramble ?? null));
   }
 
   /** Starts the demo that the page's address asks for, unless a cube is (being) connected. */
@@ -231,7 +233,7 @@ export class CubeService {
   reconnect(): Promise<void> {
     const source = this.sourceSignal();
     if (source?.kind === 'demo') {
-      this.connectDemo(source.solve, source.speed);
+      this.connectDemo(source.solve, source.speed, source.misscramble);
       return Promise.resolve();
     }
     return this.connect();
@@ -353,6 +355,31 @@ export class CubeService {
     this.connection = null;
     this.subscription?.unsubscribe();
     this.subscription = null;
+  }
+
+  /**
+   * Plays the demo's parts on `cube` one after the other, each `pauseMs / speed` after the previous
+   * one has ended, until the last one or until the cube is no longer the connection (replaced or
+   * disconnected). Never rejects: a failure sets `lastError` while the cube is still connected.
+   */
+  private async replay(cube: FakeCube, parts: readonly DemoPart[], speed: number): Promise<void> {
+    try {
+      for (const part of parts) {
+        if (part.pauseMs > 0) {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, part.pauseMs / speed);
+          });
+        }
+        if (this.connection !== cube) {
+          return;
+        }
+        await cube.play(part.moves);
+      }
+    } catch (error: unknown) {
+      if (this.connection === cube) {
+        this.lastErrorSignal.set(`The demo stopped: ${errorMessage(error)}`);
+      }
+    }
   }
 
   private onEvent(connection: CubeConnection, event: CubeEvent): void {
