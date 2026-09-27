@@ -2,7 +2,7 @@ import type { FramingRect } from './framing';
 
 /**
  * The sharpness meter (docs/PLAN.md, T2.1; the design's §5): the variance of the Laplacian of the
- * luma of the framing rectangle, downscaled to 320 pixels wide. A sharp picture has strong edges,
+ * luma of the framing rectangle, downscaled to 160 pixels wide. A sharp picture has strong edges,
  * so its Laplacian (the second derivative) swings widely; blur, a covered lens or darkness flatten
  * it towards 0. The number depends on the scene as much as on the camera, so the threshold between
  * "good" and "soft" is a setting.
@@ -11,18 +11,20 @@ import type { FramingRect } from './framing';
  * `Canvas2D`, which an `OffscreenCanvas` implements in the browser and a fake in the tests.
  */
 
-/** Width of the downscaled picture the metric is computed on. */
-export const SHARPNESS_WIDTH = 320;
-
-/** The meter measures one frame in this many (at 30 fps, three times a second). */
-export const SHARPNESS_EVERY = 10;
+/**
+ * Width of the downscaled picture the metric is computed on: 160 pixels since T2.7 (320 before),
+ * which keeps the page's main thread busy for less time while it draws (the app measures on the
+ * main thread, docs/TOOLCHAIN.md, "Timer layout").
+ */
+export const SHARPNESS_WIDTH = 160;
 
 /**
  * The default threshold between "good" and "soft". Calibrated on Chrome's fake camera (a green
- * test pattern with a moving disc and a clock, `--use-fake-device-for-media-stream`): over 12 s of
- * frames it measures 76–135 on the whole frame and 30–93 on a centred square, and 1.4–8.7 once
- * blurred by 1 pixel at 320 pixels wide (about 6 at 1080p); black frames measure 0. 20 lies
- * between the two, with a margin on each side (docs/TOOLCHAIN.md, "packages/capture").
+ * test pattern with a moving disc and a clock, `--use-fake-device-for-media-stream`): drawn 160
+ * pixels wide, over four runs of 12 to 15 s it measures 78–198 on the whole frame, 88–279 on a
+ * centred half and 48–183 on a centred square, and 2.5–17 once blurred by 1 pixel at 160 pixels
+ * wide (about 12 at 1080p); black frames measure 0. 20 lies between the two, as it did at 320 pixels
+ * wide; the owner sets it per camera in Settings (docs/TOOLCHAIN.md, "packages/capture").
  */
 export const SHARPNESS_THRESHOLD_DEFAULT = 20;
 
@@ -99,8 +101,8 @@ export interface Canvas2D<Source> {
 export type CanvasFactory<Source> = (width: number, height: number) => Canvas2D<Source> | null;
 
 /**
- * Draws a region of a frame (a playing `<video>`, a `VideoFrame`) into a small canvas, 320 pixels
- * wide, and reads its luma. The canvas is made once and made again only when the region's
+ * Draws a region of a frame (a playing `<video>`, a `VideoFrame`) into a small canvas,
+ * {@link SHARPNESS_WIDTH} pixels wide, and reads its luma. The canvas is made once and made again only when the region's
  * proportions change.
  */
 export class LumaSampler<Source> {
