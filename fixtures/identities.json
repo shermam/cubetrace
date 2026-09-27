@@ -1,0 +1,42 @@
+{
+ "solved": "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB",
+ "after_R": "UUFUUFUUFRRRRRRRRRFFDFFDFFDDDBDDBDDBLLLLLLLLLUBBUBBUBB",
+ "after_scrambles": [
+  {
+   "scramble": "U",
+   "facelets": "UUUUUUUUUBBBRRRRRRRRRFFFFFFDDDDDDDDDFFFLLLLLLLLLBBBBBB"
+  },
+  {
+   "scramble": "D'",
+   "facelets": "UUUUUUUUURRRRRRBBBFFFFFFRRRDDDDDDDDDLLLLLLFFFBBBBBBLLL"
+  },
+  {
+   "scramble": "F2",
+   "facelets": "UUUUUUDDDLRRLRRLRRFFFFFFFFFUUUDDDDDDLLRLLRLLRBBBBBBBBB"
+  },
+  {
+   "scramble": "L B",
+   "facelets": "RRRBUUBUURRDRRDRRFUFFUFFUFFFDDFDDLLLULLULLBLLBBBBBBDDD"
+  },
+  {
+   "scramble": "R U R' U'",
+   "facelets": "UULUUFUUFRRUBRRURRFFDFFUFFFDDRDDDDDDBLLLLLLLLBRRBBBBBB"
+  },
+  {
+   "scramble": "F2 U2 R B2 D' L B' L' B U2 L2 F2 U F2 U R2 D2 B2 U' L2 D'",
+   "facelets": "LDRLUUFDRFBDLRRFRBLBUDFBLLDDFRLDBDUUBDUFLRFUBBFUFBURRL"
+  }
+ ],
+ "return_to_solved": [
+  "R U R' U' R U R' U' R U R' U' R U R' U' R U R' U' R U R' U' ",
+  "R R R R",
+  "R U R' U' R' F R2 U' R' U' R U R' F' R U R' U' R' F R2 U' R' U' R U R' F' ",
+  "F R U R' U' F' F R U R' U' F' F R U R' U' F' F R U R' U' F' F R U R' U' F' F R U R' U' F' ",
+  "U D' U' D"
+ ],
+ "not_solved": [
+  "R",
+  "U2",
+  "R U R' U'"
+ ]
+}
