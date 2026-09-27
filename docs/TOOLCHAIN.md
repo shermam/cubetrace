@@ -540,3 +540,70 @@ transferred against 72.3), of which 0.1 kB is the global style of `select` and r
 Timer page's chunk grew by 0.4 kB; the chunk shared by the cube pill and the pages, which holds
 `SettingsService`, by 3.3 kB raw (0.9 kB transferred): the camera settings and their checks, which
 import only types from the package.
+
+## The capture pipeline (`packages/capture`)
+
+Added by T2.2 on 2026-09-27: the encoder pipeline of `packages/capture` (`pipeline.ts`,
+`protocol.ts`, `capture-worker.ts`, `ring-buffer.ts`, `cut.ts`). Like the camera code, it imports
+only types from `@cubetrace/core` (`FramesJson`), so nothing of core reaches the worker; the muxer
+(T2.3) comes next to it.
+
+**The capture worker is a chunk of its own, built by Angular's builder.** `pipeline.ts` starts it
+with `new Worker(new URL('./capture-worker.ts', import.meta.url), { type: 'module' })`. The
+application builder recognises exactly that form (a `new Worker` or `new SharedWorker` of a
+`new URL` of a string literal and `import.meta.url`) in the TypeScript it compiles, the packages
+included, since the `paths` put them in its program: its web worker transformer bundles the file
+with esbuild as an entry of its own, `worker-<hash>.js`, and rewrites the URL; there is nothing to
+configure. That bundle is built without Angular's plugins, so the build does not type-check it;
+`npm run typecheck` does, through `packages/capture/tsconfig.json`. The package's index never
+imports `capture-worker.ts`, whose code is therefore only in the worker, and the file installs its
+message handler only where `DedicatedWorkerGlobalScope` exists, so that Node's tests can import
+its `CaptureWorker` class. Checked with `ng build` on 2026-09-27: the worker is 11.5 kB raw
+(4.4 kB gzipped: the worker loop, the ring buffer, the cut and the protocol), a file the CLI's
+table of chunks does not list; only the capture lab's lazy chunk (14.6 kB, 5.6 kB gzipped) refers
+to it, `index.html` does not, and `ngsw.json` lists it, so the service worker
+prefetches it with the other scripts. The initial bundle grew by 128 bytes, the `/capture-lab`
+route's entry, and by nothing else (263.53 to 263.66 kB raw; about 72.3 kB transferred either way,
+an estimate that moves with the commit SHA the build embeds). `shared/error-message.ts`, which the
+lab uses too, moved into a 149-byte chunk of its own, so five lazy chunks grew by 24 to 36 bytes of
+imports and the one that held it shrank by 105. The dev server serves the worker from the same
+build; `apps/web/e2e/capture.spec.ts` starts it on `ng serve` and on the production build under
+`/cubetrace/`.
+
+**`MediaStreamTrackProcessor` is typed by the package.** TypeScript's DOM library (6.0.3) declares
+`VideoEncoder`, `AudioEncoder`, `VideoFrame`, `AudioData` and the encoded chunks, but
+`MediaStreamTrackProcessor` only for workers (`lib.webworker.d.ts`, without the `track` of its init),
+while Chrome has it on the window only (`docs/DEVICES.md`). `packages/capture/src/webcodecs.d.ts`
+declares the window's constructor as a type, and `startCapture` reads it from `globalThis` once it
+has checked that it exists: no global declaration, so none can clash with another one.
+
+**Codecs.** The worker asks `VideoEncoder.isConfigSupported` in this order: H.264 High
+(`avc1.640028`) with `hardwareAcceleration: 'prefer-hardware'` (the platform's encoder or nothing),
+then `'no-preference'`, then H.264 Main (`avc1.4d0028`) the same way, then VP9 (`vp09.00.40.08`,
+`'no-preference'`). Every config asks 8 Mbps at 1080p30 and 12 at 1080p60 (in proportion to the
+pixels at other sizes), `latencyMode: 'quality'` and the frame rate measured from the frames'
+timestamps during the first half second; H.264 adds `avc: {format: 'avc'}`, which puts the
+parameter sets in the decoder config's `description`, as MP4 wants them. Audio: AAC-LC
+(`mp4a.40.2`) at 128 kbps and the track's sample rate and channels, else Opus, else none. The
+codecs chosen are in the counters (`codec`, `audioCodec`) and in every cut.
+
+**What CI's Chromium encodes.** Playwright's Chromium 141, the browser of CI and of the agents'
+containers, is a build without proprietary codecs: it has no H.264 encoder at all (neither
+`prefer-hardware` nor `no-preference`) and no AAC encoder; it encodes VP9, VP8 and AV1 in software
+(`prefer-hardware` is refused for every codec) and Opus. So CI records VP9 and Opus, and the H.264
+and AAC paths run only in Chrome on real devices (the probes found hardware H.264 at 1080p on both of
+the owner's; round 2 notes the audio codec). Software VP9 keeps up with the fake camera at 1080p30
+in the containers (four CPUs): no frame dropped over 96 s, the encoder's queue never above 1, 12 ms
+from `encode()` to the chunk at the median and 21 ms at the 95th percentile; the fake camera's
+test pattern takes about 1.2 Mbps.
+
+**Chrome's fake camera** (`--use-fake-device-for-media-stream`) gives 1920×1080 I420 frames at
+20 fps unless the flag says `fps=30`, as `capture.spec.ts` does to have the 1080p30 of the real
+cameras (`--use-fake-device-for-media-stream=fps=30`); its frames have no `duration`, and its
+microphone gives 48 kHz mono in 10 ms buffers.
+
+**The capture lab** (`/capture-lab`, lazy, not in the navigation, with a plain message in a browser
+without the APIs, as the probe has) runs the pipeline on a chosen camera, shows its counters once per
+second and prints cuts as JSON, with the frame times and a summary of what the frames' clock is. The
+end-to-end test drives it; the owner runs it on the real devices in round 2 (`docs/DEVICES.md`,
+"VideoFrame.timestamp").
