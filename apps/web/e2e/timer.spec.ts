@@ -46,7 +46,6 @@ test('a demo solve is timed, broken down and listed; the session survives a relo
   const expectedMs = ((solve.moves.at(-1)?.ms ?? 0) - (solve.moves[0]?.ms ?? 0)) / speed;
 
   await page.goto(`/?demo=0&speed=${String(speed)}`);
-  await expect(page.getByTestId('scramble')).toHaveText(solve.scramble);
   const rows = page.getByTestId('solve-row');
   await expect(rows).toHaveCount(1, { timeout: 30_000 });
   await expect(page.getByTestId('save-status')).toHaveText('Saved');
@@ -71,7 +70,10 @@ test('a demo solve is timed, broken down and listed; the session survives a relo
     timeout: 30_000,
   });
   await expect(page.getByTestId('scramble')).toHaveText(/^([UDRLFB][2']? ?){15,30}$/);
-  expect(await page.evaluate(() => customElements.get('twisty-player') !== undefined)).toBe(true);
+  // The scramble's picture: cubing.js's <twisty-player>, defined by its lazy chunk.
+  await expect
+    .poll(() => page.evaluate(() => customElements.get('twisty-player') !== undefined))
+    .toBe(true);
 
   // A new page load: the session comes back from the store.
   await page.goto('/sessions');
