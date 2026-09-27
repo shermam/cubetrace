@@ -69,6 +69,33 @@ session, over all 1,802 moves; `fixtures/hardware/README.md`):
 So the clock fit belongs to the attempt, not the session (`docs/PLAN.md`, T2.0); every move keeps
 its `hostMs` anyway, and the session-level `clock.cube` of schema 1 stays as a coarse summary.
 
+**The GAN 356 i3 (issue #32, 2026-09-27, MacBook Pro 2021, a schema 2 export with clips):** model
+string `GANi3I1w`, hardware `0.1`, firmware `7.76`, gyroscope present. Five solves; per-attempt
+clock slopes 1.0010–1.0017 (this cube's clock runs about 0.1% slow, against the 12 ui's 0.7%:
+the rate is a property of the cube), residual p95 18–22 ms (a little more jitter than the 12 ui's
+13–15 ms), a pickup on every attempt.
+
+## First recordings (2026-09-27, MacBook Pro 2021, FaceTime camera)
+
+From the same export: every attempt has its two clips, encoded by the hardware H.264 High encoder
+(`avc1.640028`) at 1080p30, so the H.264 path that CI cannot test works on the MacBook.
+
+| Clip | Frames | Size | Rate |
+|---|---|---|---|
+| scramble (13.4–16.4 s) | 402–493 | 13.6–17.1 MB | ~8 Mbps |
+| solve (20.2–25.3 s) | 606–760 | 20.2–25.4 MB | ~8 Mbps |
+
+Two consequences:
+
+- **35–42 MB per attempt** at the configured 8 Mbps ceiling, which real footage uses in full
+  (the fake camera compressed to 1.2 Mbps and hid this): at the owner's cadence (about 130
+  attempts a day) that is 4.5–5.5 GB a day, so the 10 GB local quota fills in two days and the
+  design's storage tables (4.4 MB per attempt and camera) were low by 8×. The bitrate must come
+  down (4 Mbps at 1080p30 is plenty for hands; a "Video quality" setting), crop-at-source must
+  arrive earlier than planned, and phase 3's upload becomes urgent.
+- **No audio track** in any clip (`audio: null`), although "Record audio" defaults to on: the
+  microphone stream or the AAC/Opus encoder was not there. Under investigation (issue #33).
+
 ## VideoFrame.timestamp
 
 What the capture worker sees of a frame's own time (T2.2), measured on 2026-09-27 with Chrome's fake

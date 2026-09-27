@@ -24,7 +24,7 @@ ThinkPhone (Chrome for Android), with both cubes. The coordinator tags `v0.1.0` 
 | Date | Device, OS | Chrome | Cube: model, hardware, firmware | App (footer) | Result |
 |---|---|---|---|---|---|
 | 2026-09-27 | MacBook Pro 2021, macOS 26.6.2 | 153.0.8010.53 | GAN 12 ui FreePlay: `uiFp 138`, 0.5, 8.62 | 0.1.0 · ec373da | no issue found; 12 solves; export in issue #19 and `fixtures/hardware/` |
-| | laptop: | | GAN 356 i3: | | pending (the cube was flat) |
+| 2026-09-27 | MacBook Pro 2021, macOS 26.6.2 | 153.0.8010.53 | GAN 356 i3: `GANi3I1w`, 0.1, 7.76 | 0.1.0 · 21c7bca | connects and times as expected; 5 solves with clips; export in issue #32 and `fixtures/hardware/`; one issue reported separately |
 | 2026-09-27 | ThinkPhone, Android 16 | 155.0.8059.16 | GAN 12 ui FreePlay: `uiFp 138`, 0.5, 8.62 | 0.1.0 · 25d22c7 | no issue found; 3 solves; MAC typed once (flag off); export in issue #20 and `fixtures/hardware/` |
 | | ThinkPhone, Android: | | GAN 356 i3: | | pending (the cube was flat) |
 
