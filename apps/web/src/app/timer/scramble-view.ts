@@ -79,7 +79,8 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
       }
     </div>
     @if (session.scramble(); as scramble) {
-      <!-- One element per move; the spaces between them keep the text the scramble's own. -->
+      <!-- One element per move, with a plain space between two (&ngsp; is a space that Angular
+           keeps), so that the text is the scramble itself. -->
       <p class="moves" data-testid="scramble">
         @for (token of tokens(); track $index) {
           @if (!$first) {
