@@ -19,6 +19,7 @@ import {
   type AttemptEvents,
   type AttemptRecord,
   type AttemptState,
+  type CameraClock,
   type CameraInfo,
   type CubeInfo,
   type Facelets,
@@ -178,6 +179,18 @@ interface Current {
   clips: VideoClip[];
 }
 
+/**
+ * `clip` with its camera's lag behind the cube in `session` as its `syncResidualMs` (T2.5: the
+ * `offsetMs` of the camera's sync check, `clock.cameras`), unless it has one; null before a check.
+ */
+function withSyncResidual(clip: VideoClip, session: SessionRecord | null): VideoClip {
+  if (clip.syncResidualMs !== null || session === null) {
+    return clip;
+  }
+  const sync = session.clock.cameras[clip.camera] as CameraClock | undefined;
+  return sync === undefined ? clip : { ...clip, syncResidualMs: sync.offsetMs };
+}
+
 /** `clips` with `clip`, which replaces the clip of the same camera and segment. */
 function withClip(clips: readonly VideoClip[], clip: VideoClip): VideoClip[] {
   const at = clips.findIndex((c) => c.camera === clip.camera && c.segment === clip.segment);
@@ -257,7 +270,9 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  * - For the recording (T2.4, `RecordingService`): `milestones$` says when an attempt's scramble is
  *   done, when it ended and when it went without a record; `attachClip` adds a clip to the
  *   attempt's record (saved again, nothing else changed), `putCamera` the camera to the session's
- *   `cameras`, and `addNote` a line to its `notes`.
+ *   `cameras`, and `addNote` a line to its `notes`. For the sync check (T2.5, `SyncService`),
+ *   `putCameraClock` keeps a camera's lag behind the cube in `clock.cameras`, which the camera's
+ *   later clips carry as their `syncResidualMs`.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
@@ -616,12 +631,15 @@ export class SessionService {
    * Adds `clip` to the attempt `ref` (T2.4), replacing a clip of the same camera and segment: while
    * the attempt is under way it is kept for its record (`kept`); once it has ended, its record is
    * saved again with the clip in `video` and nothing else changed (`saved`), also when the session
-   * is no longer the current one. Resolves to `gone`, changing nothing, when the attempt went
+   * is no longer the current one. The clip gets its camera's lag behind the cube as its
+   * `syncResidualMs` when the session has a sync check of that camera (T2.5); a clip attached
+   * before the check keeps null. Resolves to `gone`, changing nothing, when the attempt went
    * without a record or was deleted. Rejects when the record could not be saved (the timer says so
    * too, as for any save).
    */
   async attachClip(ref: AttemptRef, clip: VideoClip): Promise<ClipAttachment> {
     const current = this.current;
+    const session = this.sessionSignal();
     if (
       current !== null &&
       isActive(current.machine.state) &&
@@ -629,15 +647,19 @@ export class SessionService {
       current.index === ref.index &&
       current.machine.events.scrambleShown === ref.scrambleShown
     ) {
-      current.clips = withClip(current.clips, clip);
+      const own = session?.id === ref.session ? session : null;
+      current.clips = withClip(current.clips, withSyncResidual(clip, own));
       return 'kept';
     }
-    if (this.sessionSignal()?.id === ref.session) {
+    if (session?.id === ref.session) {
       const record = this.attemptsSignal().find((attempt) => isAttempt(attempt, ref));
       if (record === undefined) {
         return 'gone';
       }
-      const updated: AttemptRecord = { ...record, video: withClip(record.video, clip) };
+      const updated: AttemptRecord = {
+        ...record,
+        video: withClip(record.video, withSyncResidual(clip, session)),
+      };
       this.attemptsSignal.update((attempts) => attempts.map((a) => (a === record ? updated : a)));
       if (this.lastResultSignal() === record) {
         this.lastResultSignal.set(updated);
@@ -648,9 +670,11 @@ export class SessionService {
     // The session changed since (New session right after the solve): its record in the store.
     let outcome: ClipAttachment = 'gone';
     await this.save(async (store) => {
-      const record = (await store.loadAttempts(ref.session)).find((a) => isAttempt(a, ref));
+      const stored = await store.exportSession(ref.session);
+      const record = stored.attempts.find((a) => isAttempt(a, ref));
       if (record !== undefined) {
-        await store.saveAttempt({ ...record, video: withClip(record.video, clip) });
+        const attached = withSyncResidual(clip, stored.session);
+        await store.saveAttempt({ ...record, video: withClip(record.video, attached) });
         outcome = 'saved';
       }
     });
@@ -707,6 +731,26 @@ export class SessionService {
     const saved: SessionRecord = { ...session, cameras, audio };
     this.sessionSignal.set(saved);
     void this.save((store) => store.saveSession(saved));
+  }
+
+  /**
+   * Puts `clock`, a camera's clock sync (T2.5: its sync check), in the current session's
+   * `clock.cameras` under `label`, replacing the entry of that label, and saves session.json; from
+   * then on the camera's clips get its `offsetMs` as their `syncResidualMs` (`attachClip`). False,
+   * changing nothing, without a session.
+   */
+  putCameraClock(label: string, clock: CameraClock): boolean {
+    const session = this.sessionSignal();
+    if (session === null) {
+      return false;
+    }
+    const saved: SessionRecord = {
+      ...session,
+      clock: { ...session.clock, cameras: { ...session.clock.cameras, [label]: clock } },
+    };
+    this.sessionSignal.set(saved);
+    void this.save((store) => store.saveSession(saved));
+    return true;
   }
 
   /**

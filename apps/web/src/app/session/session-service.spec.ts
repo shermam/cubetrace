@@ -4,6 +4,7 @@ import {
   SOLVED,
   applyMoves,
   parseMoves,
+  type CameraClock,
   type CameraInfo,
   type VideoClip,
 } from '@cubetrace/core';
@@ -877,6 +878,60 @@ describe('SessionService', () => {
       expect(s.service.session()?.notes).toBe('');
     });
 
+    it("keeps a camera's sync check in clock.cameras, and gives the camera's later clips its lag", async () => {
+      const s = setup();
+      expect(s.service.putCameraClock('laptop', SYNC)).toBe(false);
+      const fake = await ready(s);
+      const session = s.service.session()?.id ?? '';
+      const attempt = {
+        session,
+        index: 1,
+        scrambleShown: s.service.attempt()?.events.scrambleShown ?? 0,
+      };
+      turn(s, fake, 'R U F');
+      // Before the check: null.
+      expect(await s.service.attachClip(attempt, clip('scramble', 10))).toBe('kept');
+
+      expect(s.service.putCameraClock('laptop', SYNC)).toBe(true);
+      expect(s.service.session()?.clock.cameras).toEqual({ laptop: SYNC });
+      turn(s, fake, inverse('R U F'), 500);
+      expect(await s.service.attachClip(attempt, clip('solve', 20))).toBe('saved');
+      // Another camera has no check; a clip that says its own lag keeps it.
+      expect(
+        await s.service.attachClip(attempt, { ...clip('solve', 30), camera: 'phone-front' }),
+      ).toBe('saved');
+      await s.service.whenSaved();
+      let stored = await s.store.exportSession(session);
+      expect(stored.session.clock.cameras).toEqual({ laptop: SYNC });
+      expect(stored.session.clock.cube.samples).toBeGreaterThan(0);
+      expect(stored.attempts[0].video.map((c) => [c.camera, c.segment, c.syncResidualMs])).toEqual([
+        ['laptop', 'scramble', null],
+        ['laptop', 'solve', 41.5],
+        ['phone-front', 'solve', null],
+      ]);
+      expect(
+        await s.service.attachClip(attempt, { ...clip('scramble', 11), syncResidualMs: 12 }),
+      ).toBe('saved');
+      expect(s.service.attempts()[0].video[0].syncResidualMs).toBe(12);
+
+      // A check run again replaces the entry; the clips attached from then on get the new lag.
+      s.service.putCameraClock('laptop', { ...SYNC, offsetMs: 38 });
+      s.service.putCameraClock('phone-front', { ...SYNC, offsetMs: 60 });
+      expect(s.service.session()?.clock.cameras).toEqual({
+        laptop: { ...SYNC, offsetMs: 38 },
+        'phone-front': { ...SYNC, offsetMs: 60 },
+      });
+      expect(await s.service.attachClip(attempt, clip('solve', 21))).toBe('saved');
+      expect(s.service.attempts()[0].video[1].syncResidualMs).toBe(38);
+
+      // After New session, a clip of the earlier session's attempt gets that session's lag.
+      s.service.newSession();
+      expect(s.service.session()?.clock.cameras).toEqual({});
+      expect(await s.service.attachClip(attempt, clip('solve', 22))).toBe('saved');
+      stored = await s.store.exportSession(session);
+      expect(stored.attempts[0].video[1]).toMatchObject({ bytes: 22, syncResidualMs: 38 });
+    });
+
     it('creates a session with the audio setting', async () => {
       const s = setup();
       s.settings.setRecordAudio(false);
@@ -885,6 +940,16 @@ describe('SessionService', () => {
     });
   });
 });
+
+/** A sync check of a camera (T2.5): 41.5 ms behind the cube. */
+const SYNC: CameraClock = {
+  offsetMs: 41.5,
+  rttMs: 0,
+  driftPpm: 0,
+  clapperboardResidualMs: 12.3,
+  clapperboardSamples: 5,
+  samples: [{ moveHostMs: 1_790_000_010_000.5, onsetHostMs: 1_790_000_010_040.5 }],
+};
 
 /** A clip of `segment` of the laptop's camera, `bytes` long. */
 function clip(segment: 'scramble' | 'solve', bytes: number): VideoClip {
