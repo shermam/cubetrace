@@ -24,7 +24,7 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | gan-web-bluetooth (the owner's fork) | 3.0.2 plus 3 commits: git `52417a1` | `packages/gan/package.json` | GAN cube driver, a git dependency pinned to that commit; see "GAN driver" below |
 | `@angular/service-worker` | 22.2.0 | `apps/web/package.json` | added by `ng add @angular/pwa@22.2.0` (T1.7); `@angular/pwa` itself is only the schematic and is not installed |
 | cubing (cubing.js) | 0.63.7 | `packages/core/package.json`, `apps/web/package.json` | added by T1.2 for scrambles; the app uses it directly for the scramble picture (`cubing/twisty`, T1.6b); MPL-2.0 or GPL-3.0; needs Node 22.3 or later; see "cubing.js" below |
-| mediabunny | 1.60.0 | `packages/capture/package.json` | added by T2.3 to mux the encoded chunks into MP4 in the capture worker; MPL-2.0; brings `@types/dom-webcodecs` 0.1.13 and `@types/dom-mediacapture-transform` 0.1.12 (type declarations only); see "Clips" below |
+| mediabunny | 1.60.0 | `packages/capture/package.json` | added by T2.3 to mux the encoded chunks into MP4 without re-encoding, in a worker (the clip worker since T2.4); MPL-2.0; brings `@types/dom-webcodecs` 0.1.13 and `@types/dom-mediacapture-transform` 0.1.12 (type declarations only); see "Clips" below |
 
 ## Commands
 
@@ -428,6 +428,8 @@ cube.
 | Scramble marks (T1.13) | `scramble-colours.spec.ts` | Demo solve 1 at speed 20: each of its 11 half turns marked partial after its first quarter turn, then done; every view while scrambling agrees with its progress; all moves but the last done before the attempt arms, all done while armed, none from the solve on. `&misscramble=5` (demo solve 0): move 6 marked wrong exactly while the undo guidance shows, then done; all done while armed. |
 | Recording (T2.4) | `recording.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: four replays with the camera off, then four with it on, each waiting for the last one's clips; every attempt recorded has its two clips in OPFS, their frames files valid, each clip from its margin (2 s before the scramble's first turn, 3 s before the solve's) to at most one GOP earlier and to about 1 s after its segment; the viewer plays the last solve clip (`loadedmetadata`) with its moves, and Download gives the five files with the sizes of the record; the export validates; the median `timeMs` with the camera on is within 5 ms of the median with it off. In the capture lab, a 10 s clip saved mid-way: no frame dropped and no double interval in the second after it. The file's two tests run one after the other (`mode: 'default'`): each encodes 1080p30 in software. |
 | Sync check (T2.5) | `sync-check.spec.ts` | Chrome's fake camera at 30 fps, demo solve 0 at speed 20: once the solve is recorded, the camera on; when it records, the check starts by itself (the capture worker's frames counted), the timer's status says `sync-check`, the scramble and "Attempt 2" stay; after 20 s it fails with "the cube did not move" (the demo has finished: the same outcome every run) and Retry, and attempt 2 is back with its scramble; Retry, Later and "Sync check" start and hide it; the export has no `clock.cameras` entry and the one attempt of the solve. In the capture lab, a 6 s check with the demo cube's turns reports its outcome and the capture worker's time per frame, which it prints. |
+| Session with clips (T2.6) | `session-clips.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: the solve that starts with the page, recorded before the camera is on, is deleted (Delete last); the camera on, the sync check that starts by itself is ended with Later; two replays, each with its two clips; then a new page load straight to the session's page: both attempts listed with a badge "2 clips, …", "4 clips, …" in its header, the first attempt's solve clip plays in the viewer, and the page's Export validates against schema 2; every clip of the records is a file in its attempt's folder in OPFS, the MP4 of the record's size and the frames file valid against its schema, with the record's frame count and first frame, and nothing else is there but `attempt.json`. |
+| First render (T2.6) | `timer-render.spec.ts` | On the production build under `/cubetrace/`, after a demo solve (a session with a stored solve), the first animation frame that shows the clock comes within 2 s of `DOMContentLoaded`, with the camera setting off and on; with the camera (`getUserMedia`) and the storage (`navigator.storage.getDirectory`) each held back 3 s, the clock still comes within 2 s, and the solve list and the camera's preview after them. Recording is off in the file (no `MediaStreamTrackProcessor`), as in `timer-layout.spec.ts`. It prints the times: over three runs, the clock 44 to 83 ms after `DOMContentLoaded` with the camera off or on, the solve list 104 to 177 ms and the preview 137 to 194 ms; held back, the clock 39 to 104 ms, the list 3,056 to 3,121 ms and the preview 3,139 to 3,237 ms. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
 export), without its time check, which flow 1 makes on a settled page (below). The helpers in
@@ -463,12 +465,28 @@ export), without its time check, which flow 1 makes on a settled page (below). T
 - **No fixed waits and no retries.** Every wait is on a `data-testid`'s content, an attribute or a
   download. The DNF flows run at speed 5 (solves of 4.3 and 6.9 s), which leaves seconds to press Esc
   after the solve starts although assertions poll up to 1 s apart.
+- **The specs that record run one at a time** (T2.6). `capture.spec.ts`, `recording.spec.ts`,
+  `session-clips.spec.ts` and `sync-check.spec.ts` record Chrome's fake camera, encoding 1080p30 VP9
+  in software; they are the Playwright project `encoding`, limited to one worker (the project's
+  `workers` option) and listed first, so that the next of them starts as soon as one ends, while the
+  other specs, the project `chromium`, run in the other worker. Two encoders at once on four CPUs
+  lose frames and hold back the demo cube's timers: when `session-clips.spec.ts` joined the suite,
+  two of three runs in a row failed, once on a frame lost in the second after a save in
+  `recording.spec.ts`'s no-drop test (an interval of 67.1 ms, with `sync-check.spec.ts` encoding in
+  the other worker) and once on its timing check (the medians with the camera on and off 5.05 ms
+  apart, over its 5 ms, with `session-clips.spec.ts` encoding beside it). With the project, three
+  runs in a row passed, the medians 0.4, −1.4 and −3.6 ms apart, and no frame lost after a save.
 
 The whole suite (34 tests, two workers) took 44 s and 59 s in CI in the pull request's first two
 runs (the `npm run e2e` step, servers included; T1.6b's suite took 40 s), and 58 to 60 s locally on
 four CPUs in three runs in a row on 2026-09-27. With T2.4 it has 49 tests and took 2.3 min locally
 (Playwright's count) in each of four runs in a row, 2 min 20 s with the servers; it was 1.6 min
-before T2.4 (47 tests), the recording flow alone taking about 30 s.
+before T2.4 (47 tests), the recording flow alone taking about 30 s. With T2.5 and T2.7 it had 55
+tests and took 2.7 min in CI (2 min 43 s for the `npm run e2e` step, on `main` at 21c7bca) and
+2.8 min locally (2 min 50 s with the servers). With T2.6's two flows and the `encoding` project it
+has 57 tests and took 2.8, 2.9 and 2.9 min locally in three runs in a row on 2026-09-27 (2 min 52 s
+to 2 min 58 s with the servers); the specs that record take 132 to 135 s of it, one after the
+other.
 
 ## packages/capture
 

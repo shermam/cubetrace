@@ -24,7 +24,8 @@ apps/web (Angular, PWA)
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider
-  ──uses──▶ packages/capture   (phase 2) MediaStreamTrackProcessor → VideoEncoder → ring buffer → cut → mediabunny MP4 → OPFS
+  ──uses──▶ packages/capture   (phase 2) camera · capture worker: MediaStreamTrackProcessor → VideoEncoder → ring buffer → cut ·
+                               clip worker: mediabunny MP4 + frames.json → OPFS · motion and clapperboard (the sync check)
   ──uses──▶ packages/storage   (phase 1: OPFS staging of sessions; phase 3: upload queue with signed URLs)
 ```
 
@@ -47,19 +48,44 @@ synchronous so it can be unit-tested by replaying fixtures through it.
 ## Time
 
 All timestamps are host milliseconds. Cube time is mapped by a linear fit of (cubeMs, hostMs) pairs
-per attempt (docs/DEVICES.md). Remote phones (phase 2) are mapped by a data-channel ping protocol;
-video frames carry their arrival time in Chrome; a "clapperboard" of five deliberate turns at
-session start measures each camera's constant latency. See the private design for the
-measurements and the reasoning.
+per attempt (docs/DEVICES.md). Remote phones (phase 4) are mapped by a data-channel ping protocol;
+video frames carry their own timestamps and their arrival time in the capture worker; a
+"clapperboard", one face turned and turned back five times at session start, measures each camera's
+constant latency. See the private design for the measurements and the reasoning.
 
 ## Capture (phase 2)
 
-Cameras record continuously into a ring buffer of encoded H.264 chunks (keyframe every
-second). When the cube's events say an attempt happened, two segments are cut per camera
-without re-encoding: scramble (2 s before the first scramble turn to 1 s after the state
-matched) and solve (3 s before the first solve turn to 1 s after solved). Clips are muxed
-to MP4 in a worker, staged in OPFS, shipped to the host over the WebRTC data channel
-(remote cameras) and uploaded. Idle time is never stored. Audio is recorded with the video.
+```
+camera ─▶ MediaStreamTrackProcessor (window) ─▶ capture worker: encoders ─▶ ring buffer (90 s, 160 MB) ─▶ cut
+                                                          └─ motion in the framing rectangle (sync check)
+cut ─▶ MessageChannel ─▶ clip worker: mediabunny MP4 + frames.json ─▶ OPFS ─▶ attempt.json video[]
+```
+
+`packages/capture` is plain TypeScript around two module workers. On the window, the camera is
+opened with its constraints and manual controls (snapshots go into `session.json`), and its preview
+measures the frame rate and the sharpness of the framing rectangle, at most twice a second and never
+during a solve. The camera's and the microphone's `MediaStreamTrackProcessor` streams (Chrome has
+them on the main thread only) are transferred to the **capture worker**, which encodes without
+pause: H.264 High, else Main, hardware first, else VP9 (Chromium without proprietary codecs, as in
+CI); AAC, else Opus, else no sound; a keyframe every second; frames dropped and counted when more
+than 8 wait in the encoder. The chunks, each with its frame's own timestamp and its arrival on the
+host clock, fill a ring buffer bounded by 90 s and 160 MB and evicted by whole GOPs, so that it
+always starts at a keyframe. When the timer's milestones say a segment of an attempt is over, the
+recording asks for its cut 1.25 s after its end: the scramble from 2 s before its first turn to 1 s
+after the state matched, the solve from 3 s before its first turn to 1 s after solved or the DNF,
+each from the keyframe at or before its start. The capture worker copies the cut's chunks and passes
+them over a `MessageChannel` to the **clip worker**, which muxes them into MP4 with mediabunny,
+without re-encoding, and writes the clip and its `frames.json` (the first frame's host time from the
+median arrival offset over the clip, then each frame's interval from the timestamps) into the
+attempt's OPFS folder under temporary names moved into place; the clip is then added to the
+attempt's `video` in `attempt.json`, whose timing it never changes, and a clip that fails is noted
+in `session.json`. The **sync check** runs once per session and camera: the capture worker measures
+the motion inside the framing rectangle of each frame (a 160-pixel luma plane read with
+`VideoFrame.copyTo`), the clapperboard matches the motion's onsets after 500 ms of stillness to
+single cube turns within 500 ms, and the median lag becomes the camera's `offsetMs` in
+`clock.cameras` and the `syncResidualMs` of its later clips. Idle time is never stored. Remote
+cameras (phase 4) will cut the same way and ship their clips over the WebRTC data channel; phase 3
+uploads them.
 
 ## Storage (phase 3)
 
