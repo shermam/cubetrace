@@ -427,6 +427,7 @@ cube.
 | Idle setting (T1.14) | `cube.spec.ts`, last test | Settings shows the idle disconnection at 5 minutes; 1 survives a reload; 61 is refused with its message. The timer itself is tested in the unit tests, on a fake clock. |
 | Scramble marks (T1.13) | `scramble-colours.spec.ts` | Demo solve 1 at speed 20: each of its 11 half turns marked partial after its first quarter turn, then done; every view while scrambling agrees with its progress; all moves but the last done before the attempt arms, all done while armed, none from the solve on. `&misscramble=5` (demo solve 0): move 6 marked wrong exactly while the undo guidance shows, then done; all done while armed. |
 | Recording (T2.4) | `recording.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: four replays with the camera off, then four with it on, each waiting for the last one's clips; every attempt recorded has its two clips in OPFS, their frames files valid, each clip from its margin (2 s before the scramble's first turn, 3 s before the solve's) to at most one GOP earlier and to about 1 s after its segment; the viewer plays the last solve clip (`loadedmetadata`) with its moves, and Download gives the five files with the sizes of the record; the export validates; the median `timeMs` with the camera on is within 5 ms of the median with it off. In the capture lab, a 10 s clip saved mid-way: no frame dropped and no double interval in the second after it. The file's two tests run one after the other (`mode: 'default'`): each encodes 1080p30 in software. |
+| Sync check (T2.5) | `sync-check.spec.ts` | Chrome's fake camera at 30 fps, demo solve 0 at speed 20: once the solve is recorded, the camera on; when it records, the check starts by itself (the capture worker's frames counted), the timer's status says `sync-check`, the scramble and "Attempt 2" stay; after 20 s it fails with "the cube did not move" (the demo has finished: the same outcome every run) and Retry, and attempt 2 is back with its scramble; Retry, Later and "Sync check" start and hide it; the export has no `clock.cameras` entry and the one attempt of the solve. In the capture lab, a 6 s check with the demo cube's turns reports its outcome and the capture worker's time per frame, which it prints. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
 export), without its time check, which flow 1 makes on a settled page (below). The helpers in
@@ -910,16 +911,25 @@ onset during a replay finds a turn within 25 ms, which can make a narrow spread 
 
 **The check in the Timer** starts by itself when a session is under way with the camera recording, a
 cube connected and no check of that camera in the session's `clock.cameras`, once per session and
-camera, and not while a solve is about to start, is under way or is paused; "Sync check" runs it
-again at any time outside a solve, and "Later" ends it and hides it. It ends at 20 s, or as soon as
-five turns are matched within the spread and a second has passed since the last turn and the last
-onset. The turns go to the attempt under way like any others: the first attempt of a session
-usually has them in its scramble (the undo guide shows how to undo them, and the record counts them
-as `scrambleExtraMoves`), which the check does not try to hide. On success `SessionService` keeps the
-lag with the matched pairs in `clock.cameras[label]` (`putCameraClock`), and `attachClip` gives each
-clip of that camera attached from then on its `offsetMs` as `syncResidualMs`: clips saved before the
-check keep null, and one saved within a second after it, whose frames were before it, gets the lag
-too.
+camera, and only where an attempt starts: before the scramble's first turn, or between attempts
+(not once a scramble has begun, nor while a solve is about to start, is under way or is paused);
+"Sync check" runs it again under the same conditions, and "Later" ends it and hides it. It asks to
+turn one face, pause, turn it back, five times over: ten single turns that leave the cube as it
+was. It ends at 20 s, or as soon as the ten turns are matched within the spread and a second has
+passed since the last turn and the last onset; the recording stopping or the cube disconnecting
+end it as failed. While it runs the timer tracks no attempt (`SessionService.suspendForSyncCheck`,
+refused while an attempt is armed or solving): the attempt waiting for its scramble is dropped
+without a record, by the path "Mark as solved" takes, the cube's moves go to no attempt (they still
+feed the session's coarse cube clock fit), the status line says "Sync check: …" (a timer phase of
+its own, `sync-check`), and when the check ends (`resumeAfterSyncCheck`) the attempt begins again
+with the same scramble and number as soon as the cube is solved, or "Solve the cube first" says
+what to do. So no record holds the check's turns, and no scramble clip either (the restarted
+attempt's clip begins 2 s before its own first turn). On success `SessionService` keeps the lag with
+the matched pairs in `clock.cameras[label]` (`putCameraClock`), and `attachClip` gives each clip of
+that camera attached from then on its `offsetMs` as `syncResidualMs`: clips saved before the check
+keep null, and one saved within a second after it, whose frames were before it, gets the lag too.
+The capture lab's check involves no session: the lab is a page reached by its address, whose load
+starts no timer.
 
 **Sizes** (`ng build`, 2026-09-27, against `main` at 220cc02): the initial bundle is unchanged, 264.26
 kB raw. The motion code is in the capture worker only, 18.2 kB raw, 6.2 kB transferred (12.1 and 4.2

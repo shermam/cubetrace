@@ -45,14 +45,16 @@ versions follow [Semantic Versioning](https://semver.org/).
   80% of the browser's quota, and from 95% the camera stops recording while the timer goes on. A clip
   that could not be saved is said once and written in the session's notes.
 - The sync check (T2.5): how far the camera's frames lag the cube, for the training to subtract. When
-  a session records with the camera on, the Camera section asks for five single turns of the cube
-  with a pause of about a second between them, counts down 20 s with the turns and the motion onsets
-  it has seen in the framing rectangle, and says "Camera lags the cube by X ms (±Y)", or why it could
-  not tell, with Retry. The lag is kept in the session (`clock.cameras`, with the turns matched), and
-  every later clip of that camera carries it (`syncResidualMs`). "Sync check" runs it again (the
-  message then gives the lag before) and "Later" hides it. `/capture-lab` has a Sync check section
-  that runs it with any cube, the demo cube included, without a session, and says what measuring the
-  frames cost.
+  a session records with the camera on, before the scramble's first turn, the Camera section asks to
+  turn one face, pause, turn it back, five times over, counts down 20 s with the turns and the motion
+  onsets it has seen in the framing rectangle, and says "Camera lags the cube by X ms (±Y)", or why
+  it could not tell, with Retry. Meanwhile the timer tracks no attempt, so the check's turns are in
+  no record: the attempt waiting for its scramble begins again afterwards, with the same scramble and
+  number, once the cube is solved. The lag is kept in the session (`clock.cameras`, with the turns
+  matched), and every later clip of that camera carries it (`syncResidualMs`). "Sync check" runs it
+  again outside a scramble or a solve (the message then gives the lag before) and "Later" hides it.
+  `/capture-lab` has a Sync check section that runs it with any cube, the demo cube included,
+  without a session, and says what measuring the frames cost.
 
 ### Changed
 
