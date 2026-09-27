@@ -31,7 +31,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | T1.5 | `gan`: driver wrapper (Web Bluetooth), MAC provider, support check, fake cube | T1.1 | ⬜ |
 | T1.6 | `web`: timer UI (scramble, timer, breakdown chart, solve list), connect dialog, settings, sessions page, OPFS store | T1.4, T1.5 | ⬜ |
 | T1.7 | `web`: PWA (manifest, service worker), wake lock, storage persistence, responsive layouts, version display | T1.0 | 🟨 #3 |
-| T1.8 | `web`: device probe page (`/probe`) | T1.0 | ⬜ |
+| T1.8 | `web`: device probe page (`/probe`) | T1.0 | 🟨 #4 |
 | T1.9 | end-to-end suite with the fake cube; JSON Schema validation of exports | T1.6 | ⬜ |
 | T1.10 | docs, CHANGELOG, `v0.1.0`, manual test round with the owner | T1.7, T1.8, T1.9 | ⬜ |
 
