@@ -185,6 +185,25 @@ describe('LumaDownscaler', () => {
     expect(downscaler.fits(luma(4, 2, 12, 3))).toBe(false);
   });
 
+  it('gives the same plane on its fast path for 2 × 2 points as the general one', () => {
+    // A random grey picture, read as luma (the fast path) and as grey RGBX pixels (the general
+    // path, whose weights add up to 256): the same averages, the same rounding.
+    const random = seeded(4);
+    const [width, height] = [331, 187];
+    const grey = Uint8Array.from({ length: width * height }, () => Math.floor(random() * 256));
+    const rgbx = new Uint8Array(width * height * 4);
+    grey.forEach((value, i) => rgbx.set([value, value, value, 255], i * 4));
+    const size = { width: 97, height: 55 };
+    const fast = new Uint8Array(size.width * size.height);
+    const general = new Uint8Array(size.width * size.height);
+    new LumaDownscaler(luma(width, height), size).downscale(grey, fast);
+    new LumaDownscaler(
+      { width, height, offset: 0, stride: width * 4, kind: 'rgbx' },
+      size,
+    ).downscale(rgbx, general);
+    expect([...fast]).toEqual([...general]);
+  });
+
   it('weighs red, green and blue as BT.601 luma, in RGB or BGR order', () => {
     const red = new Uint8Array([255, 0, 0, 255, 255, 0, 0, 255]);
     const out = new Uint8Array(1);

@@ -206,6 +206,10 @@ export class LumaDownscaler {
   }
 
   #downscaleLuma(data: Uint8Array, out: Uint8Array): void {
+    if (this.#points === 2) {
+      this.#downscaleLuma2(data, out);
+      return;
+    }
     const n = this.#points;
     const count = n * n;
     const half = count >> 1;
@@ -225,6 +229,28 @@ export class LumaDownscaler {
           }
         }
         out[outBase + x] = Math.floor((sum + half) / count);
+      }
+    }
+  }
+
+  /**
+   * `#downscaleLuma` for 2 × 2 points (`MOTION_POINTS`), unrolled: the same sums and rounding, in a
+   * third of the time (T2.8 measures a 320-pixel plane for the whole frame: 57,600 pixels).
+   */
+  #downscaleLuma2(data: Uint8Array, out: Uint8Array): void {
+    const columns = this.#columns;
+    const rows = this.#rows;
+    const width = this.width;
+    for (let y = 0; y < this.height; y++) {
+      const top = rows[2 * y];
+      const bottom = rows[2 * y + 1];
+      const outBase = y * width;
+      for (let x = 0; x < width; x++) {
+        const left = columns[2 * x];
+        const right = columns[2 * x + 1];
+        out[outBase + x] =
+          (data[top + left] + data[top + right] + data[bottom + left] + data[bottom + right] + 2) >>
+          2;
       }
     }
   }
