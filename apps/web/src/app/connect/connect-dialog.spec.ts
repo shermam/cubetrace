@@ -1,8 +1,9 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { SOLVED, applyMoves, parseMoves } from '@cubetrace/core';
 import { FakeCube, MAC_FLAG_URL } from '@cubetrace/gan';
 
-import { CubeService, GAN_CONNECTOR } from '../cube/cube-service';
+import { CubeService, MARK_AS_SOLVED_HINT } from '../cube/cube-service';
 import { DEMO_FILE, FakeGanConnector, asGanCube, bluetoothNavigator } from '../cube/cube-testing';
 import { DEMO_SOLVES_URL } from '../cube/demo';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
@@ -42,7 +43,7 @@ describe('ConnectDialog', () => {
             fetch: fetch.fetch,
           },
         },
-        { provide: GAN_CONNECTOR, useValue: connector.connect },
+        ...connector.providers,
       ],
     });
     fixture = TestBed.createComponent(ConnectDialog);
@@ -218,6 +219,27 @@ describe('ConnectDialog', () => {
     expect(text('connect-state')).toBe('Last connection: Disconnected on request.');
     expect(button('Reconnect').disabled).toBe(false);
     expect(dialog().open).toBe(true);
+  });
+
+  it("the cube's details offer Mark as solved, which sets its state to solved", async () => {
+    await render(bluetoothNavigator(true), 'details');
+    button('Connect cube').click();
+    await stable();
+    const fake = new FakeCube({ start: applyMoves(SOLVED, parseMoves('D2 B')) });
+    connector.last.resolve(asGanCube(fake));
+    await stable();
+    expect(cube.solved()).toBe(false);
+    const reset = button('Mark as solved');
+    expect(reset.dataset['testid']).toBe('reset-state');
+    const hint = reset.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(hint)?.textContent.trim()).toBe(MARK_AS_SOLVED_HINT);
+
+    reset.click();
+    await stable();
+    expect(cube.solved()).toBe(true);
+    expect(fake.facelets).toBe(SOLVED);
+    expect(dialog().open).toBe(true);
+    expect(text('connect-state')).toBe('Connected.');
   });
 
   it('gives up connecting on Cancel, and closes a cube that connects later', async () => {

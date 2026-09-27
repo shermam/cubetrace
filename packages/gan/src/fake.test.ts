@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   SOLVED,
+  applyMoves,
   formatMove,
   isSolved,
   parseMove,
@@ -255,6 +256,82 @@ describe('FakeCube.turn and the cube clock', () => {
     expect(() => new FakeCube({ speed: 0 })).toThrow(RangeError);
     expect(() => new FakeCube({ speed: Number.POSITIVE_INFINITY })).toThrow(RangeError);
     expect(() => new FakeCube({ start: 'UUU' })).toThrow(/Invalid facelets/);
+  });
+});
+
+describe('FakeCube.resetToSolved and stop', () => {
+  /** The events as short strings: a move's notation, `reset <facelets>`, `facelets <facelets>`. */
+  function summary(events: readonly CubeEvent[]): string[] {
+    return events.flatMap((e) => {
+      switch (e.type) {
+        case 'move':
+          return [formatMove(e.m)];
+        case 'facelets':
+          return [`${e.reset === true ? 'reset' : 'facelets'} ${e.facelets}`];
+        default:
+          return [];
+      }
+    });
+  }
+
+  it('resetToSolved() sets the state to solved and emits it at once, flagged reset, with the host time', async () => {
+    const s = solve(0);
+    const cube = new FakeCube({ start: s.scrambledFacelets, now: () => 42 });
+    const { events } = record(cube);
+    cube.turn(R);
+
+    await cube.resetToSolved();
+    expect(cube.facelets).toBe(SOLVED);
+    expect(events.at(-1)).toEqual({ type: 'facelets', facelets: SOLVED, hostMs: 42, reset: true });
+    cube.turn(R);
+    expect(cube.facelets).toBe(AFTER_R);
+    expect(summary(events)).toEqual(['R', `reset ${SOLVED}`, 'R']);
+
+    // A request reports the state as it is, without the flag.
+    await cube.requestFacelets();
+    expect(events.at(-1)).toEqual({ type: 'facelets', facelets: AFTER_R, hostMs: 42 });
+  });
+
+  it('a play goes on from the solved state after a reset, in order', async () => {
+    const cube = new FakeCube({ now: () => Date.now() });
+    const { events } = record(cube);
+    const playing = cube.play(parseMoves("U R F'").map((m, i) => ({ m, ms: i * 100 })));
+    await vi.advanceTimersByTimeAsync(150);
+
+    await cube.resetToSolved();
+    await vi.runAllTimersAsync();
+    await playing;
+    expect(summary(events)).toEqual(['U', 'R', `reset ${SOLVED}`, "F'"]);
+    expect(cube.facelets).toBe(applyMoves(SOLVED, parseMoves("F'")));
+  });
+
+  it('stop() ends the play in progress and drops the queued ones; the cube stays connected', async () => {
+    const cube = new FakeCube({ now: () => Date.now() });
+    const { events, completed } = record(cube);
+    const first = cube.play(parseMoves("U R F'").map((m, i) => ({ m, ms: i * 100 })));
+    const second = cube.play(parseMoves('D L').map((m, i) => ({ m, ms: i * 100 })));
+    await vi.advanceTimersByTimeAsync(150);
+
+    cube.stop();
+    await first; // Resolves at once,
+    await second; // and so does the queued play, without a move.
+    await vi.runAllTimersAsync();
+    expect(summary(events)).toEqual(['U', 'R']);
+    expect(completed()).toBe(false);
+
+    // A later play runs as usual.
+    const third = cube.play([{ m: R_PRIME, ms: 0 }]);
+    await vi.runAllTimersAsync();
+    await third;
+    expect(summary(events)).toEqual(['U', 'R', "R'"]);
+    expect(cube.facelets).toBe(applyMoves(SOLVED, parseMoves('U')));
+  });
+
+  it('refuses a reset once disconnected', async () => {
+    const cube = new FakeCube();
+    await cube.disconnect();
+    await expect(cube.resetToSolved()).rejects.toThrow(/disconnected/);
+    expect(cube.facelets).toBe(SOLVED);
   });
 });
 

@@ -129,6 +129,31 @@
   }
 </section>
 
+<section aria-labelledby="idle-heading">
+  <h2 id="idle-heading">Idle cube</h2>
+  <label for="idle-minutes">Disconnect the cube after this many minutes without a turn</label>
+  <input
+    #idleInput
+    id="idle-minutes"
+    type="number"
+    min="0"
+    max="60"
+    step="1"
+    inputmode="numeric"
+    data-testid="idle-minutes"
+    [value]="settings.idleDisconnectMinutes()"
+    [attr.aria-invalid]="idleError() !== null"
+    (change)="setIdleMinutes(idleInput.value)"
+  />
+  @if (idleError(); as error) {
+    <p class="error" role="alert" data-testid="idle-error">{{ error }}</p>
+  }
+  <p class="hint">
+    It saves the cube's battery. 0 never disconnects it. The cube pill then says why the cube
+    disconnected, and Reconnect connects it again in one click.
+  </p>
+</section>
+
 <section aria-labelledby="timer-heading">
   <h2 id="timer-heading">Timer</h2>
   <label class="switch">

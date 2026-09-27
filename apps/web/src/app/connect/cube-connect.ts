@@ -8,7 +8,8 @@ import { ConnectActions } from './connect-actions';
  * live cube panel. One click opens Chrome's device picker (or, in a browser without Web
  * Bluetooth, the dialog that says so); "Try the demo" connects the demo cube. While connecting, the
  * button says so and a Cancel gives up; a failure is written under the buttons, with a Details
- * link to the dialog. The host shows it only while no cube is connected.
+ * link to the dialog, and otherwise why the last connection ended (T1.14), such as the idle
+ * disconnection. The host shows it only while no cube is connected.
  */
 @Component({
   selector: 'app-cube-connect',
@@ -48,6 +49,8 @@ import { ConnectActions } from './connect-actions';
             Details
           </button>
         </p>
+      } @else if (cube.disconnectReason(); as reason) {
+        <p class="reason" data-testid="disconnect-reason">{{ reason }}</p>
       }
     }
   `,
@@ -92,10 +95,15 @@ import { ConnectActions } from './connect-actions';
       }
     }
 
-    .error {
+    .error,
+    .reason {
       max-width: 36rem;
       margin: 0;
       color: var(--danger);
+    }
+
+    .reason {
+      color: var(--text-muted);
     }
 
     .link {

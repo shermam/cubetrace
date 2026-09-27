@@ -165,6 +165,10 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  *   when the cube connects again it continues, after a resync if the cube moved meanwhile. A new
  *   connection of the demo cube replays its solve from the start, so it drops an attempt under
  *   way and begins one with the demo's scramble.
+ * - "Mark as solved" (a `facelets` event flagged `reset`, T1.14) drops the attempt under way
+ *   (scrambling, armed or solving) without a record and begins it again from the solved state,
+ *   with the same scramble and number; an attempt that has ended is untouched. A reset never
+ *   produces a record: the solved state it brings is not the end of a solve.
  * - A session is created with its first attempt (or by New session while a cube is connected),
  *   and a new one when a different cube connects (the first attempt of a connection waits for the
  *   cube to say what it is, up to {@link HARDWARE_WAIT_MS}); its id is kept in `localStorage`, so a
@@ -551,7 +555,11 @@ export class SessionService {
         this.onMove(event);
         break;
       case 'facelets':
-        this.onFacelets(event.facelets, event.hostMs);
+        if (event.reset === true) {
+          this.onReset();
+        } else {
+          this.onFacelets(event.facelets, event.hostMs);
+        }
         break;
       case 'gyro':
         this.onGyro(event.q, event.hostMs);
@@ -623,6 +631,23 @@ export class SessionService {
     } else {
       this.adopt(current, facelets, hostMs);
     }
+  }
+
+  /**
+   * The cube was told it is solved ("Mark as solved"): an attempt under way is dropped, without a
+   * record, and begins again with its scramble from the solved state (CubeService, whose handler
+   * runs first, already holds it). The scramble on screen and the attempt's number stay.
+   */
+  private onReset(): void {
+    const current = this.activeCurrent();
+    if (current !== null) {
+      this.queuedSignal.set(current.scramble);
+      this.current = null;
+      this.awaitingSignal.set(true);
+      this.pausedAtSignal.set(null);
+      this.refresh();
+    }
+    this.ensureAttempt();
   }
 
   /** Resyncs the attempt to the state the cube reports, if it differs from the machine's. */

@@ -13,8 +13,8 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
 
 /**
  * `/settings`: the screen wake lock and storage persistence (T1.7), then what the timer and the
- * cube connection use (T1.6a): the host label, the cubes' MAC addresses, inspection,
- * auto-advance and the demo speed, all kept by `SettingsService`.
+ * cube connection use (T1.6a): the host label, the cubes' MAC addresses, the idle disconnection
+ * (T1.14), inspection, auto-advance and the demo speed, all kept by `SettingsService`.
  */
 @Component({
   selector: 'app-settings-page',
@@ -39,6 +39,7 @@ export class SettingsPage {
   protected readonly editing = signal<string | null>(null);
   protected readonly macError = signal<string | null>(null);
   protected readonly speedError = signal<string | null>(null);
+  protected readonly idleError = signal<string | null>(null);
 
   constructor() {
     void this.storage.refresh();
@@ -93,6 +94,15 @@ export class SettingsPage {
     const speed = text.trim() === '' ? Number.NaN : Number(text);
     this.speedError.set(
       this.settings.setDemoSpeed(speed) ? null : 'The speed must be a number from 0.1 to 100.',
+    );
+  }
+
+  protected setIdleMinutes(text: string): void {
+    const minutes = text.trim() === '' ? Number.NaN : Number(text);
+    this.idleError.set(
+      this.settings.setIdleDisconnectMinutes(minutes)
+        ? null
+        : 'The minutes must be a whole number from 0 to 60.',
     );
   }
 

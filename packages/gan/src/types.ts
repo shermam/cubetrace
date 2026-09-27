@@ -28,6 +28,12 @@ export interface CubeFaceletsEvent {
   type: 'facelets';
   facelets: Facelets;
   hostMs: number;
+  /**
+   * True on the event of `resetToSolved()`: the state is solved because the cube was told so, not
+   * because it reported it. A listener that only follows the state treats it as any report; the
+   * timer drops its attempt under way instead of taking the state as the end of a solve.
+   */
+  reset?: true;
 }
 
 /** Orientation from the gyroscope, for cubes that have one. */
@@ -79,11 +85,21 @@ export interface CubeConnection {
   /**
    * The cube state as this connection knows it: for a GAN cube, the first facelets the cube
    * reported (the connect promise resolves with them), then every move applied and every later
-   * facelets report adopted; for the fake cube, its simulated state.
+   * facelets report adopted, and the solved state after `resetToSolved()`; for the fake cube, its
+   * simulated state.
    */
   readonly facelets: Facelets;
   /** Asks the cube for its state; the answer arrives as a `facelets` event. */
   requestFacelets(): Promise<void>;
+  /**
+   * Tells the cube that it is solved ("Mark as solved"), for when its own state and the physical
+   * cube went apart (turns made while it was asleep or disconnected), with the cube solved in the
+   * solver's hands. `facelets` becomes `SOLVED` and a `facelets` event with `reset: true` says so,
+   * so that every listener resyncs. A GAN cube gets the driver's `REQUEST_RESET` first and is then
+   * asked for its state: its answer, a normal `facelets` event, confirms the reset, or brings the
+   * cube's own state if it disagrees. Rejects once disconnected.
+   */
+  resetToSolved(): Promise<void>;
   /** Asks the cube for its battery level; the answer arrives as a `battery` event. */
   requestBattery(): Promise<void>;
   /** Closes the connection: emits `disconnected` and completes `events$`. Idempotent. */

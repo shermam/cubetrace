@@ -36,6 +36,13 @@ moves, and a wrong turn brings up the moves that undo it. The time starts with t
 the scramble and stops when the cube is solved. `N` skips the scramble, `Esc` marks a DNF, `Delete`
 removes the last attempt.
 
+If the net in the Timer page's Cube section and the cube in your hands disagree (turns made while
+the cube was asleep or disconnected), solve the cube and click "Mark as solved" there or in the
+pill's details: the cube's own state is set to solved, and the attempt under way begins again with
+its scramble, without a record. A cube left 5 minutes without a turn is disconnected to save its
+battery (Settings → Idle cube; 0 never does it); the pill and the Timer page say why, and Reconnect
+takes one click.
+
 **Demo mode.** Without a cube, https://shermam.github.io/cubetrace/?demo=0&speed=20 connects a fake
 cube that replays recorded solve 0 (of 30, `?demo=0` to `?demo=29`) at 20 times its speed: the
 scramble, the solve, the time and the breakdown. "Try the demo", next to "Connect a cube" on the

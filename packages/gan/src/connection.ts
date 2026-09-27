@@ -1,7 +1,14 @@
 // A GAN cube over Web Bluetooth: the driver fork's events as CubeEvent (docs/PLAN.md, T1.5).
 // Everything that touches the driver goes through the types of driver.ts, so the tests run the
 // whole connection against a hand-built driver; the browser part is in docs/MANUAL-TESTS.md.
-import { applyMove, assertFacelets, parseMove, type Facelets, type Move } from '@cubetrace/core';
+import {
+  SOLVED,
+  applyMove,
+  assertFacelets,
+  parseMove,
+  type Facelets,
+  type Move,
+} from '@cubetrace/core';
 
 import {
   loadGanDriver,
@@ -30,6 +37,7 @@ export const FACELETS_RETRY_MS = 1500;
  * {@link FIRST_FACELETS_TIMEOUT_MS} (a wrong MAC address shows up this way).
  */
 export async function connectGanCube(opts: { macProvider: MacProvider }): Promise<CubeConnection> {
+  // The same load as the app's preload (loadGanDriver keeps it): no wait once it has finished.
   const connect = await loadGanDriver();
   return openGanConnection(opts, { connect, toHostMs: driverTimeToHost() });
 }
@@ -40,6 +48,8 @@ export interface GanConnectionDeps {
   connect: ConnectGanDriver;
   /** Converts the driver's timestamps to host milliseconds. */
   toHostMs: (driverMs: number) => number;
+  /** The host clock, for the events the connection makes itself; default {@link hostNow}. */
+  now?: () => number;
   /** Default {@link FIRST_FACELETS_TIMEOUT_MS}. */
   timeoutMs?: number;
   /** Default {@link FACELETS_RETRY_MS}. */
@@ -67,7 +77,7 @@ export async function openGanConnection(
     }
     return mac;
   });
-  const connection = new GanCubeConnection(driver, device, deps.toHostMs);
+  const connection = new GanCubeConnection(driver, device, deps.toHostMs, deps.now ?? hostNow);
   await connection.open(
     deps.timeoutMs ?? FIRST_FACELETS_TIMEOUT_MS,
     deps.retryMs ?? FACELETS_RETRY_MS,
@@ -86,6 +96,14 @@ export function driverTimeToHost(): (driverMs: number) => number {
   }
   const origin = performance.timeOrigin;
   return (driverMs) => origin + driverMs;
+}
+
+/**
+ * The host clock now, on the same scale as {@link driverTimeToHost}'s results:
+ * `performance.timeOrigin + performance.now()` in a window, `Date.now()` elsewhere.
+ */
+export function hostNow(): number {
+  return typeof window === 'undefined' ? Date.now() : performance.timeOrigin + performance.now();
 }
 
 /**
@@ -214,6 +232,7 @@ class GanCubeConnection implements CubeConnection {
     private readonly driver: GanDriverConnection,
     private readonly device: GanDriverDevice | undefined,
     toHostMs: (driverMs: number) => number,
+    private readonly now: () => number,
   ) {
     this.mapper = new GanEventMapper(toHostMs, printable(driver.deviceName));
   }
@@ -231,6 +250,22 @@ class GanCubeConnection implements CubeConnection {
 
   requestBattery(): Promise<void> {
     return this.send({ type: 'REQUEST_BATTERY' });
+  }
+
+  /**
+   * The driver's `REQUEST_RESET` (the cube sets its own state to solved), then, once it is written,
+   * the solved state here and its `facelets` event (`reset: true`, host time now), then a request
+   * for the cube's state, whose answer confirms the reset or, if the cube disagrees, brings its
+   * state as a normal report. Moves that arrive in between are applied as usual.
+   */
+  async resetToSolved(): Promise<void> {
+    await this.send({ type: 'REQUEST_RESET' });
+    if (this.hub.closed) {
+      throw new Error('The cube is disconnected.');
+    }
+    this.state = SOLVED;
+    this.hub.emit({ type: 'facelets', facelets: SOLVED, hostMs: this.now(), reset: true });
+    await this.requestFacelets();
   }
 
   disconnect(): Promise<void> {

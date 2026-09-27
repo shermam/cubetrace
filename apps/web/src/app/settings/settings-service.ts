@@ -20,6 +20,17 @@ export interface CubeMac {
 export type CubeMacResult =
   { readonly ok: true; readonly entry: CubeMac } | { readonly ok: false; readonly error: string };
 
+/** A cube is disconnected after this many minutes without a turn, by default (T1.14). */
+export const IDLE_DISCONNECT_DEFAULT_MINUTES = 5;
+
+/** The longest idle time the setting accepts, in minutes; 0 turns the idle disconnection off. */
+export const IDLE_DISCONNECT_MAX_MINUTES = 60;
+
+/** Whether `minutes` is a value of the idle disconnection setting: a whole number from 0 to 60. */
+export function isIdleDisconnectMinutes(minutes: number): boolean {
+  return Number.isInteger(minutes) && minutes >= 0 && minutes <= IDLE_DISCONNECT_MAX_MINUTES;
+}
+
 /** What `localStorage` holds; every field is checked on reading and falls back on its own. */
 interface StoredSettings {
   /** Null: the default label of this device. */
@@ -28,6 +39,7 @@ interface StoredSettings {
   readonly demoSpeed: number;
   readonly inspection: boolean;
   readonly autoAdvance: boolean;
+  readonly idleDisconnectMinutes: number;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -36,6 +48,7 @@ const DEFAULTS: StoredSettings = {
   demoSpeed: DEMO_SPEED_DEFAULT,
   inspection: false,
   autoAdvance: true,
+  idleDisconnectMinutes: IDLE_DISCONNECT_DEFAULT_MINUTES,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -48,10 +61,10 @@ export function macAddressProblem(text: string): string {
 
 /**
  * The settings the timer and the cube connection need (docs/PLAN.md, T1.6a): the host label that
- * sessions record, the cubes' MAC addresses by Bluetooth name, the demo speed, inspection and
- * auto-advance. Signals, kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that
- * is written on every change. Where the browser blocks storage the settings last until the page
- * closes, and `saveError` says so.
+ * sessions record, the cubes' MAC addresses by Bluetooth name, the idle disconnection (T1.14), the
+ * demo speed, inspection and auto-advance. Signals, kept in `localStorage` (through
+ * BROWSER_GLOBALS) as one JSON object that is written on every change. Where the browser blocks
+ * storage the settings last until the page closes, and `saveError` says so.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
@@ -74,6 +87,11 @@ export class SettingsService {
   readonly inspection = computed(() => this.stored().inspection);
   /** The next scramble appears by itself after a solve. */
   readonly autoAdvance = computed(() => this.stored().autoAdvance);
+  /**
+   * A connected cube is disconnected after this many minutes without a turn, to save its battery;
+   * 0: never. A whole number from 0 to 60, 5 by default.
+   */
+  readonly idleDisconnectMinutes = computed(() => this.stored().idleDisconnectMinutes);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -141,6 +159,15 @@ export class SettingsService {
     this.update({ autoAdvance: on });
   }
 
+  /** Sets the idle disconnection; returns false, changing nothing, unless it is 0 to 60 minutes. */
+  setIdleDisconnectMinutes(minutes: number): boolean {
+    if (!isIdleDisconnectMinutes(minutes)) {
+      return false;
+    }
+    this.update({ idleDisconnectMinutes: minutes });
+    return true;
+  }
+
   private update(change: Partial<StoredSettings>): void {
     const next = { ...this.stored(), ...change };
     this.stored.set(next);
@@ -173,6 +200,7 @@ function readSettings(storage: Storage | null): StoredSettings {
   const demoSpeed = member(parsed, 'demoSpeed');
   const inspection = member(parsed, 'inspection');
   const autoAdvance = member(parsed, 'autoAdvance');
+  const idleDisconnectMinutes = member(parsed, 'idleDisconnectMinutes');
   return {
     hostLabel:
       typeof hostLabel === 'string' && hostLabel.trim() !== ''
@@ -183,6 +211,10 @@ function readSettings(storage: Storage | null): StoredSettings {
       typeof demoSpeed === 'number' && isDemoSpeed(demoSpeed) ? demoSpeed : DEFAULTS.demoSpeed,
     inspection: typeof inspection === 'boolean' ? inspection : DEFAULTS.inspection,
     autoAdvance: typeof autoAdvance === 'boolean' ? autoAdvance : DEFAULTS.autoAdvance,
+    idleDisconnectMinutes:
+      typeof idleDisconnectMinutes === 'number' && isIdleDisconnectMinutes(idleDisconnectMinutes)
+        ? idleDisconnectMinutes
+        : DEFAULTS.idleDisconnectMinutes,
   };
 }
 

@@ -102,13 +102,50 @@ export type ConnectGanDriver = (
   customMacAddressProvider?: GanDriverMacProvider,
 ) => Promise<GanDriverConnection>;
 
+/** The loader behind {@link loadGanDriver}, created on its first call. */
+let loadDriver: (() => Promise<ConnectGanDriver>) | undefined;
+
 /**
  * Loads the driver on first use, so that it is a chunk of its own that the browser downloads
- * only when a real cube connects (the support check and the fake cube never need it).
+ * only when it is needed (the support check and the fake cube never need it). Every caller gets
+ * the same load: the app starts it as soon as it knows the browser has Web Bluetooth (a preload,
+ * T1.14), and `connectGanCube` awaits that same promise, so a click on Connect after the preload
+ * has finished does not wait for the download (Chrome opens its device picker only within a few
+ * seconds of the click). A failed load is not kept: the next call tries again.
  */
-export async function loadGanDriver(): Promise<ConnectGanDriver> {
+export function loadGanDriver(): Promise<ConnectGanDriver> {
+  loadDriver ??= createGanDriverLoader(importGanDriver);
+  return loadDriver();
+}
+
+/** The dynamic import that makes the driver a chunk of its own. */
+function importGanDriver(): Promise<unknown> {
   // @ts-expect-error -- TS7016: the fork is JavaScript without a declaration file; typed above.
-  const driver: unknown = await import('gan-web-bluetooth/src/index.js');
+  return import('gan-web-bluetooth/src/index.js');
+}
+
+/**
+ * {@link loadGanDriver} with the import injected (the tests' fake one): a function that imports the
+ * module once, however many times it is called and whether or not the import has finished, and
+ * resolves with its `connectGanCube`; after a failure, the next call imports again.
+ */
+export function createGanDriverLoader(
+  importModule: () => Promise<unknown>,
+): () => Promise<ConnectGanDriver> {
+  let load: Promise<ConnectGanDriver> | null = null;
+  return () => {
+    load ??= importModule()
+      .then(connectGanCubeOf)
+      .catch((error: unknown) => {
+        load = null;
+        throw error;
+      });
+    return load;
+  };
+}
+
+/** The driver module's `connectGanCube`, checked. */
+function connectGanCubeOf(driver: unknown): ConnectGanDriver {
   if (typeof driver !== 'object' || driver === null || !('connectGanCube' in driver)) {
     throw new Error('The GAN driver (gan-web-bluetooth) does not export connectGanCube.');
   }

@@ -69,6 +69,36 @@ page's Cube section (click "Cube", under the solve list, to open it), whose move
   on it opens the picker, and choosing the cube connects it again.
 - [ ] Disconnect from the app (the pill, then Disconnect), then connect again without reloading the
   page.
+- [ ] Mark as solved (T1.14). Disconnect the cube (the pill, then Disconnect), scramble it while it
+  is disconnected, and connect it again: write down whether the net (the Cube section) matches the
+  cube in your hands. Solve the cube in your hands, then click "Mark as solved" (in the Cube section,
+  or in the pill's details): the net shows solved at once, the attempt on screen begins again with
+  the same scramble and number, and nothing is added to the solve list; scrambling as shown arms it
+  as usual, and its solve is recorded. Then turn one face and back: the move log shows exactly those
+  two moves and the net follows them (no stray moves after the reset). (Without a cube:
+  `/?demo=0&speed=0.25`, open the Cube section and click it during the scramble: the demo cube stops,
+  solved.)
+- [ ] Idle disconnection (T1.14). Settings → Idle cube shows 5. Set it to 1, connect the cube and
+  leave it still: after one minute the pill says "Reconnect", and its tooltip and the Timer page,
+  under the button, say "Disconnected after 1 minute without a turn, to save the cube's battery."
+  One click on Reconnect connects it again. Turning a face now and then keeps it connected. In a
+  background tab the disconnection can come up to a minute late: Chrome throttles the timers of
+  hidden tabs, which is fine. Set it back to 5 (0 never disconnects).
+- [ ] Disconnect diagnostics (T1.14). With Settings → Idle cube at 0, connect the cube, switch to
+  another tab or app and leave the cube untouched for 10 minutes, then come back. Write down whether
+  the cube was still connected. If it was not, the reason under Reconnect (and in the pill's
+  tooltip) says how long the cube had gone without a turn and whether this tab was in the
+  background. Open Chrome's console (Ctrl+Shift+J, or ⌥⌘J on a Mac; for the phone, chrome://inspect
+  on a laptop, with the phone plugged in over USB and USB debugging on) and paste into the issue the
+  line that starts with `cubetrace: the cube disconnected`, with the reason shown. It looks like this
+  (the times in ms; `hiddenMs` is how long the tab had been hidden, `null` if it was visible):
+
+  ```
+  cubetrace: the cube disconnected {"reason":"The Bluetooth connection was closed.","idleMs":372104,"visibilityState":"hidden","hiddenMs":311875,"connectedMs":905233,"battery":83,"model":"GAN12ui"}
+  ```
+
+  Do the same whenever the cube disconnects by itself. If it was still connected, turn a face: the
+  move log follows (back in the tab, the app asked the cube for its state).
 
 ## T1.6 — timer
 

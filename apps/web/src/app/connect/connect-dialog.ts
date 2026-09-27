@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { normalizeMac } from '@cubetrace/gan';
 
-import { CubeService } from '../cube/cube-service';
+import { CubeService, MARK_AS_SOLVED_HINT } from '../cube/cube-service';
 import { ConnectActions } from './connect-actions';
 import { ConnectDialogService } from './connect-dialog-service';
 import { FlagSteps } from './flag-steps';
@@ -25,7 +25,7 @@ import { FlagSteps } from './flag-steps';
  * spinner; disconnected, the error or the last connection's end, the support hint, the flag's
  * steps, Connect cube and Demo cube. It closes by itself once a cube connects, unless it was opened
  * for the details, and once the MAC prompt that opened it is answered; Cancel on the prompt closes
- * it too.
+ * it too. The connected cube's details also offer "Mark as solved" (T1.14).
  */
 @Component({
   selector: 'app-connect-dialog',
@@ -41,6 +41,7 @@ export class ConnectDialog {
   private readonly macInput = viewChild<ElementRef<HTMLInputElement>>('macInput');
 
   protected readonly support = this.cube.support;
+  protected readonly markAsSolvedHint = MARK_AS_SOLVED_HINT;
   /** The flag's chrome://flags address, where this browser needs it to read MAC addresses. */
   protected readonly flagUrl = this.support.flagUrl ?? null;
   protected readonly macText = signal('');
@@ -120,6 +121,10 @@ export class ConnectDialog {
 
   protected disconnect(): void {
     void this.cube.disconnect();
+  }
+
+  protected markAsSolved(): void {
+    void this.cube.resetToSolved();
   }
 
   protected onMacInput(text: string): void {

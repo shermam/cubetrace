@@ -60,6 +60,8 @@ export class FakeCube implements CubeConnection {
   private plays: Promise<void> = Promise.resolve();
   /** Cancels the play in progress, if any. */
   private stopPlay: (() => void) | undefined;
+  /** How many times `stop()` was called: a play queued before a stop does not start. */
+  private stops = 0;
 
   constructor(opts: FakeCubeOptions = {}) {
     const start = opts.start ?? SOLVED;
@@ -87,8 +89,8 @@ export class FakeCube implements CubeConnection {
    * Emits `moves` on their schedule: the first one at once (on a zero-delay timer), each later
    * one `(ms − first ms) / speed` host milliseconds after the play started. Plays queue: a
    * second `play()` starts when the first has finished. Resolves when the last move has been
-   * emitted, or early if the cube is disconnected meanwhile. Rejects if the schedule goes back
-   * in time or the cube is already disconnected.
+   * emitted, or early if the cube is stopped or disconnected meanwhile. Rejects if the schedule
+   * goes back in time or the cube is already disconnected.
    */
   play(moves: readonly ScheduledMove[]): Promise<void> {
     if (this.hub.closed) {
@@ -109,9 +111,22 @@ export class FakeCube implements CubeConnection {
         );
       }
     }
-    const played = this.plays.then(() => this.schedule(moves));
+    const stops = this.stops;
+    const played = this.plays.then(() =>
+      stops === this.stops ? this.schedule(moves) : Promise.resolve(),
+    );
     this.plays = played;
     return played;
+  }
+
+  /**
+   * Stops the play in progress and drops the queued ones: their promises resolve at once and no
+   * more of their moves come. The cube stays connected, in the state its last move left it; a
+   * later `play()` runs as usual.
+   */
+  stop(): void {
+    this.stops++;
+    this.stopPlay?.();
   }
 
   /** One move, now (synchronously): for scripted scenarios. Throws once disconnected. */
@@ -128,6 +143,21 @@ export class FakeCube implements CubeConnection {
       return Promise.reject(disconnectedError());
     }
     this.hub.emit({ type: 'facelets', facelets: this.state, hostMs: this.now() });
+    return Promise.resolve();
+  }
+
+  /**
+   * Sets the simulated state to solved and emits a `facelets` event that says so, with
+   * `reset: true`, as a GAN cube's `resetToSolved()` does (without the confirming report: the
+   * fake cube's state is the one it reports). A play in progress goes on from the solved state,
+   * as a solver's hands would; `stop()` stops it. Rejects once disconnected.
+   */
+  resetToSolved(): Promise<void> {
+    if (this.hub.closed) {
+      return Promise.reject(disconnectedError());
+    }
+    this.state = SOLVED;
+    this.hub.emit({ type: 'facelets', facelets: SOLVED, hostMs: this.now(), reset: true });
     return Promise.resolve();
   }
 

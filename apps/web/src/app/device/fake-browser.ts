@@ -210,6 +210,69 @@ export class FakePerformance {
   }
 }
 
+/**
+ * `setTimeout` and `clearTimeout` on the test's host clock: `advance()` moves the clock (a
+ * {@link FakePerformance}) forward and runs each timer that comes due, at its own time, in the
+ * order of their times (and of their creation, for equal times). The clock can also be moved
+ * without the timers, with the `FakePerformance`'s own `advance()`: they then run at the next
+ * `advance()` here.
+ */
+export class FakeTimers {
+  private nextHandle = 1;
+  private readonly timers = new Map<number, { at: number; callback: () => void }>();
+
+  constructor(private readonly clock: FakePerformance) {}
+
+  readonly setTimeout = (callback: () => void, ms = 0): number => {
+    const handle = this.nextHandle++;
+    this.timers.set(handle, { at: this.clock.now() + Math.max(0, ms), callback });
+    return handle;
+  };
+
+  readonly clearTimeout = (handle: number): void => {
+    this.timers.delete(handle);
+  };
+
+  /** How many timers wait. */
+  get pending(): number {
+    return this.timers.size;
+  }
+
+  /** Moves the clock `ms` forward, running the timers that come due on the way. */
+  advance(ms: number): void {
+    const end = this.clock.now() + ms;
+    for (;;) {
+      let next: [number, { at: number; callback: () => void }] | null = null;
+      for (const entry of this.timers) {
+        if (entry[1].at <= end && (next === null || entry[1].at < next[1].at)) {
+          next = entry;
+        }
+      }
+      if (next === null) {
+        break;
+      }
+      const [handle, timer] = next;
+      this.timers.delete(handle);
+      this.clock.advance(Math.max(0, timer.at - this.clock.now()));
+      timer.callback();
+    }
+    this.clock.advance(Math.max(0, end - this.clock.now()));
+  }
+}
+
+/**
+ * `document`'s visibility: `visibilityState`, which `setVisibility()` changes, firing
+ * `visibilitychange` as a browser does when the tab is hidden or shown again.
+ */
+export class FakeDocument extends EventTarget {
+  visibilityState: DocumentVisibilityState = 'visible';
+
+  setVisibility(state: DocumentVisibilityState): void {
+    this.visibilityState = state;
+    this.dispatchEvent(new Event('visibilitychange'));
+  }
+}
+
 /** `requestAnimationFrame`: callbacks wait until the test runs a frame with `frame()`. */
 export class FakeAnimationFrames {
   private nextHandle = 1;

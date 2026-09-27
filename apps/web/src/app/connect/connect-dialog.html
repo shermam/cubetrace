@@ -39,7 +39,16 @@
       </dl>
       <div class="actions">
         <button type="button" (click)="disconnect()">Disconnect</button>
+        <button
+          type="button"
+          data-testid="reset-state"
+          aria-describedby="dialog-reset-hint"
+          (click)="markAsSolved()"
+        >
+          Mark as solved
+        </button>
       </div>
+      <p id="dialog-reset-hint" class="note">{{ markAsSolvedHint }}</p>
     }
     @case ('connecting') {
       @if (cube.macPrompt(); as prompt) {

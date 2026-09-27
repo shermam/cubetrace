@@ -1,11 +1,11 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { parseMove } from '@cubetrace/core';
+import { SOLVED, applyMoves, parseMove, parseMoves } from '@cubetrace/core';
 import { FakeCube } from '@cubetrace/gan';
 
 import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { FakeLocalStorage, settle } from '../device/fake-browser';
-import { CubeService, GAN_CONNECTOR } from './cube-service';
+import { CubeService, MARK_AS_SOLVED_HINT } from './cube-service';
 import { FakeGanConnector, asGanCube, bluetoothNavigator } from './cube-testing';
 import { LiveCubePanel } from './live-cube-panel';
 
@@ -21,7 +21,7 @@ describe('LiveCubePanel', () => {
           provide: BROWSER_GLOBALS,
           useValue: { navigator: bluetoothNavigator(true), localStorage: new FakeLocalStorage() },
         },
-        { provide: GAN_CONNECTOR, useValue: connector.connect },
+        ...connector.providers,
       ],
     });
     fixture = TestBed.createComponent(LiveCubePanel);
@@ -34,6 +34,10 @@ describe('LiveCubePanel', () => {
     await connecting;
     await fixture.whenStable();
   }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   function element(testId: string): HTMLElement | null {
     return (fixture.nativeElement as HTMLElement).querySelector(`[data-testid="${testId}"]`);
@@ -107,5 +111,34 @@ describe('LiveCubePanel', () => {
     expect(element('cube-net')?.getAttribute('data-facelets')).toBe(fake.facelets);
     expect(logRows()).toHaveLength(1);
     expect(element('open-connect')?.textContent.trim()).toBe('Reconnect');
+  });
+
+  it('"Mark as solved": enabled while a cube is connected; it sets the state to solved', async () => {
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    await render();
+    const reset = (): HTMLButtonElement | null =>
+      (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+        '[data-testid="reset-state"]',
+      );
+    expect(reset()?.disabled).toBe(true);
+    expect(reset()?.textContent.trim()).toBe('Mark as solved');
+    const hint = reset()?.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(hint)?.textContent.trim()).toBe(MARK_AS_SOLVED_HINT);
+
+    const fake = new FakeCube({ start: applyMoves(SOLVED, parseMoves("R U'")) });
+    await connect(fake);
+    expect(element('cube-solved')?.textContent.trim()).toBe('Not solved');
+    expect(reset()?.disabled).toBe(false);
+
+    reset()?.click();
+    await settle();
+    await fixture.whenStable();
+    expect(element('cube-solved')?.textContent.trim()).toBe('Solved');
+    expect(element('cube-net')?.getAttribute('data-facelets')).toBe(SOLVED);
+    expect(fake.facelets).toBe(SOLVED);
+
+    await fake.disconnect('The Bluetooth connection was closed.');
+    await fixture.whenStable();
+    expect(reset()?.disabled).toBe(true);
   });
 });

@@ -25,6 +25,19 @@
   <app-cube-net [facelets]="facelets" />
 }
 
+<div class="reset">
+  <button
+    type="button"
+    data-testid="reset-state"
+    aria-describedby="panel-reset-hint"
+    [disabled]="cube.status() !== 'connected'"
+    (click)="markAsSolved()"
+  >
+    Mark as solved
+  </button>
+  <p id="panel-reset-hint">{{ markAsSolvedHint }}</p>
+</div>
+
 <p id="move-log-legend" class="legend">
   Latest moves, newest first. Gap: ms since the move before, on the cube's clock. Host: the same gap
   on this device's clock (0 between the moves of one Bluetooth packet). ■: the last move of its

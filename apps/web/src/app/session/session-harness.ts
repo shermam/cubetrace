@@ -14,16 +14,18 @@ import {
 import { FakeCube, type CubeConnection, type CubeEvent } from '@cubetrace/gan';
 import { Subject, merge } from 'rxjs';
 
-import { CubeService, GAN_CONNECTOR } from '../cube/cube-service';
+import { CubeService } from '../cube/cube-service';
 import { DEMO_FILE, FakeGanConnector, asGanCube, bluetoothNavigator } from '../cube/cube-testing';
 import { DEMO_SOLVES_URL } from '../cube/demo';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import {
   FakeAnimationFrames,
+  FakeDocument,
   FakeFetch,
   FakeLocalStorage,
   FakePerformance,
   FakeStorageManager,
+  FakeTimers,
   FakeWakeLock,
   settle,
 } from '../device/fake-browser';
@@ -43,6 +45,10 @@ export interface Setup {
   wakeLock: FakeWakeLock;
   storage: FakeStorageManager;
   localStorage: FakeLocalStorage;
+  /** The tab's visibility. */
+  page: FakeDocument;
+  /** Timers on `perf`'s clock, such as the cube's idle disconnection: they run on `advance()`. */
+  timers: FakeTimers;
   connector: FakeGanConnector;
   /** Scrambles handed out so far. */
   made: string[];
@@ -61,6 +67,8 @@ export function setup(
 ): Setup {
   const perf = new FakePerformance();
   const frames = new FakeAnimationFrames();
+  const page = new FakeDocument();
+  const timers = new FakeTimers(perf);
   const wakeLock = new FakeWakeLock();
   const storage = new FakeStorageManager({ grant: true });
   const localStorage = opts.localStorage ?? new FakeLocalStorage();
@@ -79,9 +87,12 @@ export function setup(
           requestAnimationFrame: frames.request,
           cancelAnimationFrame: frames.cancel,
           fetch: new FakeFetch({ [DEMO_SOLVES_URL]: DEMO_FILE }).fetch,
+          document: page,
+          setTimeout: timers.setTimeout,
+          clearTimeout: timers.clearTimeout,
         },
       },
-      { provide: GAN_CONNECTOR, useValue: connector.connect },
+      ...connector.providers,
       { provide: SESSION_STORAGE, useValue: { store, kind: 'memory' } },
       ...(opts.providers ?? []),
       {
@@ -107,6 +118,8 @@ export function setup(
     wakeLock,
     storage,
     localStorage,
+    page,
+    timers,
     connector,
     made,
   };
@@ -156,6 +169,7 @@ export function scripted(fake: FakeCube): {
       },
       requestFacelets: () => fake.requestFacelets(),
       requestBattery: () => fake.requestBattery(),
+      resetToSolved: () => fake.resetToSolved(),
       disconnect: () => fake.disconnect(),
     },
     emit: (event) => {

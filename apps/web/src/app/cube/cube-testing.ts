@@ -1,10 +1,11 @@
 // Test doubles for the cube code, for unit tests: a GAN connector that the test answers, a GAN
 // connection backed by the fake cube, a navigator with Web Bluetooth, and a small demo file.
 // Nothing in the app imports this file, so it is not in the bundle.
+import type { Provider } from '@angular/core';
 import { SOLVED, applyMoves, parseMoves } from '@cubetrace/core';
 import type { CubeConnection, FakeCube, MacProvider } from '@cubetrace/gan';
 
-import type { GanConnector } from './cube-service';
+import { GAN_CONNECTOR, GAN_DRIVER_LOADER, type GanConnector } from './cube-service';
 
 /** One call of the fake connector: what the service passed, and how the test answers. */
 export interface ConnectCall {
@@ -13,14 +14,32 @@ export interface ConnectCall {
   reject(error: unknown): void;
 }
 
-/** `connectGanCube` for tests: every call waits until the test resolves or rejects it. */
+/**
+ * `connectGanCube` for tests: every call waits until the test resolves or rejects it. With it, a
+ * `loadGanDriver` that imports nothing and counts its calls (`driverLoads`): `providers` puts both
+ * in place of the real ones.
+ */
 export class FakeGanConnector {
   readonly calls: ConnectCall[] = [];
+  driverLoads = 0;
 
   readonly connect: GanConnector = (opts) =>
     new Promise<CubeConnection>((resolve, reject) => {
       this.calls.push({ macProvider: opts.macProvider, resolve, reject });
     });
+
+  readonly loadDriver = (): Promise<unknown> => {
+    this.driverLoads++;
+    return Promise.resolve();
+  };
+
+  /** The providers of GAN_CONNECTOR and GAN_DRIVER_LOADER. */
+  get providers(): Provider[] {
+    return [
+      { provide: GAN_CONNECTOR, useValue: this.connect },
+      { provide: GAN_DRIVER_LOADER, useValue: this.loadDriver },
+    ];
+  }
 
   /** The latest call; throws if there is none. */
   get last(): ConnectCall {
@@ -42,6 +61,7 @@ export function asGanCube(cube: FakeCube): CubeConnection {
     },
     requestFacelets: () => cube.requestFacelets(),
     requestBattery: () => cube.requestBattery(),
+    resetToSolved: () => cube.resetToSolved(),
     disconnect: () => cube.disconnect(),
   };
 }
