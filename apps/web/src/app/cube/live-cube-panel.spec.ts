@@ -4,7 +4,7 @@ import { FakeCube } from '@cubetrace/gan';
 
 import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
-import { FakeLocalStorage } from '../device/fake-browser';
+import { FakeLocalStorage, settle } from '../device/fake-browser';
 import { CubeService, GAN_CONNECTOR } from './cube-service';
 import { FakeGanConnector, asGanCube, bluetoothNavigator } from './cube-testing';
 import { LiveCubePanel } from './live-cube-panel';
@@ -46,16 +46,29 @@ describe('LiveCubePanel', () => {
     );
   }
 
-  it('offers to connect a cube while none is connected', async () => {
+  it('offers to connect a cube while none is connected: one click connects, without a dialog', async () => {
     await render();
 
     expect(element('live-cube-status')?.textContent).toContain('No cube connected.');
     expect(element('cube-net')).toBeNull();
     expect(element('cube-solved')).toBeNull();
     expect(logRows()).toEqual([['No moves yet.']]);
+    expect(element('open-connect')?.textContent.trim()).toBe('Connect a cube');
+    expect(element('try-demo')).not.toBeNull();
 
     element('open-connect')?.click();
-    expect(TestBed.inject(ConnectDialogService).isOpen()).toBe(true);
+    await fixture.whenStable();
+    expect(connector.calls).toHaveLength(1);
+    expect(element('live-cube-status')?.textContent.trim()).toBe('Connecting…');
+    expect(element('open-connect')?.textContent.trim()).toBe('Connecting…');
+    expect(TestBed.inject(ConnectDialogService).isOpen()).toBe(false);
+
+    connector.last.resolve(asGanCube(new FakeCube()));
+    await settle();
+    await fixture.whenStable();
+    expect(element('cube-solved')?.textContent.trim()).toBe('Solved');
+    expect(element('open-connect')).toBeNull();
+    expect(TestBed.inject(ConnectDialogService).isOpen()).toBe(false);
   });
 
   it("shows the cube's state, whether it is solved, and its moves newest first", async () => {
@@ -93,6 +106,6 @@ describe('LiveCubePanel', () => {
     expect(element('live-cube-status')?.textContent).toContain('Disconnected');
     expect(element('cube-net')?.getAttribute('data-facelets')).toBe(fake.facelets);
     expect(logRows()).toHaveLength(1);
-    expect(element('open-connect')).not.toBeNull();
+    expect(element('open-connect')?.textContent.trim()).toBe('Reconnect');
   });
 });

@@ -108,7 +108,7 @@ describe('TimerPage', () => {
     press('n', {}, input);
     press('Escape', { ctrlKey: true });
     press('x');
-    TestBed.inject(ConnectDialogService).open();
+    TestBed.inject(ConnectDialogService).open('details');
     press('Escape');
     input.remove();
     expect(dnf).toHaveBeenCalledTimes(1);

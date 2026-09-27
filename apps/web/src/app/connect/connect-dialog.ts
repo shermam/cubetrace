@@ -9,37 +9,40 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { Router } from '@angular/router';
 import { normalizeMac } from '@cubetrace/gan';
 
 import { CubeService } from '../cube/cube-service';
-import { BROWSER_GLOBALS } from '../device/browser-globals';
-import { errorMessage } from '../shared/error-message';
+import { ConnectActions } from './connect-actions';
 import { ConnectDialogService } from './connect-dialog-service';
+import { FlagSteps } from './flag-steps';
 
 /**
- * The connect dialog (docs/PLAN.md, T1.6a), a native modal `<dialog>`: what this browser can do
- * for a GAN cube and how to enable the rest; Connect cube and Demo cube; the MAC prompt when the
- * driver asks; a spinner while connecting; the connected cube's details and Disconnect; errors
- * in plain words. The state is `CubeService`'s; this component renders it and forwards clicks.
+ * The connect dialog (docs/PLAN.md, T1.6a and T1.12), a native modal `<dialog>`. Connecting a cube
+ * takes no dialog (see `ConnectActions`); this one opens only when it is needed
+ * (`ConnectDialogReason`): the MAC prompt when the driver asks, with the flag that makes it
+ * unnecessary folded under it; what this browser lacks; the details of a failure; the connected
+ * cube's details and Disconnect. Its content follows `CubeService`'s state: while connecting, a
+ * spinner; disconnected, the error or the last connection's end, the support hint, the flag's
+ * steps, Connect cube and Demo cube. It closes by itself once a cube connects, unless it was opened
+ * for the details, and once the MAC prompt that opened it is answered; Cancel on the prompt closes
+ * it too.
  */
 @Component({
   selector: 'app-connect-dialog',
+  imports: [FlagSteps],
   templateUrl: './connect-dialog.html',
   styleUrl: './connect-dialog.scss',
 })
 export class ConnectDialog {
   protected readonly cube = inject(CubeService);
-  private readonly dialogs = inject(ConnectDialogService);
-  private readonly router = inject(Router);
-  private readonly navigator = inject(BROWSER_GLOBALS).navigator;
+  protected readonly dialogs = inject(ConnectDialogService);
+  private readonly actions = inject(ConnectActions);
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly macInput = viewChild<ElementRef<HTMLInputElement>>('macInput');
 
   protected readonly support = this.cube.support;
-  /** The flag's name, the part of its chrome://flags address after `#`. */
-  protected readonly flagName = this.support.flagUrl?.split('#')[1] ?? '';
-  protected readonly copyNotice = signal<string | null>(null);
+  /** The flag's chrome://flags address, where this browser needs it to read MAC addresses. */
+  protected readonly flagUrl = this.support.flagUrl ?? null;
   protected readonly macText = signal('');
   protected readonly macError = signal<string | null>(null);
   protected readonly remember = signal(true);
@@ -67,14 +70,26 @@ export class ConnectDialog {
         dialog.close();
       }
     });
-    // The driver's MAC prompt opens the dialog if it was closed, with an empty field.
+    // The driver's MAC prompt opens the dialog if it was closed, with an empty field. An open
+    // dialog keeps its reason: one opened for the details stays after the cube connects.
     effect(() => {
       if (this.cube.macPrompt() !== null) {
         untracked(() => {
           this.macText.set('');
           this.macError.set(null);
           this.remember.set(true);
-          this.dialogs.open();
+          if (!this.dialogs.isOpen()) {
+            this.dialogs.open('prompt');
+          }
+        });
+      }
+    });
+    // Connected: back to the page, unless the dialog was opened for the cube's details.
+    effect(() => {
+      const reason = this.dialogs.reason();
+      if (reason !== null && reason !== 'details' && this.cube.status() === 'connected') {
+        untracked(() => {
+          this.dialogs.close();
         });
       }
     });
@@ -83,10 +98,9 @@ export class ConnectDialog {
     });
   }
 
-  /** The dialog closed: Esc, the close button, or the service. */
+  /** The dialog closed: Esc, the close button, Cancel on the MAC prompt, or the service. */
   protected onClosed(): void {
     this.dialogs.close();
-    this.copyNotice.set(null);
     // Nobody is left to answer the prompt: the connection fails, saying no address was given.
     this.cube.cancelMacPrompt();
   }
@@ -96,20 +110,12 @@ export class ConnectDialog {
   }
 
   protected connectCube(): void {
-    void (this.cube.canReconnect() ? this.cube.reconnect() : this.cube.connect());
+    this.actions.connect();
   }
 
-  /**
-   * The demo cube: the solve, speed and mis-scramble of the address's `?demo=`, `?speed=` and
-   * `?misscramble=`, if any.
-   */
+  /** The demo cube, with the address's `?demo=`, `?speed=` and `?misscramble=`, if any. */
   protected demoCube(): void {
-    const query = this.router.routerState.snapshot.root.queryParamMap;
-    void this.cube.startDemo({
-      demo: query.get('demo'),
-      speed: query.get('speed'),
-      misscramble: query.get('misscramble'),
-    });
+    this.actions.demo();
   }
 
   protected disconnect(): void {
@@ -123,29 +129,17 @@ export class ConnectDialog {
 
   protected submitMac(event: Event): void {
     event.preventDefault();
-    this.macError.set(this.cube.answerMac(this.macText(), this.remember()));
+    const problem = this.cube.answerMac(this.macText(), this.remember());
+    this.macError.set(problem);
+    // Answered: back to the page, whose connect button and pill follow the connection from here.
+    if (problem === null && this.dialogs.reason() === 'prompt') {
+      this.dialogs.close();
+    }
   }
 
+  /** No address: connecting fails, and the failure is shown where Connect was clicked. */
   protected cancelMac(): void {
     this.cube.cancelMacPrompt();
-  }
-
-  /** chrome:// addresses cannot be links, so the flag's address is copied for pasting. */
-  protected copyFlag(address: string): void {
-    const clipboard = this.navigator?.clipboard;
-    if (clipboard === undefined) {
-      this.copyNotice.set('Copying is not available here: select the address and copy it.');
-      return;
-    }
-    clipboard.writeText(address).then(
-      () => {
-        this.copyNotice.set('Copied. Paste it in the address bar.');
-      },
-      (error: unknown) => {
-        this.copyNotice.set(
-          `Copying failed (${errorMessage(error)}): select the address and copy it.`,
-        );
-      },
-    );
+    this.dialogs.close();
   }
 }

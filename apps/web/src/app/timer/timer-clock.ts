@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 
-import { ConnectDialogService } from '../connect/connect-dialog-service';
+import { CubeConnect } from '../connect/cube-connect';
+import { CubeService } from '../cube/cube-service';
 import { SessionService, type TimerPhase } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
 
@@ -23,10 +24,12 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
  * big time (see `timerDisplay`), the attempt's number, and Skip scramble (N), DNF (Esc), Delete last
  * (Delete) and New session. The keys are handled by the timer page. While the time is a result
  * (solved or DNF), the line under it names that attempt and says whether its record is saved: the
- * attempt's number below it is already the next attempt's with auto-advance.
+ * attempt's number below it is already the next attempt's with auto-advance. While no cube is
+ * connected, "Connect a cube" and "Try the demo" (T1.12), also while an attempt waits for its cube.
  */
 @Component({
   selector: 'app-timer-clock',
+  imports: [CubeConnect],
   template: `
     <p class="status" role="status" data-testid="timer-status" [attr.data-phase]="session.phase()">
       {{ status() }}
@@ -50,10 +53,8 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
     <p class="attempt">
       <span data-testid="attempt-index">Attempt {{ session.index() }}</span>
     </p>
-    @if (session.phase() === 'no-cube') {
-      <button type="button" class="primary" data-testid="timer-connect" (click)="dialogs.open()">
-        Connect a cube
-      </button>
+    @if (showConnect()) {
+      <app-cube-connect testId="timer-connect" />
     }
     <div class="actions">
       <button
@@ -160,6 +161,10 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
       justify-content: center;
     }
 
+    app-cube-connect {
+      justify-items: center;
+    }
+
     kbd {
       margin-left: var(--space-1);
       color: var(--text-muted);
@@ -174,10 +179,15 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
 })
 export class TimerClock {
   protected readonly session = inject(SessionService);
-  protected readonly dialogs = inject(ConnectDialogService);
+  private readonly cube = inject(CubeService);
   private readonly settings = inject(SettingsService);
 
   protected readonly display = this.session.display;
+
+  /** Once the session is read, while no cube is connected (a paused attempt included). */
+  protected readonly showConnect = computed(
+    () => this.session.phase() !== 'loading' && this.cube.status() !== 'connected',
+  );
 
   /**
    * The attempt whose result the time shows, and whether its record is saved ("Saving…", "Saved",
