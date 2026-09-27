@@ -702,12 +702,15 @@ chunk names.
 Chrome's fake camera at 1080p30 with its Opus audio, a `Cut` with the bytes in base64 (236 kB),
 recorded through `/capture-lab` by `apps/web/scripts/record-media-fixture.mts`
 (`fixtures/media/README.md`); `test-media.ts` reads it for the tests of the muxer, the clip writer
-and the worker. The end-to-end test (`capture.spec.ts`) saves the last 3 s through the lab's "Mux
-and save" on the fake camera, reads both files back from the origin private file system, plays the
-MP4 in a `<video>` to its end and demuxes it with mediabunny in Node; in two runs: 98 and 99 frames
-(3.3 s from the keyframe before the start), 557 and 559 kB, cut, muxed and written in 42 and 48 ms,
-the element's duration within 0.1 ms of the frames' and as many frames played as frames.json has.
-The production build's worker saves a clip under `/cubetrace/` too.
+and the worker. Since CI's Chromium encodes neither H.264 nor AAC, a test describes the sample's
+chunks as H.264 High 4.0 (an avcC) and AAC-LC: the MP4 then has an `avc1` track carrying that avcC
+and an `mp4a` track, which mediabunny reads back as `avc1.640028` and `mp4a.40.2`; the pictures
+themselves come only from real devices. The end-to-end test (`capture.spec.ts`) saves the last 3 s
+through the lab's "Mux and save" on the fake camera, reads both files back from the origin private
+file system, plays the MP4 in a `<video>` to its end and demuxes it with mediabunny in Node; in two
+runs: 98 and 99 frames (3.3 s from the keyframe before the start), 557 and 559 kB, cut, muxed and
+written in 42 and 48 ms, the element's duration within 0.1 ms of the frames' and as many frames
+played as frames.json has. The production build's worker saves a clip under `/cubetrace/` too.
 
 **Saving takes the worker from its frames for a moment.** Muxing is synchronous work in the capture
 worker, and so are the access handles' writes: while they run, the camera's frames wait in
