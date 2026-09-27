@@ -209,6 +209,10 @@ export class CubeService {
       // there, so the failure here is dropped.
       void this.loadDriver().catch(() => undefined);
     }
+    const destroyRef = inject(DestroyRef);
+    destroyRef.onDestroy(() => {
+      this.clearIdleTimer();
+    });
     const page = this.globals.document;
     if (page !== undefined) {
       if (page.visibilityState === 'hidden') {
@@ -218,9 +222,8 @@ export class CubeService {
         this.onVisibilityChange(page.visibilityState);
       };
       page.addEventListener('visibilitychange', onVisibilityChange);
-      inject(DestroyRef).onDestroy(() => {
+      destroyRef.onDestroy(() => {
         page.removeEventListener('visibilitychange', onVisibilityChange);
-        this.clearIdleTimer();
       });
     }
     // A new idle setting applies at once, counted from now: 0 stops the countdown.
