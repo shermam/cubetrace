@@ -1,0 +1,68 @@
+<div class="head">
+  <h2 id="live-cube-heading">Cube</h2>
+  @if (cube.facelets() !== null) {
+    <p class="solved" data-testid="cube-solved" [class.is-solved]="cube.solved()">
+      {{ cube.solved() ? 'Solved' : 'Not solved' }}
+    </p>
+  }
+</div>
+
+@if (cube.status() === 'connecting') {
+  <p class="muted" data-testid="live-cube-status">Connecting…</p>
+} @else if (cube.status() === 'disconnected') {
+  <p class="muted" data-testid="live-cube-status">
+    @if (cube.facelets() === null) {
+      No cube connected. Connect one, or try the demo cube.
+    } @else {
+      Disconnected: this was the cube's last state.
+    }
+  </p>
+  <button type="button" class="primary" data-testid="open-connect" (click)="dialogs.open()">
+    Connect a cube
+  </button>
+}
+
+@if (cube.facelets(); as facelets) {
+  <app-cube-net [facelets]="facelets" />
+}
+
+<p id="move-log-legend" class="legend">
+  Latest moves, newest first. Gap: ms since the move before, on the cube's clock. Host: the same gap
+  on this device's clock (0 between the moves of one Bluetooth packet). ■: the last move of its
+  packet.
+</p>
+<div class="log">
+  <table
+    aria-label="Latest moves"
+    aria-describedby="move-log-legend"
+    data-testid="move-log"
+    [attr.data-move-count]="cube.moveCount()"
+  >
+    <thead>
+      <tr>
+        <th scope="col">#</th>
+        <th scope="col">Move</th>
+        <th scope="col">Cube ms</th>
+        <th scope="col">Gap</th>
+        <th scope="col">Host</th>
+        <th scope="col"><abbr title="Last move of its Bluetooth packet">Pkt</abbr></th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (row of rows(); track row.n) {
+        <tr>
+          <td>{{ row.n }}</td>
+          <td>{{ row.move }}</td>
+          <td>{{ row.cubeMs }}</td>
+          <td>{{ row.gapMs ?? '–' }}</td>
+          <td>{{ row.hostGapMs ?? '–' }}</td>
+          <td>{{ row.packetLast ? '■' : '' }}</td>
+        </tr>
+      } @empty {
+        <tr>
+          <td colspan="6" class="empty">No moves yet.</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

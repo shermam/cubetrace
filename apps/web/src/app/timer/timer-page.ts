@@ -1,14 +1,21 @@
-import { Component, signal } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { coreVersion, generateScramble } from '@cubetrace/core';
 
+import { CubeService } from '../cube/cube-service';
+import { demoRequestFrom } from '../cube/demo';
+import { LiveCubePanel } from '../cube/live-cube-panel';
+
 /**
- * `/`: the timer. Placeholder until T1.6, which fills the three regions of its responsive
+ * `/`: the timer. Placeholder until T1.6b, which fills the three regions of its responsive
  * layout: stacked on a phone (scramble, time, breakdown and solves); on wider screens the
  * scramble and the time on the left and the breakdown and solves on the right. It also shows
- * the core library's version string, and a scramble from cubing.js as text (T1.2).
+ * the core library's version string, a scramble from cubing.js as text (T1.2), and the live cube
+ * panel (T1.6a). `?demo=<index>&speed=<n>` connects the demo cube on load.
  */
 @Component({
   selector: 'app-timer-page',
+  imports: [LiveCubePanel],
   template: `
     <h1>Timer</h1>
     <div class="timer-layout">
@@ -20,13 +27,14 @@ import { coreVersion, generateScramble } from '@cubetrace/core';
         } @else {
           <p class="placeholder">Generating a scramble…</p>
         }
-        <p class="placeholder">Its picture arrives with T1.6.</p>
+        <p class="placeholder">Its picture arrives with T1.6b.</p>
       </section>
       <section class="clock" aria-label="Time">
         <p class="time">0.00</p>
       </section>
       <section class="solves" aria-label="Breakdown and solves">
-        <p class="placeholder">The CFOP breakdown and the solve list arrive with T1.6.</p>
+        <app-live-cube-panel />
+        <p class="placeholder">The CFOP breakdown and the solve list arrive with T1.6b.</p>
       </section>
     </div>
     <p class="version" data-testid="core-version">{{ coreVersion }}</p>
@@ -41,6 +49,8 @@ import { coreVersion, generateScramble } from '@cubetrace/core';
 
       @include layout.from(layout.$two-columns) {
         grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+        /* The scramble keeps its height when the right-hand column is the taller one. */
+        grid-template-rows: auto 1fr;
         grid-template-areas: 'scramble solves' 'clock solves';
         align-items: start;
       }
@@ -72,6 +82,8 @@ import { coreVersion, generateScramble } from '@cubetrace/core';
 
     .solves {
       grid-area: solves;
+      display: grid;
+      gap: var(--space-4);
     }
 
     /* The time scales with the width of its region, so "1:23.45" fits a phone and a laptop. */
@@ -108,6 +120,10 @@ export class TimerPage {
   protected readonly scrambleError = signal<string | null>(null);
 
   constructor() {
+    const demo = demoRequestFrom(inject(ActivatedRoute).snapshot.queryParamMap);
+    if (demo !== null) {
+      inject(CubeService).autoStartDemo(demo);
+    }
     generateScramble().then(
       (scramble) => {
         this.scramble.set(scramble);
