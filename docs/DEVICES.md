@@ -68,3 +68,50 @@ session, over all 1,802 moves; `fixtures/hardware/README.md`):
 
 So the clock fit belongs to the attempt, not the session (`docs/PLAN.md`, T2.0); every move keeps
 its `hostMs` anyway, and the session-level `clock.cube` of schema 1 stays as a coarse summary.
+
+## VideoFrame.timestamp
+
+What the capture worker sees of a frame's own time (T2.2), measured on 2026-09-27 with Chrome's fake
+camera and microphone (Playwright's Chromium 141, headless, on Linux, with
+`--use-fake-device-for-media-stream=fps=30`): by `apps/web/e2e/capture.spec.ts`, which prints these
+numbers at every run, and by a 96 s recording through `/capture-lab`. CI's runner gave the same
+picture on another machine: a first `timestamp` of 192,556,290 µs on a runner up for 203.4 s, a
+95th percentile of +0.4 ms around the median offset, and the audio's offset 0.1 ms from the video's.
+
+- **It does not start at 0 at the first frame.** It is the frame's time in microseconds on the
+  system's monotonic clock (Chrome's `base::TimeTicks`: the time since boot, on Linux). The first
+  frame of a 10 s cut had `timestamp` 5,305,665,091 µs on a machine up for 5,316.6 s, and
+  `arrival − timestamp / 1000` (arrival in Unix ms) is, as a date, 13:39:03.598 UTC that day: when
+  the machine booted, plus the few milliseconds a frame takes to reach the worker.
+- **It counts on the clock of `performance.now()`, from another zero.** `timestamp / 1000` minus the
+  page's `performance.now()` when the frame reached the worker was 5,304,521.9 ms and steady (the
+  page's time origin on the monotonic clock, less that delivery time). A worker has a time origin
+  of its own, but `performance.timeOrigin + performance.now()` is the same Unix-based host clock
+  there as in the window.
+- **`arrival − timestamp / 1000` is constant.** From the first third of the frames to the last it
+  moved by −0.3 to −0.2 ms per minute over 10 s and by 0.2 ms per minute over 85 s: no drift.
+  Around its median, the 5th percentile was −0.3 ms and the 95th +0.7 to +3.3 ms in three runs
+  (+1.6 ms over 85 s), with a single late frame now and then (20 to 61 ms). So the cut's arrival
+  fit (the median offset) puts `t0HostMs` on the host clock to a fraction of a millisecond here,
+  and the frames' intervals (`dtMs`) come from the timestamps, where a dropped frame shows as a
+  double interval.
+- **`AudioData.timestamp` is on the same clock**: the audio's arrival offset was 0.6 ms from the
+  video's, so a cut takes the audio chunks that overlap its frames by their timestamps.
+- The fake camera's frames have no `duration` (null); the worker uses the frame interval it
+  measures from the timestamps. The fake camera runs at 20 fps without `fps=30`.
+
+`t0HostMs` is therefore when the first frame reached the capture worker, without the jitter of a
+single arrival; how long the light takes to get there (the camera's latency plus Chrome's delivery)
+stays in it, for the clapperboard (T2.5) to measure.
+
+**To confirm in round 2 (T2.6), on the real cameras** (Chrome's capture code differs by platform,
+and the fake camera has no sensor behind it): on the MacBook's FaceTime camera and on both
+ThinkPhone cameras, open `/capture-lab`, Start, record for a minute, set the cut length to 60 and
+cut, then read `clock` at the top of "Last cut": `firstTimestampUs` (large or near 0: either works,
+only the offset changes), `timestampMinusPageNowMs` (steady from one cut to the next if the
+timestamps count on the `performance.now()` clock), `arrivalDriftMsPerMinute` (about 0 expected),
+`audioMinusVideoOffsetMs` (a few ms at most; far more would mean the audio has a clock of its own,
+and the cut would have to place it by its own offset), and `frames.arrival.residualP95Ms`, the
+arrival jitter in the worker (the probes saw ±10–17 ms at `requestVideoFrameCallback` on the main
+thread). The counters also say which codecs Chrome chose (H.264 expected on both devices) and
+whether frames were dropped.

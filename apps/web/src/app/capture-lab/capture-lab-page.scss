@@ -1,0 +1,102 @@
+@use '../../styles/layout';
+
+// A developer page: the probe's look (fields, actions, cards, monospace values), kept short.
+
+.lead {
+  max-width: 45rem;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  max-width: 32rem;
+
+  @include layout.from(layout.$header-one-row) {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+}
+
+select {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.status,
+.error,
+.unsupported {
+  margin: var(--space-3) 0 0;
+}
+
+.error,
+.unsupported {
+  color: var(--warn);
+}
+
+section {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+h2 {
+  margin: 0 0 var(--space-3);
+}
+
+.about {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+th,
+td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+th {
+  font-weight: 500;
+}
+
+td {
+  font-family: var(--font-mono);
+}
+
+details {
+  margin-top: var(--space-3);
+}
+
+pre {
+  max-height: 30rem;
+  margin: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}

@@ -1,0 +1,91 @@
+<h1>Capture lab</h1>
+<p class="lead">
+  The capture pipeline on its own: the chosen camera is encoded in a worker into the last 90 s kept
+  in memory, and any of it can be cut without re-encoding. The counters come once per second.
+  Nothing is saved. Keep this tab in front while it records.
+</p>
+
+@if (missing) {
+  <p class="unsupported" role="alert" data-testid="lab-unsupported">
+    This browser lacks {{ missing }}: the capture pipeline needs Chrome.
+  </p>
+} @else {
+  <div class="fields">
+    <label for="lab-camera">Camera</label>
+    <select
+      id="lab-camera"
+      #cameraSelect
+      [disabled]="busy() || running() || cameras().length === 0"
+      (change)="selectedCamera.set(cameraSelect.value)"
+    >
+      @for (camera of cameras(); track camera.deviceId) {
+        <option [value]="camera.deviceId" [selected]="camera.deviceId === selectedCamera()">
+          {{ camera.label }}
+        </option>
+      } @empty {
+        <option value="">The default camera (the list comes once it is allowed)</option>
+      }
+    </select>
+    <label for="lab-audio">Audio</label>
+    <input
+      id="lab-audio"
+      #audioInput
+      type="checkbox"
+      [checked]="audio()"
+      [disabled]="busy() || running()"
+      (change)="audio.set(audioInput.checked)"
+    />
+    <label for="lab-seconds">Cut length (s)</label>
+    <input
+      id="lab-seconds"
+      #secondsInput
+      type="number"
+      min="0.5"
+      max="90"
+      step="0.5"
+      [value]="seconds()"
+      (input)="setSeconds(secondsInput.value)"
+    />
+  </div>
+
+  <div class="actions">
+    <button type="button" class="primary" [disabled]="busy() || running()" (click)="start()">
+      Start
+    </button>
+    <button type="button" [disabled]="busy() || !running()" (click)="stop()">Stop</button>
+    <button type="button" [disabled]="!running()" (click)="cut()">
+      Cut the last {{ seconds() }} s
+    </button>
+  </div>
+  <p class="status" role="status" data-testid="lab-status">{{ status() }}</p>
+  @for (error of errors(); track $index) {
+    <p class="error" data-testid="lab-error">{{ error }}</p>
+  }
+
+  <section aria-labelledby="lab-counters">
+    <h2 id="lab-counters">Counters</h2>
+    <table>
+      <tbody>
+        @for (row of counters(); track row.testId) {
+          <tr>
+            <th scope="row">{{ row.label }}</th>
+            <td [attr.data-testid]="row.testId">{{ row.value }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+    <details>
+      <summary>Every second so far (JSON)</summary>
+      <pre data-testid="lab-stats-json">{{ statsJson() }}</pre>
+    </details>
+  </section>
+
+  <section aria-labelledby="lab-cut">
+    <h2 id="lab-cut">Last cut</h2>
+    @if (lastCut()) {
+      <pre data-testid="lab-cut-json">{{ cutJson() }}</pre>
+    } @else {
+      <p class="about">None yet: start, wait a few seconds, then cut.</p>
+    }
+  </section>
+}

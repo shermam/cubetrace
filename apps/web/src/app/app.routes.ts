@@ -23,5 +23,12 @@ export const routes: Routes = [
     title: 'Device probe · cubetrace',
     loadComponent: () => import('./probe/probe-page').then((m) => m.ProbePage),
   },
+  {
+    // The capture pipeline on its own (docs/PLAN.md, T2.2): a tool reached by its address, not in
+    // the navigation.
+    path: 'capture-lab',
+    title: 'Capture lab · cubetrace',
+    loadComponent: () => import('./capture-lab/capture-lab-page').then((m) => m.CaptureLabPage),
+  },
   { path: '**', redirectTo: '' },
 ];

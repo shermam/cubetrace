@@ -19,6 +19,12 @@ versions follow [Semantic Versioning](https://semver.org/).
   (permission, no camera, in use by another app), and so is a camera that opened otherwise than asked
   (no 60 fps mode, the chosen camera gone). Settings has the resolution (1920×1080 or 1280×720), the
   frame rate (the camera's best, exactly 60 fps, or 30 fps) and the sharpness threshold.
+- The capture pipeline (T2.2, `packages/capture`): the camera is encoded without pause in a
+  worker (H.264 where Chrome has an encoder for it, else VP9; AAC or Opus audio; a keyframe every
+  second) into the last 90 s kept in memory, at most 160 MB, from which any interval can be cut
+  without re-encoding, with every frame's time on the host clock. Nothing records with it yet (the
+  timer will, from T2.4); `/capture-lab`, a page outside the navigation, runs it on its own with its
+  counters and cuts, for testing on a device.
 
 ### Changed
 
