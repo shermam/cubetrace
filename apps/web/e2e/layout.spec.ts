@@ -7,7 +7,8 @@ const viewports = [
   { width: 390, height: 844 },
   { width: 1280, height: 800 },
 ];
-const paths = ['/', '/sessions', '/settings', '/probe'];
+// A session's page (T2.7) says so when the session is not there.
+const paths = ['/', '/sessions', '/sessions/no-such-session', '/settings', '/probe'];
 
 for (const viewport of viewports) {
   test.describe(`at ${String(viewport.width)}×${String(viewport.height)}`, () => {

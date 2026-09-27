@@ -1,4 +1,5 @@
 import { Component, DOCUMENT, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { describeProblem, type StorageProblem } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
@@ -8,13 +9,9 @@ import { downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
 import { StorageMeter } from '../shared/storage-meter';
+import { exportFileName } from './session-export';
 
 const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-
-/** The file name of a session's export. */
-export function exportFileName(sessionId: string): string {
-  return `cubetrace-session-${sessionId}.json`;
-}
 
 /**
  * `/sessions` (docs/PLAN.md, T1.6b): the stored sessions, newest first, with their date, host,
@@ -25,17 +22,18 @@ export function exportFileName(sessionId: string): string {
  * session's row, and left out of its count, mean and export. The page-level error is for a listing
  * that failed; an export or a deletion that failed is said in its row. Since T2.4 each row says how
  * many clips its attempts have and their size, and the storage meter is above the list; the export
- * stays the JSON records only, and a note says where the clips are downloaded.
+ * stays the JSON records only, and a note says where the clips are downloaded. Since T2.7 each
+ * row's date opens the session's page (`SessionPage`), with all its attempts and their clips.
  */
 @Component({
   selector: 'app-sessions-page',
-  imports: [StorageMeter],
+  imports: [RouterLink, StorageMeter],
   template: `
     <h1>Sessions</h1>
     <app-storage-meter />
     <p class="muted note" data-testid="sessions-clips-note">
       Export saves a session's records as one JSON file, without its video. The clips of an attempt
-      are downloaded from its clip badge in the Timer's list of solves (the current session's).
+      are downloaded from its clip badge on the session's page, which its date opens.
     </p>
     @if (error(); as message) {
       <p class="error" role="alert" data-testid="sessions-error">{{ message }}</p>
@@ -78,7 +76,9 @@ export function exportFileName(sessionId: string): string {
             <li data-testid="session-row" [attr.data-session]="item.session.id">
               <div class="what">
                 <p class="when">
-                  {{ when(item.session.createdMs) }}
+                  <a [routerLink]="['/sessions', item.session.id]" data-testid="session-link">{{
+                    when(item.session.createdMs)
+                  }}</a>
                   @if (item.current) {
                     <span class="current">current</span>
                   }

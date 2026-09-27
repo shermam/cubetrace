@@ -1,7 +1,7 @@
 // A harness for unit tests that drive the timer through a real SessionService: the fake cube as a
 // GAN cube on a fake clock, fixed scrambles, fake animation frames and an in-memory store. Nothing in
 // the app imports this file, so it is not in the bundle.
-import type { Provider } from '@angular/core';
+import type { EnvironmentProviders, Provider } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   MemorySessionStore,
@@ -61,8 +61,8 @@ export function setup(
     scrambles?: string[];
     /** The navigator's Web Bluetooth; default Chrome with the flag on (`bluetoothNavigator(true)`). */
     navigator?: Partial<Navigator>;
-    /** More providers, such as a stand-in for the scramble picture's loader. */
-    providers?: Provider[];
+    /** More providers, such as a stand-in for the scramble picture's loader, or the router. */
+    providers?: (Provider | EnvironmentProviders)[];
   } = {},
 ): Setup {
   const perf = new FakePerformance();
