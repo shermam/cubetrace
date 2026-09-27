@@ -938,12 +938,32 @@ describe('CaptureWorker during a sync check', () => {
     return posted.flatMap((message) => (message.type === 'sync-sample' ? [message] : []));
   }
 
+  function metersOf(posted: readonly WorkerToWindow[]) {
+    return posted.flatMap((message) => (message.type === 'sync-meter' ? [message] : []));
+  }
+
   it('sends the motion of every frame in the framing rectangle until the check stops, and keeps encoding', async () => {
     const capture = harness();
     capture.worker.handle({ type: 'sync-start', id: 7, rect: { x: 480, y: 240, w: 960, h: 480 } });
 
     const fed = await feedPictures(capture, 0, 29, (index) => (index >= 20 ? SQUARE : STILL));
 
+    // First how the frames are read: copied, the rectangle (22% of the frame) on 160 × 80 pixels.
+    expect(capture.posted.find((message) => message.type.startsWith('sync-'))).toEqual({
+      type: 'sync-meter',
+      id: 7,
+      meter: {
+        format: 'I420',
+        path: 'copy',
+        frameWidth: 1920,
+        frameHeight: 1080,
+        region: { x: 480, y: 240, w: 960, h: 480 },
+        planeWidth: 160,
+        planeHeight: 80,
+        changeLevels: 12,
+      },
+    });
+    expect(metersOf(capture.posted)).toHaveLength(1);
     const samples = samplesOf(capture.posted);
     // None for the first frame: there is nothing to compare it with.
     expect(samples).toHaveLength(29);
@@ -951,11 +971,15 @@ describe('CaptureWorker during a sync check', () => {
     expect(samples[0].sample).toMatchObject({
       timestampUs: timestampOf(1),
       arrivalHostMs: arrivalOf(1),
-      energy: 0,
+      mean: 0,
+      changed: 0,
     });
     // The square appears at frame 20: 20 × 20 of the rectangle's 160 × 80 pixels, 239 levels up.
-    expect(samples.map((message) => message.sample.energy)).toEqual(
+    expect(samples.map((message) => message.sample.mean)).toEqual(
       Array.from({ length: 29 }, (_, k) => (k + 1 === 20 ? 7.469 : 0)),
+    );
+    expect(samples.map((message) => message.sample.changed)).toEqual(
+      Array.from({ length: 29 }, (_, k) => (k + 1 === 20 ? 0.03125 : 0)),
     );
     expect(samples.every((message) => message.sample.costMs >= 0)).toBe(true);
     expect(capture.encoder().encoded.length).toBeGreaterThan(0);
@@ -971,20 +995,24 @@ describe('CaptureWorker during a sync check', () => {
     expect(capture.errors()).toEqual([]);
   });
 
-  it('measures a synthetic 1080p frame in under 2 ms (the median over 90 frames)', async () => {
+  it('measures a whole synthetic 1080p frame on 320 × 180 pixels in under 2 ms (the median over 90 frames)', async () => {
     const capture = harness();
     capture.worker.handle({ type: 'sync-start', id: 1, rect: null });
 
     await feedPictures(capture, 0, 90, (index) => (index % 2 === 0 ? STILL : SQUARE));
 
-    const costs = samplesOf(capture.posted)
-      .map((message) => message.sample.costMs)
-      .sort((a, b) => a - b);
+    expect(metersOf(capture.posted).map((message) => message.meter)).toMatchObject([
+      { region: { x: 0, y: 0, w: 1920, h: 1080 }, planeWidth: 320, planeHeight: 180 },
+    ]);
+    const samples = samplesOf(capture.posted);
+    // The square: 20 × 20 of the 320 × 180 pixels.
+    expect(samples[0].sample.changed).toBe(Math.round((400 / 57_600) * 1e6) / 1e6);
+    const costs = samples.map((message) => message.sample.costMs).sort((a, b) => a - b);
     expect(costs).toHaveLength(90);
     const median = costs[45];
     console.log(
-      `sync check in the worker, 1080p I420 frames in Node: median ${String(median)} ms, ` +
-        `95th percentile ${String(costs[Math.ceil(0.95 * costs.length) - 1])} ms`,
+      `sync check in the worker, whole 1080p I420 frames on 320 × 180 in Node: median ` +
+        `${String(median)} ms, 95th percentile ${String(costs[Math.ceil(0.95 * costs.length) - 1])} ms`,
     );
     expect(median).toBeLessThan(2);
   });
@@ -1030,6 +1058,21 @@ describe('CaptureWorker during a sync check', () => {
       await settle();
     }
 
-    expect(samplesOf(posted).map((message) => message.sample.energy)).toEqual([3, 7]);
+    expect(samplesOf(posted).map((message) => message.sample.mean)).toEqual([3, 7]);
+    // No pixel moved by more than 12 levels.
+    expect(samplesOf(posted).map((message) => message.sample.changed)).toEqual([0, 0]);
+    // Drawn at the whole frame's 320 pixels.
+    expect(metersOf(posted).map((message) => message.meter)).toEqual([
+      {
+        format: null,
+        path: 'draw',
+        frameWidth: 1920,
+        frameHeight: 1080,
+        region: { x: 0, y: 0, w: 1920, h: 1080 },
+        planeWidth: 320,
+        planeHeight: 180,
+        changeLevels: 12,
+      },
+    ]);
   });
 });

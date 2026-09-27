@@ -201,11 +201,11 @@ describe('CameraPreview', () => {
     const recording = element('camera-status-recording');
     expect(recording?.getAttribute('data-status')).toBe('recording');
     expect(recording?.querySelector('.dot')).not.toBeNull();
-    // The sync check (T2.5) starts with the recording, under the status line; Later ends it, so
-    // that the turns below are the attempt's.
+    // The sync check (T2.5) is due with the recording, under the status line, and asks first for a
+    // framing rectangle around the cube (T2.8: the whole frame is framed); Later hides it.
     const status = element('camera-status');
     const sync = element('sync-check');
-    expect(sync?.getAttribute('data-state')).toBe('running');
+    expect(sync?.getAttribute('data-state')).toBe('framing');
     expect(
       status !== null &&
         sync !== null &&

@@ -16,6 +16,7 @@ import {
   type CaptureStats,
   type CaptureSupport,
   type FramingRect,
+  type MotionMeterInfo,
   type MotionSample,
   type VideoQuality,
 } from '@cubetrace/capture';
@@ -251,18 +252,20 @@ export class RecordingService {
   /**
    * Measures the motion of the camera's frames inside `rect` (frame pixels; null for the whole
    * frame) for the sync check (T2.5, `SyncService`), through the pipeline's `watchMotion`, until the
-   * returned function is called; null while it does not record.
+   * returned function is called; null while it does not record. `onMeter` hears how the frames are
+   * read (T2.8).
    */
   watchMotion(
     rect: FramingRect | null,
     onSample: (sample: MotionSample) => void,
     onError: (message: string) => void,
+    onMeter?: (meter: MotionMeterInfo) => void,
   ): (() => void) | null {
     const handle = this.handle;
     if (handle === null || this.statusSignal() !== 'recording') {
       return null;
     }
-    return handle.watchMotion(rect, onSample, onError);
+    return handle.watchMotion(rect, onSample, onError, onMeter);
   }
 
   /**

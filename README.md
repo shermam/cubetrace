@@ -106,18 +106,21 @@ the session's `notes`. The first scramble after the camera is turned on needs it
 turn the camera on a few seconds before scrambling.
 
 **The sync check** measures how far the camera's frames lag the cube. When the camera records in a
-session that has no check of it yet, with a cube connected, the check starts by itself before the
-next scramble's first turn: a panel under the camera's picture asks to turn one face, pause about a
-second, turn it back, and so five times, with the cube in the framing rectangle. Meanwhile the timer
-tracks no attempt, so the check's turns are in no record; once it ends and the cube is solved, the
-attempt begins again with its scramble and number. Within 20 s the panel says "Camera lags the cube
-by X ms (±Y)": X is how much later a turn shows in the camera's frames than the cube's report of it
-arrives over Bluetooth (the median over the turns matched), and Y the spread of those lags (95th
-minus 5th percentile). A frame at host time t thus shows the cube as the move log has it at t − X.
-The lag is kept in the session (`clock.cameras`) and in every later clip of that camera
-(`syncResidualMs`), for the training to subtract. A check that fails says why (the cube did not
-move, no motion in the framing rectangle, fewer than 4 matches, a spread over 40 ms), with Retry;
-Later hides it, and "Sync check", under the camera's picture, runs it again between attempts.
+session that has no check of it yet, with a cube connected, the check is due by itself before the
+next scramble's first turn: a panel under the camera's picture asks first for a framing rectangle
+around the cube while the rectangle is the whole frame ("Edit the framing", or "Start anyway"), then
+to turn one face, pause about a second, turn it back, and so five times, counting the turns ("Turn 3
+of 10"). Meanwhile, and until the cube has been still for a few seconds after it, the timer tracks
+no attempt, so the check's turns are in no record; then the attempt begins again with its scramble
+and number. A second after the tenth turn the panel says "Camera lags the cube by X ms (±Y)": X is
+how much later a turn shows in the camera's frames than the cube's report of it arrives over
+Bluetooth (the median over the turns matched), and Y the spread of those lags (95th minus 5th
+percentile). A frame at host time t thus shows the cube as the move log has it at t − X. The lag is
+kept in the session (`clock.cameras`) and in every later clip of that camera (`syncResidualMs`), for
+the training to subtract. A check that fails says why (the cube did not move, no motion in the
+framing rectangle, fewer than 4 matches, a spread over 50 ms plus a frame), with Retry and "Download
+check data", a file of what the camera saw around each turn to attach to an issue; Later hides it,
+and "Sync check", under the camera's picture, runs it again between attempts.
 
 **Video quality**, in Camera settings and in Settings → Camera, sets the video's bitrate, and so
 what the clips take: Standard, the default, 4 Mbps at 1920×1080 and 30 fps, about 20 MB per attempt

@@ -57,11 +57,10 @@ to create the `v0.2.0` release from GitHub after it.
    - the clips of one attempt per device: its clip badge, then Download (both MP4s, both frames files
      and `attempt.json`);
    - every console line that starts with `cubetrace:` (Ctrl+Shift+J, or ⌥⌘J on a Mac; for the phone,
-     `chrome://inspect` on the laptop, as in T1.5): `cubetrace: clip failed: …` for a clip that could
-     not be saved, `cubetrace: the cube disconnected …` for a disconnection. The sync check prints no
-     console line: copy its result instead ("Camera lags the cube by X ms (±Y)", or "Sync check
-     failed: …"), and, when a check fails for no clear reason, the capture lab's "What it found
-     (JSON)";
+     `chrome://inspect` on the laptop, as in T1.5): `cubetrace: clip failed: …` for a clip that
+     could not be saved, `cubetrace: the cube disconnected …` for a disconnection, `cubetrace: sync
+     check …` for every sync check that ended (since T2.8); and, for a sync check that fails, the
+     file its "Download check data" saves (`cubetrace-sync-check-<time>.json`);
    - screenshots of the Timer page during a session with the camera on: on the MacBook at the size
      Chrome's window opens with, and on the phone in portrait, in Chrome and in the installed app.
 5. Write into `docs/DEVICES.md`, "Manual round 2", or paste into the round's issue for the
@@ -85,11 +84,12 @@ to create the `v0.2.0` release from GitHub after it.
   test records VP9 and Opus, and the round's clips are the first H.264 ones. The codecs are in Camera
   settings (Recording, "Codecs") and in each clip's `video` entry. Where Chrome has no AAC encoder the
   sound is Opus, which is fine: write it down.
-- The sync check waits for a clean attempt start: it starts by itself only before a scramble's first
+- The sync check waits for a clean attempt start: it is due by itself only before a scramble's first
   turn, with a cube connected and the camera recording, once per session and camera, so a camera
   turned on mid-scramble or mid-solve gets its check at the next attempt. It matches single turns
   only: a turn with another move less than half a second before or after it does not count, so pause
-  about a second after each turn.
+  about a second after each turn. With the whole frame as the framing rectangle (or most of it) it
+  asks first for a rectangle around the cube (T2.8).
 - The first scramble after the camera is turned on needs 2 s of recording before its first turn: a
   scramble begun sooner loses its clip ("A clip could not be saved…"), which a T2.4 item uses on
   purpose.
@@ -394,31 +394,50 @@ console, or `chrome://inspect` on the phone).
 On https://shermam.github.io/cubetrace/, Timer page, with the GAN 12 ui FreePlay, on the MacBook's
 FaceTime camera and on the ThinkPhone's front camera (the phone on its stand), then its rear camera.
 Next to each item, write the device, the camera, Chrome's version and the numbers asked for. The
-check measures how far the camera's frames lag the cube (`docs/PLAN.md`, T2.5): the lag goes into
-the session (`clock.cameras`) and into every later clip of that camera (`syncResidualMs`), for the
-training pipeline to subtract. While it runs, the timer tracks no attempt, so its turns are in no
-record.
+check measures how far the camera's frames lag the cube (`docs/PLAN.md`, T2.5; since T2.8 it looks
+for each turn's motion in the frames around it, inside the framing rectangle): the lag goes into the
+session (`clock.cameras`) and into every later clip of that camera (`syncResidualMs`), for the
+training pipeline to subtract. While it runs, and until the cube has been still for a few seconds
+after it, the timer tracks no attempt, so its turns are in no record.
 
-- [ ] Camera on, framing rectangle around the cube and the hands, cube connected and solved, a new
-  session (Sessions → New session, or the day's first attempt): once the line under the camera's
-  picture says "recording", before the scramble's first turn, "Sync check" appears under that line
-  (beside the time on the laptop, under it on the phone) with "Turn one face, pause, turn it back;
-  repeat five times", a countdown from 20 s, and the turns and motion onsets it has seen; the
-  timer's status line says "Sync check: …" and the scramble waits. Turn one
-  face a quarter turn, hold the cube and the hands still for about a second, turn it back, hold
-  still again, five times over: about a second after the tenth turn it says "Camera lags the cube
-  by X ms (±Y)". Write down X and Y. The cube is solved again, and the timer is back on the same
-  scramble and attempt number, which the next turns scramble as usual.
-- [ ] The offset is stable: "Sync check" (the line under the picture), the same turns: it
-  says "…; was X ms". The two offsets are within 10 ms of each other and both spreads under 40 ms.
-  Write down both checks.
-- [ ] A failure says why and offers Retry: 20 s without turning ("the cube did not move"); the turns
-  with the lens covered ("no motion seen in the framing rectangle"); the turns made quickly, without
-  pauses ("fewer than 4 matches …"). Retry runs it again; Later ends it and hides it, and the line
-  under the picture then says "this camera has no check in this session". After each, the
-  timer is back on its scramble once the cube is solved (turn the face back if it is not).
-- [ ] "Sync check" is not offered once a scramble has begun, nor during the solve (its title says
-  why): it is again at the next attempt, before the scramble's first turn.
+- [ ] The framing hint (T2.8): camera on with the framing rectangle as the whole frame (Camera
+  settings → Framing → Full frame), cube connected and solved, a new session (Sessions → New
+  session, or the day's first attempt): once the line under the camera's picture says "recording",
+  "Sync check" appears under that line with "Draw the framing rectangle around the cube first
+  (Camera settings → Framing → Edit): the check looks for motion inside it.", "Edit the framing",
+  "Start anyway" and "Later", and the timer's scramble is still there to turn. "Edit the framing"
+  opens Camera settings to the rectangle over the larger picture: draw it around the cube and the
+  hands, as they are while turning (well under two thirds of the frame). The hint then says "The
+  framing rectangle is set: start the check with the cube in it." Press Done, then Start.
+- [ ] A check: after Start (or by itself, at a new session's start, once the camera has a rectangle
+  around the cube), it says "Turn one face, pause, turn it back; repeat five times" and counts down
+  20 s for the first turn; the timer's status line says "Sync check: …" and the scramble waits. Turn
+  one face a quarter turn, hold the cube and the hands still for about a second, turn it back, hold
+  still again, five times over: the panel counts "Turn 1 of 10 · 1 seen by the camera", and so on
+  (the second number is the turns whose motion the camera saw). It never gives up in the middle:
+  take a longer pause once and see that it waits. About a second after the tenth turn it says
+  "Camera lags the cube by X ms (±Y)". Write down X and Y. The status line then says "Sync check
+  over: the attempt begins once the cube is still": turn the face once more and back within two
+  seconds and see that the timer keeps waiting; hold still, and the timer is back on the same
+  scramble and attempt number (the cube solved again), with none of those turns in the scramble.
+- [ ] The offset is stable: "Sync check" (the line under the picture), the same turns: it says "…;
+  was X ms". The two offsets are within 10 ms of each other and both spreads under 40 ms. Write down
+  both checks.
+- [ ] A failure says why and offers Retry and "Download check data": 20 s without turning ("the cube
+  did not move"); the turns with the lens covered ("no motion seen in the framing rectangle"); the
+  turns made quickly, without pauses ("fewer than 4 matches …", which says why the turns it counts
+  were not matched). Retry runs it again; Later ends it and hides it, and the line under the picture
+  then says "this camera has no check in this session". After each, the timer is back on its
+  scramble once the cube is solved and still (turn the face back if it is not). For every failure
+  without a clear reason, press "Download check data" and attach the file
+  (`cubetrace-sync-check-<time>.json`: the camera, the framing rectangle, how the frames were read,
+  every frame's motion, the cube's moves and what the check saw around each turn) to an issue with
+  the console's `cubetrace: sync check …` line. After a success the same data is behind the small
+  "Download check data" link.
+- [ ] "Sync check" is not offered once a scramble has begun, nor during the solve, nor without a
+  cube: the reason is written beside it ("Before the scramble's first turn, or after the solve.",
+  "After the solve.", "Once a cube is connected."). It is offered again at the next attempt, before
+  the scramble's first turn.
 - [ ] Three solves after a check, then Sessions → Export: in `session.json`,
   `clock.cameras.<camera>` has `offsetMs` (X), `rttMs` and `driftPpm` 0, `clapperboardResidualMs`
   (Y), `clapperboardSamples` (10, or fewer when a turn was not seen; at least 4) and the matched
@@ -427,10 +446,13 @@ record.
   `moves`, and `scrambleCorrected` false unless its own scramble went wrong. Paste the
   `clock.cameras` entry here.
 - [ ] https://shermam.github.io/cubetrace/capture-lab, each camera: Start, connect the cube with the
-  cube button at the top, Sync check, the same turns (the lab watches the whole frame: keep the rest
-  of the picture still). Write down the lag it says and "Measuring a frame took the capture worker
-  … ms (95th percentile … ms)": the plan allows 2 ms per frame. When a check fails for no clear
-  reason, copy "What it found (JSON)" into an issue.
+  cube button at the top, Sync check. Before turning, wave a hand in front of the camera: the two
+  bars ("Mean difference" and "Changed area") jump, and the line under them says the frames' pixel
+  format (such as NV12) and "copied out (VideoFrame.copyTo)"; write both down. Then the same turns
+  (the lab watches the whole frame: keep the rest of the picture still). Write down the lag it says
+  and "Measuring a frame took the capture worker … ms (95th percentile … ms)": the plan allows 2 ms
+  per frame. When a check fails for no clear reason, "Download check data" and attach the file to an
+  issue.
 - [ ] Fill in the "Camera lag" table of `docs/DEVICES.md` from the numbers above (or paste them into
   the round's issue for the coordinator).
 

@@ -13,6 +13,7 @@ export type {
   CaptureError,
   CaptureStats,
   DeleteClipParams,
+  MotionMeterInfo,
   MotionSample,
   ResolvedCaptureConfig,
   SaveClipParams,
@@ -49,30 +50,39 @@ export type { ClipFiles } from './clip-files';
 export { attemptPath, clipFiles } from './clip-files';
 
 // T2.5 — the clapperboard: the camera's lag behind the cube, from the motion the capture worker
-// measures in the framing rectangle during a sync check (`CaptureHandle.watchMotion`). motion.ts,
-// which measures it, is the worker's and is not exported, so that it stays in the worker's chunk.
+// measures in the framing rectangle during a sync check (`CaptureHandle.watchMotion`); since T2.8
+// locked to each single turn, on the changed area of the picture. motion.ts, which measures it, is the
+// worker's and is not exported, so that it stays in the worker's chunk.
 export type {
   ClapperboardAnalysis,
+  ClapperboardClock,
   ClapperboardFailure,
   ClapperboardFit,
+  ClapperboardFrame,
   ClapperboardResult,
+  TurnAnalysis,
+  TurnMiss,
 } from './clapperboard';
 export {
-  MATCH_WINDOW_MS,
-  MAX_SPREAD_MS,
+  BASELINE_FROM_MS,
+  BASELINE_TO_MS,
+  CLOCK_TOLERANCE_MS,
+  ENERGY_FLOOR,
+  MIN_BASELINE_FRAMES,
   MIN_MATCHES,
-  MIN_ONSET_ENERGY,
-  ONSET_FACTOR,
-  ONSET_QUIET_MS,
+  MIN_SPREAD_LIMIT_MS,
+  ONSET_MADS,
+  PEAK_MADS,
   SINGLE_TURN_MS,
+  SPREAD_ALLOWANCE_MS,
   SYNC_CHECK_MS,
+  WINDOW_AFTER_MS,
+  WINDOW_BEFORE_MS,
   detectClapperboard,
-  findOnsets,
   frameHostTimes,
-  matchOnsets,
-  onsetThreshold,
   percentile,
   singleTurns,
+  spreadLimitMs,
 } from './clapperboard';
 
 // T2.10 — the video quality: the encoder's bitrate, which the app also shows for each quality.

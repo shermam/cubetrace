@@ -254,6 +254,7 @@ describe('message guards', () => {
     expect(isWindowToWorker({ type: 'sync-sample' })).toBe(false);
     expect(isWorkerToWindow({ type: 'sync-sample' })).toBe(true);
     expect(isWorkerToWindow({ type: 'sync-error' })).toBe(true);
+    expect(isWorkerToWindow({ type: 'sync-meter' })).toBe(true);
     expect(isWorkerToWindow({ type: 'sync-start' })).toBe(false);
     expect(isClipJob({ type: 'clip-job' })).toBe(true);
     expect(isClipJob({ type: 'mux-and-write' })).toBe(false);

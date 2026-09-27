@@ -1,17 +1,31 @@
-// Motion energy for the clapperboard (docs/PLAN.md, T2.5): how much the picture inside the framing
-// rectangle changed since the previous frame, as the mean absolute difference of the two frames'
-// luma, downscaled to 160 pixels wide. A turn of the cube makes it jump above the level of the still
-// picture; clapperboard.ts finds those jumps and matches them to the cube's moves. While a sync check
-// runs, the capture worker measures every frame with a `MotionMeter`, which reads the frame's own
-// luma plane with `VideoFrame.copyTo` (a copy, about half a millisecond at 1080p) rather than drawing
-// it into a canvas (10 to 20 ms a frame in Chromium's software canvas, docs/TOOLCHAIN.md). Plain
-// TypeScript: the frame is read through the methods a `VideoFrame` has, so the tests give synthetic
-// frames, and no browser global is touched.
-import type { FramingRect } from './framing';
+// Motion for the clapperboard (docs/PLAN.md, T2.5 and T2.8): how much the picture inside the framing
+// rectangle changed since the previous frame, on the two frames' luma downscaled to 320 pixels wide
+// for a wide region (the whole frame: more pixels on the cube) or 160 for a tight one, in two
+// measures. The changed area, the share of the pixels whose luma moved by more than 12 levels, is the
+// clapperboard's energy: a hand turning a face changes a compact area by far more than that, while a
+// camera's noise and a flicker of the light change every pixel a little, and count for nothing; the
+// mean absolute difference, the measure of T2.5, is kept for the diagnostics. clapperboard.ts reads
+// the changed area around each of the cube's turns. While a sync check runs, the capture worker
+// measures every frame with a `MotionMeter`, which reads the frame's own luma plane with
+// `VideoFrame.copyTo` (a copy, about half a millisecond at 1080p) rather than drawing it into a
+// canvas (10 to 20 ms a frame in Chromium's software canvas, docs/TOOLCHAIN.md). Plain TypeScript:
+// the frame is read through the methods a `VideoFrame` has, so the tests give synthetic frames, and
+// no browser global is touched.
+import { isWideFraming, type FramingRect } from './framing';
+import type { MotionMeterInfo } from './protocol';
 import type { LumaImage } from './sharpness';
 
-/** Width of the luma plane the motion energy is computed on. */
+/** Width of the luma plane the motion is computed on, for a tight framing rectangle. */
 export const MOTION_WIDTH = 160;
+
+/**
+ * Width of the luma plane for a wide region (`isWideFraming`: the whole frame, or more than 60% of
+ * it), where the cube is small: twice as many pixels across it.
+ */
+export const MOTION_WIDE_WIDTH = 320;
+
+/** A pixel of the plane has changed when its luma moved by more than this many levels (of 255). */
+export const CHANGE_LEVELS = 12;
 
 /**
  * Points averaged per side of each pixel of the luma plane: 2 × 2 of the pixels of its block, spread
@@ -26,6 +40,40 @@ export const MOTION_POINTS = 2;
  * RangeError for planes of different sizes.
  */
 export function motionEnergy(previous: ArrayLike<number>, current: ArrayLike<number>): number {
+  return compareLuma(previous, current).mean;
+}
+
+/**
+ * The changed area of two luma planes of the same size: the share of their pixels (0 to 1) whose luma
+ * differs by more than `levels`. Noise and a flicker of the light, which move every pixel a little,
+ * leave it near 0; a hand and a face turning in a part of the picture raise it by that part. Throws a
+ * RangeError for planes of different sizes.
+ */
+export function changedArea(
+  previous: ArrayLike<number>,
+  current: ArrayLike<number>,
+  levels = CHANGE_LEVELS,
+): number {
+  return compareLuma(previous, current, levels).changed;
+}
+
+/** Two luma planes compared: their mean absolute difference and their changed area. */
+export interface LumaDifference {
+  /** In luma levels (`motionEnergy`). */
+  readonly mean: number;
+  /** A share of the pixels, 0 to 1 (`changedArea`). */
+  readonly changed: number;
+}
+
+/**
+ * `motionEnergy` and `changedArea` of two planes in one pass. Throws a RangeError for planes of
+ * different sizes; two empty planes differ by nothing.
+ */
+export function compareLuma(
+  previous: ArrayLike<number>,
+  current: ArrayLike<number>,
+  levels = CHANGE_LEVELS,
+): LumaDifference {
   const length = current.length;
   if (previous.length !== length) {
     throw new RangeError(
@@ -33,14 +81,19 @@ export function motionEnergy(previous: ArrayLike<number>, current: ArrayLike<num
     );
   }
   if (length === 0) {
-    return 0;
+    return { mean: 0, changed: 0 };
   }
   let sum = 0;
+  let changed = 0;
   for (let i = 0; i < length; i++) {
     const difference = current[i] - previous[i];
-    sum += difference < 0 ? -difference : difference;
+    const absolute = difference < 0 ? -difference : difference;
+    sum += absolute;
+    if (absolute > levels) {
+      changed += 1;
+    }
   }
-  return sum / length;
+  return { mean: sum / length, changed: changed / length };
 }
 
 /** A size in pixels. */
@@ -50,12 +103,26 @@ export interface PlaneSize {
 }
 
 /**
- * The size of the luma plane of a region (`w` × `h` pixels): 160 pixels wide, or the region's own
- * width when it is narrower, and the height in proportion (at least 1).
+ * The size of the luma plane of a region (`w` × `h` pixels): `width` pixels wide (160 by default), or
+ * the region's own width when it is narrower, and the height in proportion (at least 1).
  */
-export function motionSize(region: { readonly w: number; readonly h: number }): PlaneSize {
-  const width = Math.max(1, Math.min(MOTION_WIDTH, Math.round(region.w)));
-  return { width, height: Math.max(1, Math.round((width * region.h) / Math.max(1, region.w))) };
+export function motionSize(
+  region: { readonly w: number; readonly h: number },
+  width = MOTION_WIDTH,
+): PlaneSize {
+  const across = Math.max(1, Math.min(width, Math.round(region.w)));
+  return {
+    width: across,
+    height: Math.max(1, Math.round((across * region.h) / Math.max(1, region.w))),
+  };
+}
+
+/**
+ * The size of the luma plane of `region` of frames of `frame` size: 320 pixels wide when the region
+ * is wide (`isWideFraming`: more than 60% of the frame, the whole frame by default), else 160.
+ */
+export function motionPlaneSize(region: FramingRect, frame: PlaneSize): PlaneSize {
+  return motionSize(region, isWideFraming(region, frame) ? MOTION_WIDE_WIDTH : MOTION_WIDTH);
 }
 
 /**
@@ -139,6 +206,10 @@ export class LumaDownscaler {
   }
 
   #downscaleLuma(data: Uint8Array, out: Uint8Array): void {
+    if (this.#points === 2) {
+      this.#downscaleLuma2(data, out);
+      return;
+    }
     const n = this.#points;
     const count = n * n;
     const half = count >> 1;
@@ -158,6 +229,28 @@ export class LumaDownscaler {
           }
         }
         out[outBase + x] = Math.floor((sum + half) / count);
+      }
+    }
+  }
+
+  /**
+   * `#downscaleLuma` for 2 × 2 points (`MOTION_POINTS`), unrolled: the same sums and rounding, in a
+   * third of the time (T2.8 measures a 320-pixel plane for the whole frame: 57,600 pixels).
+   */
+  #downscaleLuma2(data: Uint8Array, out: Uint8Array): void {
+    const columns = this.#columns;
+    const rows = this.#rows;
+    const width = this.width;
+    for (let y = 0; y < this.height; y++) {
+      const top = rows[2 * y];
+      const bottom = rows[2 * y + 1];
+      const outBase = y * width;
+      for (let x = 0; x < width; x++) {
+        const left = columns[2 * x];
+        const right = columns[2 * x + 1];
+        out[outBase + x] =
+          (data[top + left] + data[top + right] + data[bottom + left] + data[bottom + right] + 2) >>
+          2;
       }
     }
   }
@@ -248,11 +341,18 @@ const PIXEL_KINDS: Readonly<Record<string, PixelKind>> = {
 export interface MotionMeasure {
   /**
    * The mean absolute luma difference from the frame measured before it (`motionEnergy`); null for
-   * the first frame, and for the first after the region's size changed.
+   * the first frame, and for the first after the plane's size changed.
    */
-  readonly energy: number | null;
+  readonly mean: number | null;
+  /** The changed area against that frame (`changedArea`), 0 to 1; null when `mean` is. */
+  readonly changed: number | null;
   /** The time `measure` took, ms: the copy (or the drawing) and the arithmetic. */
   readonly costMs: number;
+  /**
+   * How the frame was read: the same object from one frame to the next until something in it
+   * changes (the frames' size, format or path).
+   */
+  readonly meter: MotionMeterInfo;
 }
 
 export interface MotionMeterOptions<F> {
@@ -267,11 +367,13 @@ export interface MotionMeterOptions<F> {
 }
 
 /**
- * Measures the motion energy of a camera's frames in a region (docs/PLAN.md, T2.5): the framing
+ * Measures the motion of a camera's frames in a region (docs/PLAN.md, T2.5 and T2.8): the framing
  * rectangle in the frames' pixels as shown (T2.1), or the whole frame for null, clamped to each
  * frame. For every frame it copies the region's first plane out of the frame (the luma of a YUV
- * frame), downscales it to 160 pixels wide (`LumaDownscaler`) and compares it with the previous
- * frame's (`motionEnergy`). Its buffers are made once and kept while the frames keep their size.
+ * frame), downscales it (`LumaDownscaler`) to 320 pixels wide for a wide region or 160 for a tight
+ * one (`motionPlaneSize`), and compares it with the previous frame's (`compareLuma`): the mean
+ * absolute difference and the changed area. Its buffers are made once and kept while the frames keep
+ * their size.
  */
 export class MotionMeter<F extends MotionFrame = MotionFrame> {
   readonly #rect: FramingRect | null;
@@ -281,6 +383,7 @@ export class MotionMeter<F extends MotionFrame = MotionFrame> {
   #downscaler: LumaDownscaler | null = null;
   #previous: Uint8Array | null = null;
   #current: Uint8Array | null = null;
+  #info: MotionMeterInfo | null = null;
 
   constructor(rect: FramingRect | null = null, options: MotionMeterOptions<F> = {}) {
     this.#rect = rect;
@@ -289,28 +392,44 @@ export class MotionMeter<F extends MotionFrame = MotionFrame> {
   }
 
   /**
-   * The motion energy of `frame` against the frame measured before it, and what measuring it cost.
-   * Rejects when the frame's pixels cannot be read (no format the meter copies and no `draw`).
+   * The motion of `frame` against the frame measured before it, what measuring it cost, and how it
+   * was read. Rejects when the frame's pixels cannot be read (no format the meter copies and no
+   * `draw`).
    */
   async measure(frame: F): Promise<MotionMeasure> {
     const start = this.#now();
     const region = regionOf(this.#rect, frame);
+    const size = motionPlaneSize(region, {
+      width: frame.displayWidth,
+      height: frame.displayHeight,
+    });
     const kind = frame.format === null ? undefined : PIXEL_KINDS[frame.format];
     const shown = (frame.rotation ?? 0) % 360 === 0 && frame.flip !== true;
-    const luma =
-      kind !== undefined && shown
-        ? await this.#copy(frame, region, kind)
-        : this.#drawn(frame, region);
-    const energy = this.#compare(luma);
-    return { energy, costMs: this.#now() - start };
+    const copied = kind !== undefined && shown;
+    const luma = copied
+      ? await this.#copy(frame, region, kind, size)
+      : this.#drawn(frame, region, size);
+    const difference = this.#compare(luma);
+    const costMs = this.#now() - start;
+    return {
+      mean: difference?.mean ?? null,
+      changed: difference?.changed ?? null,
+      costMs,
+      meter: this.#describe(frame, region, size, copied ? 'copy' : 'draw'),
+    };
   }
 
-  /** The region's luma plane, copied out of the frame and downscaled. */
-  async #copy(frame: F, region: FramingRect, kind: PixelKind): Promise<Uint8Array> {
+  /** The region's luma plane, copied out of the frame and downscaled to `size`. */
+  async #copy(
+    frame: F,
+    region: FramingRect,
+    kind: PixelKind,
+    size: PlaneSize,
+  ): Promise<Uint8Array> {
     const rect = codedRect(frame, region);
-    const size = frame.allocationSize({ rect });
-    if (this.#buffer === null || this.#buffer.byteLength < size) {
-      this.#buffer = new Uint8Array(size);
+    const bytes = frame.allocationSize({ rect });
+    if (this.#buffer === null || this.#buffer.byteLength < bytes) {
+      this.#buffer = new Uint8Array(bytes);
     }
     const buffer = this.#buffer;
     const layout = await frame.copyTo(buffer, { rect });
@@ -326,8 +445,12 @@ export class MotionMeter<F extends MotionFrame = MotionFrame> {
       kind,
     };
     let downscaler = this.#downscaler;
-    if (downscaler?.fits(plane) !== true) {
-      downscaler = new LumaDownscaler(plane, motionSize({ w: region.w, h: region.h }));
+    if (
+      downscaler?.fits(plane) !== true ||
+      downscaler.width !== size.width ||
+      downscaler.height !== size.height
+    ) {
+      downscaler = new LumaDownscaler(plane, size);
       this.#downscaler = downscaler;
     }
     const out = this.#plane(downscaler.width * downscaler.height);
@@ -335,8 +458,8 @@ export class MotionMeter<F extends MotionFrame = MotionFrame> {
     return out;
   }
 
-  /** The region's luma plane, drawn by `draw`. */
-  #drawn(frame: F, region: FramingRect): Uint8Array {
+  /** The region's luma plane, drawn by `draw` at `size`. */
+  #drawn(frame: F, region: FramingRect, size: PlaneSize): Uint8Array {
     const format = frame.format ?? 'no pixel format';
     const why =
       (frame.rotation ?? 0) % 360 !== 0 || frame.flip === true
@@ -345,7 +468,7 @@ export class MotionMeter<F extends MotionFrame = MotionFrame> {
     if (this.#draw === undefined) {
       throw new Error(`The motion meter cannot read ${why}.`);
     }
-    const image = this.#draw(frame, region, motionSize({ w: region.w, h: region.h }));
+    const image = this.#draw(frame, region, size);
     if (image === null) {
       throw new Error(`The motion meter cannot read ${why}: this browser draws no frame.`);
     }
@@ -362,15 +485,51 @@ export class MotionMeter<F extends MotionFrame = MotionFrame> {
     return this.#current;
   }
 
-  /** The energy of `luma` against the previous plane, which it then becomes. */
-  #compare(luma: Uint8Array): number | null {
+  /** `luma` against the previous plane, which it then becomes; null without one of its size. */
+  #compare(luma: Uint8Array): LumaDifference | null {
     const previous = this.#previous;
-    const energy =
-      previous !== null && previous.length === luma.length ? motionEnergy(previous, luma) : null;
+    const difference =
+      previous !== null && previous.length === luma.length ? compareLuma(previous, luma) : null;
     // The two planes swap: the next frame is written over the older one.
     this.#previous = luma;
     this.#current = previous;
-    return energy;
+    return difference;
+  }
+
+  /** How this frame was read: the object of the frame before when nothing changed. */
+  #describe(
+    frame: F,
+    region: FramingRect,
+    size: PlaneSize,
+    path: MotionMeterInfo['path'],
+  ): MotionMeterInfo {
+    const info = this.#info;
+    if (
+      info?.format === frame.format &&
+      info.path === path &&
+      info.frameWidth === frame.displayWidth &&
+      info.frameHeight === frame.displayHeight &&
+      info.region.x === region.x &&
+      info.region.y === region.y &&
+      info.region.w === region.w &&
+      info.region.h === region.h &&
+      info.planeWidth === size.width &&
+      info.planeHeight === size.height
+    ) {
+      return info;
+    }
+    const next: MotionMeterInfo = {
+      format: frame.format,
+      path,
+      frameWidth: frame.displayWidth,
+      frameHeight: frame.displayHeight,
+      region: { x: region.x, y: region.y, w: region.w, h: region.h },
+      planeWidth: size.width,
+      planeHeight: size.height,
+      changeLevels: CHANGE_LEVELS,
+    };
+    this.#info = next;
+    return next;
   }
 }
 

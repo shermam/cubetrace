@@ -211,6 +211,9 @@ export class TimerClock {
   protected readonly status = computed(() => {
     const phase = this.session.phase();
     const attempt = this.session.attempt();
+    if (phase === 'sync-check' && this.session.syncCheckOver()) {
+      return 'Sync check over: the attempt begins once the cube is still.';
+    }
     if (phase === 'scrambling' && attempt?.progress.diverged) {
       return 'Off the scramble: undo the moves shown.';
     }

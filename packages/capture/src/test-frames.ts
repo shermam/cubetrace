@@ -1,6 +1,7 @@
 // Synthetic camera frames for the tests of the motion meter and of the capture worker's sync check
-// (T2.5): frames whose pixels the test draws, which `copyTo` copies out as a `VideoFrame` does, the
-// planes packed one after the other. Not part of the package's API.
+// (T2.5, T2.8): frames whose pixels the test draws, which `copyTo` copies out as a `VideoFrame` does,
+// the planes packed one after the other, and a seeded random generator for their noise. Not part of
+// the package's API.
 import type { CopyRect, MotionFrame } from './motion';
 
 /** A square of `size` pixels of `value`, its top-left corner at (`x`, `y`). */
@@ -99,4 +100,19 @@ export class SyntheticFrame implements MotionFrame {
   #rgb(): boolean {
     return this.format !== null && /^(RGB|BGR)/.test(this.format);
   }
+}
+
+/**
+ * A seeded pseudo-random generator (mulberry32): numbers in [0, 1), the same sequence for the same
+ * seed, so that the synthetic pictures and series of the tests never change.
+ */
+export function seeded(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

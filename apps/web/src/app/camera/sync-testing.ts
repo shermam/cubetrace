@@ -50,9 +50,21 @@ export async function update(r: Rig): Promise<void> {
   TestBed.tick();
 }
 
-/** The camera on, a cube connected (a session begins), the pipeline recording. */
-export async function recording(r: Rig): Promise<{ fake: FakeCube; capture: FakeCapture }> {
+/** A framing rectangle around the cube: a quarter of the fake camera's 1920 × 1080 frames. */
+export const AROUND_THE_CUBE = { x: 720, y: 270, w: 960, h: 540 };
+
+/**
+ * The camera on (the framing rectangle around the cube unless `framed` is false: the whole frame,
+ * the default), a cube connected (a session begins), the pipeline recording.
+ */
+export async function recording(
+  r: Rig,
+  options: { readonly framed?: boolean } = {},
+): Promise<{ fake: FakeCube; capture: FakeCapture }> {
   await r.camera.start();
+  if (options.framed !== false) {
+    r.camera.setFraming(AROUND_THE_CUBE);
+  }
   const fake = await ready(r.s);
   await update(r);
   const capture = r.starter.last;
@@ -64,11 +76,15 @@ export async function recording(r: Rig): Promise<{ fake: FakeCube; capture: Fake
 /** How many turns each fake cube has made for the check: the next one turns U, or turns it back. */
 const turned = new WeakMap<FakeCube, number>();
 
+/** A still picture's changed area: 3 pixels in 10,000. */
+export const STILL = (): number => 0.0003;
+
 /**
  * The camera's frames for `ms` from now, one every 33.3 ms on the fake clock, sent to the motion
- * watch under way with `energy(frame time)`; the cube turns at those of `turns` (host ms) that come
- * in that time, in their place among the frames, as the check asks: U, then back (U'), and again.
- * The timers due on the way run (the check's ticks).
+ * watch under way with their changed area `energy(frame time)` (and a mean difference in proportion);
+ * the cube turns at those of `turns` (host ms) that come in that time, in their place among the
+ * frames, as the check asks: U, then back (U'), and again. The timers due on the way run (the
+ * check's ticks, the timer's wait after it).
  */
 export async function film(
   r: Rig,
@@ -94,10 +110,12 @@ export async function film(
       continue;
     }
     r.s.timers.advance(next - r.s.perf.hostMs);
+    const changed = energy(next);
     const sample: MotionSample = {
       timestampUs: (next - TIMESTAMP_OFFSET_MS) * 1000,
       arrivalHostMs: next,
-      energy: energy(next),
+      mean: Math.round(changed * 400 * 1000) / 1000,
+      changed,
       costMs: 0.9,
     };
     capture.watches.at(-1)?.onSample(sample);
@@ -109,12 +127,13 @@ export async function film(
 
 /**
  * One turn per lag, 1.2 s apart from `start`, each lagged by its lag (ms) in the frames: a turn at a
- * frame's time minus its lag, so that its motion begins on that frame.
+ * frame's time minus its lag, so that its motion (2% of the pixels changed, over five frames) begins
+ * on that frame.
  */
 export function clapperboard(start: number, lags: readonly number[]) {
   const onsets = lags.map((_, k) => start + FRAME_MS * 36 * (k + 1));
   const turns = onsets.map((onset, k) => onset - lags[k]);
   const energy = (hostMs: number): number =>
-    onsets.some((onset) => hostMs >= onset - 1 && hostMs < onset + 150) ? 12 : 1;
+    onsets.some((onset) => hostMs >= onset - 1 && hostMs < onset + 150) ? 0.02 : STILL();
   return { turns, energy, onsets };
 }

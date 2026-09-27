@@ -56,6 +56,19 @@ export const CURRENT_SESSION_KEY = 'cubetrace.currentSession';
  */
 export const HARDWARE_WAIT_MS = 3000;
 
+/**
+ * After a sync check ends (T2.8), the timer tracks no attempt until the cube has been still this
+ * long, ms, or the check's result is dismissed: the turns a solver still makes for the check go to
+ * no attempt.
+ */
+export const SYNC_SETTLE_MS = 2000;
+
+/**
+ * Once a sync check's suspension ends (T2.8), no attempt begins until the cube has been still this
+ * long, ms: a turn made just then is the check's, not a scramble's.
+ */
+export const SYNC_GRACE_MS = 1000;
+
 /** The cube of a session created before the cube said what it is. */
 export const UNKNOWN_CUBE: CubeInfo = {
   model: 'Unknown cube',
@@ -273,9 +286,11 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  *   attempt's record (saved again, nothing else changed), `putCamera` the camera to the session's
  *   `cameras`, and `addNote` a line to its `notes`. For the sync check (T2.5, `SyncService`),
  *   `putCameraClock` keeps a camera's lag behind the cube in `clock.cameras`, which the camera's
- *   later clips carry as their `syncResidualMs`; `suspendForSyncCheck` and `resumeAfterSyncCheck`
- *   keep the check's turns out of the attempts: while it runs no attempt is tracked, and an attempt
- *   that had not started its solve begins again afterwards, with its scramble and number.
+ *   later clips carry as their `syncResidualMs`; `suspendForSyncCheck`, `holdAfterSyncCheck` and
+ *   `resumeAfterSyncCheck` keep the check's turns out of the attempts: while it runs no attempt is
+ *   tracked, nor after it until the cube has been still for {@link SYNC_SETTLE_MS} or its result is
+ *   dismissed, and then for {@link SYNC_GRACE_MS} of stillness more (T2.8); an attempt that had not
+ *   started its solve begins again afterwards, with its scramble and number, once the cube is solved.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
@@ -308,6 +323,10 @@ export class SessionService {
   private readonly noticeSignal = signal<string | null>(null);
   /** A sync check is under way (T2.5): attempts are not tracked meanwhile. */
   private readonly suspendedSignal = signal(false);
+  /** The sync check is over; the suspension holds until the cube is still (T2.8). */
+  private readonly settlingSignal = signal(false);
+  /** The suspension is over; no attempt begins until the cube is still (T2.8). */
+  private readonly graceSignal = signal(false);
 
   /** `opfs`: sessions are kept in the browser; `memory`: they last until the page closes. */
   readonly storageKind = this.sessionStorage.kind;
@@ -334,6 +353,11 @@ export class SessionService {
    * the next attempt begins once it ends.
    */
   readonly suspended = this.suspendedSignal.asReadonly();
+  /**
+   * A sync check is over, but no attempt begins yet: the cube has not been still long enough since
+   * (`holdAfterSyncCheck`, and the grace after `resumeAfterSyncCheck`, T2.8).
+   */
+  readonly syncCheckOver = computed(() => this.settlingSignal() || this.graceSignal());
 
   /** The index of the attempt under way, or of the next one. */
   readonly index = computed(() => {
@@ -359,7 +383,7 @@ export class SessionService {
     if (!this.readySignal()) {
       return 'loading';
     }
-    if (this.suspendedSignal()) {
+    if (this.suspendedSignal() || this.graceSignal()) {
       return 'sync-check';
     }
     const view = this.attemptSignal();
@@ -425,6 +449,12 @@ export class SessionService {
   /** Set when the connection's cube has not said what it is within {@link HARDWARE_WAIT_MS}. */
   private hardwareWaitOver = false;
   private hardwareTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The host time of the cube's latest move, for the sync check's stillness (T2.8). */
+  private lastMoveMs = Number.NEGATIVE_INFINITY;
+  /** When the sync check's suspension ended, for its grace (T2.8). */
+  private resumedMs = Number.NEGATIVE_INFINITY;
+  private settleTimer: number | null = null;
+  private graceTimer: number | null = null;
   private generating = false;
   private restoring: Promise<void> | null = null;
   /** The end of the last write queued; never rejects. */
@@ -442,6 +472,8 @@ export class SessionService {
       subscription.unsubscribe();
       this.stopTicker();
       clearTimeout(this.hardwareTimer);
+      this.clearTimer(this.settleTimer);
+      this.clearTimer(this.graceTimer);
     });
     effect(() => {
       const active = this.cube.status() === 'connected' && this.sessionSignal() !== null;
@@ -778,6 +810,11 @@ export class SessionService {
     if (!this.readySignal() || this.solveStarted()) {
       return false;
     }
+    // A check again, while the last one's suspension or grace lasts: it goes on for this one.
+    this.settlingSignal.set(false);
+    this.graceSignal.set(false);
+    this.settleTimer = this.clearTimer(this.settleTimer);
+    this.graceTimer = this.clearTimer(this.graceTimer);
     if (this.suspendedSignal()) {
       return true;
     }
@@ -791,17 +828,35 @@ export class SessionService {
   }
 
   /**
-   * Ends the suspension of `suspendForSyncCheck`: the attempt it dropped begins again, with its
-   * scramble and number, as soon as the cube is solved (at once if it is; otherwise the timer says
-   * to solve it first), as any next attempt does.
+   * The sync check ended (T2.8): the suspension holds until the cube has been still for
+   * {@link SYNC_SETTLE_MS}, then ends by itself (`resumeAfterSyncCheck`), so that the turns a solver
+   * still makes for the check, or turns back, go to no attempt; dismissing the check's result ends
+   * it sooner. Nothing while no check suspends the timer.
+   */
+  holdAfterSyncCheck(): void {
+    if (!this.suspendedSignal()) {
+      return;
+    }
+    this.settlingSignal.set(true);
+    this.armSettle();
+  }
+
+  /**
+   * Ends the suspension of `suspendForSyncCheck`: once the cube has been still for
+   * {@link SYNC_GRACE_MS} (T2.8), the attempt it dropped begins again, with its scramble and number,
+   * as soon as the cube is solved (at once if it is; otherwise the timer says to solve it first), as
+   * any next attempt does.
    */
   resumeAfterSyncCheck(): void {
     if (!this.suspendedSignal()) {
       return;
     }
     this.suspendedSignal.set(false);
-    this.refresh();
-    this.ensureAttempt();
+    this.settlingSignal.set(false);
+    this.settleTimer = this.clearTimer(this.settleTimer);
+    this.resumedMs = this.now();
+    this.graceSignal.set(true);
+    this.armGrace();
   }
 
   /**
@@ -919,6 +974,14 @@ export class SessionService {
 
   private onMove(event: CubeMoveEvent): void {
     this.clockFit.addSample(event.cubeMs, event.hostMs, event.packetLast);
+    this.lastMoveMs = this.now();
+    // After a sync check, the cube is not still yet: its suspension or its grace waits longer.
+    if (this.settlingSignal()) {
+      this.armSettle();
+    }
+    if (this.graceSignal()) {
+      this.armGrace();
+    }
     const current = this.activeCurrent();
     if (current === null) {
       // The cube may have become solved: the next attempt can begin.
@@ -1058,13 +1121,72 @@ export class SessionService {
     this.ensureAttempt();
   }
 
+  /**
+   * The sync check's suspension ends once the cube has been still for {@link SYNC_SETTLE_MS} since
+   * its last move (at once when it has been already).
+   */
+  private armSettle(): void {
+    this.settleTimer = this.clearTimer(this.settleTimer);
+    const wait = this.lastMoveMs + SYNC_SETTLE_MS - this.now();
+    if (wait <= 0) {
+      this.resumeAfterSyncCheck();
+      return;
+    }
+    this.settleTimer = this.setTimer(() => {
+      this.settleTimer = null;
+      this.resumeAfterSyncCheck();
+    }, wait);
+  }
+
+  /**
+   * The grace after the sync check's suspension ends once the cube has been still for
+   * {@link SYNC_GRACE_MS} since the later of its last move and the suspension's end; then the next
+   * attempt may begin.
+   */
+  private armGrace(): void {
+    this.graceTimer = this.clearTimer(this.graceTimer);
+    const wait = Math.max(this.lastMoveMs, this.resumedMs) + SYNC_GRACE_MS - this.now();
+    const end = (): void => {
+      this.graceTimer = null;
+      this.graceSignal.set(false);
+      this.refresh();
+      this.ensureAttempt();
+    };
+    if (wait <= 0) {
+      end();
+    } else {
+      this.graceTimer = this.setTimer(end, wait);
+    }
+  }
+
+  /** A timer on the host clock (BROWSER_GLOBALS', which the tests fake). */
+  private setTimer(callback: () => void, ms: number): number {
+    const set =
+      this.globals.setTimeout ?? ((cb: () => void, delay: number) => setTimeout(cb, delay));
+    return set(callback, ms);
+  }
+
+  /** Clears the timer `handle`, if any; null, for the field that held it. */
+  private clearTimer(handle: number | null): null {
+    if (handle !== null) {
+      const clear = this.globals.clearTimeout;
+      if (clear === undefined) {
+        clearTimeout(handle);
+      } else {
+        clear(handle);
+      }
+    }
+    return null;
+  }
+
   /** Begins the next attempt if one is due and everything it needs is there. */
   private ensureAttempt(): void {
     if (
       !this.readySignal() ||
       !this.awaitingSignal() ||
       this.activeCurrent() !== null ||
-      this.suspendedSignal()
+      this.suspendedSignal() ||
+      this.graceSignal()
     ) {
       return;
     }

@@ -13,10 +13,10 @@ import { videoBitrate, type VideoQuality } from './bitrate';
 import { cut } from './cut';
 import type { FramingRect } from './framing';
 import {
-  MOTION_WIDTH,
   MotionMeter,
   isMotionFrame,
   type MotionFrame,
+  type MotionMeasure,
   type PlaneSize,
 } from './motion';
 import {
@@ -27,6 +27,7 @@ import {
   type ClipJob,
   type CutRequest,
   type MessageTarget,
+  type MotionMeterInfo,
   type MuxAndWriteRequest,
   type ResolvedCaptureConfig,
   type WindowToWorker,
@@ -163,10 +164,14 @@ export interface WorkerEnvironment {
   readonly drawLuma?: (frame: FrameLike, region: FramingRect, size: PlaneSize) => LumaImage | null;
 }
 
-/** A sync check under way (T2.5): its id, and the meter of its frames' motion. */
+/**
+ * A sync check under way (T2.5): its id, the meter of its frames' motion, and the description of the
+ * meter last sent to the window (T2.8).
+ */
 interface SyncCheck {
   readonly id: number;
   readonly meter: MotionMeter<FrameLike & MotionFrame>;
+  sent: MotionMeterInfo | null;
 }
 
 /** An audio input's timestamp and arrival, kept until the chunks that start in it are out. */
@@ -275,6 +280,7 @@ export class CaptureWorker {
     this.#sync = {
       id,
       meter: new MotionMeter<FrameLike & MotionFrame>(rect, draw === undefined ? {} : { draw }),
+      sent: null,
     };
   }
 
@@ -417,17 +423,17 @@ export class CaptureWorker {
   }
 
   /**
-   * Sends the motion of `frame` for the sync check `sync`, unless it is the check's first frame; a
-   * frame whose pixels cannot be read ends the check, and the window hears why.
+   * Sends the motion of `frame` for the sync check `sync`, unless it is the check's first frame,
+   * after how the frames are read when that is new (the check's first frame, a new size); a frame
+   * whose pixels cannot be read ends the check, and the window hears why.
    */
   async #measureMotion(sync: SyncCheck, frame: FrameLike, arrivalHostMs: number): Promise<void> {
-    let energy: number | null;
-    let costMs: number;
+    let measured: MotionMeasure;
     try {
       if (!isMotionFrame(frame)) {
         throw new Error("The camera's frames cannot be read here.");
       }
-      ({ energy, costMs } = await sync.meter.measure(frame));
+      measured = await sync.meter.measure(frame);
     } catch (error: unknown) {
       if (this.#sync === sync) {
         this.#sync = null;
@@ -435,7 +441,15 @@ export class CaptureWorker {
       }
       return;
     }
-    if (energy === null || this.#sync !== sync) {
+    if (this.#sync !== sync) {
+      return;
+    }
+    const { mean, changed, costMs, meter } = measured;
+    if (meter !== sync.sent) {
+      sync.sent = meter;
+      this.#env.post({ type: 'sync-meter', id: sync.id, meter });
+    }
+    if (mean === null || changed === null) {
       return;
     }
     this.#env.post({
@@ -444,7 +458,9 @@ export class CaptureWorker {
       sample: {
         timestampUs: frame.timestamp,
         arrivalHostMs,
-        energy: Math.round(energy * 1000) / 1000,
+        mean: Math.round(mean * 1000) / 1000,
+        // A millionth: finer than one pixel of a 320 × 180 plane (1/57,600).
+        changed: Math.round(changed * 1e6) / 1e6,
         costMs: Math.round(costMs * 1000) / 1000,
       },
     });
@@ -875,8 +891,17 @@ function globalFunction(name: string): unknown {
 // Node's tests import `CaptureWorker` without a DedicatedWorkerGlobalScope.
 if (globalFunction('DedicatedWorkerGlobalScope') !== undefined) {
   const scope = globalThis as unknown as WorkerScope;
-  // For the frames the motion meter cannot copy: drawn into a canvas, 160 pixels wide (T2.5).
-  const sampler = new LumaSampler<CanvasImageSource>(offscreenCanvas, MOTION_WIDTH);
+  // For the frames the motion meter cannot copy: drawn into a canvas as wide as the meter's plane,
+  // 320 or 160 pixels (T2.5, T2.8), one canvas per width.
+  const samplers = new Map<number, LumaSampler<CanvasImageSource>>();
+  const samplerFor = (width: number): LumaSampler<CanvasImageSource> => {
+    let sampler = samplers.get(width);
+    if (sampler === undefined) {
+      sampler = new LumaSampler<CanvasImageSource>(offscreenCanvas, width);
+      samplers.set(width, sampler);
+    }
+    return sampler;
+  };
   const worker = new CaptureWorker({
     VideoEncoder: globalFunction('VideoEncoder') as VideoEncoderClass | undefined,
     AudioEncoder: globalFunction('AudioEncoder') as AudioEncoderClass | undefined,
@@ -891,7 +916,8 @@ if (globalFunction('DedicatedWorkerGlobalScope') !== undefined) {
       };
     },
     // The frames here are the camera's `VideoFrame`s, which a canvas draws.
-    drawLuma: (frame, region) => sampler.sample(frame as unknown as VideoFrame, region),
+    drawLuma: (frame, region, size) =>
+      samplerFor(size.width).sample(frame as unknown as VideoFrame, region),
   });
   scope.addEventListener('message', (event) => {
     const data = event.data;
