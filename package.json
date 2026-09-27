@@ -1,6 +1,6 @@
 {
   "name": "cubetrace",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Chrome web app that records speedcube solves in sync with a GAN Bluetooth cube.",
   "license": "MIT",
