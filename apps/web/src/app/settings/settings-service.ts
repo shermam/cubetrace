@@ -62,9 +62,9 @@ export function macAddressProblem(text: string): string {
 /**
  * The settings the timer and the cube connection need (docs/PLAN.md, T1.6a): the host label that
  * sessions record, the cubes' MAC addresses by Bluetooth name, the idle disconnection (T1.14), the
- * demo speed, inspection and auto-advance. Signals, kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that
- * is written on every change. Where the browser blocks storage the settings last until the page
- * closes, and `saveError` says so.
+ * demo speed, inspection and auto-advance. Signals, kept in `localStorage` (through
+ * BROWSER_GLOBALS) as one JSON object that is written on every change. Where the browser blocks
+ * storage the settings last until the page closes, and `saveError` says so.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {

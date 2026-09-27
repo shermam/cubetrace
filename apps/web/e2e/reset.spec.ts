@@ -5,11 +5,11 @@ import { fixtureSolve } from './helpers/fixtures';
 import { currentSessionId, demoPath, expectSolves, solveRows } from './helpers/timer';
 import { recordTimerViews, timerViews } from './helpers/timer-views';
 
-// "Mark as solved" (T1.14) with the demo cube. Pressed during the scramble, it tells the cube that it
-// is solved: the attempt under way is dropped without a record and begins again, from its start,
-// with the same scramble and number; the demo cube's replay stops there, as a solver's hands would.
-// A fresh demo, the page loaded again with ?demo (the session goes on), then scrambles and solves
-// that attempt.
+// "Mark as solved" (T1.14) with the demo cube. Pressed during the scramble, it tells the cube that
+// it is solved: the attempt under way is dropped without a record and begins again, from its
+// start, with the same scramble and number; the demo cube's replay stops there, as a solver's hands
+// would. A fresh demo, the page loaded again with ?demo (the session goes on), then scrambles and
+// solves that attempt.
 
 const SOLVED = 'UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB';
 
@@ -22,7 +22,7 @@ test('Mark as solved during the scramble: the attempt begins again with its scra
   const partWay = new RegExp(`^\\s*([1-9]|1\\d|20) / ${String(total)}\\s*$`);
   await recordTimerViews(page);
 
-  // A quarter of the speed: a scramble move every 400 ms, time enough to press the button during it.
+  // A quarter of the speed: a scramble move every 400 ms, time enough to press the button then.
   await page.goto(demoPath(0, 0.25));
   const cube = page.getByTestId('cube-section');
   await cube.locator('summary').click();
@@ -40,7 +40,7 @@ test('Mark as solved during the scramble: the attempt begins again with its scra
   await expect(page.getByTestId('cube-status').first()).toHaveText('Fake cube · 100%');
   await expect(solveRows(page)).toHaveCount(0);
 
-  // The button was pressed during the scramble: the view before the restart was part-way through it.
+  // It was pressed during the scramble: the view before the restart was part-way through it.
   const views = await timerViews(page);
   const restarted = views.findIndex(
     (view, i) =>
