@@ -7,7 +7,7 @@ import { CameraService } from './camera-service';
 import { RecordingService, STORAGE_FULL } from './recording-service';
 
 /**
- * The recording's part of the Camera section (docs/PLAN.md, T2.4): whether it records and why not,
+ * The recording's part of Camera settings (docs/PLAN.md, T2.4): whether it records and why not,
  * the pipeline's counters (frames in, encoded and dropped, the buffer, the codecs), the last clip
  * saved, a clip that failed (once, until dismissed), and the storage meter. The logic is the
  * `RecordingService`'s; this only shows it.
@@ -62,7 +62,7 @@ import { RecordingService, STORAGE_FULL } from './recording-service';
         While the camera is on and a session is under way, the last 90 s are kept in memory, and
         every attempt gets two clips in its folder: its scramble from 2 s before the first turn to 1
         s after, and its solve from 3 s before the first turn to 1 s after. The solve list shows
-        them. Audio: Settings, Camera.
+        them. Audio: Record audio, above.
       </p>
     </section>
   `,

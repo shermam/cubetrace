@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Canvas2D, FramingRect } from './index';
-import { LumaSampler, lumaFromRgba, sampleSize, sharpness } from './index';
+import { LumaSampler, SHARPNESS_WIDTH, lumaFromRgba, sampleSize, sharpness } from './index';
 
 const W = 320;
 const H = 180;
@@ -148,21 +148,25 @@ describe('LumaSampler', () => {
     };
   }
 
-  it('draws the region 320 pixels wide, its height in proportion, and reads its luma', () => {
+  it('draws the region 160 pixels wide, its height in proportion, and reads its luma', () => {
     const { sampler: luma, canvases } = sampler((x, y) => (x + y) % 256);
     const region: FramingRect = { x: 480, y: 270, w: 960, h: 540 };
 
     const image = luma.sample('frame 1', region);
 
-    expect(sampleSize(region)).toEqual({ width: 320, height: 180 });
-    expect(canvases.map((canvas) => [canvas.width, canvas.height])).toEqual([[320, 180]]);
+    expect(SHARPNESS_WIDTH).toBe(160);
+    expect(sampleSize(region)).toEqual({ width: 160, height: 90 });
+    expect(canvases.map((canvas) => [canvas.width, canvas.height])).toEqual([[160, 90]]);
     expect(canvases[0].draws).toEqual([
-      { source: 'frame 1', args: [480, 270, 960, 540, 0, 0, 320, 180] },
+      { source: 'frame 1', args: [480, 270, 960, 540, 0, 0, 160, 90] },
     ]);
-    expect(image?.width).toBe(320);
-    expect(image?.height).toBe(180);
-    expect(image?.luma.length).toBe(320 * 180);
-    expect(image?.luma[181]).toBe(181);
+    expect(image?.width).toBe(160);
+    expect(image?.height).toBe(90);
+    expect(image?.luma.length).toBe(160 * 90);
+    // The pixel at (21, 1).
+    expect(image?.luma[181]).toBe(22);
+    // Another width, when asked.
+    expect(sampleSize(region, 320)).toEqual({ width: 320, height: 180 });
   });
 
   it('keeps its canvas while the proportions stay, and makes a new one when they change', () => {
@@ -172,11 +176,11 @@ describe('LumaSampler', () => {
     expect(canvases).toHaveLength(1);
     luma.sample('c', { x: 0, y: 0, w: 1080, h: 1080 });
     expect(canvases.map((canvas) => [canvas.width, canvas.height])).toEqual([
-      [320, 180],
-      [320, 320],
+      [160, 90],
+      [160, 160],
     ]);
     // A portrait frame, 1080 × 1920.
-    expect(sampleSize({ x: 0, y: 0, w: 1080, h: 1920 })).toEqual({ width: 320, height: 569 });
+    expect(sampleSize({ x: 0, y: 0, w: 1080, h: 1920 })).toEqual({ width: 160, height: 284 });
   });
 
   it('measures the sharpness of what it drew; null without a canvas', () => {
@@ -185,7 +189,11 @@ describe('LumaSampler', () => {
     );
     const { sampler: flat } = sampler(() => 90);
     const region = { x: 0, y: 0, w: 1920, h: 1080 };
-    expect(sharp.measure('frame', region)).toBeCloseTo(sharpness(checkers, W, H), 6);
+    const { width, height } = sampleSize(region);
+    const drawn = picture(width, height, (x, y) =>
+      (Math.floor(x / 20) + Math.floor(y / 20)) % 2 ? 40 : 220,
+    );
+    expect(sharp.measure('frame', region)).toBeCloseTo(sharpness(drawn, width, height), 6);
     expect(flat.measure('frame', region)).toBe(0);
 
     const none = new LumaSampler<string>(() => null);

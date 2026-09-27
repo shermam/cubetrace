@@ -1,9 +1,9 @@
 import { type Locator, type Page, expect, test } from '@playwright/test';
 
-// The Camera section of the Timer page (docs/PLAN.md, T2.1) with Chrome's fake camera: a green test
-// pattern with a moving disc at 20 fps ("fake_device_0"), which has manual exposure and focus, and
-// an automatic "Allow" on the camera prompt. Launch options force a browser of their own for this
-// file.
+// The Camera settings of the Timer page (docs/PLAN.md, T2.1; a disclosure with the preview beside the
+// clock since T2.7) with Chrome's fake camera: a green test pattern with a moving disc at 20 fps
+// ("fake_device_0"), which has manual exposure and focus, and an automatic "Allow" on the camera
+// prompt. Launch options force a browser of their own for this file.
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
@@ -53,7 +53,7 @@ test('the fake camera: listed, turned on, measured, adjusted and framed; the fra
   expect(fps).toBeLessThan(25);
   await expect(page.getByTestId('camera-state')).toHaveText(/^1920×1080 · \d+\.\d fps$/);
 
-  // The meter measures every 10th frame (twice a second at 20 fps); the pattern is sharp.
+  // The meter measures twice a second; the pattern is sharp.
   const meter = page.getByTestId('camera-sharpness');
   await expect.poll(() => samples(meter), { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
   const before = await samples(meter);
@@ -73,9 +73,11 @@ test('the fake camera: listed, turned on, measured, adjusted and framed; the fra
   await expect(page.getByTestId('control-exposureTime-value')).toHaveText('5.0 ms (1/200 s)');
   await expect(page.getByTestId('camera-state')).toHaveText(/^1920×1080/, { timeout: 10_000 });
 
-  // The framing rectangle: the full frame, then resized from its bottom-right corner and moved.
+  // The framing rectangle, edited over the larger picture: the full frame, then resized from its
+  // bottom-right corner and moved.
   const text = page.getByTestId('camera-framing-rect');
   await expect(text).toHaveText('full frame, 1920×1080');
+  await page.getByTestId('camera-framing-edit').click();
   const preview = page.getByTestId('camera-frame');
   await preview.scrollIntoViewIfNeeded();
   const box = await preview.boundingBox();
@@ -97,7 +99,8 @@ test('the fake camera: listed, turned on, measured, adjusted and framed; the fra
   expect(moved[1]).toBeGreaterThan(80);
   expect(moved.slice(2)).toEqual(resized.slice(2));
 
-  // A reload: the camera turns on by itself, the section open, the rectangle where it was left.
+  // A reload: the camera turns on by itself, the settings open as they were left, the rectangle
+  // where it was left.
   await page.reload();
   await expect(page.getByTestId('camera-preview')).toBeVisible();
   await expect(page.getByTestId('camera-section')).toHaveAttribute('open', '');
@@ -108,7 +111,7 @@ test('the fake camera: listed, turned on, measured, adjusted and framed; the fra
   await expect(page.getByTestId('camera-state')).toHaveText('Off');
   await expect(page.getByTestId('camera-preview')).toHaveCount(0);
   await page.reload();
-  await page.getByTestId('camera-section').locator('summary').click();
+  await expect(page.getByTestId('camera-section')).toHaveAttribute('open', '');
   await expect(page.getByTestId('camera-state')).toHaveText('Off');
   await page.getByTestId('camera-toggle').click();
   await expect(page.getByTestId('camera-preview')).toBeVisible();
@@ -134,7 +137,7 @@ test('exactly 60 fps from Settings: the 20 fps fake camera opens at its best rat
 test.describe('on a phone in portrait', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('the Camera section, on, fits the screen without scrolling sideways', async ({ page }) => {
+  test('the Camera settings, on, fit the screen without scrolling sideways', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('camera-section').locator('summary').click();
     await page.getByTestId('camera-toggle').click();

@@ -460,7 +460,7 @@ describe('CameraService', () => {
     expect(camera.values().zoom).toBe(1);
   });
 
-  it('measures the preview: its frames, the real frame rate, and the sharpness every 10th frame', async () => {
+  it('measures the preview: its frames, the real frame rate, and the sharpness twice a second', async () => {
     const camera = load({ cameras: [FAKE_PHONE_REAR], userAgent: ANDROID });
     await camera.start();
     const video = document.createElement('video');
@@ -468,37 +468,64 @@ describe('CameraService', () => {
     frames.install(video);
     canvas.paint = checkers;
 
+    // Frames 40 ms apart (25 fps): the first is measured, then one every 13 frames (520 ms).
     const stop = camera.watchPreview(video);
-    frames.present(9, 1000 / 30, 1080, 1920);
-    expect(camera.frameSize()).toEqual({ width: 1080, height: 1920 });
     expect(camera.sharpness()).toBeNull();
-
-    frames.present(1, 1000 / 30, 1080, 1920);
-    expect(canvas.draws).toEqual([[0, 0, 1080, 1920, 0, 0, 320, 569]]);
+    frames.present(1, 40, 1080, 1920);
+    expect(camera.frameSize()).toEqual({ width: 1080, height: 1920 });
+    expect(canvas.draws).toEqual([[0, 0, 1080, 1920, 0, 0, 160, 284]]);
     expect(camera.sharpness()).toBeGreaterThan(1000);
     expect(camera.sharpnessSamples()).toBe(1);
     expect(camera.sharpnessGood()).toBe(true);
 
-    // The track claims 60 fps; the frames come every 33 ms.
-    frames.present(30, 1000 / 30, 1080, 1920);
+    frames.present(12, 40, 1080, 1920);
+    expect(camera.sharpnessSamples()).toBe(1);
+    frames.present(1, 40, 1080, 1920);
+    expect(camera.sharpnessSamples()).toBe(2);
+    // The track claims 60 fps; the frames come every 40 ms.
+    frames.present(37, 40, 1080, 1920);
     expect(camera.settings()?.['frameRate']).toBe(60);
-    expect(camera.measuredFps()).toBeCloseTo(30, 6);
+    expect(camera.measuredFps()).toBeCloseTo(25, 6);
+    // 51 frames, 2 s: four measurements.
     expect(camera.sharpnessSamples()).toBe(4);
 
     canvas.paint = () => 128;
-    frames.present(10, 1000 / 30, 1080, 1920);
+    frames.present(13, 40, 1080, 1920);
     expect(camera.sharpness()).toBe(0);
     expect(camera.sharpnessGood()).toBe(false);
+    expect(camera.sharpnessSamples()).toBe(5);
 
     stop();
     expect(frames.waiting).toBe(0);
-    frames.present(10);
+    frames.present(13, 40);
     expect(camera.sharpnessSamples()).toBe(5);
 
     expect(camera.watchPreview(document.createElement('video'))).toEqual(expect.any(Function));
     expect(camera.frameProblem()).toBe(
       'This browser cannot measure the frames (no requestVideoFrameCallback).',
     );
+  });
+
+  it('measures no sharpness while it is held, and again once it is not', async () => {
+    const camera = load();
+    await camera.start();
+    const video = document.createElement('video');
+    const frames = new FakeVideoFrames();
+    frames.install(video);
+    canvas.paint = checkers;
+    let held = false;
+
+    camera.watchPreview(video, () => held);
+    frames.present(1, 40);
+    expect(camera.sharpnessSamples()).toBe(1);
+    held = true;
+    // 4 s of frames while held (a solve): none measured; the frame rate and size still are.
+    frames.present(100, 40);
+    expect(camera.sharpnessSamples()).toBe(1);
+    expect(camera.measuredFps()).toBeCloseTo(25, 6);
+    held = false;
+    frames.present(1, 40);
+    expect(camera.sharpnessSamples()).toBe(2);
   });
 
   it('keeps the framing rectangle per camera and frame size; the full frame by default', async () => {
@@ -522,8 +549,8 @@ describe('CameraService', () => {
     const frames = new FakeVideoFrames();
     frames.install(video);
     camera.watchPreview(video);
-    frames.present(10);
-    expect(canvas.draws.at(-1)).toEqual([0, 100, 800, 600, 0, 0, 320, 240]);
+    frames.present(1);
+    expect(canvas.draws.at(-1)).toEqual([0, 100, 800, 600, 0, 0, 160, 120]);
 
     camera = load({ keepMedia: true });
     await camera.start();

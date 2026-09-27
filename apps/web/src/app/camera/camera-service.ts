@@ -11,7 +11,6 @@ import {
 import {
   CONTROL_GROUPS,
   FrameRateMeter,
-  SHARPNESS_EVERY,
   applyControls,
   browserLumaSampler,
   buildConstraints,
@@ -52,6 +51,7 @@ import {
   describeCameraError,
   describeFallback,
 } from './camera-errors';
+import { SharpnessSchedule } from './sharpness-schedule';
 
 /**
  * `off`: closed, as the user left it. `starting`: asking for the camera (the permission prompt
@@ -140,8 +140,8 @@ export function cameraDevices(list: readonly MediaDeviceInfo[]): CameraDevice[] 
  * like the cube's connection. `cameraInfo()` is the session's `cameras[]` entry (T2.4 stores it).
  *
  * The browser is read through BROWSER_GLOBALS (`navigator.mediaDevices`), which the unit tests
- * fake; the frames are measured on the preview `<video>` that the Camera panel hands to
- * `watchPreview`.
+ * fake; the frames are measured on the preview `<video>` that the Camera preview beside the clock
+ * (T2.7) hands to `watchPreview`.
  */
 @Injectable({ providedIn: 'root' })
 export class CameraService {
@@ -431,10 +431,11 @@ export class CameraService {
 
   /**
    * Measures the frames that `video` (the preview, playing `stream`) presents, until the returned
-   * function is called: their size, the frame rate over a second of the camera's clock, and every
-   * 10th frame the sharpness of the framing rectangle.
+   * function is called: their size, the frame rate over a second of the camera's clock, and the
+   * sharpness of the framing rectangle at most twice a second, none while `held()` says so (see
+   * `SharpnessSchedule`: the Camera preview holds it during a solve).
    */
-  watchPreview(video: HTMLVideoElement): () => void {
+  watchPreview(video: HTMLVideoElement, held: () => boolean = () => false): () => void {
     if (typeof member(video, 'requestVideoFrameCallback') !== 'function') {
       this.frameProblemSignal.set(
         'This browser cannot measure the frames (no requestVideoFrameCallback).',
@@ -443,10 +444,9 @@ export class CameraService {
     }
     this.frameProblemSignal.set(null);
     const meter = new FrameRateMeter();
-    let frames = 0;
+    const schedule = new SharpnessSchedule();
     let shownAt = Number.NEGATIVE_INFINITY;
     return watchFrames(video, (metadata) => {
-      frames++;
       const size = this.frameSizeSignal();
       if (size?.width !== metadata.width || size.height !== metadata.height) {
         if (metadata.width > 0 && metadata.height > 0) {
@@ -461,7 +461,7 @@ export class CameraService {
           this.measuredFpsSignal.set(fps);
         }
       }
-      if (frames % SHARPNESS_EVERY === 0) {
+      if (schedule.due(metadata.mediaTime * 1000, held())) {
         this.measureSharpness(video);
       }
     });

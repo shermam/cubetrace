@@ -273,3 +273,39 @@ clips of the timer.
   Turn on): the Recording part says "A clip could not be saved…" once, Chrome's console (on the
   phone, `chrome://inspect`) has one line `cubetrace: clip failed: scramble of attempt N: …`, and the
   session's export has that line in `notes`; the attempt itself is saved as usual.
+
+## T2.7 — layout
+
+On https://shermam.github.io/cubetrace/, Timer page, with a cube connected and the camera on, on
+the MacBook (Chrome at the size its window opens with, not full screen) and on the ThinkPhone
+(Chrome, then the installed app). Since T2.7 the Camera section of the T2.1 and T2.4 items above is
+**Camera settings**, a disclosure below the Cube section: the camera's picture is beside the time
+(under it on the phone), and the framing rectangle is dragged after Framing → Edit. Next to each
+item, write the device, Chrome's version and the window's size (`innerWidth` × `innerHeight` in the
+console, or `chrome://inspect` on the phone).
+
+- [ ] MacBook: the scramble (moves and picture), the time and the camera's preview are all in view
+  together without scrolling, the preview beside the time, about 240 px high, and under it one line:
+  the frame rate (about 30 fps), the sharpness (green when good, amber when soft), "recording" with
+  a red dot during a session ("saving" for a moment after each scramble and solve), and storage in
+  percent.
+- [ ] ThinkPhone in portrait, in Chrome and in the installed app: scramble, time and preview (under
+  the time, the width of the screen) in view together without scrolling, and nothing scrolls
+  sideways. If the bottom of the preview is cut off in Chrome (with its address bar), write down by
+  how much.
+- [ ] The preview stays in view through a whole attempt, the page not moving: scrambling, armed,
+  solving, and after the solve. It shows the framing rectangle; a front camera's preview is mirrored
+  like a mirror.
+- [ ] The sharpness number under the preview stays the same while a solve is under way (it is not
+  measured then, so that no move of the solve waits for it) and changes again after it.
+- [ ] Fifteen solves or more: the Timer page lists the last 12, newest first, with "N solves in this
+  session · See all"; See all opens the session's page with all of them and the same ao12 as the
+  Timer page (ao100 says "–" until the session has 100 attempts).
+- [ ] The session's page: its date, device, cube, camera and clips with their size; a clip badge opens
+  the viewer, which plays the clip and downloads the five files. The same for an older session,
+  opened from the Sessions page (its date is a link). Reload the page: the same. Export saves the
+  session's JSON; Delete… then Delete removes it and goes back to the Sessions page.
+- [ ] Camera settings: closed the first time, until the camera is on; then open by themselves. Closed
+  by hand, they stay closed across a reload, and opened, open. The camera picker, Turn on and off,
+  the resolution, the frame rate, Record audio, the exposure, focus, white balance, zoom and torch
+  (the ThinkPhone), and the framing (Edit, Full frame) are all in them.

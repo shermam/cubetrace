@@ -1,15 +1,34 @@
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import type { AttemptRecord } from '@cubetrace/core';
 
-import { testAttempt } from '../session/session-testing';
+import { SESSION_A, testAttempt } from '../session/session-testing';
 import { ClipViewing } from './clip-viewing';
-import { SolveList } from './solve-list';
+import { SolveList, newest } from './solve-list';
 
-async function render(attempts: readonly AttemptRecord[]): Promise<HTMLElement> {
+async function render(
+  attempts: readonly AttemptRecord[],
+  inputs: { limit?: number | null; sessionId?: string | null; showStats?: boolean } = {},
+): Promise<HTMLElement> {
+  TestBed.configureTestingModule({ providers: [provideRouter([])] });
   const fixture = TestBed.createComponent(SolveList);
   fixture.componentRef.setInput('attempts', attempts);
+  for (const [name, value] of Object.entries(inputs)) {
+    fixture.componentRef.setInput(name, value);
+  }
   await fixture.whenStable();
   return fixture.nativeElement as HTMLElement;
+}
+
+function indices(element: HTMLElement): string[] {
+  return Array.from(element.querySelectorAll('[data-testid="solve-row"]'), (row) =>
+    row.getAttribute('data-index'),
+  ).map(String);
+}
+
+/** Attempts 1 to `count`, solved in 10 s plus a second per attempt. */
+function attempts(count: number): AttemptRecord[] {
+  return Array.from({ length: count }, (_, k) => testAttempt(k + 1, 10_000 + k * 1000));
 }
 
 function text(element: HTMLElement, testId: string): string {
@@ -87,5 +106,71 @@ describe('SolveList', () => {
     const element = await render([]);
     expect(element.querySelector('[data-testid="solve-row"]')).toBeNull();
     expect(element.textContent).toContain('No solves in this session yet.');
+  });
+
+  it('shows the newest `limit` solves, and under them how many there are and "See all"', async () => {
+    const element = await render(attempts(15), { limit: 12, sessionId: SESSION_A });
+
+    expect(indices(element)).toEqual([
+      '15',
+      '14',
+      '13',
+      '12',
+      '11',
+      '10',
+      '9',
+      '8',
+      '7',
+      '6',
+      '5',
+      '4',
+    ]);
+    // The statistics are the whole session's.
+    expect(text(element, 'stat-count')).toBe('15');
+    expect(text(element, 'stat-best')).toBe('10.00');
+    expect(text(element, 'stat-ao12')).toBe('18.50');
+    const footer = element.querySelector('[data-testid="solve-list-footer"]');
+    expect(footer?.textContent.replace(/\s+/g, ' ').trim()).toBe(
+      '15 solves in this session · See all',
+    );
+    expect(footer?.querySelector('a')?.getAttribute('href')).toBe(`/sessions/${SESSION_A}`);
+  });
+
+  it('shows all the solves with a limit they do not reach, and says "1 solve"', async () => {
+    const element = await render(attempts(1), { limit: 12, sessionId: SESSION_A });
+    expect(indices(element)).toEqual(['1']);
+    expect(text(element, 'solve-list-footer')).toBe('1 solve in this session · See all');
+  });
+
+  it('has no footer without a limit, a session or a solve', async () => {
+    expect(
+      (await render(attempts(15), { sessionId: SESSION_A })).querySelectorAll(
+        '[data-testid="solve-row"]',
+      ),
+    ).toHaveLength(15);
+    TestBed.resetTestingModule();
+    for (const [list, inputs] of [
+      [attempts(15), { sessionId: SESSION_A }],
+      [attempts(15), { limit: 12 }],
+      [[], { limit: 12, sessionId: SESSION_A }],
+    ] as const) {
+      const element = await render(list, inputs);
+      expect(element.querySelector('[data-testid="solve-list-footer"]')).toBeNull();
+      TestBed.resetTestingModule();
+    }
+  });
+
+  it('leaves the statistics out when asked', async () => {
+    const element = await render(attempts(3), { showStats: false });
+    expect(element.querySelector('[data-testid="session-stats"]')).toBeNull();
+    expect(indices(element)).toEqual(['3', '2', '1']);
+  });
+
+  it('newest: the last `limit` attempts, newest first', () => {
+    const all = attempts(5);
+    expect(newest(all, 2).map((attempt) => attempt.index)).toEqual([5, 4]);
+    expect(newest(all, 12).map((attempt) => attempt.index)).toEqual([5, 4, 3, 2, 1]);
+    expect(newest(all, null).map((attempt) => attempt.index)).toEqual([5, 4, 3, 2, 1]);
+    expect(newest(all, 0)).toEqual([]);
   });
 });

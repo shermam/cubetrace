@@ -4,6 +4,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
   viewChild,
   type ElementRef,
 } from '@angular/core';
@@ -21,7 +22,13 @@ import {
   type PreviewBox,
 } from '@cubetrace/capture';
 
-import { SettingsService } from '../settings/settings-service';
+import {
+  CAMERA_FRAME_RATES,
+  CAMERA_FRAME_RATE_TEXT,
+  CAMERA_RESOLUTIONS,
+  CAMERA_RESOLUTION_TEXT,
+  SettingsService,
+} from '../settings/settings-service';
 import {
   fpsText,
   framingText,
@@ -34,6 +41,7 @@ import { CameraControls } from './camera-controls';
 import { CameraService } from './camera-service';
 import { RecordingPanel } from './recording-panel';
 import { RecordingService } from './recording-service';
+import { showStream } from './video';
 
 /** A corner is taken hold of within this many CSS pixels of it (a finger's width). */
 const HANDLE_REACH_PX = 24;
@@ -61,15 +69,22 @@ interface Drag {
 }
 
 /**
- * The Camera section of the Timer page (docs/PLAN.md, T2.1): the cameras of this device to choose
- * from (front and rear on a phone), Turn on / Turn off (kept across loads), the preview (mirrored
- * for a front camera, like a mirror; the frames are not), what the track claims next to what the
- * preview measures (a phone may claim 60 fps and deliver 30), the sharpness meter, the framing
- * rectangle over the preview (drag it to move it, drag a corner to resize it, by mouse or touch; the
- * arrow keys move it and Shift + arrows resize it; kept per camera), the camera's manual controls,
- * and in plain words why the camera did not open or opened otherwise than asked; below them, the
- * recording (T2.4, `RecordingPanel`), which this panel's `RecordingService` runs from the moment the
- * Timer page loads it.
+ * The Camera settings of the Timer page (docs/PLAN.md, T2.1; a disclosure since T2.7, whose
+ * `CameraPreview` shows the picture beside the clock): the cameras of this device to choose from
+ * (front and rear on a phone), Turn on / Turn off (kept across loads), what the track claims next to
+ * what the preview measures (a phone may claim 60 fps and deliver 30), the framing rectangle, which
+ * Edit shows over a larger picture of the camera (mirrored for a front camera, like a mirror; the
+ * frames are not; drag the rectangle to move it, drag a corner to resize it, by mouse or touch; the
+ * arrow keys move it and Shift + arrows resize it; kept per camera), the sharpness meter, the
+ * camera's manual controls, the resolution, frame rate and audio of Settings, and in plain words why
+ * the camera did not open or opened otherwise than asked; below them, the recording (T2.4,
+ * `RecordingPanel`), which this panel's `RecordingService` runs from the moment the Timer page loads
+ * it.
+ *
+ * Closed at first; the first time the camera is on it opens by itself, so that its controls are
+ * found, and from then on it stays as it was left (Settings keeps it). The larger picture is there
+ * only while the framing is edited and the panel is open: a second picture of the camera costs the
+ * page some work on every frame.
  */
 @Component({
   selector: 'app-camera-panel',
@@ -80,24 +95,34 @@ interface Drag {
 export class CameraPanel {
   protected readonly camera = inject(CameraService);
   private readonly recording = inject(RecordingService);
-  private readonly prefs = inject(SettingsService);
-  private readonly preview = viewChild<ElementRef<HTMLVideoElement>>('preview');
+  protected readonly prefs = inject(SettingsService);
+  private readonly picture = viewChild<ElementRef<HTMLVideoElement>>('picture');
   private readonly frame = viewChild<ElementRef<HTMLElement>>('frame');
   /** The rectangle while it is dragged; the stored one otherwise. */
   private readonly draft = signal<FramingRect | null>(null);
   private drag: Drag | null = null;
 
-  /** The section is open at first when the camera is on, so that its preview shows. */
-  protected readonly startOpen = this.prefs.cameraOn() || this.camera.status() !== 'off';
+  /** Whether the disclosure is open: as it was left, closed before it ever was opened. */
+  protected readonly open = signal(this.prefs.cameraSettingsOpen() ?? false);
+  /** The framing rectangle is being edited, over the larger picture. */
+  protected readonly editing = signal(false);
+  protected readonly resolutions = CAMERA_RESOLUTIONS.map((value) => ({
+    value,
+    label: CAMERA_RESOLUTION_TEXT[value],
+  }));
+  protected readonly frameRates = CAMERA_FRAME_RATES.map((value) => ({
+    value,
+    label: CAMERA_FRAME_RATE_TEXT[value],
+  }));
 
   protected readonly rect = computed(() => this.draft() ?? this.camera.framing());
-  /** The rectangle over the preview, in percent of the frame. */
+  /** The rectangle over the larger picture, in percent of the frame. */
   protected readonly box = computed(() => {
     const rect = this.rect();
     const size = this.camera.frameSize();
     return rect === null || size === null ? null : framingPercent(rect, size);
   });
-  /** The preview's proportions: the frames', 16:9 until they are known. */
+  /** The larger picture's proportions: the frames', 16:9 until they are known. */
   protected readonly aspect = computed(() => {
     const size = this.camera.frameSize();
     return size === null ? 16 / 9 : size.width / size.height;
@@ -160,24 +185,42 @@ export class CameraPanel {
   });
 
   constructor() {
-    // The preview plays the camera's stream, and the service measures its frames.
-    effect((onCleanup) => {
-      const video = this.preview()?.nativeElement;
-      const stream = this.camera.stream();
-      if (video === undefined || stream === null) {
-        return;
+    // The first time the camera is on (on this device), the settings open by themselves.
+    effect(() => {
+      if (this.camera.status() !== 'off' && this.prefs.cameraSettingsOpen() === null) {
+        untracked(() => {
+          this.setOpen(true);
+        });
       }
-      video.muted = true;
-      video.srcObject = stream;
-      playQuietly(video);
-      const stop = this.camera.watchPreview(video);
-      onCleanup(() => {
-        stop();
-        if (video.srcObject === stream) {
-          video.srcObject = null;
-        }
-      });
     });
+    // The picture for framing plays the camera's stream; the preview beside the clock measures it.
+    effect((onCleanup) => {
+      const video = this.picture()?.nativeElement;
+      const stream = this.camera.stream();
+      if (video !== undefined && stream !== null) {
+        onCleanup(showStream(video, stream));
+      }
+    });
+  }
+
+  /** The disclosure was opened or closed: kept for the next loads. */
+  protected setOpen(open: boolean): void {
+    this.open.set(open);
+    this.prefs.setCameraSettingsOpen(open);
+  }
+
+  protected setResolution(value: string): void {
+    const resolution = CAMERA_RESOLUTIONS.find((option) => option === value);
+    if (resolution !== undefined) {
+      this.prefs.setCameraResolution(resolution);
+    }
+  }
+
+  protected setFrameRate(value: string): void {
+    const rate = CAMERA_FRAME_RATES.find((option) => option === value);
+    if (rate !== undefined) {
+      this.prefs.setCameraFrameRate(rate);
+    }
   }
 
   protected toggle(): void {
@@ -299,12 +342,4 @@ export class CameraPanel {
 function handleOf(target: EventTarget | null): FramingHandle | null {
   const handle = target instanceof HTMLElement ? target.dataset['handle'] : undefined;
   return handle === 'nw' || handle === 'ne' || handle === 'sw' || handle === 'se' ? handle : null;
-}
-
-/** Starts the preview; a refusal (a stream replaced meanwhile) is dropped: the next one plays. */
-function playQuietly(video: HTMLVideoElement): void {
-  const playing: unknown = video.play();
-  if (playing instanceof Promise) {
-    playing.catch(() => undefined);
-  }
 }

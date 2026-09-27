@@ -1,6 +1,12 @@
-<details class="camera" data-testid="camera-section" [open]="startOpen">
+<details
+  #details
+  class="camera"
+  data-testid="camera-section"
+  [open]="open()"
+  (toggle)="setOpen(details.open)"
+>
   <summary>
-    <h2>Camera</h2>
+    <h2>Camera settings</h2>
     <span class="state" data-testid="camera-state" [attr.data-status]="camera.status()">{{
       summary()
     }}</span>
@@ -41,8 +47,8 @@
     @switch (camera.status()) {
       @case ('off') {
         <p class="muted" data-testid="camera-off">
-          The camera is off. Turned on, it stays on across pages and reloads until it is turned off;
-          the first time, Chrome asks for the permission.
+          The camera is off. Turned on, it stays on across pages and reloads until it is turned off,
+          and its picture shows beside the time; the first time, Chrome asks for the permission.
         </p>
       }
       @case ('starting') {
@@ -57,45 +63,6 @@
     }
 
     @if (camera.stream()) {
-      <div
-        #frame
-        class="frame"
-        data-testid="camera-frame"
-        [class.mirrored]="camera.mirrored()"
-        [style.--aspect]="aspect()"
-      >
-        <video
-          #preview
-          muted
-          playsinline
-          aria-label="Camera preview"
-          data-testid="camera-preview"
-        ></video>
-        @if (box(); as area) {
-          <div
-            class="framing"
-            role="group"
-            tabindex="0"
-            aria-label="Framing rectangle: drag it to move it, drag a corner to resize it; arrow keys move it, Shift and arrow keys resize it"
-            data-testid="camera-framing"
-            [style.left.%]="area.left"
-            [style.top.%]="area.top"
-            [style.width.%]="area.width"
-            [style.height.%]="area.height"
-            (pointerdown)="grab($event)"
-            (pointermove)="move($event)"
-            (pointerup)="release($event)"
-            (pointercancel)="release($event)"
-            (keydown)="nudge($event)"
-          >
-            <span class="handle nw" data-handle="nw"></span>
-            <span class="handle ne" data-handle="ne"></span>
-            <span class="handle sw" data-handle="sw"></span>
-            <span class="handle se" data-handle="se"></span>
-          </div>
-        }
-      </div>
-
       <dl class="facts">
         <dt>Track</dt>
         <dd data-testid="camera-track">{{ track() }}</dd>
@@ -104,11 +71,63 @@
         <dt>Framing</dt>
         <dd>
           <span data-testid="camera-framing-rect">{{ framingLine() }}</span>
+          <button
+            type="button"
+            class="link"
+            data-testid="camera-framing-edit"
+            [attr.aria-pressed]="editing()"
+            (click)="editing.set(!editing())"
+          >
+            {{ editing() ? 'Done' : 'Edit' }}
+          </button>
           <button type="button" class="link" data-testid="camera-full-frame" (click)="wholeFrame()">
             Full frame
           </button>
         </dd>
       </dl>
+
+      <!-- The picture to frame the cube on, while the framing is edited (a second <video> of the
+           stream, there only then). -->
+      @if (open() && editing()) {
+        <div
+          #frame
+          class="frame"
+          data-testid="camera-frame"
+          [class.mirrored]="camera.mirrored()"
+          [style.--aspect]="aspect()"
+        >
+          <video
+            #picture
+            muted
+            playsinline
+            aria-label="Camera picture, with the framing rectangle"
+            data-testid="camera-framing-video"
+          ></video>
+          @if (box(); as area) {
+            <div
+              class="framing"
+              role="group"
+              tabindex="0"
+              aria-label="Framing rectangle: drag it to move it, drag a corner to resize it; arrow keys move it, Shift and arrow keys resize it"
+              data-testid="camera-framing"
+              [style.left.%]="area.left"
+              [style.top.%]="area.top"
+              [style.width.%]="area.width"
+              [style.height.%]="area.height"
+              (pointerdown)="grab($event)"
+              (pointermove)="move($event)"
+              (pointerup)="release($event)"
+              (pointercancel)="release($event)"
+              (keydown)="nudge($event)"
+            >
+              <span class="handle nw" data-handle="nw"></span>
+              <span class="handle ne" data-handle="ne"></span>
+              <span class="handle sw" data-handle="sw"></span>
+              <span class="handle se" data-handle="se"></span>
+            </div>
+          }
+        </div>
+      }
 
       <div
         class="sharpness"
@@ -135,12 +154,54 @@
         >
       </div>
       <p class="hint">
-        Of the framing rectangle, every 10th frame; good from {{ threshold() }} up (Settings). Aim
-        for good with the cube in the rectangle: light helps most.
+        Of the framing rectangle, twice a second, and not while a solve is under way (drawing a
+        frame would hold its moves back); good from {{ threshold() }} up (Settings). Aim for good
+        with the cube in the rectangle: light helps most.
       </p>
 
       <app-camera-controls />
     }
+
+    <div class="mode" role="group" aria-label="What the camera is asked for">
+      <label>
+        <span>Resolution</span>
+        <select
+          #resolutionSelect
+          data-testid="camera-panel-resolution"
+          (change)="setResolution(resolutionSelect.value)"
+        >
+          @for (option of resolutions; track option.value) {
+            <option [value]="option.value" [selected]="option.value === prefs.cameraResolution()">
+              {{ option.label }}
+            </option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Frame rate</span>
+        <select
+          #rateSelect
+          data-testid="camera-panel-frame-rate"
+          (change)="setFrameRate(rateSelect.value)"
+        >
+          @for (option of frameRates; track option.value) {
+            <option [value]="option.value" [selected]="option.value === prefs.cameraFrameRate()">
+              {{ option.label }}
+            </option>
+          }
+        </select>
+      </label>
+      <label class="switch">
+        <input
+          #audioBox
+          type="checkbox"
+          data-testid="camera-panel-audio"
+          [checked]="prefs.recordAudio()"
+          (change)="prefs.setRecordAudio(audioBox.checked)"
+        />
+        Record audio
+      </label>
+    </div>
 
     <app-recording-panel />
   </div>

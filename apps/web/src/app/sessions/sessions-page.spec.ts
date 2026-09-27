@@ -1,4 +1,5 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { MemorySessionStore, type SessionStore } from '@cubetrace/core';
 import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 
@@ -21,6 +22,7 @@ describe('SessionsPage', () => {
     blobs = [];
     TestBed.configureTestingModule({
       providers: [
+        provideRouter([]),
         {
           provide: BROWSER_GLOBALS,
           useValue: {
@@ -94,6 +96,13 @@ describe('SessionsPage', () => {
     expect(newest.querySelector('.current')?.textContent).toBe('current');
     expect(oldest.querySelector('[data-testid="session-attempts"]')?.textContent).toBe('1 attempt');
     expect(oldest.querySelector('.current')).toBeNull();
+    // Each date opens the session's page.
+    expect(newest.querySelector('[data-testid="session-link"]')?.getAttribute('href')).toBe(
+      `/sessions/${SESSION_B}`,
+    );
+    expect(oldest.querySelector('[data-testid="session-link"]')?.getAttribute('href')).toBe(
+      `/sessions/${SESSION_A}`,
+    );
   });
 
   it("says how many clips each session's attempts have and their size, and how full storage is", async () => {

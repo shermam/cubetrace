@@ -45,6 +45,7 @@ describe('SettingsService', () => {
     expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.sharpnessThreshold()).toBe(20);
     expect(settings.recordAudio()).toBe(true);
+    expect(settings.cameraSettingsOpen()).toBeNull();
     expect(settings.cameraPickFor('macOS laptop')).toBeNull();
     expect(settings.cameraControlsFor('FaceTime HD Camera')).toEqual({});
     expect(settings.cameraFramings()).toEqual([]);
@@ -65,6 +66,7 @@ describe('SettingsService', () => {
     settings.setCameraFrameRate('60');
     expect(settings.setSharpnessThreshold(35.5)).toBe(true);
     settings.setRecordAudio(false);
+    settings.setCameraSettingsOpen(false);
     settings.setCameraPick('office-mbp', 'id-1', 'FaceTime HD Camera');
     settings.setCameraControls('camera 0, facing back', { exposureMode: 'manual', iso: 400 });
     settings.setCameraFraming(
@@ -86,6 +88,7 @@ describe('SettingsService', () => {
       cameraFrameRate: '60',
       sharpnessThreshold: 35.5,
       recordAudio: false,
+      cameraSettingsOpen: false,
       cameraPicks: [{ host: 'office-mbp', deviceId: 'id-1', label: 'FaceTime HD Camera' }],
       cameraControls: [
         { camera: 'camera 0, facing back', values: { exposureMode: 'manual', iso: 400 } },
@@ -111,6 +114,7 @@ describe('SettingsService', () => {
     expect(reloaded.cameraFrameRate()).toBe('60');
     expect(reloaded.sharpnessThreshold()).toBe(35.5);
     expect(reloaded.recordAudio()).toBe(false);
+    expect(reloaded.cameraSettingsOpen()).toBe(false);
     expect(reloaded.cameraPickFor('office-mbp')).toEqual({
       host: 'office-mbp',
       deviceId: 'id-1',
@@ -208,6 +212,7 @@ describe('SettingsService', () => {
         cameraFrameRate: 120,
         sharpnessThreshold: -1,
         recordAudio: 'no',
+        cameraSettingsOpen: 'open',
         cameraPicks: [{ host: 'a', deviceId: '' }, { host: 'b', deviceId: 'id' }, 'c'],
         cameraControls: [
           { camera: 'x', values: { exposureMode: 'sometimes', iso: 'high', zoom: 2, torch: true } },
@@ -229,6 +234,7 @@ describe('SettingsService', () => {
     expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.sharpnessThreshold()).toBe(20);
     expect(settings.recordAudio()).toBe(true);
+    expect(settings.cameraSettingsOpen()).toBeNull();
     expect(settings.cameraPickFor('a')).toBeNull();
     expect(settings.cameraPickFor('b')).toEqual({ host: 'b', deviceId: 'id', label: '' });
     expect(settings.cameraControlsFor('x')).toEqual({ zoom: 2 });

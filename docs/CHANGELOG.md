@@ -47,6 +47,21 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The Timer page keeps the camera in view (T2.7). On a laptop, the camera's picture sits beside the
+  time, under the scramble (whose picture is now beside its moves), so that the scramble, the time and
+  the cube in frame are seen together, with one line under the picture: the frame rate, the sharpness
+  (green when good, amber when soft), what the recording does (idle, recording, saving) and how full
+  storage is. On a phone the picture is under the time, the width of the screen, and the page is
+  tighter so that the three fit. The camera's controls, with the resolution, frame rate and Record
+  audio of Settings, are in Camera settings, a disclosure below the Cube section that opens by itself
+  the first time the camera is on and then stays as it was left; the framing rectangle is moved there,
+  over a larger picture (Framing → Edit). The Timer page lists the last 12 solves, with "N solves in
+  this session · See all", which opens the session's page (`/sessions/<id>`, also from each date on the
+  Sessions page): its date, device, cube and cameras, its statistics with ao100, the storage its clips
+  take, every attempt with the clip viewer and its downloads, Export and Delete; the current session's
+  page follows its attempts as they come. The sharpness meter measures at most twice a second, on the
+  framing rectangle drawn 160 pixels wide (320 before), and not while an attempt is armed or solving,
+  so that drawing a frame never holds back a move of the solve.
 - Clips are muxed and written by a second worker (T2.4), so that saving one never holds up the
   camera's frames in the capture worker, which only cuts; the camera's frames and the microphone's
   sound wait up to a third and half a second for a busy worker instead of being dropped.

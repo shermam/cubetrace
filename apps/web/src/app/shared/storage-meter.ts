@@ -8,7 +8,7 @@ import {
 import { formatBytes } from './format-bytes';
 
 /**
- * The storage meter (docs/PLAN.md, T2.4), in the Camera section and on the Sessions page: how much
+ * The storage meter (docs/PLAN.md, T2.4), in Camera settings and on the Sessions page: how much
  * of the origin's quota the app uses (`navigator.storage.estimate()`, read again when it is shown),
  * a warning from 80% ("export or delete sessions"), and from 95% that the camera stopped recording
  * while the timer goes on.

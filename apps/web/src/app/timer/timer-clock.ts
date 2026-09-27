@@ -23,9 +23,10 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
  * The time and the attempt's controls (docs/PLAN.md, T1.6b): what the timer is waiting for, the
  * big time (see `timerDisplay`), the attempt's number, and Skip scramble (N), DNF (Esc), Delete last
  * (Delete) and New session. The keys are handled by the timer page. While the time is a result
- * (solved or DNF), the line under it names that attempt and says whether its record is saved: the
- * attempt's number below it is already the next attempt's with auto-advance. While no cube is
+ * (solved or DNF), the line under it names that attempt and says whether its record is saved, before
+ * the attempt's number, which is already the next attempt's with auto-advance. While no cube is
  * connected, "Connect a cube" and "Try the demo" (T1.12), also while an attempt waits for its cube.
+ * Where it is narrow (a phone), its buttons are smaller.
  */
 @Component({
   selector: 'app-timer-clock',
@@ -42,15 +43,16 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
     >
       {{ display().text }}
     </p>
+    <!-- The result and the attempt's number on one line (T2.7), which is always there, so that
+         nothing moves when a solve starts or ends. -->
     <p class="result">
       @if (result(); as result) {
         <span data-testid="result-index">#{{ result.index }}</span> ·
         <span data-testid="save-status" [attr.data-saving]="session.saving()">{{
           result.save
         }}</span>
+        ·
       }
-    </p>
-    <p class="attempt">
       <span data-testid="attempt-index">Attempt {{ session.index() }}</span>
     </p>
     @if (showConnect()) {
@@ -119,15 +121,8 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
 
     .status,
     .result,
-    .attempt,
     .muted {
       color: var(--text-muted);
-    }
-
-    .result {
-      /* Kept when empty, so that the buttons do not move when a solve starts or ends. */
-      min-height: 1lh;
-      font-size: 0.875rem;
     }
 
     .time {
@@ -159,6 +154,14 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
       flex-wrap: wrap;
       gap: var(--space-2);
       justify-content: center;
+    }
+
+    /* Smaller buttons where the time is narrow (a phone, T2.7), so that the camera's preview under
+       it fits the screen too. */
+    @container (max-width: 24rem) {
+      .actions button {
+        padding: var(--space-1) var(--space-3);
+      }
     }
 
     app-cube-connect {

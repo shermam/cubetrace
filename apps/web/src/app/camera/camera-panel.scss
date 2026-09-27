@@ -1,6 +1,11 @@
+:host {
+  display: block;
+}
+
 summary {
   display: flex;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
   align-items: baseline;
   cursor: pointer;
 
@@ -59,8 +64,8 @@ p {
   color: var(--warn);
 }
 
-// The preview keeps the frames' proportions (the framing rectangle is drawn in percent of it) and
-// at most 60% of the window's height; a front camera's preview is mirrored, rectangle included.
+// The picture keeps the frames' proportions (the framing rectangle is drawn in percent of it) and
+// at most 60% of the window's height; a front camera's picture is mirrored, rectangle included.
 .frame {
   position: relative;
   width: min(100%, calc(60vh * var(--aspect)));
@@ -162,5 +167,25 @@ meter {
 
   &.good {
     color: var(--ok);
+  }
+}
+
+// Resolution, frame rate and audio: the settings of Settings → Camera, here too.
+.mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  font-size: 0.875rem;
+
+  label {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    align-items: center;
+  }
+
+  select {
+    max-width: 100%;
   }
 }

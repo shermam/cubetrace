@@ -521,8 +521,10 @@ installation that say nothing about the pictures (the probes in `docs/devices/` 
 for the same reason); the `constraints` of `cameraInfo()` leave the device id out too.
 
 **Sharpness.** The variance of the 4-neighbour Laplacian of the luma (BT.601 weights) of the framing
-rectangle drawn 320 pixels wide into an `OffscreenCanvas` (`willReadFrequently`), every 10th frame of
-the preview. Calibrated on Chromium 141's fake camera on 2026-09-27, over 12 s of frames (24
+rectangle drawn into an `OffscreenCanvas` (`willReadFrequently`): until T2.7, 320 pixels wide on
+every 10th frame of the preview; since, 160 pixels wide at most twice a second and never during a
+solve (see "Timer layout (T2.7)" below, with the numbers at 160). Calibrated on Chromium 141's fake
+camera on 2026-09-27, at 320 pixels wide, over 12 s of frames (24
 measurements each): the whole frame measured 76–135, a centred 1080×1080 square 30–93 and a centred
 half 55–145; the same frames blurred by 1 pixel at 320 wide (a canvas `blur(1px)` filter, about 6
 pixels at 1080p) 1.4–8.7; black frames 0. The default threshold, 20, lies between the two with a
@@ -793,3 +795,73 @@ Camera section's chunk, which the Timer page loads right after it renders and wh
 that loads when a badge is clicked, 10.0 kB (3.4 kB); the Sessions page 8.1 kB (2.5 kB), against 7.6
 (2.4); the storage meter, shared by the Camera section and the Sessions page, 2.3 kB (1.0 kB); the
 chunk of `SessionService` and the store 23.1 kB (6.7 kB), against 20.3.
+
+## Timer layout (T2.7)
+
+Added by T2.7 on 2026-09-27.
+
+**The preview and Camera settings.** The camera's picture beside the time is `CameraPreview`
+(`camera/camera-preview.ts`), a chunk of its own that the Timer page loads right after it renders,
+like Camera settings (`CameraPanel`); the two share `CameraService` and `RecordingService`. The
+preview measures the frames (`watchPreview`); the larger picture of Camera settings, there only while
+the framing is edited (Framing → Edit), is a second `<video>` of the same stream that measures
+nothing, so that a second picture costs nothing the rest of the time. The preview is a box of 16:9,
+15rem (240 px) high once its row is 46rem wide, else the width of the page (a phone); the frames keep
+their proportions inside it through container query units (the box has `container-type: size`, the
+frame is `min(100cqw, 100cqh × aspect)` wide), so the framing rectangle is still drawn in percent of
+the frames. The Timer page's `main` is 80rem wide at most (72rem, `--page-max`, elsewhere), by
+`main:has(> app-timer-page)` in the shell's styles, so that the time keeps about 400 px beside the
+preview at 1280 px. Whether Camera settings are open is a setting (`cameraSettingsOpen`: null until
+they are first opened or closed; the first time the camera is on they open by themselves).
+
+**The sharpness meter's cost.** Measured on 2026-09-27 in headless Chromium (software canvas) on the
+fake camera at 1080p30, over three runs of 15 s: drawing a frame's rectangle and reading it back took
+11.3 to 12.2 ms at 160 pixels wide (the runs' medians of each frame's first draw; 25 ms at most)
+against 12.3 to 16.3 ms at 320 (23 at most): reading the frame back dominates, not the size of the
+picture.
+What takes the meter out of the solve's timing is when it measures: at most twice a second
+(`SharpnessSchedule`, on the camera's clock; it was three times a second at 30 fps and six at 60),
+and never while an attempt is armed or solving, which the Camera preview tells `watchPreview`: the
+first move of the solve starts its time and the last one ends it. With the camera on and recording,
+over eight replays at speed 20 no long animation frame (over 50 ms) fell while an attempt was armed
+or solving (one did, 52 ms, on `main` at 220cc02); in the recording e2e the medians of four replays
+with and without the camera differed by −0.3 to 3.1 ms over four runs, single replays with the camera
+on taking 1,059.8 to 1,124.7 ms against 1,070.0 to 1,070.3 off: what spread remains is not the
+meter's.
+
+At 160 pixels wide the fake camera measures (four runs of 12 to 15 s) 78–198 on the whole frame,
+88–279 on a centred half and 48–183 on a centred 1080×1080 square, and 2.5–17 blurred by 1 pixel (a
+canvas `blur(1px)`, about 12 pixels at 1080p), so the default threshold stays 20. A smaller blur tells
+less at this width: blurred by 1 pixel at 320 wide (about 6 at 1080p), then averaged 2 by 2 down to
+160 (a canvas ignores a blur under a pixel), the same frames measure 19–57 on the whole frame, 19–81 on
+the half and 9–44 on the square, often above 20 yet under the sharp frames of the same rectangle (at
+320 wide they measured 1.2–8.8). The owner's round sets the threshold per camera, with the cube in its
+rectangle.
+
+**The phone.** For the scramble, the time and the preview to fit a phone's screen together: the
+scramble's picture floats beside the heading and the first lines of the moves (7rem wide, 12rem from
+a 32rem-wide scramble), whose lines are closer (1.45) where the scramble is narrow; the result and the
+attempt's number share a line under the time; the time's buttons are smaller where it is narrower
+than 24rem; the sections are 12 px apart and inside under 60rem (16 from there); and the Timer page's
+`h1` is visually hidden, the navigation saying where the page is. Measured with the demo cube and the
+fake camera, without the banner about Web Bluetooth (which Chrome on the phone does not show): at
+390×844 the preview's picture ends at 764 px and its line at 787; at 412×818 (the ThinkPhone in
+Chrome with its address bar) at 784 and 808; at 360×780 the picture ends at 739 and its line, on two
+lines there, at 782. At 1280×800 the preview ends at 507 (530 with its line) and the time's section
+at 545. Headless Chromium's banner about Web Bluetooth adds 44 px at 1280 and 85 px at 390, where the
+e2e dismisses it.
+
+**E2E.** `apps/web/e2e/timer-layout.spec.ts` checks the layout with bounding boxes, at 1280×800 after
+15 replays of the demo at speed 20 (about 37 s) and at 390×844 (the banner dismissed) and 320 px wide.
+Recording is off in that file (an init script deletes `MediaStreamTrackProcessor`, so the app says it
+cannot record): it then encodes no video beside `recording.spec.ts` and `capture.spec.ts`, which count
+the frames lost and run in the other worker.
+
+**Sizes** (`ng build`, 2026-09-27, against `main` at 220cc02): the initial bundle is 264.46 kB raw,
+72.51 kB transferred (264.26 and 72.48): `main` grew by 203 bytes, the route of the session's page and
+the shell's rule for the Timer page's width. The Timer page's chunk is 28.2 kB raw, 8.7 kB gzipped
+(34.1 and 10.4): the solve list is now in a chunk it shares with the session's page, 9.1 kB (3.5 kB).
+The camera's code that the Timer page loads right after it renders is Camera settings, 25.2 kB (7.9
+kB), the preview, 6.1 kB (2.4 kB), and `CameraService` with `RecordingService`, which they share, 21.0
+kB (6.9 kB), against one chunk of 42.2 kB (13.2 kB). The session's page, new, is 9.1 kB (3.3 kB); the
+Sessions page 8.3 kB (2.8 kB), against 8.1 (2.8).

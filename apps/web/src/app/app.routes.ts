@@ -14,6 +14,11 @@ export const routes: Routes = [
     loadComponent: () => import('./sessions/sessions-page').then((m) => m.SessionsPage),
   },
   {
+    path: 'sessions/:id',
+    title: 'Session · cubetrace',
+    loadComponent: () => import('./sessions/session-page').then((m) => m.SessionPage),
+  },
+  {
     path: 'settings',
     title: 'Settings · cubetrace',
     loadComponent: () => import('./settings/settings-page').then((m) => m.SettingsPage),
