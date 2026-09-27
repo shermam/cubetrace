@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { ScrambleTracker, parseMoves, type AttemptState } from '@cubetrace/core';
 
-import { inverse, ready, setup, turn } from '../session/session-harness';
+import { ready, setup, turn } from '../session/session-harness';
 import type { AttemptView } from '../session/session-service';
 import { NO_UNDO } from '../session/undo-guide';
 import { TWISTY_LOADER, scrambleTokens, type ScrambleTokenState } from './scramble-view';
@@ -202,8 +202,8 @@ describe('ScrambleView', () => {
     turn(s, fake, 'B');
     expect(s.service.attempt()?.state).toBe('solving');
     expect(await marks()).toEqual(['L2 pending', 'D pending', "B' pending"]);
-    // Solved: the next scramble, unmarked.
-    turn(s, fake, `B' ${inverse("L2 D B'")}`);
+    // The solve, B D' L2: then the next scramble, unmarked.
+    turn(s, fake, "D' L2");
     await fixture.whenStable();
     expect(text()).toBe('R U F');
     expect(await marks()).toEqual(['R pending', 'U pending', 'F pending']);
