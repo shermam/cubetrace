@@ -5,7 +5,7 @@
 //
 // in the origin private file system, each file written whole under a temporary name next to it and
 // then moved over its own name, as the session store writes its records (packages/storage, T1.11),
-// so that a clip file is never half written. The capture worker writes the files' bytes through
+// so that a clip file is never half written. The clip worker writes the files' bytes through
 // access handles (`createSyncAccessHandle`, dedicated workers only); where there are none, a
 // writable stream does it. Plain TypeScript over the structural OPFS types of @cubetrace/storage
 // (types only: see clip-files.ts), so it runs in Node's tests on the in-memory fake.
