@@ -558,17 +558,21 @@ configure. That bundle is built without Angular's plugins, so the build does not
 `npm run typecheck` does, through `packages/capture/tsconfig.json`. The package's index never
 imports `capture-worker.ts`, whose code is therefore only in the worker, and the file installs its
 message handler only where `DedicatedWorkerGlobalScope` exists, so that Node's tests can import
-its `CaptureWorker` class. Checked with `ng build` on 2026-09-27: the worker is 11.5 kB raw
-(4.4 kB gzipped: the worker loop, the ring buffer, the cut and the protocol), a file the CLI's
-table of chunks does not list; only the capture lab's lazy chunk (14.6 kB, 5.6 kB gzipped) refers
-to it, `index.html` does not, and `ngsw.json` lists it, so the service worker
-prefetches it with the other scripts. The initial bundle grew by 128 bytes, the `/capture-lab`
-route's entry, and by nothing else (263.53 to 263.66 kB raw; about 72.3 kB transferred either way,
-an estimate that moves with the commit SHA the build embeds). `shared/error-message.ts`, which the
-lab uses too, moved into a 149-byte chunk of its own, so five lazy chunks grew by 24 to 36 bytes of
-imports and the one that held it shrank by 105. The dev server serves the worker from the same
-build; `apps/web/e2e/capture.spec.ts` starts it on `ng serve` and on the production build under
-`/cubetrace/`.
+its `CaptureWorker` class. Checked with `ng build` on 2026-09-27, on `main` with T2.1: the worker is
+11.5 kB raw (4.4 kB gzipped: the worker loop, the ring buffer, the cut and the protocol), a file the
+CLI's table of chunks does not list, which `index.html` does not load and `ngsw.json` lists, so the
+service worker prefetches it with the other scripts. The initial bundle grew by 128 bytes, the
+`/capture-lab` route's entry, and by nothing else (263.66 to 263.79 kB raw). The code that starts
+the worker, the pipeline's window side (`pipeline.ts` and `protocol.ts`), is in the chunk of
+`@cubetrace/capture`'s files: the build assigns whole files to chunks ("Cube connection" above), and
+the capture lab and the camera panel both import the package, so all of its files make one chunk
+that the two share, 11.7 kB raw (4.6 kB gzipped). The camera panel, which the Timer page loads right
+after it renders, therefore loads the pipeline's window side too: 3.6 kB raw (2.1 kB gzipped) more
+with everything it imports (86.5 kB raw against 82.9); T2.4 records from the Timer page, which needs
+that code anyway. The lab's own chunk is 11.5 kB raw (4.4 kB gzipped); `shared/error-message.ts`,
+which the lab uses too, moved into a 149-byte chunk of its own. The dev server serves the worker from
+the same build; `apps/web/e2e/capture.spec.ts` starts it on `ng serve` and on the production build
+under `/cubetrace/`.
 
 **`MediaStreamTrackProcessor` is typed by the package.** TypeScript's DOM library (6.0.3) declares
 `VideoEncoder`, `AudioEncoder`, `VideoFrame`, `AudioData` and the encoded chunks, but
