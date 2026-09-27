@@ -33,7 +33,7 @@ Run from the repository root.
 | `npm run build` | production build into `apps/web/dist/web/browser` (`ng build`) |
 | `npm test` | package tests (Vitest), then the app's tests (`ng test`, single run, jsdom) |
 | `npm run test:watch` | package tests in watch mode; for the app, `npm run test -w @cubetrace/web` |
-| `npm run e2e` | Playwright end-to-end tests in Chromium (starts `ng serve` if nothing runs on port 4200) |
+| `npm run e2e` | Playwright end-to-end tests in Chromium (starts `ng serve` on port 4200 and a production build on port 4300, unless servers already run there) |
 | `npm run lint` | type-check, `eslint .`, then `ng lint` for the app |
 | `npm run format` / `npm run format:check` | Prettier write / check |
 

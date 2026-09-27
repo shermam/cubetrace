@@ -32,5 +32,26 @@ and the result next to each item.
 
 ## T1.7 — PWA on the phone
 
-- [ ] Install to the home screen on the ThinkPhone; open it; the screen stays on during a
-  session (wake lock); orientation behaves as set.
+On https://shermam.github.io/cubetrace/ after the Pages deploy. Until T1.6 the wake lock is
+turned on with the switch in Settings; from T1.6 on, the timer turns it on during a session.
+
+- [ ] ThinkPhone (Chrome for Android): menu → Install app (or Add to Home screen). The home
+  screen shows the cube icon and the name "cubetrace"; opened from there, the app has no address
+  bar (standalone).
+- [ ] Rotate the phone: the app follows (`orientation: "any"`) and no page scrolls sideways,
+  in portrait or in landscape.
+- [ ] Settings → Keep the screen on: the header says "Screen on"; leave the phone untouched
+  longer than its screen timeout: the screen stays on. Switch to another app and back: still
+  "Screen on" (the lock is requested again). Switch it off: "Screen may sleep", and the screen
+  turns off after the timeout.
+- [ ] Settings → Keep my data, in the installed app: the status becomes "Persistent" (Chrome
+  grants it to installed apps). If it stays "Best effort", write down the Chrome version here.
+- [ ] The footer shows `cubetrace <version> · <commit>` with the last commit on `main`. After a
+  new deploy, the new commit appears from the second launch (the service worker updates in the
+  background).
+- [ ] Airplane mode, then open the app from the home screen: it opens, from the service
+  worker's cache.
+- [ ] Laptop (Chrome, macOS or Windows): the install button in the address bar installs it as a
+  window; there is no banner about missing APIs.
+- [ ] Firefox or Safari on any device: a banner names the missing APIs and says the app needs
+  Chrome; the pages still render.

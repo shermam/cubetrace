@@ -12,3 +12,13 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Packages `@cubetrace/core` and `@cubetrace/gan` (placeholders), npm workspaces, strict
   TypeScript, ESLint and Prettier, Vitest and Playwright tests, CI, and the GitHub Pages deploy
   to https://shermam.github.io/cubetrace/.
+- Installable app (T1.7): a web app manifest (standalone, any orientation, a cube icon) and a
+  service worker that caches the app shell, so the installed app opens offline.
+- Screen wake lock: a "Keep the screen on" switch in Settings and its status in the header; the
+  lock is requested again whenever the page becomes visible.
+- Storage persistence: Settings shows whether the browser keeps the app's data and how much it
+  uses, with a "Keep my data" button.
+- A dark theme and a layout that fits a phone in portrait and a laptop; the footer shows the
+  version and the commit of the build.
+- A banner on browsers that lack Web Bluetooth, the origin private file system or WebCodecs,
+  naming what is missing.
