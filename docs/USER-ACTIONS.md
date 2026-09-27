@@ -10,7 +10,7 @@ adds items; the owner ticks them when done (date and any detail that others need
   `https://shermam.github.io/cubetrace/` after every merge. This is the development host
   for testing on the real phones and laptops (HTTPS is required for Web Bluetooth and the
   camera). Firebase Hosting replaces it in phase 3.
-- [ ] **Manual round 1 (v0.1.0)**, now that the timer is on Pages (T1.6b): open
+- [x] 2026-09-27 — Manual round 1 done on the MacBook Pro 2021 and the ThinkPhone with the GAN 12 ui (issues #19, #20; results in `docs/MANUAL-TESTS.md` and `docs/DEVICES.md`); the GAN 356 i3 is still to be tested when charged. **Manual round 1 (v0.1.0)**, now that the timer is on Pages (T1.6b): open
   https://shermam.github.io/cubetrace/ on one laptop and on the ThinkPhone and go through the
   T1.5, T1.6 and T1.7 sections of `docs/MANUAL-TESTS.md` with the GAN 12 ui FreePlay and the
   356 i3 (at least ten attempts on each cube), filling in the "Round 1" table at the top of that
@@ -18,9 +18,7 @@ adds items; the owner ticks them when done (date and any detail that others need
   device's session export (Sessions → Export) in a GitHub issue, attached as a file (ten attempts
   make about 160 kB, too long to paste into an issue), and open an issue for every failure. The
   coordinator tags `v0.1.0` after the round.
-- [ ] **Run the device probe** (`/probe` route, after T1.8 lands) on both phones (rear and
-  front cameras) and on each laptop, and paste the JSON reports into `docs/DEVICES.md`.
-  This decides the phase 2 camera settings.
+- [x] 2026-09-27 — Device probe run on the MacBook Pro 2021 (FaceTime) and the ThinkPhone (front camera): `docs/DEVICES.md`. Still to run: the ThinkPhone's **rear** camera, the Moto g60 (both cameras) and the MacBook Pro 2016, when convenient.
 - [ ] `chrome://flags` on each device: keep `#enable-web-bluetooth-new-permissions-backend`
   (or whatever flag the app's connect screen names) enabled so the cube's MAC address can
   be read automatically; otherwise enter the MAC once per cube in Settings.

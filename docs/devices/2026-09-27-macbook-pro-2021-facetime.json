@@ -1,0 +1,275 @@
+{
+  "generatedAt": "2026-09-27T13:35:16.182Z",
+  "label": "",
+  "device": {
+    "screen": {
+      "width": 3360,
+      "height": 1890,
+      "availWidth": 3360,
+      "availHeight": 1860,
+      "colorDepth": 24,
+      "orientation": "landscape-primary"
+    },
+    "devicePixelRatio": 2,
+    "hardwareConcurrency": 8,
+    "deviceMemory": 16,
+    "secureContext": true
+  },
+  "camera": {
+    "videoInputs": [
+      {
+        "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+        "label": "FaceTime HD Camera (3A71:F4B5)",
+        "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1"
+      }
+    ],
+    "selected": {
+      "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+      "label": "FaceTime HD Camera (3A71:F4B5)",
+      "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1"
+    },
+    "requested": {
+      "deviceId": {
+        "exact": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26"
+      },
+      "width": {
+        "ideal": 1920
+      },
+      "height": {
+        "ideal": 1080
+      },
+      "frameRate": {
+        "ideal": 60
+      }
+    },
+    "failedAttempts": [],
+    "trackLabel": "FaceTime HD Camera (3A71:F4B5)"
+  },
+  "capabilities": {
+    "aspectRatio": {
+      "max": 1920,
+      "min": 0.0005208333333333333
+    },
+    "backgroundBlur": [
+      false
+    ],
+    "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+    "facingMode": [],
+    "frameRate": {
+      "max": 30,
+      "min": 0
+    },
+    "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1",
+    "height": {
+      "max": 1920,
+      "min": 1
+    },
+    "resizeMode": [
+      "none",
+      "crop-and-scale"
+    ],
+    "width": {
+      "max": 1920,
+      "min": 1
+    }
+  },
+  "settings": {
+    "aspectRatio": 1.7777777777777777,
+    "backgroundBlur": false,
+    "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+    "frameRate": 30,
+    "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1",
+    "height": 1080,
+    "resizeMode": "none",
+    "width": 1920
+  },
+  "timing": {
+    "warmupMs": 1000,
+    "windowMs": 10000,
+    "completed": true,
+    "frames": 302,
+    "durationMs": 10017.6,
+    "achievedFps": 30.05,
+    "presentedFps": 30.05,
+    "intervalMs": {
+      "count": 301,
+      "min": 14.7,
+      "p5": 17.7,
+      "p50": 33.3,
+      "p95": 43.2,
+      "max": 53.5,
+      "mean": 33.281
+    },
+    "captureMinusNowMs": {
+      "count": 302,
+      "min": -18.7,
+      "p5": -17.095,
+      "p50": -10.5,
+      "p95": -2.715,
+      "max": -0.5,
+      "mean": -10.272
+    },
+    "mediaTimeDeltaMs": {
+      "count": 301,
+      "min": 33.34,
+      "p5": 33.35,
+      "p50": 33.35,
+      "p95": 33.35,
+      "max": 33.35,
+      "mean": 33.35
+    },
+    "captureMinusMediaMs": {
+      "count": 302,
+      "min": 1548313.89,
+      "p5": 1548317.471,
+      "p50": 1548324.325,
+      "p95": 1548351.258,
+      "max": 1548355.96,
+      "mean": 1548327.766
+    },
+    "callbackMissedFrames": 0,
+    "droppedFramesEstimate": 0,
+    "frameSizes": [
+      "1920x1080"
+    ],
+    "playbackQuality": {
+      "totalVideoFrames": 301,
+      "droppedVideoFrames": 0
+    }
+  },
+  "encoders": {
+    "results": [
+      {
+        "codec": "avc1.640028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 30,
+        "hardwareAcceleration": "prefer-hardware",
+        "supported": true
+      },
+      {
+        "codec": "avc1.640028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 30,
+        "hardwareAcceleration": "no-preference",
+        "supported": true
+      },
+      {
+        "codec": "avc1.640028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 60,
+        "hardwareAcceleration": "prefer-hardware",
+        "supported": true
+      },
+      {
+        "codec": "avc1.640028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 60,
+        "hardwareAcceleration": "no-preference",
+        "supported": true
+      },
+      {
+        "codec": "avc1.4d0028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 30,
+        "hardwareAcceleration": "prefer-hardware",
+        "supported": true
+      },
+      {
+        "codec": "avc1.4d0028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 30,
+        "hardwareAcceleration": "no-preference",
+        "supported": true
+      },
+      {
+        "codec": "avc1.4d0028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 60,
+        "hardwareAcceleration": "prefer-hardware",
+        "supported": true
+      },
+      {
+        "codec": "avc1.4d0028",
+        "width": 1920,
+        "height": 1080,
+        "framerate": 60,
+        "hardwareAcceleration": "no-preference",
+        "supported": true
+      }
+    ]
+  },
+  "worker": {
+    "inWorker": {
+      "MediaStreamTrackProcessor": false,
+      "VideoEncoder": true
+    },
+    "onMainThread": {
+      "MediaStreamTrackProcessor": true,
+      "VideoEncoder": true
+    }
+  },
+  "storage": {
+    "estimate": {
+      "quota": 10740082917,
+      "usage": 2664677,
+      "usageDetails": {
+        "caches": 2390784,
+        "fileSystem": 189250,
+        "serviceWorkerRegistrations": 84643
+      }
+    },
+    "persisted": false
+  },
+  "bluetooth": {
+    "navigatorBluetooth": true,
+    "getDevices": true,
+    "watchAdvertisements": true,
+    "availability": true
+  },
+  "hints": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    "userAgentData": {
+      "architecture": "arm",
+      "bitness": "64",
+      "brands": [
+        {
+          "brand": "Google Chrome",
+          "version": "153"
+        },
+        {
+          "brand": "Not_A Brand",
+          "version": "8"
+        },
+        {
+          "brand": "Chromium",
+          "version": "153"
+        }
+      ],
+      "fullVersionList": [
+        {
+          "brand": "Google Chrome",
+          "version": "153.0.8010.53"
+        },
+        {
+          "brand": "Not_A Brand",
+          "version": "8.0.0.0"
+        },
+        {
+          "brand": "Chromium",
+          "version": "153.0.8010.53"
+        }
+      ],
+      "mobile": false,
+      "model": "",
+      "platform": "macOS",
+      "platformVersion": "26.6.2"
+    }
+  }
+}

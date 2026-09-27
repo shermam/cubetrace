@@ -5,48 +5,6 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-### Added
-
-- The scramble's moves are outlined as the cube makes them, as on Cubeast: green once made, yellow
-  while a half turn is half made (one quarter turn of its two), red on the move where the cube left
-  the scramble, next to the undo list as before; the whole scramble green once it is complete, until
-  the solve starts. The demo cube now makes a scramble's half turns as two quarter turns, as a real
-  cube does, so the yellow shows in demo mode too (T1.13).
-- "Mark as solved", in the Timer page's Cube section and in the connected cube's details (the pill):
-  it tells the cube that it is solved, for when the cube's own state and the cube in your hands went
-  apart (turns made while it was asleep or disconnected). The attempt under way begins again with
-  its scramble, and nothing is recorded; with the demo cube, the replay stops there (T1.14).
-- A cube left 5 minutes without a turn is disconnected, to save its battery (Settings → Idle cube,
-  0 to 60 minutes, 0 for never); the pill's tooltip and the Timer page say why, and Reconnect takes
-  one click (T1.14).
-- When the cube disconnects by itself, the reason says how long it had gone without a turn and
-  whether the tab was in the background (and that GAN cubes go to sleep, after two minutes), and the
-  browser's console gets one line with the details, to paste into an issue. Back in the tab, a
-  connected cube is asked for its state, so that turns made meanwhile are caught up. The GAN driver
-  now loads right after the page, so that the click on Connect does not wait for it (T1.14).
-
-### Changed
-
-- Connecting a cube takes one click (T1.12). "Connect a cube" on the Timer page (and in its Cube
-  section) and the cube pill in the header, which now reads "Connect cube" or "Reconnect", open
-  Chrome's list of Bluetooth devices at once; once the cube is connected, no dialog is left open.
-  While it connects, the button says so, with Cancel next to it. The connect dialog opens only when
-  it is needed: when the cube's MAC address has to be typed (the Chrome flag that makes it
-  unnecessary is folded under the prompt), in a browser without Web Bluetooth, for the Details of a
-  failed connection, and for a connected cube's details from the pill. A failure is written under
-  the button and in the pill's tooltip, whose dot turns red. "Try the demo", next to "Connect a
-  cube", starts the demo cube.
-
-### Fixed
-
-- A page reloaded or closed during a save no longer leaves an empty `session.json` or `attempt.json`
-  behind: files are written under a temporary name and moved into place in one step. A file that
-  cannot be read (empty, not JSON, or not its session's) is set aside instead of breaking the Timer
-  page's resume and the whole Sessions page: the Sessions page still lists, exports and deletes the
-  other sessions, shows a broken session as its own row, with the file and what is wrong, and can
-  delete it, and names an attempt it left out; the Timer page starts a new session and says which
-  file it could not read (issue #12, T1.11).
-
 ## 0.1.0 — 2026-09-27
 
 The first release: phase 1 of `docs/PLAN.md`, a timer for a GAN Bluetooth cube in Chrome that keeps
@@ -98,3 +56,42 @@ every solve as data. Deployed at https://shermam.github.io/cubetrace/.
 - Development: npm workspaces (`apps/web` and `packages/core`, `gan`, `storage`), strict
   TypeScript, ESLint and Prettier, Vitest and Playwright tests driven by the fake cube, CI on every
   pull request and a GitHub Pages deploy from `main` (T1.0).
+- The scramble's moves are outlined as the cube makes them, as on Cubeast: green once made, yellow
+  while a half turn is half made (one quarter turn of its two), red on the move where the cube left
+  the scramble, next to the undo list as before; the whole scramble green once it is complete, until
+  the solve starts. The demo cube now makes a scramble's half turns as two quarter turns, as a real
+  cube does, so the yellow shows in demo mode too (T1.13).
+- "Mark as solved", in the Timer page's Cube section and in the connected cube's details (the pill):
+  it tells the cube that it is solved, for when the cube's own state and the cube in your hands went
+  apart (turns made while it was asleep or disconnected). The attempt under way begins again with
+  its scramble, and nothing is recorded; with the demo cube, the replay stops there (T1.14).
+- A cube left 5 minutes without a turn is disconnected, to save its battery (Settings → Idle cube,
+  0 to 60 minutes, 0 for never); the pill's tooltip and the Timer page say why, and Reconnect takes
+  one click (T1.14).
+- When the cube disconnects by itself, the reason says how long it had gone without a turn and
+  whether the tab was in the background (and that GAN cubes go to sleep, after two minutes), and the
+  browser's console gets one line with the details, to paste into an issue. Back in the tab, a
+  connected cube is asked for its state, so that turns made meanwhile are caught up. The GAN driver
+  now loads right after the page, so that the click on Connect does not wait for it (T1.14).
+
+### Changed
+
+- Connecting a cube takes one click (T1.12). "Connect a cube" on the Timer page (and in its Cube
+  section) and the cube pill in the header, which now reads "Connect cube" or "Reconnect", open
+  Chrome's list of Bluetooth devices at once; once the cube is connected, no dialog is left open.
+  While it connects, the button says so, with Cancel next to it. The connect dialog opens only when
+  it is needed: when the cube's MAC address has to be typed (the Chrome flag that makes it
+  unnecessary is folded under the prompt), in a browser without Web Bluetooth, for the Details of a
+  failed connection, and for a connected cube's details from the pill. A failure is written under
+  the button and in the pill's tooltip, whose dot turns red. "Try the demo", next to "Connect a
+  cube", starts the demo cube.
+
+### Fixed
+
+- A page reloaded or closed during a save no longer leaves an empty `session.json` or `attempt.json`
+  behind: files are written under a temporary name and moved into place in one step. A file that
+  cannot be read (empty, not JSON, or not its session's) is set aside instead of breaking the Timer
+  page's resume and the whole Sessions page: the Sessions page still lists, exports and deletes the
+  other sessions, shows a broken session as its own row, with the file and what is wrong, and can
+  delete it, and names an attempt it left out; the Timer page starts a new session and says which
+  file it could not read (issue #12, T1.11).
