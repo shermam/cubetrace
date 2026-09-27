@@ -234,8 +234,10 @@ files to chunks: once a file of the initial bundle imports either package, every
 indexes goes into the initial bundle too, `packages/core/src/scramble.ts` and its cubing.js chunks
 included. Checked with `ng build --stats-json`: with the status pill and the connect dialog in the
 initial bundle, it grew by 122 kB raw, 113 kB of it cubing.js. So `app.html` renders the pill and
-the dialog in `@defer (on immediate)` blocks, with a static "No cube" placeholder that already
-opens the dialog (through `ConnectDialogService`, which stays in `main`). The pill, the dialog,
+the dialog in `@defer (on immediate)` blocks, with a static placeholder pill that already works: a
+click on it is kept by `ConnectDialogService`, which stays in `main`, and the pill acts on it as
+soon as it has loaded (T1.12; Chrome keeps a click's user activation, which Web Bluetooth's device
+picker needs, for a few seconds). The pill, the dialog,
 `CubeService`, `SettingsService` and both packages load in lazy chunks right after the first
 render, shared with the Timer page. The initial bundle grew from 247.2 to 261.2 kB raw (69.6 to
 73.5 kB transferred): 12.9 kB of Angular's `@defer` runtime, the placeholder, the dialog's open
@@ -243,7 +245,12 @@ state and the shared styles. The GAN driver is still a chunk of its own that loa
 cube connects. Checked again with T1.6b, once `scramble.ts` imported cubing.js lazily (see "cubing.js"):
 an eager pill and dialog then bring no cubing.js along, but still cost 42 kB raw (13.8 kB
 transferred) on the initial bundle, 305.4 kB against 263.3 kB, because the chunk optimizer then
-merges core's attempt, phase and scramble modules into `main`; the `@defer` blocks stay.
+merges core's attempt, phase and scramble modules into `main`; the `@defer` blocks stay. Checked
+again with T1.12 (the one-click connection): 263.5 kB raw against 263.3 kB before, and 72.3 to
+72.4 kB transferred either way (that estimate moves with the commit SHA the build embeds). The
+connect dialog shows the flag's steps in two places through a component of its own, `FlagSteps`,
+rather than an `<ng-template>` with `NgTemplateOutlet`, which the chunk optimizer put in `main`
+(2.5 kB raw).
 
 **The demo solves are a file in `public/`, fetched when a demo starts.**
 `apps/web/scripts/write-demo-solves.mts` writes `apps/web/public/demo/solves.json`: the first 30
