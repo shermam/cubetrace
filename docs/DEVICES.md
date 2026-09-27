@@ -54,10 +54,11 @@ What the exports show about the cube's clock (a fit of host time on cube time, p
 session, over all 1,802 moves; `fixtures/hardware/README.md`):
 
 - **Within an attempt, the cube's clock runs 0.7% slow, steadily.** Every one of the 15 attempts,
-  on both devices, fits `hostMs ≈ 1.0070 × cubeMs + b` (slopes 1.0069–1.0071) with residuals of
-  ±13 ms at the 5th/95th percentiles: that ±13 ms is the Bluetooth notification jitter, in the
-  range the design expected. On the ThinkPhone one fit for its three attempts (100 s) holds to
-  ±15 ms.
+  on both devices, fits `hostMs ≈ 1.0070 × cubeMs + b` (slopes 1.0067–1.0071), with 95th
+  percentiles of the absolute residuals of 13–23 ms (the median attempt: slope 1.006983,
+  14.6 ms): that is the Bluetooth notification jitter, in the range the design expected, and
+  `packages/core/src/clock-hardware.test.ts` holds the bounds. On the ThinkPhone one fit for its
+  three attempts (100 s) holds to ±15 ms.
 - **Across a pause the two clocks advance equally** (the laptop's 291 s pause between attempts 3
   and 4: host 291.1 s, cube 291.1 s), so the offset `b` shifts by 0.7% of each pause. One fit per
   session is therefore wrong as soon as the session has pauses of minutes: the laptop's session
