@@ -111,7 +111,7 @@
       <button type="button" [disabled]="!running() || syncRunning()" (click)="startSync()">
         Sync check
       </button>
-      <button type="button" [disabled]="!syncRunning()" (click)="stopSync()">Stop the check</button>
+      <button type="button" [disabled]="!syncRunning()" (click)="stopSync()">End the check</button>
     </div>
     <p class="status" role="status" data-testid="lab-sync-status">{{ syncStatus() }}</p>
     @if (syncJson()) {
