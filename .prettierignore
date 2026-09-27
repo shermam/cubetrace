@@ -1,0 +1,6 @@
+# Prettier also skips everything in .gitignore.
+package-lock.json
+# Real solves exported by a private script: read-only (CLAUDE.md).
+fixtures/
+# Prose keeps its hand formatting (tables, line breaks).
+*.md

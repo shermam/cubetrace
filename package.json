@@ -1,0 +1,39 @@
+{
+  "name": "cubetrace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Chrome web app that records speedcube solves in sync with a GAN Bluetooth cube.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": "^22.22.3 || ^24.15.0 || >=26.0.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "start": "npm run start -w @cubetrace/web --",
+    "build": "npm run build -w @cubetrace/web --",
+    "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
+    "lint": "npm run typecheck && eslint . --ignore-pattern \"apps/web/**\" && npm run lint -w @cubetrace/web",
+    "test": "vitest run && npm run test -w @cubetrace/web -- --watch=false",
+    "test:watch": "vitest",
+    "e2e": "playwright test -c apps/web/e2e/playwright.config.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.56.1",
+    "@types/node": "^22.20.4",
+    "angular-eslint": "^22.5.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  }
+}

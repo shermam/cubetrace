@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output and caches
+dist/
+out-tsc/
+.angular/
+.sass-cache/
+coverage/
+*.tsbuildinfo
+
+# Test output (Playwright, Vitest browser mode)
+playwright-report/
+test-results/
+blob-report/
+__screenshots__/
+
+# Logs
+npm-debug.log*
+yarn-error.log*
+
+# Local environment (never commit secrets)
+.env
+.env.*
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.history/
+*.sublime-workspace
+
+# System files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,17 @@
+<header class="top-bar">
+  <a class="brand" routerLink="/">cubetrace</a>
+  <nav aria-label="Main">
+    @for (link of links; track link.path) {
+      <a
+        [routerLink]="link.path"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        [routerLinkActiveOptions]="{ exact: link.exact }"
+        >{{ link.label }}</a
+      >
+    }
+  </nav>
+</header>
+<main>
+  <router-outlet />
+</main>

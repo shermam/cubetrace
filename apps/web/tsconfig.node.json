@@ -1,0 +1,10 @@
+/* TypeScript that runs in Node rather than in the browser: the Playwright suite and the Vitest config. */
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["e2e/**/*.ts", "*.mts"]
+}
