@@ -5,6 +5,14 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- The scramble's moves are outlined as the cube makes them, as on Cubeast: green once made, yellow
+  while a half turn is half made (one quarter turn of its two), red on the move where the cube left
+  the scramble, next to the undo list as before; the whole scramble green once it is complete, until
+  the solve starts. The demo cube now makes a scramble's half turns as two quarter turns, as a real
+  cube does, so the yellow shows in demo mode too (T1.13).
+
 ### Fixed
 
 - A page reloaded or closed during a save no longer leaves an empty `session.json` or `attempt.json`

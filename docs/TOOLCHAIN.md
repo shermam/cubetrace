@@ -256,6 +256,13 @@ prefetches every `.js` file, so the demo data would have been downloaded by ever
 (`dist/web/browser/ngsw.json` does not list it; `cube.spec.ts` checks this). Demo mode therefore
 needs the network, apart from the browser's own HTTP cache.
 
+**The demo makes the scramble's half turns as a real cube does** (T1.13). A GAN cube reports every
+move as a quarter turn, so the demo cube turns each half turn of the scramble as two clockwise
+quarter turns 60 ms apart (3 ms at speed 20); the scramble's moves still start 100 ms apart (5 ms at
+speed 20). Before T1.13 a `U2` was one move event, which a real cube never sends, so the scramble
+view's half-made state (yellow) could not be seen without a cube; the move log now counts a demo
+half turn as two moves.
+
 **Demo mode can mis-scramble on purpose** (T1.9). With `?demo=`, `&misscramble=<k>` makes the demo
 cube turn one wrong face after scramble move k: a clockwise quarter turn of the first face, in the
 order U R F D L B, that neither move k nor move k + 1 turns, nor their opposite faces, so that the
@@ -268,15 +275,16 @@ keeps it.
 
 **The demo replay is a list of parts, each started on a timer once the previous one has ended**
 (`demoParts` in `apps/web/src/app/cube/demo.ts`, T1.9): the scramble (or its first k moves and the
-wrong turn, then the inverse and the rest), then the solution. When a part's last move changes a
-signal, Angular schedules the page's render on a zero-delay timer or the next animation frame, ahead
-of that timer, so the page shows the state the part left before the next part starts: the undo
-guidance before the inverse, the armed attempt before the solve, however fast the replay and however
-late its timers fire. The next part's schedule counts from after that render. Before T1.9 the
-solution was queued while the scramble played, so its timers were set before the armed render: its
-first move waited behind the render (and the frame after it) while the other moves kept their times,
-and a solve measured 2 to 11 ms shorter than recorded, and up to 47 ms with the CPU loaded (demo
-solve 1 lasts 750 ms at speed 20, where 5% is 37 ms).
+wrong turn, then the inverse and the rest), cut before the second quarter turn of each half turn
+(T1.13), then the solution. When a part's last move changes a signal, Angular schedules the page's
+render on a zero-delay timer or the next animation frame, ahead of that timer, so the page shows the
+state the part left before the next part starts: the half-made turn before its second quarter turn,
+the undo guidance before the inverse, the armed attempt before the solve, however fast the replay
+and however late its timers fire. The next part's schedule counts from after that render. Before
+T1.9 the solution was queued while the scramble played, so its timers were set before the armed
+render: its first move waited behind the render (and the frame after it) while the other moves kept
+their times, and a solve measured 2 to 11 ms shorter than recorded, and up to 47 ms with the CPU
+loaded (demo solve 1 lasts 750 ms at speed 20, where 5% is 37 ms).
 
 ## cubing.js
 
@@ -366,6 +374,7 @@ cube.
 | 4. Reload | `reload.spec.ts` | After a solve, a reload: the page shows the stored solve and attempt 2 at once, and the demo solve, replayed again, becomes attempt 2 of the same session. |
 | 5. Export | `export.spec.ts`, and the export of every other flow | A session with a solved, corrected attempt and a DNF validates against both schemas; copies that break either schema fail with ajv's message. |
 | 6. Settings | `inspection.spec.ts` | The inspection switch on: the armed attempt shows the countdown from 15; switched off: 0.00 and no countdown. |
+| Scramble marks (T1.13) | `scramble-colours.spec.ts` | Demo solve 1 at speed 20: each of its 11 half turns marked partial after its first quarter turn, then done; every view while scrambling agrees with its progress; all moves but the last done before the attempt arms, all done while armed, none from the solve on. `&misscramble=5` (demo solve 0): move 6 marked wrong exactly while the undo guidance shows, then done; all done while armed. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
 export), without its time check, which flow 1 makes on a settled page (below). The helpers in
@@ -385,7 +394,8 @@ export), without its time check, which flow 1 makes on a settled page (below). T
   Playwright's assertions poll every 100 ms to 1 s. `timer-views.ts` installs a MutationObserver
   before the page's own scripts run (`page.addInitScript`) that records every state the Timer page
   renders (the status line, the time, the attempt's number, the progress, the undo guidance, the
-  solve list); flows 2, 4 and 6 check that record, which also goes into the report as `timer-views`.
+  scramble and its moves' marks, the solve list); flows 2, 4 and 6 and the scramble marks check that
+  record, which also goes into the report as `timer-views`.
   That the page renders those states at all is the demo's doing (the replay's parts, above).
 - **Times are checked on a settled page.** The replay that starts with the page runs while the page
   is still loading: cubing.js builds its search tables in a worker and the scramble picture's chunk

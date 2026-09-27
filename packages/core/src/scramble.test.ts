@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import type { Move, ScrambleProgress } from './index';
+import type { Move, ScrambleMoveState, ScrambleProgress } from './index';
 import {
   FACE_ORDER,
   NotationError,
@@ -59,13 +59,34 @@ const SCRAMBLES = (solves as unknown[]).map((s, i) => ({
 /** The scramble text of the Timer page's end-to-end check (docs/PLAN.md, T1.2). */
 const SCRAMBLE_TEXT = /^([UDRLFB][2']? ?){15,30}$/;
 
-const NOTHING_YET: Omit<ScrambleProgress, 'total'> = {
+const NOTHING_YET: Omit<ScrambleProgress, 'total' | 'moves'> = {
   matched: 0,
   done: false,
   diverged: false,
   undo: [],
   extraMoves: 0,
 };
+
+/** `ScrambleProgress.moves` written one letter per scramble move: `d` done, `p` partial, `.` pending. */
+function states(letters: string): ScrambleMoveState[] {
+  return Array.from(letters, (letter): ScrambleMoveState => {
+    switch (letter) {
+      case 'd':
+        return 'done';
+      case 'p':
+        return 'partial';
+      case '.':
+        return 'pending';
+      default:
+        throw new Error(`"${letter}" is not a move state: d, p or .`);
+    }
+  });
+}
+
+/** The first `done` of `total` moves done and the rest pending. */
+function doneUpTo(done: number, total: number): ScrambleMoveState[] {
+  return states('d'.repeat(done).padEnd(total, '.'));
+}
 
 /** A seeded pseudo-random generator (mulberry32), so that "random" tests are reproducible. */
 function random(seed: number): () => number {
@@ -171,7 +192,7 @@ describe('ScrambleTracker', () => {
   it('starts at the start state with nothing matched', () => {
     const tracker = new ScrambleTracker(scramble);
     expect(tracker.state).toBe(SOLVED);
-    expect(tracker.progress).toEqual({ ...NOTHING_YET, total });
+    expect(tracker.progress).toEqual({ ...NOTHING_YET, total, moves: doneUpTo(0, total) });
   });
 
   it('follows every fixture scramble executed exactly to done, without divergence', () => {
@@ -187,6 +208,7 @@ describe('ScrambleTracker', () => {
           diverged: false,
           undo: [],
           extraMoves: 0,
+          moves: doneUpTo(i + 1, scrambleMoves.length),
         });
       }
       expect(tracker.progress.matched).toBe(tracker.progress.total);
@@ -199,13 +221,24 @@ describe('ScrambleTracker', () => {
     const tracker = new ScrambleTracker("R U2 F'");
     expect(tracker.onMove(parseMove('R')).matched).toBe(1);
     // Halfway through U2: on the path, not diverged, U2 not reached yet.
-    expect(tracker.onMove(parseMove('U'))).toEqual({ ...NOTHING_YET, matched: 1, total: 3 });
-    expect(tracker.onMove(parseMove('U'))).toEqual({ ...NOTHING_YET, matched: 2, total: 3 });
+    expect(tracker.onMove(parseMove('U'))).toEqual({
+      ...NOTHING_YET,
+      matched: 1,
+      total: 3,
+      moves: states('dp.'),
+    });
+    expect(tracker.onMove(parseMove('U'))).toEqual({
+      ...NOTHING_YET,
+      matched: 2,
+      total: 3,
+      moves: states('dd.'),
+    });
     expect(tracker.onMove(parseMove("F'"))).toEqual({
       ...NOTHING_YET,
       matched: 3,
       total: 3,
       done: true,
+      moves: states('ddd'),
     });
   });
 
@@ -234,12 +267,28 @@ describe('ScrambleTracker', () => {
     // D' then U for "U D'": the first is in flight, the second reaches both.
     const tracker = new ScrambleTracker("R U D' F");
     tracker.onMove(parseMove('R'));
-    expect(tracker.onMove(parseMove("D'"))).toEqual({ ...NOTHING_YET, matched: 1, total: 4 });
-    expect(tracker.onMove(parseMove('U'))).toEqual({ ...NOTHING_YET, matched: 3, total: 4 });
+    expect(tracker.onMove(parseMove("D'"))).toEqual({
+      ...NOTHING_YET,
+      matched: 1,
+      total: 4,
+      moves: states('d.d.'),
+    });
+    expect(tracker.onMove(parseMove('U'))).toEqual({
+      ...NOTHING_YET,
+      matched: 3,
+      total: 4,
+      moves: states('ddd.'),
+    });
     expect(tracker.onMove(parseMove('F')).done).toBe(true);
     // The same with half turns made as quarter turns: "U2 D2" as D U' D U'.
     const halves = track('R U2 D2 F', "R D U' D U' F");
-    expect(halves.progress).toEqual({ ...NOTHING_YET, matched: 4, total: 4, done: true });
+    expect(halves.progress).toEqual({
+      ...NOTHING_YET,
+      matched: 4,
+      total: 4,
+      done: true,
+      moves: states('dddd'),
+    });
   });
 
   it('wrong move then its inverse: diverged, undo is the inverse, matched again, 2 extra moves', () => {
@@ -255,12 +304,14 @@ describe('ScrambleTracker', () => {
       diverged: true,
       undo: [inverse(wrong)],
       extraMoves: 1,
+      moves: doneUpTo(3, total),
     });
     expect(tracker.onMove(inverse(wrong))).toEqual({
       ...NOTHING_YET,
       matched: 3,
       total,
       extraMoves: 2,
+      moves: doneUpTo(3, total),
     });
     for (const m of moves.slice(3)) {
       tracker.onMove(m);
@@ -271,6 +322,7 @@ describe('ScrambleTracker', () => {
       total,
       done: true,
       extraMoves: 2,
+      moves: doneUpTo(total, total),
     });
   });
 
@@ -299,6 +351,7 @@ describe('ScrambleTracker', () => {
       matched: 5,
       total,
       extraMoves: 4,
+      moves: doneUpTo(5, total),
     });
     for (const m of moves.slice(5)) {
       tracker.onMove(m);
@@ -316,6 +369,7 @@ describe('ScrambleTracker', () => {
       matched: 1,
       total: 3,
       extraMoves: 4,
+      moves: states('d..'),
     });
   });
 
@@ -325,12 +379,14 @@ describe('ScrambleTracker', () => {
       matched: 1,
       diverged: true,
       undo: [parseMove("L'")],
+      moves: states('d..'),
     });
     expect(tracker.onMove(parseMove("L'"))).toEqual({
       ...NOTHING_YET,
       matched: 1,
       total: 3,
       extraMoves: 2,
+      moves: states('dp.'),
     });
     tracker.onMove(parseMove('U'));
     expect(tracker.onMove(parseMove("F'"))).toEqual({
@@ -339,6 +395,7 @@ describe('ScrambleTracker', () => {
       total: 3,
       done: true,
       extraMoves: 2,
+      moves: states('ddd'),
     });
   });
 
@@ -348,6 +405,7 @@ describe('ScrambleTracker', () => {
       matched: 1,
       total: 3,
       extraMoves: 2,
+      moves: states('d..'),
     });
   });
 
@@ -360,6 +418,7 @@ describe('ScrambleTracker', () => {
       matched: 2,
       total: 3,
       extraMoves: 2,
+      moves: states('dd.'),
     });
     expect(tracker.onMove(parseMove('F')).done).toBe(true);
   });
@@ -374,6 +433,7 @@ describe('ScrambleTracker', () => {
       total: 4,
       done: true,
       extraMoves: 16,
+      moves: states('dddd'),
     });
   });
 
@@ -381,13 +441,14 @@ describe('ScrambleTracker', () => {
     const start = scrambleTarget("L F'");
     const tracker = new ScrambleTracker("R U'", start);
     expect(tracker.state).toBe(start);
-    expect(tracker.progress).toEqual({ ...NOTHING_YET, total: 2 });
+    expect(tracker.progress).toEqual({ ...NOTHING_YET, total: 2, moves: states('..') });
     tracker.onMove(parseMove('R'));
     expect(tracker.onMove(parseMove("U'"))).toEqual({
       ...NOTHING_YET,
       matched: 2,
       total: 2,
       done: true,
+      moves: states('dd'),
     });
     expect(tracker.state).toBe(applyMoves(start, parseMoves("R U'")));
   });
@@ -397,7 +458,7 @@ describe('ScrambleTracker', () => {
     const afterR = tracker.onMove(parseMove('R'));
     expect(tracker.progress).toBe(afterR);
     tracker.onMove(parseMove('B'));
-    expect(afterR).toEqual({ ...NOTHING_YET, matched: 1, total: 3 });
+    expect(afterR).toEqual({ ...NOTHING_YET, matched: 1, total: 3, moves: states('d..') });
   });
 
   it('rejects a scramble outside the notation and a start that is not a cube state', () => {
@@ -423,6 +484,17 @@ describe('ScrambleTracker', () => {
         expect(progress.matched).toBeGreaterThanOrEqual(before.matched);
         expect(progress.extraMoves).toBeGreaterThanOrEqual(before.extraMoves);
         expect(progress.undo.length > 0).toBe(progress.diverged);
+        // The moves before matched are done; only the next two can be begun, and none off the path.
+        const { matched, diverged } = progress;
+        const consistent =
+          progress.moves.length === scrambleMoves.length &&
+          progress.moves.every((state, i) => {
+            if (i < matched) {
+              return state === 'done';
+            }
+            return diverged || i > matched + 1 ? state === 'pending' : true;
+          });
+        expect(consistent || `${s.scramble}: ${progress.moves.join(' ')}`).toBe(true);
         before = progress;
       };
       for (let step = 0; !tracker.progress.done; step++) {
@@ -465,25 +537,48 @@ describe('ScrambleTracker.setState (resync with the state the cube reports)', ()
     for (const m of moves.slice(0, 3)) {
       tracker.onMove(m);
     }
-    expect(tracker.setState(after(7))).toEqual({ ...NOTHING_YET, matched: 7, total });
+    expect(tracker.setState(after(7))).toEqual({
+      ...NOTHING_YET,
+      matched: 7,
+      total,
+      moves: doneUpTo(7, total),
+    });
     expect(tracker.state).toBe(after(7));
     for (const m of moves.slice(7)) {
       tracker.onMove(m);
     }
-    expect(tracker.progress).toEqual({ ...NOTHING_YET, matched: total, total, done: true });
+    expect(tracker.progress).toEqual({
+      ...NOTHING_YET,
+      matched: total,
+      total,
+      done: true,
+      moves: doneUpTo(total, total),
+    });
   });
 
   it('is done when the reported state is the target', () => {
     const tracker = track(scramble, 'F2');
     const progress = tracker.setState(scrambleTarget(scramble));
-    expect(progress).toEqual({ ...NOTHING_YET, matched: total, total, done: true });
+    expect(progress).toEqual({
+      ...NOTHING_YET,
+      matched: total,
+      total,
+      done: true,
+      moves: doneUpTo(total, total),
+    });
     expect(tracker.progress).toBe(progress);
   });
 
   it('off the path: diverged with an empty undo and extraMoves unchanged, until a move brings it back', () => {
     const tracker = track('R U F', 'R');
     const off = applyMoves(SOLVED, parseMoves('R B'));
-    expect(tracker.setState(off)).toEqual({ ...NOTHING_YET, matched: 1, total: 3, diverged: true });
+    expect(tracker.setState(off)).toEqual({
+      ...NOTHING_YET,
+      matched: 1,
+      total: 3,
+      diverged: true,
+      moves: states('d..'),
+    });
     // Moves made while the way back is unknown build no undo either.
     expect(tracker.onMove(parseMove('L'))).toMatchObject({ diverged: true, undo: [] });
     expect(tracker.onMove(parseMove("L'"))).toMatchObject({ diverged: true, undo: [] });
@@ -493,6 +588,7 @@ describe('ScrambleTracker.setState (resync with the state the cube reports)', ()
       matched: 1,
       total: 3,
       extraMoves: 3,
+      moves: states('d..'),
     });
     tracker.onMove(parseMove('U'));
     expect(tracker.onMove(parseMove('F')).done).toBe(true);
@@ -506,6 +602,7 @@ describe('ScrambleTracker.setState (resync with the state the cube reports)', ()
       matched: 2,
       total: 3,
       extraMoves: 1,
+      moves: states('dd.'),
     });
   });
 
@@ -515,8 +612,9 @@ describe('ScrambleTracker.setState (resync with the state the cube reports)', ()
       ...NOTHING_YET,
       matched: 1,
       total: 3,
+      moves: states('dp.'),
     });
-    expect(tracker.onMove(parseMove('U')).matched).toBe(2);
+    expect(tracker.onMove(parseMove('U'))).toMatchObject({ matched: 2, moves: states('dd.') });
   });
 
   it('searches from the last matched state on: an earlier state of the path is off it', () => {
@@ -529,10 +627,115 @@ describe('ScrambleTracker.setState (resync with the state the cube reports)', ()
       matched: 5,
       total,
       diverged: true,
+      moves: doneUpTo(5, total),
     });
   });
 
   it('rejects a state that is not a cube state', () => {
     expect(() => new ScrambleTracker('R U').setState(SOLVED.slice(1))).toThrow(/^Invalid facelets/);
+  });
+});
+
+describe('ScrambleProgress.moves (how far each scramble move is)', () => {
+  it('a half turn made as two quarter turns, either way: partial after the first, done after the second', () => {
+    for (const quarter of ['U', "U'"]) {
+      const tracker = track("R U2 F'", 'R');
+      expect(tracker.progress.moves).toEqual(states('d..'));
+      expect(tracker.onMove(parseMove(quarter)).moves, quarter).toEqual(states('dp.'));
+      expect(tracker.onMove(parseMove(quarter)).moves, quarter).toEqual(states('dd.'));
+      expect(tracker.onMove(parseMove("F'")).moves, quarter).toEqual(states('ddd'));
+    }
+    // Made at once, as the scramble writes it: done.
+    expect(track("R U2 F'", 'R U2').progress.moves).toEqual(states('dd.'));
+  });
+
+  it('moves of opposite faces made in the other order: the second is done, or half made, first', () => {
+    // "U D'" made as D' U.
+    const tracker = track("R U D' F", 'R');
+    expect(tracker.onMove(parseMove("D'")).moves).toEqual(states('d.d.'));
+    expect(tracker.onMove(parseMove('U')).moves).toEqual(states('ddd.'));
+    // "U2 D2" made as D U' D U', then as D U' U' D.
+    const halves = track('R U2 D2 F', 'R');
+    expect(halves.onMove(parseMove('D')).moves).toEqual(states('d.p.'));
+    expect(halves.onMove(parseMove("U'")).moves).toEqual(states('dpp.'));
+    expect(halves.onMove(parseMove('D')).moves).toEqual(states('dpd.'));
+    expect(halves.onMove(parseMove("U'")).moves).toEqual(states('ddd.'));
+    const firstWhole = track('R U2 D2 F', "R D U'");
+    expect(firstWhole.onMove(parseMove("U'")).moves).toEqual(states('ddp.'));
+    expect(firstWhole.onMove(parseMove('D')).moves).toEqual(states('ddd.'));
+  });
+
+  it('a wrong turn: every move from matched on is pending, what was begun too; its undo brings the states back', () => {
+    // From a half-made U2.
+    const halfway = track("R U2 F'", 'R U');
+    expect(halfway.progress.moves).toEqual(states('dp.'));
+    expect(halfway.onMove(parseMove('L'))).toMatchObject({
+      matched: 1,
+      diverged: true,
+      moves: states('d..'),
+    });
+    expect(halfway.onMove(parseMove("L'"))).toMatchObject({
+      diverged: false,
+      moves: states('dp.'),
+    });
+    // After the second move of an opposite pair made first.
+    const pair = track("R U D' F", "R D'");
+    expect(pair.onMove(parseMove('B'))).toMatchObject({ diverged: true, moves: states('d...') });
+    expect(pair.onMove(parseMove("B'"))).toMatchObject({ diverged: false, moves: states('d.d.') });
+    // From a matched state, with two wrong turns.
+    const matched = track('R U F', 'R');
+    expect(matched.onMove(parseMove('B')).moves).toEqual(states('d..'));
+    expect(matched.onMove(parseMove('L')).moves).toEqual(states('d..'));
+    expect(matched.onMove(parseMove("L'")).moves).toEqual(states('d..'));
+    expect(matched.onMove(parseMove("B'"))).toMatchObject({
+      diverged: false,
+      extraMoves: 4,
+      moves: states('d..'),
+    });
+    expect(matched.onMove(parseMove('U')).moves).toEqual(states('dd.'));
+  });
+
+  it('setState: onto an in-flight state, off the path and back, onto the target', () => {
+    const tracker = track("R U2 D' F", 'R');
+    // U2 halfway (as U') and D' made first.
+    expect(tracker.setState(applyMoves(SOLVED, parseMoves("R U' D'")))).toMatchObject({
+      matched: 1,
+      diverged: false,
+      moves: states('dpd.'),
+    });
+    expect(tracker.setState(applyMoves(SOLVED, parseMoves("R U' D' B")))).toMatchObject({
+      matched: 1,
+      diverged: true,
+      moves: states('d...'),
+    });
+    // A move back to the in-flight state: as it was.
+    expect(tracker.onMove(parseMove("B'"))).toMatchObject({
+      diverged: false,
+      moves: states('dpd.'),
+    });
+    expect(tracker.setState(scrambleTarget("R U2 D' F"))).toMatchObject({
+      done: true,
+      moves: states('dddd'),
+    });
+  });
+
+  it('follows every fixture scramble made one quarter turn at a time, either way', () => {
+    for (const s of SCRAMBLES) {
+      const scrambleMoves = parseMoves(s.scramble);
+      const total = scrambleMoves.length;
+      for (const clockwise of [true, false]) {
+        const tracker = new ScrambleTracker(s.scramble);
+        for (const [i, m] of scrambleMoves.entries()) {
+          const quarters = asQuarterTurns(m, clockwise);
+          for (const [j, q] of quarters.entries()) {
+            const whole = j === quarters.length - 1;
+            expect(tracker.onMove(q).moves, `${s.scramble}, move ${String(i + 1)}`).toEqual(
+              states(('d'.repeat(i) + (whole ? 'd' : 'p')).padEnd(total, '.')),
+            );
+          }
+        }
+        expect(tracker.progress.done).toBe(true);
+      }
+    }
   });
 });

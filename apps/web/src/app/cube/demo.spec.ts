@@ -6,6 +6,7 @@ import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals'
 import { FakeFetch } from '../device/fake-browser';
 import { DEMO_FILE, demoSolve } from './cube-testing';
 import {
+  DEMO_HALF_TURN_GAP_MS,
   DEMO_MISSCRAMBLE_PAUSE_MS,
   DEMO_SOLVES_URL,
   DemoSolves,
@@ -165,15 +166,19 @@ describe('parseDemoSolves', () => {
 });
 
 describe('scrambleSchedule', () => {
-  it('turns the scramble at one move per 100 ms', () => {
+  it('turns the scramble at one move per 100 ms, a half turn as two quarter turns 60 ms apart', () => {
     const [solve] = parseDemoSolves({
-      solves: [{ ...DEMO_FILE.solves[0], scramble: "R U2 F'" }],
+      solves: [{ ...DEMO_FILE.solves[0], scramble: "R U2 F' D2" }],
     });
 
+    expect(DEMO_HALF_TURN_GAP_MS).toBe(60);
     expect(scrambleSchedule(solve).map((x) => [formatMove(x.m), x.ms])).toEqual([
       ['R', 0],
-      ['U2', 100],
+      ['U', 100],
+      ['U', 160],
       ["F'", 200],
+      ['D', 300],
+      ['D', 360],
     ]);
   });
 });
@@ -267,6 +272,72 @@ describe('demoParts', () => {
   it.each([0, 4, 9, 1.5, -2])('ignores a mis-scramble after move %s of 4', (after) => {
     expect(demoParts(solve, after)).toEqual(demoParts(solve));
   });
+
+  const [halves] = parseDemoSolves({
+    solves: [
+      demoSolve('R U2 F D2', [
+        ['D2', 0],
+        ["F'", 100],
+        ['U2', 200],
+        ["R'", 300],
+      ]),
+    ],
+  });
+  const HALVES_SOLUTION = { pauseMs: 0, moves: ['D2 @0', "F' @100", 'U2 @200', "R' @300"] };
+
+  it('cuts the scramble before the second quarter turn of each half turn, which starts 60 ms after the first', () => {
+    expect(written(demoParts(halves))).toEqual([
+      { pauseMs: 0, moves: ['R @0', 'U @100'] },
+      { pauseMs: 60, moves: ['U @160', 'F @200', 'D @300'] },
+      { pauseMs: 60, moves: ['D @360'] },
+      HALVES_SOLUTION,
+    ]);
+  });
+
+  it('with a mis-scramble after a half turn: the same cuts, the wrong turn and its inverse', () => {
+    // Moves 2 and 3 turn U and F: the wrong turn is R.
+    expect(written(demoParts(halves, 2))).toEqual([
+      { pauseMs: 0, moves: ['R @0', 'U @100'] },
+      { pauseMs: 60, moves: ['U @160', 'R @200'] },
+      { pauseMs: DEMO_MISSCRAMBLE_PAUSE_MS, moves: ["R' @0", 'F @100', 'D @200'] },
+      { pauseMs: 60, moves: ['D @260'] },
+      HALVES_SOLUTION,
+    ]);
+  });
+
+  // Scrambles of the fixtures, with half turns and moves of opposite faces side by side.
+  it.each([
+    "F2 U2 R B2 D' L B' L' B U2 L2 F2 U F2 U R2 D2 B2 U' L2 D'",
+    "R2 U L' U' R L B R F L2 U L2 U2 L2 B2 R2 B2 D L2 D' B2",
+  ])(
+    'ends each part of %s on a half-made turn, the wrong turn or the target, which it reaches',
+    (scramble) => {
+      const [fixture] = parseDemoSolves({ solves: [demoSolve(scramble, [['R', 0]])] });
+      const halfTurns = parseMoves(scramble).flatMap((m, i) => (m.turns === 2 ? [i] : []));
+      /** Plays the scramble's parts on a tracker: the partial move after each part (-1: none). */
+      const partialAfterEachPart = (misscramble: number | null, extraMoves: number): number[] => {
+        const tracker = new ScrambleTracker(scramble);
+        const partial = demoParts(fixture, misscramble)
+          .slice(0, -1)
+          .map((part) => {
+            for (const { m } of part.moves) {
+              tracker.onMove(m);
+            }
+            return tracker.progress.moves.indexOf('partial');
+          });
+        expect(tracker.progress).toMatchObject({ done: true, extraMoves });
+        return partial;
+      };
+
+      expect(partialAfterEachPart(null, 0)).toEqual([...halfTurns, -1]);
+      expect(partialAfterEachPart(5, 2)).toEqual([
+        ...halfTurns.filter((i) => i < 5),
+        -1,
+        ...halfTurns.filter((i) => i >= 5),
+        -1,
+      ]);
+    },
+  );
 });
 
 describe('DemoSolves', () => {
