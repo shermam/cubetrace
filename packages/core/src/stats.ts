@@ -34,8 +34,7 @@ export function best(ms: readonly number[]): number | null {
 /**
  * The WCA trimmed average of the last `n` results: the best and the worst are dropped and the rest
  * averaged. One DNF counts as the worst result and is dropped; with two or more the average is DNF,
- * returned as null. Null too with fewer than `n` results. Not rounded (the WCA rounds averages to
- * hundredths of a second when displaying them).
+ * returned as null. Null too with fewer than `n` results. Not rounded: rounding is for display.
  */
 export function aoN(ms: readonly number[], n: 5 | 12 | 100): number | null {
   if (ms.length < n) {
