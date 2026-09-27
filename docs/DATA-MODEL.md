@@ -65,7 +65,7 @@ first after `solve_start`, and it never changes.
 | Phase | Ends at the first move after which… |
 |---|---|
 | `cross` | some face `X` has its four edges in place and oriented (all four edge stickers on `X` show `X`'s colour and the other sticker of each edge matches its adjacent centre); `X` becomes `crossFace`. Faces whose cross was already complete at `scramble_done` are excluded. If one move completes several crosses, the one with the most pairs in place wins, then the first in the order `U R F D L B`. |
-| `f2l1`..`f2l4` | one more of the four corner–edge pairs of the first two layers (relative to `crossFace`) is fully in place, counting pairs only while the cross is complete; slots are numbered by completion order (pairs completed by the same move in a fixed order of the slots), and the record says which physical slot each was |
+| `f2l1`..`f2l4` | one more of the four corner–edge pairs of the first two layers (relative to `crossFace`) is fully in place, counting pairs only while the cross is complete; slots are numbered by completion order (pairs completed by the same move in a fixed order of the slots), and the record says which slot each was. A slot is named by its middle-layer edge position (`FR`, `FL`, `BL`, `BR` for a U or D cross). |
 | `eoll` | all four last-layer edges show the last-layer colour on the last-layer face |
 | `ocll` | all four last-layer corners do too |
 | `pll` | the cube is solved |
@@ -161,7 +161,7 @@ sessions/<sessionId>/
   },
   "phases": [
     {"name": "cross", "startMs": 0, "endMs": 0, "moves": 8, "recognitionMs": 0, "executionMs": 0},
-    {"name": "f2l1", "slot": "DFR", "startMs": 0, "endMs": 0, "moves": 9, "recognitionMs": 0, "executionMs": 0}
+    {"name": "f2l1", "slot": "FR", "startMs": 0, "endMs": 0, "moves": 9, "recognitionMs": 0, "executionMs": 0}
   ],
   "video": []                            // phase 2: [{camera, segment, file, bytes, codec, audio, width, height, crop, fpsNominal, frames, firstFrameHostMs, framesFile, syncResidualMs}]
 }
