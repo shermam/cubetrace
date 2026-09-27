@@ -61,5 +61,7 @@ export type { CubeInfo, HostInfo, SessionRecord, SessionSettings, SessionSummary
 export { createSession, summarize } from './session';
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CubeClockFit } from './clock';
+export type { PhaseAverage } from './stats';
+export { DNF, aoN, attemptTimes, best, mean, phaseAverages } from './stats';
 export type { JsonSchema } from './schemas';
 export { ATTEMPT_SCHEMA, SESSION_SCHEMA } from './schemas';
