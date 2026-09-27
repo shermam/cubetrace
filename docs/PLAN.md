@@ -684,8 +684,9 @@ pipeline, §9 the data model).
 | T2.4 | `web`: recording in the timer: two clips per attempt, storage meter, clip viewer, downloads | T2.0, T2.1, T2.3 | ⬜ |
 | T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | ⬜ |
 | T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | ⬜ |
+| T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | ⬜ |
 
-Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → T2.5 → T2.6. Rules for every phase 2 task: nothing of
+Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6. Rules for every phase 2 task: nothing of
 the capture code in the initial bundle (lazy chunks; check `ng build`); the worker code is plain
 TypeScript in `packages/capture` (no Angular), tested in Node where it is pure and in Playwright
 with Chrome's fake camera (`--use-fake-device-for-media-stream`, see `apps/web/e2e/probe.spec.ts`)
@@ -904,6 +905,43 @@ failure (the fake camera has no onsets; the test asserts the failure text and th
 
 **Acceptance.**
 - [ ] On the owner's devices in round 2 the spread is under 40 ms and the offset is stable across two checks (recorded in `docs/DEVICES.md`).
+
+### T2.7 — `web`: timer layout, last 12 solves, session history page
+
+**Goal.** Two things the owner saw on the desktop the day the camera panel landed: the solve
+list grows without bound and pushes the camera preview below the fold, so the scramble and the
+live picture (which is how you know the cube is in frame) are not visible together.
+
+**Scope.** `apps/web/src/app/timer/*` (layout and the solve list), `apps/web/src/app/camera/*`
+(the preview split from the controls), `apps/web/src/app/sessions/*` (a session page), routes,
+e2e layout checks, `docs/MANUAL-TESTS.md`.
+
+**Behaviour.**
+- **Layout.** Wide screens (from 60rem): left column scramble (text, picture, progress, undo)
+  then the clock with the **camera preview beside it** (a fixed box of about 16:9 at ~240 px high,
+  the preview only: mirrored for a front camera, the framing rectangle drawn on it, the sharpness
+  number and the recording status in one line); right column the breakdown, the session stats
+  and the **last 12 solves**. The camera's controls (device, resolution, exposure, focus, torch,
+  framing editing) move under a "Camera settings" disclosure that is closed by default; the live
+  cube net and move log stay in their collapsible Cube section. On a phone (portrait): scramble,
+  clock, the preview (same box, full width), breakdown, last solves. No horizontal overflow at
+  320 px; nothing under the fold that the solver needs during a solve.
+- **Last 12 solves** on the timer, newest first, each with time, phases mini-bar, flags and clip
+  badge; a footer line "N solves in this session · See all" linking to the session page.
+- **Session page** `/sessions/<id>`: the session's header (date, device, cube, camera, counts, mean,
+  best, ao5/ao12/ao100), the full attempt list (all of T2.4's per-attempt actions: viewer,
+  download), export and delete; reachable from the Sessions list (each row links to it) and from
+  "See all". The current session's page updates live.
+
+**Tests.** Unit for the list slicing and the stats footer; Playwright: at 1280×800 with the fake
+camera on and the demo cube, the scramble, the clock and the preview are all within the viewport
+while a solve list of 15 attempts exists (seed through the demo at high speed or a fixture store
+state), the list shows 12 rows and "15 solves · See all", the session page shows 15; at 390×844
+no horizontal overflow and the preview sits under the clock. Screenshots in the PR.
+
+**Acceptance.**
+- [ ] Owner's visual check on the MacBook and the ThinkPhone (round 2).
+- [ ] The timer page's initial render does not wait for the camera or the list.
 
 ### T2.6 — e2e for recording, docs, `v0.2.0`, manual round 2
 
