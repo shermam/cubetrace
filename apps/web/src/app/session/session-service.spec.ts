@@ -939,6 +939,135 @@ describe('SessionService', () => {
       expect(s.service.session()?.audio).toBe(false);
     });
   });
+
+  describe('for the sync check (T2.5)', () => {
+    it("drops the attempt under way without a record, makes none of the check's turns, and begins it again with its scramble and number", async () => {
+      const s = setup();
+      const fake = await ready(s);
+      const seen: AttemptMilestone[] = [];
+      s.service.milestones$.subscribe((milestone) => seen.push(milestone));
+      const session = s.service.session()?.id ?? '';
+      const before = s.service.attempt();
+      expect(before).toMatchObject({ index: 1, scramble: 'R U F', state: 'scrambling' });
+
+      expect(s.service.suspendForSyncCheck()).toBe(true);
+      expect(s.service.suspended()).toBe(true);
+      expect(s.service.phase()).toBe('sync-check');
+      expect(s.service.attempt()).toBeNull();
+      // The scramble stays on screen, and its number.
+      expect(s.service.scramble()).toBe('R U F');
+      expect(s.service.index()).toBe(1);
+      expect(seen).toEqual([
+        {
+          type: 'dropped',
+          attempt: { session, index: 1, scrambleShown: before?.events.scrambleShown },
+          clips: [],
+        },
+      ]);
+
+      // The check's turns: one face, turned and turned back, five times. They make no attempt, even
+      // when they leave the cube solved.
+      for (let k = 0; k < 5; k++) {
+        turn(s, fake, 'U', 1200);
+        turn(s, fake, "U'", 1200);
+      }
+      expect(s.service.phase()).toBe('sync-check');
+      expect(s.service.attempt()).toBeNull();
+      expect(s.service.attempts()).toEqual([]);
+      expect(s.service.suspendForSyncCheck()).toBe(true);
+
+      // Over: attempt 1 begins again at once (the cube is solved), with its scramble.
+      s.service.resumeAfterSyncCheck();
+      expect(s.service.suspended()).toBe(false);
+      expect(s.service.phase()).toBe('scrambling');
+      const again = s.service.attempt();
+      expect(again).toMatchObject({
+        index: 1,
+        scramble: 'R U F',
+        state: 'scrambling',
+        events: { scrambleStart: null },
+      });
+      expect(again?.events.scrambleShown).toBeGreaterThan(before?.events.scrambleShown ?? 0);
+      expect(s.made).toEqual(['R U F']);
+
+      // Its record holds its own moves only.
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 500);
+      const [record] = s.service.attempts();
+      expect(record.moves.map((move) => move.m)).toEqual(['R', 'U', 'F', "F'", "U'", "R'"]);
+      expect(record.result).toMatchObject({
+        status: 'solved',
+        scrambleCorrected: false,
+        scrambleExtraMoves: 0,
+      });
+      await s.service.whenSaved();
+      expect(await s.store.loadAttempts(session)).toEqual([record]);
+      expect(seen.map((milestone) => milestone.type)).toEqual(['dropped', 'armed', 'ended']);
+    });
+
+    it('begins the attempt again only once the cube is solved; a scramble begun is dropped too', async () => {
+      const s = setup();
+      const fake = await ready(s);
+      // Two moves of the scramble made, then a check.
+      turn(s, fake, 'R U');
+      expect(s.service.suspendForSyncCheck()).toBe(true);
+      turn(s, fake, 'D', 1200);
+      s.service.resumeAfterSyncCheck();
+
+      expect(s.service.phase()).toBe('solve-first');
+      expect(s.service.attempt()).toBeNull();
+      expect(s.service.scramble()).toBe('R U F');
+      turn(s, fake, "D' U' R'");
+      expect(s.service.phase()).toBe('scrambling');
+      expect(s.service.attempt()).toMatchObject({
+        index: 1,
+        scramble: 'R U F',
+        events: { scrambleStart: null },
+      });
+      expect(s.service.attempts()).toEqual([]);
+    });
+
+    it('refuses a check while an attempt is armed or solving', async () => {
+      const s = setup();
+      const fake = await ready(s);
+
+      turn(s, fake, 'R U F');
+      expect(s.service.phase()).toBe('armed');
+      expect(s.service.suspendForSyncCheck()).toBe(false);
+      turn(s, fake, "F'", 500);
+      expect(s.service.phase()).toBe('solving');
+      expect(s.service.suspendForSyncCheck()).toBe(false);
+      expect(s.service.suspended()).toBe(false);
+      // Nothing to resume: the solve goes on.
+      s.service.resumeAfterSyncCheck();
+      turn(s, fake, "U' R'", 500);
+      expect(s.service.attempts()).toHaveLength(1);
+    });
+
+    it('between attempts, a check drops nothing, and the next attempt waits for its end', async () => {
+      const s = setup();
+      s.settings.setAutoAdvance(false);
+      const fake = await ready(s);
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 500);
+      expect(s.service.phase()).toBe('next');
+
+      expect(s.service.suspendForSyncCheck()).toBe(true);
+      expect(s.service.phase()).toBe('sync-check');
+      expect(s.service.lastResult()?.index).toBe(1);
+      s.service.next();
+      expect(s.service.attempt()).toBeNull();
+      turn(s, fake, 'U', 1200);
+      turn(s, fake, "U'", 1200);
+
+      s.service.resumeAfterSyncCheck();
+      // The next scramble, made during the solve, is there once its promise has settled.
+      await settle();
+      expect(s.service.phase()).toBe('scrambling');
+      expect(s.service.attempt()).toMatchObject({ index: 2, scramble: "L2 D B'" });
+      expect(s.service.attempts()).toHaveLength(1);
+    });
+  });
 });
 
 /** A sync check of a camera (T2.5): 41.5 ms behind the cube. */

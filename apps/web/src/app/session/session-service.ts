@@ -86,14 +86,15 @@ export interface AttemptView {
 
 /**
  * Where the timer is, for the page's status line: `loading` (reading the stored session),
- * `no-cube`, `connecting`, `solve-first` (a cube is connected but not solved), `scramble-wait`
- * (making a scramble), `cube-info` (waiting for the cube to say what it is, which a new session
- * records), `next` (an attempt ended; auto-advance is off, so the next one waits for Next),
- * the attempt's own `scrambling`, `armed` and `solving`, and `paused` (an attempt is under way
- * and the cube is gone).
+ * `sync-check` (a sync check is under way: no attempt is tracked, T2.5), `no-cube`, `connecting`,
+ * `solve-first` (a cube is connected but not solved), `scramble-wait` (making a scramble),
+ * `cube-info` (waiting for the cube to say what it is, which a new session records), `next` (an
+ * attempt ended; auto-advance is off, so the next one waits for Next), the attempt's own
+ * `scrambling`, `armed` and `solving`, and `paused` (an attempt is under way and the cube is gone).
  */
 export type TimerPhase =
   | 'loading'
+  | 'sync-check'
   | 'no-cube'
   | 'connecting'
   | 'solve-first'
@@ -272,7 +273,9 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  *   attempt's record (saved again, nothing else changed), `putCamera` the camera to the session's
  *   `cameras`, and `addNote` a line to its `notes`. For the sync check (T2.5, `SyncService`),
  *   `putCameraClock` keeps a camera's lag behind the cube in `clock.cameras`, which the camera's
- *   later clips carry as their `syncResidualMs`.
+ *   later clips carry as their `syncResidualMs`; `suspendForSyncCheck` and `resumeAfterSyncCheck`
+ *   keep the check's turns out of the attempts: while it runs no attempt is tracked, and an attempt
+ *   that had not started its solve begins again afterwards, with its scramble and number.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
@@ -303,6 +306,8 @@ export class SessionService {
   private readonly saveErrorSignal = signal<string | null>(null);
   private readonly scrambleErrorSignal = signal<string | null>(null);
   private readonly noticeSignal = signal<string | null>(null);
+  /** A sync check is under way (T2.5): attempts are not tracked meanwhile. */
+  private readonly suspendedSignal = signal(false);
 
   /** `opfs`: sessions are kept in the browser; `memory`: they last until the page closes. */
   readonly storageKind = this.sessionStorage.kind;
@@ -324,6 +329,11 @@ export class SessionService {
   readonly notice = this.noticeSignal.asReadonly();
   /** Records are being written to the store. */
   readonly saving = computed(() => this.pendingWritesSignal() > 0);
+  /**
+   * A sync check is under way (T2.5, `suspendForSyncCheck`): the cube's moves go to no attempt, and
+   * the next attempt begins once it ends.
+   */
+  readonly suspended = this.suspendedSignal.asReadonly();
 
   /** The index of the attempt under way, or of the next one. */
   readonly index = computed(() => {
@@ -348,6 +358,9 @@ export class SessionService {
   readonly phase = computed<TimerPhase>(() => {
     if (!this.readySignal()) {
       return 'loading';
+    }
+    if (this.suspendedSignal()) {
+      return 'sync-check';
     }
     const view = this.attemptSignal();
     const status = this.cube.status();
@@ -754,6 +767,44 @@ export class SessionService {
   }
 
   /**
+   * Suspends attempt tracking for a sync check (T2.5), whose turns must not become an attempt's: an
+   * attempt under way that has not started its solve is dropped without a record, as "Mark as
+   * solved" drops it, and no attempt begins until `resumeAfterSyncCheck`, so the cube's moves go to
+   * none meanwhile (they still feed the session's coarse cube clock fit). Refused (false) while an
+   * attempt is armed or solving, and before the stored session has been read; true when tracking is
+   * suspended (already, or now).
+   */
+  suspendForSyncCheck(): boolean {
+    if (!this.readySignal() || this.solveStarted()) {
+      return false;
+    }
+    if (this.suspendedSignal()) {
+      return true;
+    }
+    const current = this.activeCurrent();
+    if (current !== null) {
+      this.dropForRestart(current);
+    }
+    this.suspendedSignal.set(true);
+    this.refresh();
+    return true;
+  }
+
+  /**
+   * Ends the suspension of `suspendForSyncCheck`: the attempt it dropped begins again, with its
+   * scramble and number, as soon as the cube is solved (at once if it is; otherwise the timer says
+   * to solve it first), as any next attempt does.
+   */
+  resumeAfterSyncCheck(): void {
+    if (!this.suspendedSignal()) {
+      return;
+    }
+    this.suspendedSignal.set(false);
+    this.refresh();
+    this.ensureAttempt();
+  }
+
+  /**
    * Adds `line` to the `notes` of session `sessionId` and saves its session.json (T2.4: a clip that
    * could not be saved), also when it is no longer the current session. Rejects when it could not be
    * saved.
@@ -901,13 +952,21 @@ export class SessionService {
   private onReset(): void {
     const current = this.activeCurrent();
     if (current !== null) {
-      this.queuedSignal.set(current.scramble);
-      this.dropCurrent();
-      this.awaitingSignal.set(true);
-      this.pausedAtSignal.set(null);
+      this.dropForRestart(current);
       this.refresh();
     }
     this.ensureAttempt();
+  }
+
+  /**
+   * Drops the attempt under way without a record, so that it begins again with its scramble and
+   * number: "Mark as solved", and a sync check (T2.5).
+   */
+  private dropForRestart(current: Current): void {
+    this.queuedSignal.set(current.scramble);
+    this.dropCurrent();
+    this.awaitingSignal.set(true);
+    this.pausedAtSignal.set(null);
   }
 
   /** Resyncs the attempt to the state the cube reports, if it differs from the machine's. */
@@ -1001,7 +1060,12 @@ export class SessionService {
 
   /** Begins the next attempt if one is due and everything it needs is there. */
   private ensureAttempt(): void {
-    if (!this.readySignal() || !this.awaitingSignal() || this.activeCurrent() !== null) {
+    if (
+      !this.readySignal() ||
+      !this.awaitingSignal() ||
+      this.activeCurrent() !== null ||
+      this.suspendedSignal()
+    ) {
       return;
     }
     const facelets = this.cube.facelets();
