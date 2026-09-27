@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { MemorySessionStore, SOLVED, applyMoves, parseMoves } from '@cubetrace/core';
 import { FakeCube, type CubeEvent } from '@cubetrace/gan';
+import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 import { Subject } from 'rxjs';
 
 import { DEMO_FILE, asGanCube } from '../cube/cube-testing';
@@ -256,6 +257,73 @@ describe('SessionService', () => {
     expect(localStorage.getItem(CURRENT_SESSION_KEY)).toBeNull();
   });
 
+  it('starts a new session when the current one’s session.json cannot be read, naming the file', async () => {
+    // A write cut short by a page load left it empty (issue #12).
+    const root = new FakeDirectoryHandle();
+    await root.plant(`sessions/${SESSION_A}/session.json`, '');
+    const store = new OpfsSessionStore(root);
+    const localStorage = new FakeLocalStorage();
+    localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
+    const s = setup({ store, localStorage });
+    await ready(s);
+
+    expect(s.service.notice()).toBe(
+      `The last session could not be resumed (sessions/${SESSION_A}/session.json is empty.); ` +
+        'the next attempt starts a new one.',
+    );
+    const fresh = s.service.session()?.id;
+    expect(fresh).toBeDefined();
+    expect(fresh).not.toBe(SESSION_A);
+    expect(localStorage.getItem(CURRENT_SESSION_KEY)).toBe(fresh);
+    expect(s.service.attempt()).toMatchObject({ index: 1, state: 'scrambling' });
+    // The Sessions page lists the new session, and the unreadable one apart.
+    expect(await s.service.listSessions()).toMatchObject({
+      sessions: [{ session: { id: fresh }, attempts: 0, current: true, unreadable: [] }],
+      unreadable: [
+        {
+          sessionId: SESSION_A,
+          kind: 'session',
+          path: `sessions/${SESSION_A}/session.json`,
+          reason: 'empty',
+        },
+      ],
+    });
+  });
+
+  it('resumes a session without its unreadable attempt.json, which the next attempt replaces', async () => {
+    const root = new FakeDirectoryHandle();
+    const store = new OpfsSessionStore(root);
+    await store.createSession(testSession());
+    await store.saveAttempt(testAttempt(1, 12_000));
+    await root.plant(`sessions/${SESSION_A}/attempts/0002/attempt.json`, '');
+    const localStorage = new FakeLocalStorage();
+    localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
+    const s = setup({ store, localStorage });
+    const fake = await ready(s);
+
+    expect(s.service.notice()).toBeNull();
+    expect(s.service.session()?.id).toBe(SESSION_A);
+    expect(s.service.attempts().map((a) => a.index)).toEqual([1]);
+    expect(await s.service.listSessions()).toMatchObject({
+      sessions: [
+        {
+          attempts: 1,
+          unreadable: [
+            { path: `sessions/${SESSION_A}/attempts/0002/attempt.json`, reason: 'empty' },
+          ],
+        },
+      ],
+      unreadable: [],
+    });
+
+    expect(s.service.attempt()).toMatchObject({ index: 2, state: 'scrambling' });
+    turn(s, fake, 'R U F');
+    turn(s, fake, inverse('R U F'));
+    await s.service.whenSaved();
+    expect((await store.loadAttempts(SESSION_A)).map((a) => a.index)).toEqual([1, 2]);
+    expect(await store.listProblems()).toEqual([]);
+  });
+
   it('starts a new session for another cube, and on New session', async () => {
     const store = new MemorySessionStore();
     await store.createSession({
@@ -442,9 +510,18 @@ describe('SessionService', () => {
     const s = setup({ store, localStorage });
     await s.service.whenReady();
 
-    expect(await s.service.listSessions()).toEqual([
-      { session: testSession(SESSION_A, 1000), attempts: 2, mean: '11.00', current: true },
-    ]);
+    expect(await s.service.listSessions()).toEqual({
+      sessions: [
+        {
+          session: testSession(SESSION_A, 1000),
+          attempts: 2,
+          mean: '11.00',
+          current: true,
+          unreadable: [],
+        },
+      ],
+      unreadable: [],
+    });
     const exported = await s.service.exportSession(SESSION_A);
     expect(exported.attempts.map((a) => a.index)).toEqual([1, 2]);
 
@@ -452,7 +529,7 @@ describe('SessionService', () => {
     expect(s.service.session()).toBeNull();
     expect(s.service.attempts()).toEqual([]);
     expect(localStorage.getItem(CURRENT_SESSION_KEY)).toBeNull();
-    expect(await s.service.listSessions()).toEqual([]);
+    expect(await s.service.listSessions()).toEqual({ sessions: [], unreadable: [] });
   });
 
   it('says so when a record cannot be saved, and keeps going', async () => {

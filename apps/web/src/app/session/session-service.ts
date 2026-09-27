@@ -26,6 +26,7 @@ import {
   type SessionStore,
 } from '@cubetrace/core';
 import type { CubeEvent, CubeMoveEvent } from '@cubetrace/gan';
+import type { StorageProblem } from '@cubetrace/storage';
 
 import { APP_BUILD } from '../../environments/version';
 import { CubeService } from '../cube/cube-service';
@@ -108,6 +109,16 @@ export interface SessionListItem {
   readonly mean: string;
   /** The session the timer is recording. */
   readonly current: boolean;
+  /** Its `attempt.json` files that could not be read, left out of `attempts` and `mean`. */
+  readonly unreadable: readonly StorageProblem[];
+}
+
+/** The stored sessions, for the Sessions page. */
+export interface SessionList {
+  /** The readable sessions, newest first. */
+  readonly sessions: readonly SessionListItem[];
+  /** The sessions whose `session.json` could not be read, which can only be deleted. */
+  readonly unreadable: readonly StorageProblem[];
 }
 
 /** An attempt under way or just ended, with what its machine does not expose. */
@@ -168,7 +179,7 @@ export class SessionService {
   private readonly wakeLock = inject(WakeLockService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly sessionStorage = inject(SESSION_STORAGE);
-  private readonly store: SessionStore = this.sessionStorage.store;
+  private readonly store = this.sessionStorage.store;
   private readonly makeScramble = inject(SCRAMBLE_SOURCE);
 
   private readonly readySignal = signal(false);
@@ -454,23 +465,28 @@ export class SessionService {
     this.ensureAttempt();
   }
 
-  /** The stored sessions, newest first, with their attempt counts and means. */
-  async listSessions(): Promise<SessionListItem[]> {
+  /**
+   * The stored sessions, newest first, with their attempt counts and means, and the files that the
+   * store could not read: a session whose `session.json` is unreadable is listed apart, and an
+   * unreadable `attempt.json` is left out of its session's count and mean.
+   */
+  async listSessions(): Promise<SessionList> {
     await this.whenReady();
     await this.whenSaved();
     const sessions = await this.store.listSessions();
+    const attempts = await Promise.all(sessions.map((s) => this.store.loadAttempts(s.id)));
+    const problems = (await this.store.listProblems?.()) ?? [];
     const currentId = this.sessionSignal()?.id;
-    return Promise.all(
-      sessions.map(async (session) => {
-        const attempts = await this.store.loadAttempts(session.id);
-        return {
-          session,
-          attempts: attempts.length,
-          mean: sessionMean(attempts),
-          current: session.id === currentId,
-        };
-      }),
-    );
+    return {
+      sessions: sessions.map((session, k) => ({
+        session,
+        attempts: attempts[k].length,
+        mean: sessionMean(attempts[k]),
+        current: session.id === currentId,
+        unreadable: problems.filter((p) => p.kind === 'attempt' && p.sessionId === session.id),
+      })),
+      unreadable: problems.filter((p) => p.kind === 'session'),
+    };
   }
 
   /** A session with its attempts, as one export file holds them, once pending writes are done. */
@@ -497,6 +513,11 @@ export class SessionService {
     await this.save((store) => store.deleteSession(id));
   }
 
+  /**
+   * Resumes the session of the current id, if any, with its readable attempts. A session whose
+   * `session.json` is gone or unreadable is not resumed: its id is forgotten, the notice says why
+   * (the store's error names the file), and the next attempt starts a new session.
+   */
   private async restore(): Promise<void> {
     const id = this.readCurrentId();
     if (id !== null) {
