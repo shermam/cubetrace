@@ -38,13 +38,19 @@ adds items; the owner ticks them when done (date and any detail that others need
     cents. Cloud Functions will run in `us-central1`, inside `nam5`.
   - [x] Web app registered (2026-09-27); its config object (public by design) goes into the
     repo when phase 3 lands.
-  - [ ] **No CLI login needed.** Instead of `firebase login` on a machine, phase 3 deploys the
-    Cloud Function from GitHub Actions with a service account: when the coordinator asks,
-    create in the Google Cloud console of `cubetrace-cacd9` a service account
-    (`github-deploy`) with the roles Cloud Functions Admin, Service Account User, Secret
-    Manager Admin and Firebase Rules Admin, download one JSON key and add it as the
-    repository secret `FIREBASE_SERVICE_ACCOUNT` (Settings → Secrets and variables → Actions).
-    Browser only, no Codespace and no local CLI.
+  - [ ] **No CLI login needed: one service account, two keys** (decided 2026-09-27). In the
+    Google Cloud console of `cubetrace-cacd9`: IAM → Service accounts → create `deploy` with
+    the roles Firebase Admin, Service Account User, Secret Manager Admin, Cloud Run Admin,
+    Cloud Build Editor and Artifact Registry Administrator (Editor also works, but is
+    broader). Then two JSON keys, revocable one by one:
+    - key 1 → the Claude Code cloud environment's variables as `FIREBASE_SA_KEY_JSON`: the
+      coordinator session (never a subagent) runs `firebase deploy`, `functions:secrets:set`
+      and rules deploys with it during phases 3+;
+    - key 2 → the repository secret `FIREBASE_SERVICE_ACCOUNT` (Settings → Secrets and
+      variables → Actions): the deploy workflow that phase 3 adds, so merges to `main`
+      deploy without anyone's machine.
+    Delete the downloaded files afterwards. Neither key is ever committed, printed in a PR or
+    handed to an agent; `CLAUDE.md` will say so. Browser only, no Codespace, no local CLI.
 - [x] 2026-09-27 — **Bucket decided: Cloudflare R2.** To do when the coordinator asks (phase 3):
   in the Cloudflare dashboard, R2 → Create bucket `cubetrace` (location hint: Eastern North
   America, so it sits near `nam5`); R2 → Manage API tokens → Create API token with
