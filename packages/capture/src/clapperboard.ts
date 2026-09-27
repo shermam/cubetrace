@@ -19,6 +19,14 @@ export const ONSET_QUIET_MS = 500;
 /** An onset is matched to the nearest move within this, ms, either way. */
 export const MATCH_WINDOW_MS = 500;
 
+/**
+ * A move counts as one of the check's turns only when no other move comes within this, ms, before or
+ * after it: a single turn with a pause, as the check asks for. The moves of a scramble or a solve
+ * come closer, and so densely that any motion finds one of them within a few ms: matched, they
+ * would give a lag and a narrow spread out of nothing.
+ */
+export const SINGLE_TURN_MS = 500;
+
 /** Fewer turns matched to an onset fail the check. */
 export const MIN_MATCHES = 4;
 
@@ -41,6 +49,8 @@ export interface ClapperboardAnalysis {
   readonly frames: number;
   /** The cube's moves given. */
   readonly moves: number;
+  /** Of those, the single turns (`SINGLE_TURN_MS`): the ones matched to onsets. */
+  readonly turns: number;
   /**
    * The median of arrival minus timestamp over the frames, ms: a frame's host time is its timestamp
    * plus this, as for the clips (docs/DATA-MODEL.md §9); null without frames.
@@ -82,9 +92,10 @@ export type ClapperboardResult =
  * Each frame is placed on the host clock by its timestamp and the median arrival offset (the clips'
  * rule, so without the arrival's jitter); an onset is the first frame of a run above `ONSET_FACTOR`
  * times the baseline after at least `ONSET_QUIET_MS` under it; each onset is matched to the nearest
- * move within `MATCH_WINDOW_MS`, one to one; the offset is the median of onset minus move over the
- * pairs and the residual their spread (95th minus 5th percentile). Fails, saying why, without moves,
- * frames or onsets, with fewer than `MIN_MATCHES` pairs, or a spread over `MAX_SPREAD_MS`.
+ * single turn (`SINGLE_TURN_MS`) within `MATCH_WINDOW_MS`, one to one; the offset is the median of
+ * onset minus move over the pairs and the residual their spread (95th minus 5th percentile). Fails,
+ * saying why, without moves, frames or onsets, with fewer than `MIN_MATCHES` pairs, or a spread over
+ * `MAX_SPREAD_MS`.
  */
 export function detectClapperboard(
   frames: readonly MotionSample[],
@@ -95,13 +106,15 @@ export function detectClapperboard(
   const energies = ordered.map((frame) => frame.energy);
   const level = onsetThreshold(times, energies);
   const onsets = level === null ? [] : findOnsets(times, energies, level.threshold);
-  const pairs = matchOnsets(onsets, moves);
+  const turns = singleTurns(moves);
+  const pairs = matchOnsets(onsets, turns);
   const lags = pairs.map((pair) => pair.onsetHostMs - pair.moveHostMs).sort((a, b) => a - b);
   const offset = lags.length === 0 ? null : median(lags);
   const spread = lags.length === 0 ? null : percentile(lags, 0.95) - percentile(lags, 0.05);
   const analysis: ClapperboardAnalysis = {
     frames: ordered.length,
     moves: moves.length,
+    turns: turns.length,
     arrivalOffsetMs: arrivalOffsetMs === null ? null : round(arrivalOffsetMs, 2),
     baseline: level === null ? null : round(level.baseline, 3),
     threshold: level === null ? null : round(level.threshold, 3),
@@ -126,10 +139,15 @@ export function detectClapperboard(
     return fail('no-motion', 'no motion seen in the framing rectangle');
   }
   if (pairs.length < MIN_MATCHES) {
+    const others = moves.length - turns.length;
+    const close =
+      others === 0
+        ? ''
+        : `; ${String(others)} ${plural(others, 'turn')} came within half a second of another`;
     return fail(
       'few-matches',
-      `fewer than ${String(MIN_MATCHES)} matches (${String(pairs.length)} of ${String(moves.length)} ` +
-        `${moves.length === 1 ? 'turn' : 'turns'} matched a motion)`,
+      `fewer than ${String(MIN_MATCHES)} matches (${String(pairs.length)} of ` +
+        `${String(turns.length)} single ${plural(turns.length, 'turn')} matched a motion${close})`,
     );
   }
   if (offset === null || spread === null || spread > MAX_SPREAD_MS) {
@@ -228,6 +246,19 @@ export function findOnsets(
 }
 
 /**
+ * The single turns among `moves` (host ms): those with no other move within `gapMs` before or after
+ * them, in time order.
+ */
+export function singleTurns(moves: readonly number[], gapMs = SINGLE_TURN_MS): number[] {
+  const sorted = [...moves].sort((a, b) => a - b);
+  return sorted.filter(
+    (move, k) =>
+      (k === 0 || move - sorted[k - 1] >= gapMs) &&
+      (k === sorted.length - 1 || sorted[k + 1] - move >= gapMs),
+  );
+}
+
+/**
  * Onsets matched to moves (host ms), one to one: the pairs within `windowMs` of each other, the
  * closest first, each onset and each move in one pair at most; in the order of the moves.
  */
@@ -273,6 +304,11 @@ export function percentile(sorted: readonly number[], p: number): number {
 function median(sorted: readonly number[]): number {
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/** "turn" or "turns". */
+function plural(count: number, word: string): string {
+  return count === 1 ? word : `${word}s`;
 }
 
 function thresholdOf(baseline: number): number {

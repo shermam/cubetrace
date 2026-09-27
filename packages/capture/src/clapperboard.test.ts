@@ -7,6 +7,7 @@ import {
   MIN_ONSET_ENERGY,
   ONSET_FACTOR,
   ONSET_QUIET_MS,
+  SINGLE_TURN_MS,
   SYNC_CHECK_MS,
   detectClapperboard,
   findOnsets,
@@ -14,6 +15,7 @@ import {
   matchOnsets,
   onsetThreshold,
   percentile,
+  singleTurns,
 } from './clapperboard';
 import type { MotionSample } from './protocol';
 
@@ -94,7 +96,9 @@ describe('the thresholds', () => {
     expect([SYNC_CHECK_MS, ONSET_FACTOR, ONSET_QUIET_MS, MATCH_WINDOW_MS]).toEqual([
       20_000, 4, 500, 500,
     ]);
-    expect([MIN_MATCHES, MAX_SPREAD_MS, MIN_ONSET_ENERGY]).toEqual([4, 40, 0.5]);
+    expect([MIN_MATCHES, MAX_SPREAD_MS, MIN_ONSET_ENERGY, SINGLE_TURN_MS]).toEqual([
+      4, 40, 0.5, 500,
+    ]);
   });
 });
 
@@ -181,9 +185,31 @@ describe('detectClapperboard', () => {
     expect(result).toMatchObject({
       ok: false,
       reason: 'few-matches',
-      message: 'fewer than 4 matches (3 of 3 turns matched a motion)',
+      message: 'fewer than 4 matches (3 of 3 single turns matched a motion)',
     });
     expect(result.analysis.pairs).toHaveLength(3);
+  });
+
+  it("matches only single turns: a scramble's turns, close together, match no motion", () => {
+    // A scramble's twenty turns 60 ms apart from 13 s, with its motion from their start; the five
+    // single turns as before.
+    const scramble = Array.from({ length: 20 }, (_, k) => hostMs(390) - 40 + 60 * k);
+    const { frames, moves } = check([...FIVE, { frame: 390, lagMs: null }]);
+
+    const result = detectClapperboard(frames, [...moves, ...scramble]);
+
+    expect(result).toMatchObject({ ok: true, offsetMs: 41, clapperboardSamples: 5 });
+    expect(result.analysis).toMatchObject({ moves: 25, turns: 5 });
+
+    // Only the scramble: its onset finds a turn 40 ms before it, but none of them is single.
+    const alone = check([{ frame: 390, lagMs: null }]).frames;
+    expect(detectClapperboard(alone, scramble)).toMatchObject({
+      ok: false,
+      reason: 'few-matches',
+      message:
+        'fewer than 4 matches (0 of 0 single turns matched a motion; 20 turns came within half ' +
+        'a second of another)',
+    });
   });
 
   it('fails when the lags spread over 40 ms, saying the spread', () => {
@@ -289,6 +315,14 @@ describe('onsetThreshold and findOnsets', () => {
         4,
       ),
     ).toEqual([]);
+  });
+});
+
+describe('singleTurns', () => {
+  it('keeps the turns with no other within half a second either way', () => {
+    expect(singleTurns([3000, 1000, 1400, 5000, 5499, 7000])).toEqual([3000, 7000]);
+    expect(singleTurns([1000, 1500, 2000])).toEqual([1000, 1500, 2000]);
+    expect(singleTurns([])).toEqual([]);
   });
 });
 

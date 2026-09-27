@@ -64,6 +64,7 @@ export {
   MIN_ONSET_ENERGY,
   ONSET_FACTOR,
   ONSET_QUIET_MS,
+  SINGLE_TURN_MS,
   SYNC_CHECK_MS,
   detectClapperboard,
   findOnsets,
@@ -71,4 +72,5 @@ export {
   matchOnsets,
   onsetThreshold,
   percentile,
+  singleTurns,
 } from './clapperboard';

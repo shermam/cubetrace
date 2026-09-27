@@ -63,8 +63,8 @@ export async function recording(r: Rig): Promise<{ fake: FakeCube; capture: Fake
 
 /**
  * The camera's frames for `ms` from now, one every 33.3 ms on the fake clock, sent to the motion
- * watch under way with `energy(frame time)`; the cube turns at `turns` (host ms), which come in
- * their place among the frames. The timers due on the way run (the check's ticks).
+ * watch under way with `energy(frame time)`; the cube turns at those of `turns` (host ms) that come
+ * in that time, in their place among the frames. The timers due on the way run (the check's ticks).
  */
 export async function film(
   r: Rig,
@@ -76,7 +76,8 @@ export async function film(
 ): Promise<void> {
   const start = r.s.perf.hostMs;
   const end = start + ms;
-  const pending = [...turns].sort((a, b) => a - b);
+  // The turns of this stretch of time: those before it were filmed already.
+  const pending = turns.filter((at) => at > start).sort((a, b) => a - b);
   for (let frame = 1; start + frame * FRAME_MS <= end + 0.001;) {
     const next = start + frame * FRAME_MS;
     const turnAt = pending[0] as number | undefined;

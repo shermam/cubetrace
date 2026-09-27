@@ -56,7 +56,7 @@ describe('SyncCheck', () => {
     await refresh();
     expect(panel?.getAttribute('data-state')).toBe('failed');
     expect(text(element, 'sync-failure')).toBe(
-      'Sync check failed: fewer than 4 matches (1 of 1 turn matched a motion).',
+      'Sync check failed: fewer than 4 matches (1 of 1 single turn matched a motion).',
     );
     expect(element.querySelector('[data-testid="sync-failure"]')?.getAttribute('data-reason')).toBe(
       'few-matches',
