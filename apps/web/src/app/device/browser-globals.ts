@@ -7,6 +7,10 @@ import { DOCUMENT, InjectionToken, inject } from '@angular/core';
 export interface BrowserGlobals {
   readonly navigator?: Partial<Navigator>;
   readonly VideoEncoder?: unknown;
+  /** Web Storage, for the settings. Reading it throws where the browser blocks storage. */
+  readonly localStorage?: Storage;
+  /** For files the app loads on demand, such as the demo solves. */
+  readonly fetch?: typeof fetch;
 }
 
 /** The browser's `window` in the app; unit tests provide a fake with the APIs they need. */
