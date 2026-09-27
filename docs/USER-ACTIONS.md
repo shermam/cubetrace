@@ -30,22 +30,33 @@ adds items; the owner ticks them when done (date and any detail that others need
 - [x] 2026-09-27 — Firebase project created: `cubetrace-cacd9`
   (https://console.firebase.google.com/project/cubetrace-cacd9/overview). Still to do there
   before phase 3 starts, in this order (each is a few clicks in the console):
-  - [ ] Upgrade to the Blaze plan and set a budget alert (say US$ 20/month) in the linked
-    Google Cloud billing account.
-  - [ ] Authentication → Sign-in method → enable **Google**.
-  - [ ] Firestore Database → Create database → production mode, region `southamerica-east1`
-    (São Paulo) or `us-central1` (the bucket's region, decided below); the rules come from
-    the repo.
-  - [ ] Project settings → Your apps → Add app → Web (nickname `cubetrace`, no Firebase
-    Hosting yet): the config object it shows (apiKey, authDomain, projectId, …) is not a
-    secret; paste it where `apps/web/src/environments/environment.prod.ts` will say when
-    phase 3 lands.
-  - [ ] Phase 3 also needs the Firebase CLI logged in once on your machine (`firebase login`)
-    to deploy the Cloud Function that mints signed URLs; the coordinator will say when.
-- [ ] Decide the bucket: Cloudflare R2 (recommended in the design: free egress) or Google
-  Cloud Storage. Both are supported by configuration; the decision sets which secret the
-  Cloud Function gets. For R2: create the bucket and an API token with object write; for
-  GCS: the bucket in `us-central1` with a lifecycle rule to Coldline after 60 days.
+  - [x] Blaze plan with a budget alert (2026-09-27).
+  - [x] Authentication → Google sign-in enabled (2026-09-27).
+  - [x] Firestore created in production mode, location **`nam5`** (US multi-region;
+    2026-09-27). Fine for the index: it cannot be moved later, its per-operation prices are
+    about twice a single region's, and the volume (a few hundred documents a day) makes that
+    cents. Cloud Functions will run in `us-central1`, inside `nam5`.
+  - [x] Web app registered (2026-09-27); its config object (public by design) goes into the
+    repo when phase 3 lands.
+  - [ ] **No CLI login needed.** Instead of `firebase login` on a machine, phase 3 deploys the
+    Cloud Function from GitHub Actions with a service account: when the coordinator asks,
+    create in the Google Cloud console of `cubetrace-cacd9` a service account
+    (`github-deploy`) with the roles Cloud Functions Admin, Service Account User, Secret
+    Manager Admin and Firebase Rules Admin, download one JSON key and add it as the
+    repository secret `FIREBASE_SERVICE_ACCOUNT` (Settings → Secrets and variables → Actions).
+    Browser only, no Codespace and no local CLI.
+- [x] 2026-09-27 — **Bucket decided: Cloudflare R2.** To do when the coordinator asks (phase 3):
+  in the Cloudflare dashboard, R2 → Create bucket `cubetrace` (location hint: Eastern North
+  America, so it sits near `nam5`); R2 → Manage API tokens → Create API token with
+  **Object Read & Write** on that bucket only; keep the Access Key ID, the Secret Access Key
+  and the account id (the S3 endpoint is `https://<account-id>.r2.cloudflarestorage.com`).
+  They go into GitHub Actions secrets (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+  `R2_ACCOUNT_ID`), from which the deploy workflow stores them as Firebase secrets; they are
+  never committed. The bucket's CORS rule (PUT and GET from `https://shermam.github.io` and,
+  later, the Firebase Hosting domain) comes from the repo as a file you paste in the
+  bucket's Settings → CORS policy.
+- [x] 2026-09-27 — Bucket provider decided: R2 (see above). GCS stays supported by
+  configuration for anyone else deploying the app.
 - [ ] Run `python ferramentas/banda.py` (private repo) at home and at the office and record
   the upstream in `docs/DEVICES.md`; it sets the upload queue's expectations.
 
