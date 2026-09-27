@@ -1,7 +1,8 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, type ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 
 import { type StoragePersistence, StorageService } from '../device/storage-service';
 import { WAKE_LOCK_TEXT, WakeLockService } from '../device/wake-lock-service';
+import { type CubeMac, SettingsService } from './settings-service';
 
 const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
   unsupported: 'This browser has no Storage API, so it cannot be asked to keep the data.',
@@ -11,97 +12,33 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
 };
 
 /**
- * `/settings`: the screen wake lock and storage persistence. Inspection, auto-advance, the
- * host label and cube addresses arrive with T1.6.
+ * `/settings`: the screen wake lock and storage persistence (T1.7), then what the timer and the
+ * cube connection use (T1.6a): the host label, the cubes' MAC addresses, inspection,
+ * auto-advance and the demo speed, all kept by `SettingsService`.
  */
 @Component({
   selector: 'app-settings-page',
-  template: `
-    <h1>Settings</h1>
-
-    <section aria-labelledby="screen-heading">
-      <h2 id="screen-heading">Screen</h2>
-      <label class="switch">
-        <input
-          #keepAwake
-          type="checkbox"
-          [checked]="wakeLock.wanted()"
-          [disabled]="wakeLock.status() === 'unsupported'"
-          (change)="setKeepAwake(keepAwake.checked)"
-        />
-        Keep the screen on
-      </label>
-      <p class="status" data-testid="wake-lock-detail">
-        {{ wakeLockText().detail }}
-        @if (wakeLock.error(); as error) {
-          ({{ error }})
-        }
-      </p>
-      <p class="hint">The timer will also turn it on by itself during a session (T1.6).</p>
-    </section>
-
-    <section aria-labelledby="storage-heading">
-      <h2 id="storage-heading">Storage</h2>
-      <p class="status" data-testid="storage-persistence">
-        {{ persistenceText[storage.persistence()] }}
-      </p>
-      @if (storage.usage(); as usage) {
-        <p class="status" data-testid="storage-usage">
-          Using {{ bytes(usage.usage) }} of the {{ bytes(usage.quota) }} this browser allows.
-        </p>
-      }
-      <button type="button" class="primary" [disabled]="!canPersist()" (click)="keepData()">
-        Keep my data
-      </button>
-      <p class="hint">The timer will also ask when the first session starts (T1.6).</p>
-      @if (storage.refused()) {
-        <p class="hint" data-testid="storage-refused">
-          The browser said no. Chrome grants it to installed apps and to sites used often: install
-          cubetrace (Install app, or Add to Home screen) and try again.
-        </p>
-      }
-    </section>
-
-    <p class="hint">Inspection, auto-advance, host label and cube addresses arrive with T1.6.</p>
-  `,
-  styles: `
-    section {
-      margin-bottom: var(--space-4);
-      padding: var(--space-4);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface);
-    }
-
-    h2 {
-      margin-top: 0;
-    }
-
-    .switch {
-      display: inline-flex;
-      gap: var(--space-2);
-      align-items: center;
-    }
-
-    .status {
-      margin: var(--space-2) 0;
-    }
-
-    .hint {
-      color: var(--text-muted);
-      font-size: 0.875rem;
-    }
-  `,
+  templateUrl: './settings-page.html',
+  styleUrl: './settings-page.scss',
 })
 export class SettingsPage {
   protected readonly wakeLock = inject(WakeLockService);
   protected readonly storage = inject(StorageService);
+  protected readonly settings = inject(SettingsService);
   protected readonly wakeLockText = computed(() => WAKE_LOCK_TEXT[this.wakeLock.status()]);
   protected readonly persistenceText = PERSISTENCE_TEXT;
   protected readonly canPersist = computed(() => {
     const persistence = this.storage.persistence();
     return persistence === 'unknown' || persistence === 'best-effort';
   });
+
+  private readonly macForm = viewChild.required<ElementRef<HTMLFormElement>>('macForm');
+  protected readonly macName = signal('');
+  protected readonly macAddress = signal('');
+  /** The name of the entry being edited; null while adding. */
+  protected readonly editing = signal<string | null>(null);
+  protected readonly macError = signal<string | null>(null);
+  protected readonly speedError = signal<string | null>(null);
 
   constructor() {
     void this.storage.refresh();
@@ -113,6 +50,50 @@ export class SettingsPage {
 
   protected keepData(): void {
     void this.storage.persist();
+  }
+
+  protected saveMac(event: Event): void {
+    event.preventDefault();
+    const result = this.settings.saveCubeMac(
+      this.macName(),
+      this.macAddress(),
+      this.editing() ?? undefined,
+    );
+    if (result.ok) {
+      this.cancelEdit();
+    } else {
+      this.macError.set(result.error);
+    }
+  }
+
+  protected editMac(entry: CubeMac): void {
+    this.editing.set(entry.name);
+    this.macName.set(entry.name);
+    this.macAddress.set(entry.mac);
+    this.macError.set(null);
+  }
+
+  protected cancelEdit(): void {
+    this.editing.set(null);
+    this.macName.set('');
+    this.macAddress.set('');
+    this.macError.set(null);
+    // The fields may hold text that the bindings have not seen yet: clear them in the page too.
+    this.macForm().nativeElement.reset();
+  }
+
+  protected removeMac(name: string): void {
+    this.settings.removeCubeMac(name);
+    if (this.editing() === name) {
+      this.cancelEdit();
+    }
+  }
+
+  protected setDemoSpeed(text: string): void {
+    const speed = text.trim() === '' ? Number.NaN : Number(text);
+    this.speedError.set(
+      this.settings.setDemoSpeed(speed) ? null : 'The speed must be a number from 0.1 to 100.',
+    );
   }
 
   /** Decimal units, as Chrome shows storage: "0 B", "12.3 kB", "1.2 GB". */

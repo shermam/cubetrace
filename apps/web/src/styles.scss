@@ -102,6 +102,58 @@ button {
   }
 }
 
+/* The header's cube status: the pill of app-cube-status-pill and its placeholder in app.html,
+   shown until that component (loaded with @defer) is there. */
+.cube-pill {
+  --status-colour: var(--text-muted);
+
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  font-size: 0.875rem;
+  white-space: nowrap;
+
+  &[data-status='connecting'] {
+    --status-colour: var(--warn);
+  }
+
+  &[data-status='connected'] {
+    --status-colour: var(--ok);
+  }
+
+  .dot {
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--status-colour);
+  }
+
+  .label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+input[type='text'],
+input[type='number'] {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+
+  &[aria-invalid='true'] {
+    border-color: var(--danger);
+  }
+}
+
 input[type='checkbox'] {
   width: 1.125rem;
   height: 1.125rem;

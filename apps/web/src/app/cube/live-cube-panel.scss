@@ -1,0 +1,76 @@
+:host {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+
+  h2 {
+    margin: 0;
+  }
+}
+
+.solved {
+  margin: 0;
+  color: var(--warn);
+  font-weight: 600;
+
+  &.is-solved {
+    color: var(--ok);
+  }
+}
+
+.muted,
+.legend {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.legend {
+  font-size: 0.75rem;
+}
+
+button {
+  justify-self: start;
+}
+
+// The table fits a 320 px phone; should a column grow wider (hours of moves), it scrolls inside
+// its box instead of widening the page.
+.log {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: var(--space-1) 0.375rem;
+  border-bottom: 1px solid var(--line);
+  text-align: end;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+th:nth-child(2),
+td:nth-child(2),
+.empty {
+  text-align: start;
+}
+
+abbr {
+  text-decoration: none;
+}

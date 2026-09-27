@@ -29,8 +29,8 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 
 | Root script | Runs |
 |---|---|
-| `npm start` | `ng serve` in `apps/web` (extra arguments after `--` go to `ng`), after `scripts/write-version.mts` |
-| `npm run build` | `ng build` in `apps/web`, production configuration, output `apps/web/dist/web/browser`, after `scripts/write-version.mts` |
+| `npm start` | `ng serve` in `apps/web` (extra arguments after `--` go to `ng`), after `scripts/write-version.mts` and `scripts/write-demo-solves.mts` |
+| `npm run build` | `ng build` in `apps/web`, production configuration, output `apps/web/dist/web/browser`, after `scripts/write-version.mts` and `scripts/write-demo-solves.mts` |
 | `npm run typecheck` | `tsc --noEmit` for the root configs, each package, and the Node-side files of `apps/web` (`tsconfig.node.json`) |
 | `npm run lint` | `typecheck`, then `eslint .` (everything outside `apps/web`), then `ng lint` (`apps/web`: `src`, `e2e`, configs) |
 | `npm test` | `vitest run` (`packages/**/src/**/*.test.ts`, Node), then `ng test --watch=false` (the app's `*.spec.ts`, jsdom, headless) |
@@ -223,6 +223,35 @@ adding the `WebBluetoothNewPermissionsBackend` feature exposes both. The support
 flag (the one `docs/USER-ACTIONS.md` names) and uses `navigator.bluetooth.getDevices` to detect
 `watchAdvertisements`, which lives on devices, not on `navigator`. On Linux, Web Bluetooth itself
 needs `#enable-experimental-web-platform-features`.
+
+## Cube connection
+
+Added by T1.6a on 2026-09-27.
+
+**The cube code loads right after the first render, not with the initial bundle.** The app
+imports `@cubetrace/core` and `@cubetrace/gan` through their `index.ts`, and esbuild assigns whole
+files to chunks: once a file of the initial bundle imports either package, every file behind those
+indexes goes into the initial bundle too, `packages/core/src/scramble.ts` and its cubing.js chunks
+included. Checked with `ng build --stats-json`: with the status pill and the connect dialog in the
+initial bundle, it grew by 122 kB raw, 113 kB of it cubing.js. So `app.html` renders the pill and
+the dialog in `@defer (on immediate)` blocks, with a static "No cube" placeholder that already
+opens the dialog (through `ConnectDialogService`, which stays in `main`). The pill, the dialog,
+`CubeService`, `SettingsService` and both packages load in lazy chunks right after the first
+render, shared with the Timer page. The initial bundle grew from 247.2 to 261.2 kB raw (69.6 to
+73.5 kB transferred): 12.9 kB of Angular's `@defer` runtime, the placeholder, the dialog's open
+state and the shared styles. The GAN driver is still a chunk of its own that loads when a real
+cube connects.
+
+**The demo solves are a file in `public/`, fetched when a demo starts.**
+`apps/web/scripts/write-demo-solves.mts` writes `apps/web/public/demo/solves.json`: the first 30
+solves of `fixtures/solves.json` with only `scramble`, `scrambled_facelets`, `moves` (`[{m, ms}]`)
+and `time_ms`, one solve per line, 57 kB (the script fails at 100 kB). npm runs it with
+`write-version.mts` (postinstall, prestart, prebuild); the file is in `.gitignore` and is rewritten
+only when it changes. A lazy chunk was the alternative, but the service worker's `app` asset group
+prefetches every `.js` file, so the demo data would have been downloaded by every installation. The
+`assets` group lists images and fonts only, so `demo/solves.json` is neither prefetched nor cached
+(`dist/web/browser/ngsw.json` does not list it; `cube.spec.ts` checks this). Demo mode therefore
+needs the network, apart from the browser's own HTTP cache.
 
 ## cubing.js
 
