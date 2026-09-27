@@ -203,8 +203,8 @@ describe('FakeCube.play', () => {
         { m: R, ms: 10 },
         { m: R, ms: 5 },
       ]),
-    ).rejects.toThrow(RangeError);
-    await expect(cube.play([{ m: R, ms: Number.NaN }])).rejects.toThrow(RangeError);
+    ).rejects.toThrow(/move 1 at 5 ms comes before move 0 at 10 ms/);
+    await expect(cube.play([{ m: R, ms: Number.NaN }])).rejects.toThrow(/no finite time/);
   });
 });
 

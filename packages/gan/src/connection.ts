@@ -89,8 +89,8 @@ export function driverTimeToHost(): (driverMs: number) => number {
 }
 
 /**
- * The MAC address in the form the driver expects (`"AB:12:CD:34:EF:56"`), from six hex bytes
- * separated by `:`, `-` or spaces, or from twelve hex digits; `null` if `text` is not one.
+ * The MAC address in the form the driver expects (`"AB:12:CD:34:EF:56"`), from twelve hex digits
+ * in either case with any `:`, `-` or whitespace between them; `null` if `text` is not one.
  */
 export function normalizeMac(text: string): string | null {
   const hex = text.replace(/[\s:-]/g, '');
@@ -100,7 +100,7 @@ export function normalizeMac(text: string): string | null {
   return Array.from({ length: 6 }, (_, i) => hex.slice(2 * i, 2 * i + 2).toUpperCase()).join(':');
 }
 
-/** Printable ASCII only: the cube pads its hardware strings with zero bytes. */
+/** Printable ASCII only: the driver reads names from fixed-length byte fields, maybe padded. */
 function printable(text: string | undefined): string {
   return Array.from(text ?? '')
     .filter((c) => c >= ' ' && c <= '~')

@@ -95,8 +95,8 @@ export interface CubeConnection {
  * Supplies the cube's MAC address, which the GAN protocol needs to derive its encryption key.
  * The driver calls it first with `isFallback: false` (return `null` to let the driver try to
  * read the MAC from the cube's advertisements) and, if that fails, once more with
- * `isFallback: true` (the last chance; typically ask the user). Accepted formats: six hex bytes
- * separated by `:`, `-` or spaces, or twelve hex digits.
+ * `isFallback: true` (the last chance; typically ask the user). Accepted: twelve hex digits with
+ * any `:`, `-` or whitespace between them, such as `AB:12:CD:34:EF:56` or `ab12cd34ef56`.
  */
 export type MacProvider = (
   device: { name?: string; id: string },

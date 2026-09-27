@@ -86,7 +86,8 @@ export interface GanDriverConnection {
 /** The part of Web Bluetooth's `BluetoothDevice` that the wrapper touches. */
 export interface GanDriverDevice {
   readonly id: string;
-  readonly name?: string | undefined;
+  /** `null` or absent when the device did not say (the IDL's `DOMString? name`). */
+  readonly name?: string | null | undefined;
   readonly gatt?: { readonly connected: boolean; disconnect(): void } | undefined;
 }
 

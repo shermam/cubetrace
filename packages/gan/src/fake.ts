@@ -42,10 +42,9 @@ function disconnectedError(): Error {
  * as fast as the host clock, so a fixture played at any speed keeps its own cube timings: the
  * first move of each `play()` is stamped with that clock and every later move adds its own gap
  * from the schedule. `cubeMs` never goes back. Every move is its own Bluetooth packet
- * (`packetLast: true`) and carries a move counter (`serial`, 0–255, wrapping, the first move is 1)
- * like a GAN cube's.
- * On creation it reports its hardware and a full battery, which `events$` replays to every new
- * subscriber.
+ * (`packetLast: true`) and carries a move counter like a GAN cube's (`serial`: 1 for the first
+ * move, wrapping after 255 to 0). On creation it reports its hardware and a full battery, which
+ * `events$` replays to every new subscriber.
  */
 export class FakeCube implements CubeConnection {
   readonly kind = 'fake';
@@ -96,12 +95,16 @@ export class FakeCube implements CubeConnection {
       return Promise.reject(disconnectedError());
     }
     for (const [i, move] of moves.entries()) {
-      const previous = i === 0 ? move.ms : moves[i - 1].ms;
-      if (!Number.isFinite(move.ms) || move.ms < previous) {
+      if (!Number.isFinite(move.ms)) {
+        return Promise.reject(
+          new RangeError(`play(): move ${String(i)} has no finite time (${String(move.ms)}).`),
+        );
+      }
+      if (i > 0 && move.ms < moves[i - 1].ms) {
         return Promise.reject(
           new RangeError(
-            `play(): move ${String(i)} is at ${String(move.ms)} ms, after a move at ${String(previous)} ms; ` +
-              'the schedule must be finite and never go back.',
+            `play(): move ${String(i)} at ${String(move.ms)} ms comes before move ` +
+              `${String(i - 1)} at ${String(moves[i - 1].ms)} ms; a schedule never goes back.`,
           ),
         );
       }

@@ -83,6 +83,8 @@ interface FakeDriverOptions {
   autoMac?: string | null;
   /** Upstream's driver: events$ is an RxJS Subject and the connection has disconnect(). */
   upstream?: boolean;
+  /** The device's Bluetooth name; `null` when it has none. */
+  name?: string | null;
 }
 
 function fakeDriver(opts: FakeDriverOptions = {}) {
@@ -91,7 +93,11 @@ function fakeDriver(opts: FakeDriverOptions = {}) {
   const commands: GanDriverCommand['type'][] = [];
   const macs: string[] = [];
   const gatt = { connected: true, disconnect: vi.fn() };
-  const device = { id: 'device-1', name: 'GAN12ui_1a2b', gatt };
+  const device = {
+    id: 'device-1',
+    name: opts.name === undefined ? 'GAN12ui_1a2b' : opts.name,
+    gatt,
+  };
   const native = nativeObservable(subject);
   const upstreamDisconnect = vi.fn(() => Promise.resolve());
   let upstreamSubscription: Subscription | undefined;
@@ -114,7 +120,7 @@ function fakeDriver(opts: FakeDriverOptions = {}) {
     return Promise.resolve();
   });
   const connection: GanDriverConnection = {
-    deviceName: device.name,
+    deviceName: device.name ?? 'GAN-XXXX',
     deviceMAC: '',
     events$: opts.upstream === true ? upstreamEvents : native,
     sendCubeCommand: send,
@@ -333,6 +339,13 @@ describe('openGanConnection', () => {
       false,
     );
     expect(driver.macs).toEqual([MAC]);
+  });
+
+  it('gives the MAC provider no name when the device has none', async () => {
+    const driver = fakeDriver({ name: null });
+    const provider = vi.fn<MacProvider>(() => Promise.resolve(MAC));
+    await open(driver, provider);
+    expect(provider).toHaveBeenCalledExactlyOnceWith({ name: undefined, id: 'device-1' }, false);
   });
 
   it('lets the driver read the MAC when the provider returns null, and asks again as a fallback', async () => {
