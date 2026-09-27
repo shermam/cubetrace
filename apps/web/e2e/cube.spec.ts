@@ -1,8 +1,9 @@
 import { type APIRequestContext, type Page, expect, test } from '@playwright/test';
 
-// The cube connection (docs/PLAN.md, T1.6a) end to end. Headless Chromium has no Web Bluetooth,
-// so the cube is the demo cube: the fake cube replaying public/demo/solves.json, which
-// scripts/write-demo-solves.mts writes before the dev server and the build start.
+// The cube connection (docs/PLAN.md, T1.6a and T1.12) end to end. Headless Chromium has no Web
+// Bluetooth, so the cube is the demo cube: the fake cube replaying public/demo/solves.json, which
+// scripts/write-demo-solves.mts writes before the dev server and the build start. For the same
+// reason, "Connect a cube" opens the dialog that says so instead of Chrome's device picker.
 const pagesUrl = 'http://localhost:4300/cubetrace/';
 const SOLVED = 'UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB';
 
@@ -94,7 +95,7 @@ test('the production build under /cubetrace/: the demo solves load only when a d
   });
   await page.goto(pagesUrl);
   await expect(page.getByTestId('scramble')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('cube-status')).toHaveText('No cube');
+  await expect(page.getByTestId('cube-status')).toHaveText('Connect cube');
   expect(demoRequests).toEqual([]);
 
   await page.goto(`${pagesUrl}?demo=0&speed=20`);
@@ -102,16 +103,17 @@ test('the production build under /cubetrace/: the demo solves load only when a d
   expect(demoRequests).toEqual([`${pagesUrl}demo/solves.json`]);
 });
 
-test('the connect dialog: no Web Bluetooth here, so Connect cube is disabled; Demo cube connects', async ({
+test('no Web Bluetooth here: "Connect a cube" opens the dialog that says so; Demo cube connects and closes it', async ({
   page,
 }) => {
   await page.goto('/');
   const pill = page.getByTestId('cube-status');
-  await expect(pill).toHaveText('No cube');
+  await expect(pill).toHaveText('Connect cube');
 
-  await pill.click();
+  await page.getByTestId('timer-connect').click();
   const dialog = page.getByRole('dialog', { name: 'Cube' });
   await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('data-reason', 'support');
   await expect(dialog.getByTestId('bluetooth-hint')).toContainText(
     'This browser cannot connect to a Bluetooth cube.',
   );
@@ -119,21 +121,48 @@ test('the connect dialog: no Web Bluetooth here, so Connect cube is disabled; De
 
   await dialog.getByRole('button', { name: 'Demo cube' }).click();
   await expect(pill).toHaveText('Fake cube · 100%');
-  await expect(dialog.getByTestId('connect-state')).toHaveText('Connected to the demo cube.');
-  await expect(dialog.getByTestId('cube-details')).toContainText('Fake cube');
+  // Connected: back on the page.
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId('timer-connect')).toBeHidden();
   await expect(page.getByTestId('move-log')).not.toHaveAttribute('data-move-count', '0');
 
+  // The pill opens the cube's details, which stay open.
+  await pill.click();
+  await expect(dialog).toHaveAttribute('data-reason', 'details');
+  await expect(dialog.getByTestId('connect-state')).toHaveText('Connected to the demo cube.');
+  await expect(dialog.getByTestId('cube-details')).toContainText('Fake cube');
+
   await dialog.getByRole('button', { name: 'Disconnect' }).click();
-  await expect(pill).toHaveText('No cube');
+  await expect(pill).toHaveText('Connect cube');
   await expect(dialog.getByTestId('connect-state')).toHaveText(
     'Last connection: Disconnected on request.',
   );
 });
 
+test('"Try the demo" on the Timer page connects the demo cube in one click, at the address\'s ?speed', async ({
+  page,
+}) => {
+  await page.goto('/?speed=20');
+  const pill = page.getByTestId('cube-status');
+  await expect(pill).toHaveText('Connect cube');
+
+  await page
+    .getByRole('region', { name: 'Time' })
+    .getByRole('button', { name: 'Try the demo' })
+    .click();
+  await expect(pill).toHaveText('Fake cube · 100%');
+  await expect(page.getByRole('dialog', { name: 'Cube' })).toBeHidden();
+  await expect(page.getByTestId('timer-connect')).toBeHidden();
+  await expect(page.getByTestId('move-log')).not.toHaveAttribute('data-move-count', '0');
+
+  await pill.click();
+  await expect(page.getByRole('dialog', { name: 'Cube' })).toContainText(/at 20× speed/);
+});
+
 test('the connect dialog works from the keyboard', async ({ page }) => {
   await page.goto('/');
   const pill = page.locator('app-cube-status-pill').getByTestId('cube-status');
-  await expect(pill).toHaveText('No cube');
+  await expect(pill).toHaveText('Connect cube');
 
   await pill.focus();
   await page.keyboard.press('Enter');
