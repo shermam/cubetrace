@@ -682,7 +682,7 @@ pipeline, §9 the data model).
 | T2.2 | `capture`: encoder pipeline in a worker, ring buffer, cuts | — | ✅ #26 |
 | T2.3 | `capture`: MP4 muxing (mediabunny) and OPFS clip writing | T2.2 | ✅ #27 |
 | T2.4 | `web`: recording in the timer: two clips per attempt, storage meter, clip viewer, downloads | T2.0, T2.1, T2.3 | ✅ #28 |
-| T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | 🟨 #29 |
+| T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | ✅ #29 |
 | T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | ⬜ |
 | T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | ✅ #30 |
 
@@ -891,8 +891,9 @@ detection against a quiet baseline), `apps/web/src/app/camera/*` ("Sync check" a
 when a camera is on, and on demand), `session.json.clock.cameras[label]` (T2.0's shape),
 `attempt.json.video[].syncResidualMs` from then on.
 
-**Behaviour.** The app asks for five single turns with a pause of at least a second between
-them and watches 20 s; onsets = frames where the energy rises above 4× the baseline's median
+**Behaviour.** The app asks the solver to turn one face, pause, turn it back, five times over
+(ten single turns, the cube ends solved; attempt tracking is suspended meanwhile, so the turns
+never enter a record) and watches 20 s, or until all ten turns are matched; onsets = frames where the energy rises above 4× the baseline's median
 after at least 500 ms of quiet; each onset is matched to the nearest cube move within 500 ms;
 offset = median of (onsetHostMs − moveHostMs), spread = p95 − p5; fewer than 4 matches or a
 spread over 40 ms (a frame at 30 fps) → "Sync check failed: …" with the reason and a Retry; the

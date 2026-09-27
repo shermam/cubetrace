@@ -218,7 +218,8 @@ frame. `mode` is `full` when whole frames are recorded (always in phase 2, where
 metadata for training) and `crop` when only the rectangle is (later).
 
 `clock.cameras` holds each camera's clock sync, by label (from the clapperboard, `docs/PLAN.md`
-T2.5: five single turns with pauses, watched by every camera). `offsetMs` is how far the camera's
+T2.5: one face turned and turned back, five times over, so up to ten single turns, watched by
+the camera while attempt tracking is suspended). `offsetMs` is how far the camera's
 frames lag the cube: the median over the matched turns of the host time of the motion's onset in
 the frames minus the host time of the turn. `clapperboardResidualMs` is the spread of those
 differences (95th minus 5th percentile), `clapperboardSamples` the number of turns matched, and
