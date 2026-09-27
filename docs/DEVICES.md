@@ -48,14 +48,20 @@ firmware `8.62`, gyroscope present. 12 solves on the laptop (mean 17.2 s) and 3 
 from the gyroscope on every attempt (inspection 2.2–6.8 s). Both exports validate against the
 schemas. The GAN 356 i3 was flat and is still to be tested.
 
-Two things the exports show about the cube's clock (`fixtures/hardware/README.md`):
+What the exports show about the cube's clock (a fit of host time on cube time, per attempt and per
+session, over all 1,802 moves; `fixtures/hardware/README.md`):
 
-- the cube's `cubeMs` restarts when the cube reconnects (the laptop session spans a
-  reconnection three hours after its first attempt: `cubeMs` went from 51,434 back to 51,142);
-- **the cube's clock loses time during pauses**: between the laptop's attempts 3 and 4 the host
-  clock advanced 330 s and the cube's clock 291 s. `cubeMs` is a running sum of the intervals
-  the cube reports between moves, and long intervals are not reported in full. So one linear
-  fit per session is wrong whenever the session has pauses (the laptop's fit has residuals of
-  ±600 ms at its ends); within one attempt the fit holds to about ±15 ms (the phone's three
-  attempts, one fit: p5 −15 ms, p95 +17 ms). Phase 2 fits the clock per attempt
-  (`docs/PLAN.md`, T2.0) and every move keeps its `hostMs` anyway.
+- **Within an attempt, the cube's clock runs 0.7% slow, steadily.** Every one of the 15 attempts,
+  on both devices, fits `hostMs ≈ 1.0070 × cubeMs + b` (slopes 1.0069–1.0071) with residuals of
+  ±13 ms at the 5th/95th percentiles: that ±13 ms is the Bluetooth notification jitter, in the
+  range the design expected. On the ThinkPhone one fit for its three attempts (100 s) holds to
+  ±15 ms.
+- **Across a pause the two clocks advance equally** (the laptop's 291 s pause between attempts 3
+  and 4: host 291.1 s, cube 291.1 s), so the offset `b` shifts by 0.7% of each pause. One fit per
+  session is therefore wrong as soon as the session has pauses of minutes: the laptop's session
+  fit (11 attempts over 14 minutes) has a slope of 1.0031 and residuals of ±600 ms at its ends.
+- `cubeMs` restarts when the cube reconnects (the laptop session spans a reconnection after a
+  3-hour pause: `cubeMs` went from 51,434 back to 51,142).
+
+So the clock fit belongs to the attempt, not the session (`docs/PLAN.md`, T2.0); every move keeps
+its `hostMs` anyway, and the session-level `clock.cube` of schema 1 stays as a coarse summary.

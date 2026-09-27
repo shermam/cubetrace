@@ -7,7 +7,7 @@ beyond the device label and the browser's user-agent string.
 
 | File | Device | Cube | Attempts | Notes |
 |---|---|---|---|---|
-| `2026-09-27-macbook-pro-2021-gan12ui.json` | MacBook Pro 2021, macOS 26.6.2, Chrome 153 | GAN 12 ui FreePlay (`uiFp 138`, fw 8.62) | 12 solved | the session spans a cube reconnection after a 3-hour pause: `cubeMs` restarts between attempts 1 and 2; the cube's clock also loses time during pauses of minutes (see `docs/DEVICES.md`) |
-| `2026-09-27-thinkphone-gan12ui.json` | ThinkPhone, Android 16, Chrome 155 | same cube | 3 solved | MAC address typed once (the Chrome flag was off); three attempts in 100 s, one clock fit holds to ±15 ms |
+| `2026-09-27-macbook-pro-2021-gan12ui.json` | MacBook Pro 2021, macOS 26.6.2, Chrome 153 | GAN 12 ui FreePlay (`uiFp 138`, fw 8.62) | 12 solved | the session spans a cube reconnection after a 3-hour pause: `cubeMs` restarts between attempts 1 and 2; within each attempt the cube's clock runs 0.7% slow with ±13 ms jitter, and across pauses the clocks advance equally, so a per-session fit drifts (see `docs/DEVICES.md`) |
+| `2026-09-27-thinkphone-gan12ui.json` | ThinkPhone, Android 16, Chrome 155 | same cube | 3 solved | MAC address typed once (the Chrome flag was off); three attempts in 100 s; one clock fit holds to ±15 ms, slope 1.0069 |
 
 Round 1 found no functional issue (the owner's report in issues #19 and #20).

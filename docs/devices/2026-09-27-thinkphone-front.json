@@ -18,24 +18,24 @@
   "camera": {
     "videoInputs": [
       {
-        "deviceId": "2373360405e778f91d0771131ceba3e6ff960a9a902ea804c2db720638ab5af5",
+        "deviceId": "redacted",
         "label": "camera 1, facing front",
-        "groupId": "1ca8da778b1e1375db76ddcdba8a3289ced08922e3c0348e43114c10eb4f82ab"
+        "groupId": "redacted"
       },
       {
-        "deviceId": "085b3c35b03d7527c87c3e0054b76d12d6d046433973492dbb4818ab39ab5a96",
+        "deviceId": "redacted",
         "label": "camera 0, facing back",
-        "groupId": "00adf2dfe23b2d69ed12e56cbc029e5bc0c34bade1d51bdf15a8ddfcfda83741"
+        "groupId": "redacted"
       }
     ],
     "selected": {
-      "deviceId": "2373360405e778f91d0771131ceba3e6ff960a9a902ea804c2db720638ab5af5",
+      "deviceId": "redacted",
       "label": "camera 1, facing front",
-      "groupId": "1ca8da778b1e1375db76ddcdba8a3289ced08922e3c0348e43114c10eb4f82ab"
+      "groupId": "redacted"
     },
     "requested": {
       "deviceId": {
-        "exact": "2373360405e778f91d0771131ceba3e6ff960a9a902ea804c2db720638ab5af5"
+        "exact": "redacted"
       },
       "width": {
         "ideal": 1920
@@ -60,7 +60,7 @@
       "min": 2850,
       "step": 50
     },
-    "deviceId": "2373360405e778f91d0771131ceba3e6ff960a9a902ea804c2db720638ab5af5",
+    "deviceId": "redacted",
     "exposureCompensation": {
       "max": 4,
       "min": -4,
@@ -90,7 +90,7 @@
       "max": 60,
       "min": 0
     },
-    "groupId": "1ca8da778b1e1375db76ddcdba8a3289ced08922e3c0348e43114c10eb4f82ab",
+    "groupId": "redacted",
     "height": {
       "max": 2448,
       "min": 1
@@ -121,7 +121,7 @@
   "settings": {
     "aspectRatio": 1.7777777777777777,
     "colorTemperature": 0,
-    "deviceId": "2373360405e778f91d0771131ceba3e6ff960a9a902ea804c2db720638ab5af5",
+    "deviceId": "redacted",
     "exposureCompensation": 0,
     "exposureMode": "continuous",
     "exposureTime": 309.245,
@@ -129,7 +129,7 @@
     "focusDistance": 0.3310000002384186,
     "focusMode": "continuous",
     "frameRate": 60,
-    "groupId": "1ca8da778b1e1375db76ddcdba8a3289ced08922e3c0348e43114c10eb4f82ab",
+    "groupId": "redacted",
     "height": 1080,
     "iso": 100,
     "resizeMode": "none",

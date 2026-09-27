@@ -18,19 +18,19 @@
   "camera": {
     "videoInputs": [
       {
-        "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+        "deviceId": "redacted",
         "label": "FaceTime HD Camera (3A71:F4B5)",
-        "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1"
+        "groupId": "redacted"
       }
     ],
     "selected": {
-      "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+      "deviceId": "redacted",
       "label": "FaceTime HD Camera (3A71:F4B5)",
-      "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1"
+      "groupId": "redacted"
     },
     "requested": {
       "deviceId": {
-        "exact": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26"
+        "exact": "redacted"
       },
       "width": {
         "ideal": 1920
@@ -53,13 +53,13 @@
     "backgroundBlur": [
       false
     ],
-    "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+    "deviceId": "redacted",
     "facingMode": [],
     "frameRate": {
       "max": 30,
       "min": 0
     },
-    "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1",
+    "groupId": "redacted",
     "height": {
       "max": 1920,
       "min": 1
@@ -76,9 +76,9 @@
   "settings": {
     "aspectRatio": 1.7777777777777777,
     "backgroundBlur": false,
-    "deviceId": "0f64149fa6d0f9c67bb486b6f9abc1e02f0f8a455c51c9eea4a64e066c286f26",
+    "deviceId": "redacted",
     "frameRate": 30,
-    "groupId": "8e212cc0a0716c745d6b645e18728072e85e455482e30d60ca86ba15138647f1",
+    "groupId": "redacted",
     "height": 1080,
     "resizeMode": "none",
     "width": 1920
