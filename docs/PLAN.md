@@ -26,7 +26,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | T1.0 | Scaffold: workspaces, Angular app, packages, lint, tests, CI, Pages deploy | — | 🟨 #1 |
 | T1.1 | `core`: notation and the cube simulator (Kociemba facelets) | T1.0 | 🟨 #2 |
 | T1.2 | `core`: scramble generation (cubing.js), target state, scramble progress and undo guidance | T1.1 | 🟨 #5 |
-| T1.3 | `core`: colour-neutral CFOP phase detector, validated against the fixtures | T1.1 | ⬜ |
+| T1.3 | `core`: colour-neutral CFOP phase detector, validated against the fixtures | T1.1 | 🟨 #7 |
 | T1.4 | `core`: attempt state machine, records, cube clock fit, statistics, JSON Schemas, store interface | T1.2, T1.3 | ⬜ |
 | T1.5 | `gan`: driver wrapper (Web Bluetooth), MAC provider, support check, fake cube | T1.1 | 🟨 #6 |
 | T1.6a | `web`: cube connection: connect dialog, `CubeService`, status pill, live cube panel (net, move log), settings, demo mode | T1.5 | ⬜ |

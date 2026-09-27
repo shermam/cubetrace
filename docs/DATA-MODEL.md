@@ -60,22 +60,46 @@ and `result.scramble_extra_moves` counts the moves beyond the scramble's own.
 Names, in order: `cross`, `f2l1`, `f2l2`, `f2l3`, `f2l4`, `eoll`, `ocll`, `pll`
 (two-look OLL is the reference method; a one-look OLL solver completes `eoll` and `ocll`
 on the same move). Colour-neutral: the cross face is whichever face completes a cross
-first after `solve_start`.
+first after `solve_start`, and it never changes.
 
 | Phase | Ends at the first move after which… |
 |---|---|
-| `cross` | some face `X` has its four edges in place and oriented (all four edge stickers on `X` show `X`'s colour and the other sticker of each edge matches its adjacent centre); `X` becomes `crossFace`. Faces whose cross was already complete at `scramble_done` are excluded. |
-| `f2l1`..`f2l4` | one more of the four corner–edge pairs of the first two layers (relative to `crossFace`) is fully in place; slots are numbered by completion order, and the record says which physical slot each was |
+| `cross` | some face `X` has its four edges in place and oriented (all four edge stickers on `X` show `X`'s colour and the other sticker of each edge matches its adjacent centre); `X` becomes `crossFace`. Faces whose cross was already complete at `scramble_done` are excluded. If one move completes several crosses, the one with the most pairs in place wins, then the first in the order `U R F D L B`. |
+| `f2l1`..`f2l4` | one more of the four corner–edge pairs of the first two layers (relative to `crossFace`) is fully in place, counting pairs only while the cross is complete; slots are numbered by completion order (pairs completed by the same move in a fixed order of the slots), and the record says which slot each was. A slot is named by its middle-layer edge position (`FR`, `FL`, `BL`, `BR` for a U or D cross). |
 | `eoll` | all four last-layer edges show the last-layer colour on the last-layer face |
 | `ocll` | all four last-layer corners do too |
 | `pll` | the cube is solved |
 
+A cross completed first by accident is kept, as Cubeast keeps it, even when the solver
+then builds the first two layers on another face.
+
 Per phase: `startMs` (previous phase's `endMs`, or `solve_start` for the cross), `endMs`,
-`moves` (count), `recognitionMs` (from `startMs` to the phase's first move) and
-`executionMs` (from the phase's first move to `endMs`). If the solver abandons the first
-cross and completes an F2L pair on another face with a complete cross, `crossFace`
-switches to that face and the phases are recomputed (a rule validated against the Cubeast
-fixtures).
+`moves` (count), and `recognitionMs` and `executionMs`, which add up to `endMs − startMs`
+and are split where the execution starts, as Cubeast splits phases:
+
+- after the cross, at the phase's first move that does not turn the last-layer face (the
+  face opposite `crossFace`): leading AUF turns are recognition, and a turn of any other
+  face, the cross face included, starts the execution;
+- a phase whose moves all turn the last-layer face (a PLL finished by an AUF alone) is all
+  recognition, with `executionMs` 0, as Cubeast reports the 4 fixture solves where this
+  happens;
+- the cross's execution starts at its first move, whatever face that turns, so its
+  recognition is 0 unless `solve_start` came before the first move (Cubeast's cross
+  recognition is 0 on all 300 fixtures, 8 of which start with a last-layer turn);
+- a phase with no moves (already satisfied when the previous one ended) has both 0.
+
+Checked against the 300 Cubeast fixtures in T1.3: all 2400 phase boundaries agree within
+±1 ms, and 2306 of the 2400 recognition times (96.1%). The other 94 come from Cubeast's
+move merging, which the data model does not do (§2): Cubeast shows repeated turns of one
+face as one move (`R R` as `R2`; 77 of them) and turns of opposite faces as a slice
+(`F' B` as `S`; 17), stamped with their last turn, so its recognition ends at that later turn.
+Pairs count only while the cross is complete because, during an insertion that takes a
+cross edge out, another pair can sit in place for a move or two: counting it ended the
+phase before the insertion was over on 5 of the 300 solves (4 of them with the wrong
+slot), where Cubeast waits for the cross.
+
+Later: with more data, evaluate choosing as the cross face the face whose first two layers
+complete first (the solver's real cross), which would relabel solves like fixture 13.
 
 ## 5. Files
 
@@ -137,7 +161,7 @@ sessions/<sessionId>/
   },
   "phases": [
     {"name": "cross", "startMs": 0, "endMs": 0, "moves": 8, "recognitionMs": 0, "executionMs": 0},
-    {"name": "f2l1", "slot": "DFR", "startMs": 0, "endMs": 0, "moves": 9, "recognitionMs": 0, "executionMs": 0}
+    {"name": "f2l1", "slot": "FR", "startMs": 0, "endMs": 0, "moves": 9, "recognitionMs": 0, "executionMs": 0}
   ],
   "video": []                            // phase 2: [{camera, segment, file, bytes, codec, audio, width, height, crop, fpsNominal, frames, firstFrameHostMs, framesFile, syncResidualMs}]
 }
