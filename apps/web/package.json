@@ -6,10 +6,10 @@
   "license": "MIT",
   "scripts": {
     "ng": "ng",
-    "postinstall": "node scripts/write-version.mts",
-    "prestart": "node scripts/write-version.mts",
+    "postinstall": "node scripts/write-version.mts && node scripts/write-demo-solves.mts",
+    "prestart": "node scripts/write-version.mts && node scripts/write-demo-solves.mts",
     "start": "ng serve",
-    "prebuild": "node scripts/write-version.mts",
+    "prebuild": "node scripts/write-version.mts && node scripts/write-demo-solves.mts",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
@@ -26,6 +26,7 @@
     "@angular/router": "^22.2.0",
     "@angular/service-worker": "^22.2.0",
     "@cubetrace/core": "*",
+    "@cubetrace/gan": "*",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },
