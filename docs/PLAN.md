@@ -29,7 +29,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | T1.3 | `core`: colour-neutral CFOP phase detector, validated against the fixtures | T1.1 | 🟨 #7 |
 | T1.4 | `core`: attempt state machine, records, cube clock fit, statistics, JSON Schemas, store interface | T1.2, T1.3 | 🟨 #8 |
 | T1.5 | `gan`: driver wrapper (Web Bluetooth), MAC provider, support check, fake cube | T1.1 | 🟨 #6 |
-| T1.6a | `web`: cube connection: connect dialog, `CubeService`, status pill, live cube panel (net, move log), settings, demo mode | T1.5 | ⬜ |
+| T1.6a | `web`: cube connection: connect dialog, `CubeService`, status pill, live cube panel (net, move log), settings, demo mode | T1.5 | 🟨 #9 |
 | T1.6b | `web`: timer page, breakdown chart, solve list, sessions page, OPFS store, `SessionService` | T1.4, T1.6a | ⬜ |
 | T1.7 | `web`: PWA (manifest, service worker), wake lock, storage persistence, responsive layouts, version display | T1.0 | 🟨 #3 |
 | T1.8 | `web`: device probe page (`/probe`) | T1.0 | 🟨 #4 |
