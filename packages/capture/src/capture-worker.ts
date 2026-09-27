@@ -1,21 +1,19 @@
 // The capture worker (docs/PLAN.md, T2.2): it reads the camera's frames and the microphone's audio
 // from the streams the window transfers, encodes them with WebCodecs into the ring buffer, sends
-// the counters once per second and answers cuts; since T2.3 it also saves clips: it cuts, muxes
-// (mux.ts, mediabunny) and writes them into the origin private file system (clip-writer.ts), so
-// that the MP4s never cross to the window. Angular's builder emits it as a chunk of its own
-// (docs/TOOLCHAIN.md, "The capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain
-// TypeScript: no Angular. The encoders, the clock, the timer and the file system come in through
-// `WorkerEnvironment`, so the logic also runs in Node's tests with fakes; the last lines wire it to
-// the worker's global scope.
-import type { OpfsDirectoryHandle } from '@cubetrace/storage';
-
-import { writeClip } from './clip-writer';
-import { cut, type Cut } from './cut';
-import { muxClip } from './mux';
+// the counters once per second and answers cuts. For a clip (T2.3) it only cuts: since T2.4 the cut
+// moves, with its request, to the clip worker (clip-worker.ts), which muxes and writes it, so that
+// saving a clip never holds up the frames here (docs/TOOLCHAIN.md, "Two workers"). Angular's
+// builder emits it as a chunk of its own (docs/TOOLCHAIN.md, "The capture pipeline");
+// `startCapture` (pipeline.ts) starts it. Plain TypeScript: no Angular. The encoders, the clock and
+// the timer come in through `WorkerEnvironment`, so the logic also runs in Node's tests with fakes;
+// the last lines wire it to the worker's global scope.
+import { cut } from './cut';
 import {
+  describeError,
   isWindowToWorker,
   post,
   type CaptureStats,
+  type ClipJob,
   type CutRequest,
   type MessageTarget,
   type MuxAndWriteRequest,
@@ -148,8 +146,6 @@ export interface WorkerEnvironment {
   post(message: WorkerToWindow): void;
   /** Calls `callback` every `ms` until the returned function is called. */
   every(ms: number, callback: () => void): () => void;
-  /** The origin private file system's root (`navigator.storage.getDirectory()`), for the clips. */
-  opfsRoot(): Promise<OpfsDirectoryHandle>;
 }
 
 /** An audio input's timestamp and arrival, kept until the chunks that start in it are out. */
@@ -199,8 +195,8 @@ export class CaptureWorker {
   #encodedInWindow = 0;
   #windowStartHostMs = 0;
 
-  /** The end of the last clip queued: clips are muxed and written one at a time. */
-  #saving: Promise<void> = Promise.resolve();
+  /** The clip worker's end of their channel (the start's `clips`): where the clips' cuts go. */
+  #clips: MessageTarget | null = null;
 
   constructor(env: WorkerEnvironment) {
     this.#env = env;
@@ -215,13 +211,19 @@ export class CaptureWorker {
   handle(message: WindowToWorker): void {
     switch (message.type) {
       case 'start':
-        void this.start(message.video, message.audio, message.config, message.frameRate);
+        void this.start(
+          message.video,
+          message.audio,
+          message.config,
+          message.frameRate,
+          message.clips,
+        );
         break;
       case 'cut':
         this.cut(message);
         break;
       case 'mux-and-write':
-        void this.muxAndWrite(message);
+        this.muxAndWrite(message);
         break;
       case 'stop':
         void this.stop();
@@ -229,18 +231,23 @@ export class CaptureWorker {
     }
   }
 
-  /** Reads and encodes both streams until they end or `stop`; never rejects. */
+  /**
+   * Reads and encodes both streams until they end or `stop`; never rejects. `clips` is the channel
+   * to the clip worker, where the cuts of the clips to save go (none: clips cannot be saved).
+   */
   async start(
     video: ReadableStream<FrameLike>,
     audio: ReadableStream<AudioLike> | null,
     config: ResolvedCaptureConfig,
     frameRate: number | null,
+    clips: MessageTarget | null = null,
   ): Promise<void> {
     if (this.#started) {
       return;
     }
     this.#started = true;
     this.#recording = true;
+    this.#clips = clips;
     this.#buffer = new RingBuffer({
       maxSeconds: config.bufferSeconds,
       maxBytes: config.bufferBytes,
@@ -260,7 +267,7 @@ export class CaptureWorker {
       const result = cut(this.#buffer, request.startHostMs, request.endHostMs);
       answer = { type: 'cut-done', id: request.id, cut: result };
     } catch (error: unknown) {
-      answer = { type: 'cut-failed', id: request.id, message: describe(error) };
+      answer = { type: 'cut-failed', id: request.id, message: describeError(error) };
     }
     try {
       this.#env.post(answer);
@@ -268,37 +275,45 @@ export class CaptureWorker {
       this.#env.post({
         type: 'cut-failed',
         id: request.id,
-        message: `The cut could not be sent: ${describe(error)}`,
+        message: `The cut could not be sent: ${describeError(error)}`,
       });
     }
   }
 
   /**
-   * Saves a clip (docs/PLAN.md, T2.3): cuts `[startHostMs, endHostMs]` now, then, after the clips
-   * asked for before it, muxes the cut into an MP4 and writes it with its frames.json into the
-   * attempt's folder, and answers with the clip's `video[]` entry, or why there is none. The cut
-   * shares the buffer's bytes (nothing is copied or sent), which later evictions do not touch.
-   * Resolves once the answer is sent; never rejects.
+   * Saves a clip (docs/PLAN.md, T2.3 and T2.4): cuts `[startHostMs, endHostMs]` now, with copies of
+   * the chunks' bytes (a memory copy, the only work done here), and moves the cut with its request to
+   * the clip worker, which muxes and writes it and answers the window. When there is nothing to
+   * cut, or no clip worker, the window gets the reason from here.
    */
-  muxAndWrite(request: MuxAndWriteRequest): Promise<void> {
-    let source: Cut;
-    try {
-      source = cut(this.#buffer, request.startHostMs, request.endHostMs, { copy: false });
-    } catch (error: unknown) {
-      this.#answer({ type: 'mux-and-write-failed', id: request.id, message: describe(error) });
-      return Promise.resolve();
+  muxAndWrite(request: MuxAndWriteRequest): void {
+    const clips = this.#clips;
+    if (clips === null) {
+      this.#refuseClip(request, 'This capture has no clip worker to save clips.');
+      return;
     }
-    // Only an answer that cannot be sent at all rejects: the window's timeout then speaks for it,
-    // and the clips queued after this one are saved all the same.
-    const job = this.#saving.then(() => this.#save(request, source)).catch(() => undefined);
-    this.#saving = job;
-    return job;
+    let job: ClipJob;
+    try {
+      job = {
+        type: 'clip-job',
+        request,
+        cut: cut(this.#buffer, request.startHostMs, request.endHostMs),
+      };
+    } catch (error: unknown) {
+      this.#refuseClip(request, describeError(error));
+      return;
+    }
+    try {
+      post(clips, job);
+    } catch (error: unknown) {
+      this.#refuseClip(
+        request,
+        `The cut could not be sent to the clip worker: ${describeError(error)}`,
+      );
+    }
   }
 
-  /**
-   * Stops reading, closes the encoders, empties the buffer, finishes the clips queued, then says
-   * `stopped`.
-   */
+  /** Stops reading, closes the encoders, empties the buffer, then says `stopped`. */
   async stop(): Promise<void> {
     if (this.#stopped) {
       return;
@@ -308,40 +323,12 @@ export class CaptureWorker {
     this.#stopTicker?.();
     await this.#release();
     this.#buffer.clear();
-    await this.#saving;
     this.#env.post({ type: 'stopped' });
   }
 
-  /** Muxes and writes one clip and answers; rejects only when no answer can be sent. */
-  async #save(request: MuxAndWriteRequest, source: Cut): Promise<void> {
-    const { id, sessionId, index, camera, segment, fpsNominal } = request;
-    try {
-      const { mp4, frames, info } = await muxClip(source, { camera, segment });
-      const root = await this.#env.opfsRoot();
-      const clip = await writeClip(root, sessionId, index, camera, segment, mp4, frames, {
-        codec: info.codec,
-        audio: info.audio,
-        width: info.width,
-        height: info.height,
-        fpsNominal,
-      });
-      this.#answer({ type: 'mux-and-write-done', id, clip });
-    } catch (error: unknown) {
-      this.#answer({ type: 'mux-and-write-failed', id, message: describe(error) });
-    }
-  }
-
-  /** Sends an answer to a clip request; a failure to send becomes a failed answer. */
-  #answer(answer: WorkerToWindow & { readonly id: number }): void {
-    try {
-      this.#env.post(answer);
-    } catch (error: unknown) {
-      this.#env.post({
-        type: 'mux-and-write-failed',
-        id: answer.id,
-        message: `The answer could not be sent: ${describe(error)}`,
-      });
-    }
+  /** Answers a clip request that went no further than here. */
+  #refuseClip(request: MuxAndWriteRequest, message: string): void {
+    this.#env.post({ type: 'mux-and-write-failed', id: request.id, message });
   }
 
   /**
@@ -369,7 +356,7 @@ export class CaptureWorker {
         }
       }
     } catch (error: unknown) {
-      this.#fail(`Reading the camera's frames failed: ${describe(error)}`);
+      this.#fail(`Reading the camera's frames failed: ${describeError(error)}`);
       return;
     }
     await this.#videoEnded();
@@ -415,7 +402,7 @@ export class CaptureWorker {
     try {
       encoder.encode(frame, { keyFrame });
     } catch (error: unknown) {
-      this.#fail(`The video encoder refused a frame: ${describe(error)}`);
+      this.#fail(`The video encoder refused a frame: ${describeError(error)}`);
       return;
     }
     if (keyFrame) {
@@ -447,7 +434,7 @@ export class CaptureWorker {
           this.#onVideoChunk(chunk, metadata);
         },
         error: (error) => {
-          this.#fail(`The video encoder failed: ${describe(error)}`);
+          this.#fail(`The video encoder failed: ${describeError(error)}`);
         },
       });
       encoder.configure(config);
@@ -590,7 +577,7 @@ export class CaptureWorker {
         }
       }
     } catch (error: unknown) {
-      this.#stopAudio(`Reading the microphone failed: ${describe(error)}`);
+      this.#stopAudio(`Reading the microphone failed: ${describeError(error)}`);
       return;
     }
     this.#stopAudio('The microphone stopped sending audio (its track ended).');
@@ -611,7 +598,7 @@ export class CaptureWorker {
     try {
       encoder.encode(data);
     } catch (error: unknown) {
-      this.#stopAudio(`The audio encoder refused audio: ${describe(error)}`);
+      this.#stopAudio(`The audio encoder refused audio: ${describeError(error)}`);
     }
   }
 
@@ -640,7 +627,7 @@ export class CaptureWorker {
           this.#onAudioChunk(chunk, metadata);
         },
         error: (error) => {
-          this.#stopAudio(`The audio encoder failed: ${describe(error)}`);
+          this.#stopAudio(`The audio encoder failed: ${describeError(error)}`);
         },
       });
       encoder.configure(config);
@@ -784,13 +771,6 @@ function perSecond(count: number, seconds: number): number {
   return seconds > 0 ? Math.round((count / seconds) * 100) / 100 : 0;
 }
 
-function describe(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message === '' ? error.name : `${error.name}: ${error.message}`;
-  }
-  return String(error);
-}
-
 /** The worker's global scope, as far as this file uses it. */
 interface WorkerScope extends MessageTarget {
   addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
@@ -818,13 +798,6 @@ if (globalFunction('DedicatedWorkerGlobalScope') !== undefined) {
       return () => {
         clearInterval(timer);
       };
-    },
-    opfsRoot: () => {
-      // Read as optional: TypeScript's DOM types say every navigator has one.
-      const storage = (globalThis.navigator as Partial<Navigator> | undefined)?.storage;
-      return typeof storage?.getDirectory === 'function'
-        ? storage.getDirectory()
-        : Promise.reject(new Error('This browser has no origin private file system in workers.'));
     },
   });
   scope.addEventListener('message', (event) => {

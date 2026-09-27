@@ -3,7 +3,7 @@ import { FakeDirectoryHandle, type FakeFileHandle, type FakeOpfsOptions } from '
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020';
 import { describe, expect, it } from 'vitest';
 
-import { deleteClip, writeClip, type ClipDetails } from './clip-writer';
+import { deleteClip, deleteClipIf, writeClip, type ClipDetails } from './clip-writer';
 
 // The clip writer over the in-memory file system of @cubetrace/storage: the files of
 // docs/DATA-MODEL.md §5, each written whole under a temporary name and moved into place, the
@@ -378,5 +378,38 @@ describe('deleteClip', () => {
     access?.close();
     await deleteClip(root, SESSION, 7, 'laptop', 'solve');
     expect([...root.files().keys()]).toEqual([`sessions/${SESSION}/session.json`]);
+  });
+});
+
+describe('deleteClipIf', () => {
+  it('removes the clip while its frames file says the first frame asked for, and only then', async () => {
+    const root = await withSession({ syncAccessHandle: true });
+    await root.plant(`${FOLDER}/attempt.json`, '{}');
+    await write(root);
+
+    // A newer clip of the same name (the next attempt with this index) stays.
+    expect(await deleteClipIf(root, SESSION, 7, 'laptop', 'solve', FRAMES.t0HostMs + 1)).toBe(
+      false,
+    );
+    expect(file(root, `${FOLDER}/laptop.solve.mp4`)).toBeDefined();
+
+    expect(await deleteClipIf(root, SESSION, 7, 'laptop', 'solve', FRAMES.t0HostMs)).toBe(true);
+    expect([...root.files().keys()].sort()).toEqual([
+      `${FOLDER}/attempt.json`,
+      `sessions/${SESSION}/session.json`,
+    ]);
+  });
+
+  it('removes nothing when the frames file is missing or unreadable, or the folder is gone', async () => {
+    const root = await withSession();
+    expect(await deleteClipIf(root, SESSION, 7, 'laptop', 'solve', FRAMES.t0HostMs)).toBe(false);
+    expect(await deleteClipIf(root, 'gone', 7, 'laptop', 'solve', FRAMES.t0HostMs)).toBe(false);
+    await root.plant(`${FOLDER}/laptop.solve.frames.json`, 'not JSON');
+    await root.plant(`${FOLDER}/laptop.solve.mp4`, 'an MP4');
+    expect(await deleteClipIf(root, SESSION, 7, 'laptop', 'solve', FRAMES.t0HostMs)).toBe(false);
+    expect(file(root, `${FOLDER}/laptop.solve.mp4`)).toBeDefined();
+    await expect(
+      deleteClipIf(root, SESSION, 7, 'Laptop', 'solve', FRAMES.t0HostMs),
+    ).rejects.toThrow(RangeError);
   });
 });

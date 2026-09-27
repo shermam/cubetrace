@@ -1,8 +1,10 @@
 // The window's side of the capture pipeline (docs/PLAN.md, T2.2). Chrome has
 // MediaStreamTrackProcessor on the window only (docs/DEVICES.md), so the window turns the camera's
 // tracks into streams of frames and audio, moves the streams to the capture worker, and relays
-// cuts, clips (T2.3) and counters; it never touches a frame or an MP4. Plain TypeScript: no
-// Angular.
+// cuts, clips (T2.3) and counters; it never touches a frame or an MP4. Since T2.4 two workers run:
+// the capture worker encodes and cuts, and the clip worker muxes and writes the clips, which reach
+// it from the capture worker through a channel of their own (docs/TOOLCHAIN.md, "Two workers").
+// Plain TypeScript: no Angular.
 import type { VideoClip } from '@cubetrace/core';
 
 import type { Cut } from './cut';
@@ -13,6 +15,7 @@ import {
   type CaptureConfig,
   type CaptureError,
   type CaptureStats,
+  type DeleteClipParams,
   type SaveClipParams,
   type WorkerToWindow,
 } from './protocol';
@@ -32,12 +35,20 @@ export interface CaptureHandle {
    * (host ms, as `cut` takes them), muxes it into an MP4 and writes it with its frames.json into
    * `sessions/<sessionId>/attempts/<index>/` of the origin private file system, then resolves with
    * the clip's `video[]` entry (docs/DATA-MODEL.md §7; `crop` and `syncResidualMs` null, for the
-   * caller to fill). Clips are saved one at a time, in the order asked. Rejects with the worker's
-   * reason (nothing buffered there, the start older than the buffer, a missing session folder, a
-   * full disk, ...), once the capture has stopped, or when the worker does not answer within
+   * caller to fill). The capture worker only cuts; the clip worker muxes and writes, so the frames
+   * keep coming meanwhile (T2.4). Clips are saved one at a time, in the order asked. Rejects with
+   * the workers' reason (nothing buffered there, the start older than the buffer, a missing session
+   * folder, a full disk, ...), once the capture has stopped, or when no answer comes within
    * `SAVE_CLIP_TIMEOUT_MS`.
    */
   saveClip(params: SaveClipParams): Promise<VideoClip>;
+  /**
+   * Removes a clip that `saveClip` saved for an attempt that is gone (docs/PLAN.md, T2.4): its MP4,
+   * its frames file and their temporary files, only while they are still that clip's (the frames
+   * file's `t0HostMs` is `params.firstFrameHostMs`), after the clips being saved. Resolves to
+   * whether it removed them; rejects as `saveClip` does.
+   */
+  deleteClip(params: DeleteClipParams): Promise<boolean>;
   /** `listener` gets the counters once per second; call the returned function to stop. */
   onStats(listener: (stats: CaptureStats) => void): () => void;
   /**
@@ -46,7 +57,7 @@ export interface CaptureHandle {
    */
   onError(listener: (error: CaptureError) => void): () => void;
   /**
-   * Stops recording and frees the buffer and the worker, once the clips being saved are written;
+   * Stops recording and frees the buffer and the workers, once the clips being saved are written;
    * the stream's tracks keep running.
    */
   stop(): Promise<void>;
@@ -70,6 +81,17 @@ export const SAVE_CLIP_TIMEOUT_MS = 30_000;
 /** How long `stop()` waits for the worker to close its encoders before terminating it. */
 export const STOP_TIMEOUT_MS = 2000;
 
+/**
+ * How many frames the video's MediaStreamTrackProcessor keeps for a capture worker that is late to
+ * read them, before it drops the oldest: a third of a second at 30 fps, for a garbage collection or
+ * a busy moment (T2.4; Chrome's default holds fewer). Frames wait there only while the worker is
+ * behind.
+ */
+export const VIDEO_PROCESSOR_BUFFER = 10;
+
+/** The same for the microphone, in its buffers of 10 ms: half a second. */
+export const AUDIO_PROCESSOR_BUFFER = 50;
+
 const REQUIRED_APIS = ['MediaStreamTrackProcessor', 'VideoEncoder', 'Worker'];
 
 /** Whether `scope` (the window) has what `startCapture` needs: Chrome does, others lack some. */
@@ -80,14 +102,15 @@ export function captureSupport(scope: object = globalThis): CaptureSupport {
 
 /**
  * Starts the capture worker on the stream's first video track and, unless `config.audio` is
- * false, its first audio track. Throws when the browser lacks MediaStreamTrackProcessor or the
- * stream has no video track. `workerFactory` is for tests; by default the capture worker starts
- * from its own chunk.
+ * false, its first audio track, and the clip worker, joined to it by a channel. Throws when the
+ * browser lacks MediaStreamTrackProcessor or the stream has no video track. The factories are for
+ * tests; by default each worker starts from its own chunk.
  */
 export function startCapture(
   stream: MediaStream,
   config: CaptureConfig = {},
   workerFactory: () => Worker = createCaptureWorker,
+  clipWorkerFactory: () => Worker = createClipWorker,
 ): CaptureHandle {
   const Processor = member(globalThis, 'MediaStreamTrackProcessor');
   if (typeof Processor !== 'function') {
@@ -100,25 +123,38 @@ export function startCapture(
   }
   const resolved = resolveCaptureConfig(config);
   const audioTrack = resolved.audio ? stream.getAudioTracks().at(0) : undefined;
-  const video = new TrackProcessor<VideoFrame>({ track: videoTrack }).readable;
+  const video = new TrackProcessor<VideoFrame>({
+    track: videoTrack,
+    maxBufferSize: VIDEO_PROCESSOR_BUFFER,
+  }).readable;
   const audio =
-    audioTrack === undefined ? null : new TrackProcessor<AudioData>({ track: audioTrack }).readable;
-  let worker: Worker;
+    audioTrack === undefined
+      ? null
+      : new TrackProcessor<AudioData>({ track: audioTrack, maxBufferSize: AUDIO_PROCESSOR_BUFFER })
+          .readable;
+  let worker: Worker | undefined;
+  let clipWorker: Worker;
   try {
     worker = workerFactory();
+    clipWorker = clipWorkerFactory();
   } catch (error: unknown) {
     // The processors would otherwise hold the tracks' frames for a reader that never comes.
     void video.cancel();
     void audio?.cancel();
+    worker?.terminate();
     throw error;
   }
-  const capture = new Capture(worker);
+  const capture = new Capture(worker, clipWorker);
+  // The capture worker sends the clips' cuts straight to the clip worker, not through the window.
+  const channel = new MessageChannel();
+  post(clipWorker, { type: 'connect', port: channel.port2 });
   post(worker, {
     type: 'start',
     video,
     audio,
     config: resolved,
     frameRate: videoTrack.getSettings().frameRate ?? null,
+    clips: channel.port1,
   });
   return capture;
 }
@@ -132,6 +168,11 @@ export function createCaptureWorker(): Worker {
   return new Worker(new URL('./capture-worker.ts', import.meta.url), { type: 'module' });
 }
 
+/** The clip worker as a module worker, from its own chunk (as `createCaptureWorker`). */
+export function createClipWorker(): Worker {
+  return new Worker(new URL('./clip-worker.ts', import.meta.url), { type: 'module' });
+}
+
 /** A request waiting for the worker's answer. */
 interface Pending<T> {
   readonly resolve: (value: T) => void;
@@ -141,20 +182,27 @@ interface Pending<T> {
 
 class Capture implements CaptureHandle {
   readonly #worker: Worker;
+  readonly #clipWorker: Worker;
   readonly #cuts = new Map<number, Pending<Cut>>();
   readonly #clips = new Map<number, Pending<VideoClip>>();
-  /** The clips being saved, settled either way: `stop()` waits for them. */
+  readonly #deletions = new Map<number, Pending<boolean>>();
+  /** The clips being saved or removed, settled either way: `stop()` waits for them. */
   readonly #saving = new Set<Promise<void>>();
   readonly #statsListeners = new Set<(stats: CaptureStats) => void>();
   readonly #errorListeners = new Set<(error: CaptureError) => void>();
   #nextId = 1;
   #stopping: Promise<void> | undefined;
   #stopped: (() => void) | undefined;
+  /** Why the clip worker failed, once it has: clips are refused from then on. */
+  #clipWorkerFailure: string | undefined;
 
-  constructor(worker: Worker) {
+  constructor(worker: Worker, clipWorker: Worker) {
     this.#worker = worker;
+    this.#clipWorker = clipWorker;
     worker.addEventListener('message', this.#onMessage);
     worker.addEventListener('error', this.#onWorkerError);
+    clipWorker.addEventListener('message', this.#onMessage);
+    clipWorker.addEventListener('error', this.#onClipWorkerError);
   }
 
   cut(startHostMs: number, endHostMs: number): Promise<Cut> {
@@ -169,24 +217,64 @@ class Capture implements CaptureHandle {
   }
 
   saveClip(params: SaveClipParams): Promise<VideoClip> {
-    if (this.#stopping !== undefined) {
-      return Promise.reject(new Error('The capture has stopped.'));
+    const refused = this.#refusal();
+    if (refused !== undefined) {
+      return Promise.reject(refused);
     }
     const id = this.#nextId;
     this.#nextId += 1;
-    const answer = this.#request(this.#clips, id, SAVE_CLIP_TIMEOUT_MS, () => {
-      post(this.#worker, {
-        type: 'mux-and-write',
-        id,
-        startHostMs: params.startHostMs,
-        endHostMs: params.endHostMs,
-        sessionId: params.sessionId,
-        index: params.index,
-        camera: params.camera,
-        segment: params.segment,
-        fpsNominal: params.fpsNominal,
-      });
-    });
+    return this.#track(
+      this.#request(this.#clips, id, SAVE_CLIP_TIMEOUT_MS, () => {
+        post(this.#worker, {
+          type: 'mux-and-write',
+          id,
+          startHostMs: params.startHostMs,
+          endHostMs: params.endHostMs,
+          sessionId: params.sessionId,
+          index: params.index,
+          camera: params.camera,
+          segment: params.segment,
+          fpsNominal: params.fpsNominal,
+        });
+      }),
+    );
+  }
+
+  deleteClip(params: DeleteClipParams): Promise<boolean> {
+    const refused = this.#refusal();
+    if (refused !== undefined) {
+      return Promise.reject(refused);
+    }
+    const id = this.#nextId;
+    this.#nextId += 1;
+    return this.#track(
+      this.#request(this.#deletions, id, SAVE_CLIP_TIMEOUT_MS, () => {
+        post(this.#clipWorker, {
+          type: 'delete-clip',
+          id,
+          sessionId: params.sessionId,
+          index: params.index,
+          camera: params.camera,
+          segment: params.segment,
+          firstFrameHostMs: params.firstFrameHostMs,
+        });
+      }),
+    );
+  }
+
+  /** Why a clip cannot be saved or removed now, if it cannot. */
+  #refusal(): Error | undefined {
+    if (this.#stopping !== undefined) {
+      return new Error('The capture has stopped.');
+    }
+    if (this.#clipWorkerFailure !== undefined) {
+      return new Error(this.#clipWorkerFailure);
+    }
+    return undefined;
+  }
+
+  /** Keeps `answer` among the clip requests that `stop()` waits for, until it settles. */
+  #track<T>(answer: Promise<T>): Promise<T> {
     const settled = answer.then(
       () => undefined,
       () => undefined,
@@ -247,16 +335,24 @@ class Capture implements CaptureHandle {
     clearTimeout(timer);
     this.#worker.removeEventListener('message', this.#onMessage);
     this.#worker.removeEventListener('error', this.#onWorkerError);
+    this.#clipWorker.removeEventListener('message', this.#onMessage);
+    this.#clipWorker.removeEventListener('error', this.#onClipWorkerError);
     this.#worker.terminate();
-    for (const requests of [this.#cuts, this.#clips]) {
-      for (const [id, pending] of requests) {
-        requests.delete(id);
-        clearTimeout(pending.timer);
-        pending.reject(new Error('The capture has stopped.'));
-      }
-    }
+    this.#clipWorker.terminate();
+    this.#rejectAll([this.#cuts, this.#clips, this.#deletions], 'The capture has stopped.');
     this.#statsListeners.clear();
     this.#errorListeners.clear();
+  }
+
+  /** Rejects every request of `requests` with `message`. */
+  #rejectAll(requests: readonly Map<number, Pending<never>>[], message: string): void {
+    for (const pending of requests) {
+      for (const [id, request] of pending) {
+        pending.delete(id);
+        clearTimeout(request.timer);
+        request.reject(new Error(message));
+      }
+    }
   }
 
   readonly #onMessage = (event: MessageEvent<unknown>): void => {
@@ -270,6 +366,19 @@ class Capture implements CaptureHandle {
     event.preventDefault();
     const reason = event.message === '' ? 'it could not start' : event.message;
     this.#emitError({ message: `The capture worker failed: ${reason}`, fatal: true });
+  };
+
+  /**
+   * The clip worker failed: recording goes on, but no clip can be saved or removed. The requests
+   * waiting for it are refused at once rather than at their timeouts.
+   */
+  readonly #onClipWorkerError = (event: ErrorEvent): void => {
+    event.preventDefault();
+    const reason = event.message === '' ? 'it could not start' : event.message;
+    const message = `The clip worker failed: ${reason}`;
+    this.#clipWorkerFailure ??= message;
+    this.#rejectAll([this.#clips, this.#deletions], message);
+    this.#emitError({ message, fatal: false });
   };
 
   #receive(message: WorkerToWindow): void {
@@ -290,6 +399,12 @@ class Capture implements CaptureHandle {
         break;
       case 'mux-and-write-failed':
         settle(this.#clips, message.id)?.reject(new Error(message.message));
+        break;
+      case 'delete-clip-done':
+        settle(this.#deletions, message.id)?.resolve(message.deleted);
+        break;
+      case 'delete-clip-failed':
+        settle(this.#deletions, message.id)?.reject(new Error(message.message));
         break;
       case 'error':
         this.#emitError({ message: message.message, fatal: message.fatal });

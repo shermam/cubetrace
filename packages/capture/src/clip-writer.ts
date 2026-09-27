@@ -138,6 +138,45 @@ export async function deleteClip(
   }
 }
 
+/**
+ * Removes the clip of `camera` for `segment` from the folder of attempt `index` of session
+ * `sessionId`, as `deleteClip` does, only while its frames file says its first frame is at
+ * `firstFrameHostMs` (`t0HostMs`): so a clip saved for an attempt that is gone goes, and a newer clip
+ * of the same name (the next attempt with that index) stays. Resolves to whether it removed it:
+ * false when the frames file is missing, unreadable, or another clip's. Rejects as `deleteClip`.
+ */
+export async function deleteClipIf(
+  root: OpfsDirectoryHandle,
+  sessionId: string,
+  index: number,
+  camera: string,
+  segment: VideoSegment,
+  firstFrameHostMs: number,
+): Promise<boolean> {
+  const names = clipFiles(camera, segment);
+  const path = attemptPath(sessionId, index);
+  checkSessionId(sessionId);
+  const dir = await attemptDir(root, path, false);
+  if (dir === null) {
+    return false;
+  }
+  let t0HostMs: unknown;
+  try {
+    const text = await (await (await dir.getFileHandle(names.framesFile)).getFile()).text();
+    t0HostMs = (JSON.parse(text) as { t0HostMs?: unknown }).t0HostMs;
+  } catch (error: unknown) {
+    if (isNotFound(error) || error instanceof SyntaxError) {
+      return false;
+    }
+    throw error;
+  }
+  if (t0HostMs !== firstFrameHostMs) {
+    return false;
+  }
+  await deleteClip(root, sessionId, index, camera, segment);
+  return true;
+}
+
 /** Whether `error` is the `NotFoundError` DOMException the File System API rejects with. */
 function isNotFound(error: unknown): boolean {
   return (
