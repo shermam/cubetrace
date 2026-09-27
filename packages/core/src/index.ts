@@ -34,3 +34,13 @@ export {
 // T1.2 — scrambles
 export type { ScrambleProgress } from './scramble';
 export { ScrambleTracker, generateScramble, scrambleTarget } from './scramble';
+// T1.3 — CFOP phases
+export type { DetectPhasesOptions, PhaseName, PhaseRecord, PhaseReport, TimedMove } from './phases';
+export {
+  PHASE_NAMES,
+  crossComplete,
+  detectPhases,
+  eollComplete,
+  f2lSlotsComplete,
+  ocllComplete,
+} from './phases';
