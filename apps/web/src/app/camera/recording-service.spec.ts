@@ -443,6 +443,49 @@ describe('RecordingService', () => {
     expect(r.recording.storage()?.usage).toBe(123_456);
   });
 
+  it("lends the pipeline's motion watch to the sync check while it records, and clips carry the check's lag", async () => {
+    const r = rig();
+    const onSample = vi.fn();
+    const onError = vi.fn();
+    expect(r.recording.watchMotion(null, onSample, onError)).toBeNull();
+    await r.camera.start();
+    const fake = await ready(r.s);
+    await sync(r);
+    // Starting: not yet.
+    expect(r.recording.watchMotion(null, onSample, onError)).toBeNull();
+    const capture = r.starter.last;
+    capture.emitStats(statsOf(5));
+
+    const rect = { x: 480, y: 120, w: 960, h: 840 };
+    const stop = r.recording.watchMotion(rect, onSample, onError);
+    expect(capture.watches.at(-1)).toMatchObject({ rect, onSample, onError, stopped: false });
+    stop?.();
+    expect(capture.watches.at(-1)?.stopped).toBe(true);
+
+    // A check of this camera in the session: its clips from then on carry its lag.
+    r.s.service.putCameraClock('laptop', {
+      offsetMs: 52.5,
+      rttMs: 0,
+      driftPpm: 0,
+      clapperboardResidualMs: 9,
+      clapperboardSamples: 5,
+    });
+    turn(r.s, fake, 'R U F');
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    await settle();
+    turn(r.s, fake, inverse('R U F'), 500);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    await settle();
+    await r.s.service.whenSaved();
+    const [stored] = (await r.s.store.exportSession(sessionId(r))).attempts;
+    expect(stored.video.map((clip) => [clip.segment, clip.syncResidualMs])).toEqual([
+      ['scramble', 52.5],
+      ['solve', 52.5],
+    ]);
+  });
+
   it('says why a browser without the capture APIs cannot record', async () => {
     const r = rig({ supported: false });
     await r.camera.start();

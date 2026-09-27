@@ -129,7 +129,7 @@ export function detectClapperboard(
     return fail(
       'few-matches',
       `fewer than ${String(MIN_MATCHES)} matches (${String(pairs.length)} of ${String(moves.length)} ` +
-        `turns matched a motion)`,
+        `${moves.length === 1 ? 'turn' : 'turns'} matched a motion)`,
     );
   }
   if (offset === null || spread === null || spread > MAX_SPREAD_MS) {

@@ -9,6 +9,8 @@ import type {
   CaptureSupport,
   Cut,
   DeleteClipParams,
+  FramingRect,
+  MotionSample,
   SaveClipParams,
 } from '@cubetrace/capture';
 import type { VideoClip } from '@cubetrace/core';
@@ -61,10 +63,21 @@ export function clipFor(params: SaveClipParams): VideoClip {
   };
 }
 
+/** The motion watch of a sync check (T2.5): its rectangle, and the samples the test sends it. */
+export interface MotionWatchCall {
+  readonly rect: FramingRect | null;
+  readonly onSample: (sample: MotionSample) => void;
+  readonly onError: ((message: string) => void) | undefined;
+  /** Whether its stop was called. */
+  stopped: boolean;
+}
+
 /** A running pipeline: the test answers its clips and sends its counters and errors. */
 export class FakeCapture implements CaptureHandle {
   readonly saves: PendingSave[] = [];
   readonly deletions: DeleteClipParams[] = [];
+  /** The motion watches asked for, the last one the one under way. */
+  readonly watches: MotionWatchCall[] = [];
   stopped = false;
   private readonly statsListeners = new Set<(stats: CaptureStats) => void>();
   private readonly errorListeners = new Set<(error: CaptureError) => void>();
@@ -91,6 +104,18 @@ export class FakeCapture implements CaptureHandle {
   deleteClip(params: DeleteClipParams): Promise<boolean> {
     this.deletions.push(params);
     return Promise.resolve(true);
+  }
+
+  watchMotion(
+    rect: FramingRect | null,
+    onSample: (sample: MotionSample) => void,
+    onError?: (message: string) => void,
+  ): () => void {
+    const call: MotionWatchCall = { rect, onSample, onError, stopped: false };
+    this.watches.push(call);
+    return () => {
+      call.stopped = true;
+    };
   }
 
   onStats(listener: (stats: CaptureStats) => void): () => void {
