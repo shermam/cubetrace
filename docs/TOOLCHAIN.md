@@ -256,6 +256,28 @@ prefetches every `.js` file, so the demo data would have been downloaded by ever
 (`dist/web/browser/ngsw.json` does not list it; `cube.spec.ts` checks this). Demo mode therefore
 needs the network, apart from the browser's own HTTP cache.
 
+**Demo mode can mis-scramble on purpose** (T1.9). With `?demo=`, `&misscramble=<k>` makes the demo
+cube turn one wrong face after scramble move k: a clockwise quarter turn of the first face, in the
+order U R F D L B, that neither move k nor move k + 1 turns, nor their opposite faces, so that the
+scramble tracker cannot take it for a step of the scramble (half of a half turn, or the next move of
+an opposite pair made first). One second of replay time later (50 ms at speed 20) it turns the face
+back and finishes the scramble; the attempt records `scrambleCorrected: true` and
+`scrambleExtraMoves: 2`. k runs from 1 to one less than the number of scramble moves; other values
+are ignored. "Demo cube" in the connect dialog passes it on like `?demo` and `?speed`, and Reconnect
+keeps it.
+
+**The demo replay is a list of parts, each started on a timer once the previous one has ended**
+(`demoParts` in `apps/web/src/app/cube/demo.ts`, T1.9): the scramble (or its first k moves and the
+wrong turn, then the inverse and the rest), then the solution. When a part's last move changes a
+signal, Angular schedules the page's render on a zero-delay timer or the next animation frame, ahead
+of that timer, so the page shows the state the part left before the next part starts: the undo
+guidance before the inverse, the armed attempt before the solve, however fast the replay and however
+late its timers fire. The next part's schedule counts from after that render. Before T1.9 the
+solution was queued while the scramble played, so its timers were set before the armed render: its
+first move waited behind the render (and the frame after it) while the other moves kept their times,
+and a solve measured 2 to 11 ms shorter than recorded, and up to 47 ms with the CPU loaded (demo
+solve 1 lasts 750 ms at speed 20, where 5% is 37 ms).
+
 ## cubing.js
 
 Added by T1.2 on 2026-09-27. Version 0.63.7, a dependency of `@cubetrace/core` (its own dependencies,
@@ -330,3 +352,54 @@ in-memory store. `BROWSER_GLOBALS` now also carries `performance`, `requestAnima
 (261.2 and 73.5 before T1.6b); the Timer page's chunk 27.5 kB (7.7 kB), `SessionService` with the
 store 18.3 kB (5.3 kB, shared with the Sessions page), the Sessions page 5.4 kB (2.0 kB), and the
 scramble picture as above.
+
+## End-to-end suite
+
+Added by T1.9 on 2026-09-27: the flows of `docs/PLAN.md` T1.9 in `apps/web/e2e/`, driven by the demo
+cube.
+
+| Flow | Spec | What it checks |
+|---|---|---|
+| 1. Full attempt | `attempt.spec.ts` | Demo solves 0, 1 and 13 (the one whose cross is on F; the others' is on U) at speed 20, each replayed twice, the second time from the connect dialog: solved; the second replay's time on the timer within 5% of the fixture's `time_ms` / 20; eight phases in the chart; in both records, `crossFace` and each phase's moves and F2L slot as `detectPhases` finds them in the fixture, `status` solved, `replayOk`, `movesQtm` equal to the fixture's `quarter_turns`. |
+| 2. Mis-scramble | `misscramble.spec.ts` | `&misscramble=5`: the undo guidance shows the inverse of the wrong turn, then clears; the attempt arms and is solved; the export has the wrong turn and its inverse among the scramble's moves, `scrambleCorrected: true` and `scrambleExtraMoves: 2`. |
+| 3. DNF | `timer.spec.ts`, second test | Esc during the solve (speed 5): the row and the time say DNF; once the replay has solved the cube, attempt 2 begins with a scramble of its own; the DNF's record. |
+| 4. Reload | `reload.spec.ts` | After a solve, a reload: the page shows the stored solve and attempt 2 at once, and the demo solve, replayed again, becomes attempt 2 of the same session. |
+| 5. Export | `export.spec.ts`, and the export of every other flow | A session with a solved, corrected attempt and a DNF validates against both schemas; copies that break either schema fail with ajv's message. |
+| 6. Settings | `inspection.spec.ts` | The inspection switch on: the armed attempt shows the countdown from 15; switched off: 0.00 and no countdown. |
+
+`timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
+export), without its time check, which flow 1 makes on a settled page (below). The helpers in
+`apps/web/e2e/helpers/` are shared by the flows:
+
+- **The fixtures are the oracle.** `fixtures.ts` reads `fixtures/solves.json`, whose first 30 solves
+  are the demo's, and runs `@cubetrace/core`'s phase detector on them in the test. Specs import
+  `@cubetrace/core` as a package: Playwright resolves it through the `@cubetrace/*` paths of
+  `tsconfig.base.json` and transpiles its TypeScript.
+- **Every export is validated.** `export.ts` opens the Sessions page from the navigation (no reload),
+  exports the browser context's one session and validates `session` against `session.schema.json`
+  and each attempt against `attempt.schema.json` with ajv (draft 2020-12, `allowUnionTypes`, all
+  errors), so a flow fails with ajv's text, such as "attempts[0]/crossFace must be equal to one of
+  the allowed values".
+- **States that last one render are recorded, not polled.** At speed 20 the armed attempt lasts until
+  the solution's first move, a few milliseconds, and a mis-scramble's guidance 50 ms, while
+  Playwright's assertions poll every 100 ms to 1 s. `timer-views.ts` installs a MutationObserver
+  before the page's own scripts run (`page.addInitScript`) that records every state the Timer page
+  renders (the status line, the time, the attempt's number, the progress, the undo guidance, the
+  solve list); flows 2, 4 and 6 check that record, which also goes into the report as `timer-views`.
+  That the page renders those states at all is the demo's doing (the replay's parts, above).
+- **Times are checked on a settled page.** The replay that starts with the page runs while the page
+  is still loading: cubing.js builds its search tables in a worker and the scramble picture's chunk
+  is evaluated. With the CPU busy, that holds the demo cube's timers back by tens of milliseconds,
+  and demo solve 1 lasts 750 ms at speed 20, where 5% is 37 ms. Measured on 2026-09-27 with four
+  workers on four CPUs, 24 solves each: the replay that starts with the page was 4.0% short to 6.1%
+  long, and a second replay once the next attempt's scramble is on screen, from the connect dialog
+  (Disconnect, then Demo cube, which takes `?demo` and `?speed` from the address), 1.4% short to
+  1.6% long. Flow 1 therefore times the second replay (`replayDemo` in `timer.ts`). With two
+  workers, T1.6b's check of the first replay was 0.5% to 4.2% short over 20 runs, too close to 5%,
+  so it was left to flow 1.
+- **No fixed waits and no retries.** Every wait is on a `data-testid`'s content, an attribute or a
+  download. The DNF flows run at speed 5 (solves of 4.3 and 6.9 s), which leaves seconds to press Esc
+  after the solve starts although assertions poll up to 1 s apart.
+
+The whole suite (34 tests, two workers on four CPUs) took 58 to 60 s locally, servers included, in
+three runs in a row on 2026-09-27; T1.6b's suite took 44 s.
