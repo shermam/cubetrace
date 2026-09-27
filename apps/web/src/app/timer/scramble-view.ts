@@ -6,8 +6,9 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import type { ScrambleMoveState } from '@cubetrace/core';
 
-import { SessionService } from '../session/session-service';
+import { SessionService, type AttemptView } from '../session/session-service';
 import { errorMessage } from '../shared/error-message';
 
 /**
@@ -21,9 +22,49 @@ export const TWISTY_LOADER = new InjectionToken<() => Promise<unknown>>('TWISTY_
 });
 
 /**
+ * How a move of the scramble on screen looks: how far the cube has made it (`done`; `partial`, a
+ * half turn made halfway; `pending`), or `wrong`, the move where the cube left the scramble.
+ */
+export type ScrambleTokenState = ScrambleMoveState | 'wrong';
+
+/** A move of the scramble on screen, as written in the scramble, and its state. */
+export interface ScrambleToken {
+  readonly move: string;
+  readonly state: ScrambleTokenState;
+}
+
+/**
+ * The moves of `scramble` as the scramble view marks them (T1.13), for `attempt`, the attempt under
+ * way: while it is scrambling, how far the cube has made each (`ScrambleProgress.moves`), and the
+ * move at `matched` `wrong` while the cube is off the scramble's path; while it is armed, all `done`
+ * (the scramble is complete: the next turn starts the solve); otherwise, while solving and for the
+ * next scramble, all `pending`, which is the plain look.
+ */
+export function scrambleTokens(scramble: string, attempt: AttemptView | null): ScrambleToken[] {
+  const marked = (state: (i: number) => ScrambleTokenState): ScrambleToken[] =>
+    scramble.split(' ').map((move, i) => ({ move, state: state(i) }));
+  if (attempt?.scramble !== scramble) {
+    return marked(() => 'pending');
+  }
+  switch (attempt.state) {
+    case 'scrambling': {
+      const { moves, matched, diverged } = attempt.progress;
+      return marked((i) => (diverged && i === matched ? 'wrong' : (moves.at(i) ?? 'pending')));
+    }
+    case 'armed':
+      return marked(() => 'done');
+    default:
+      return marked(() => 'pending');
+  }
+}
+
+/**
  * The scramble at the top of the timer (docs/PLAN.md, T1.6b): its moves in large monospace, its
  * picture (cubing.js's `<twisty-player>`, 2D, the scramble as its setup), the progress through it
  * and, when the cube leaves its path, the moves that undo the detour, greyed as they are made.
+ * While the attempt is scrambling, each move is outlined as the cube makes it (T1.13, see
+ * {@link scrambleTokens}): green once made, yellow while a half turn is half made, red where the
+ * cube left the scramble; all green once the scramble is complete, until the solve starts.
  */
 @Component({
   selector: 'app-scramble-view',
@@ -38,7 +79,15 @@ export const TWISTY_LOADER = new InjectionToken<() => Promise<unknown>>('TWISTY_
       }
     </div>
     @if (session.scramble(); as scramble) {
-      <p class="moves" data-testid="scramble">{{ scramble }}</p>
+      <!-- One element per move; the spaces between them keep the text the scramble's own. -->
+      <p class="moves" data-testid="scramble">
+        @for (token of tokens(); track $index) {
+          @if (!$first) {
+            &ngsp;
+          }
+          <span class="move" [attr.data-state]="token.state">{{ token.move }}</span>
+        }
+      </p>
       @if (pictureError() === null) {
         <twisty-player
           class="picture"
@@ -99,8 +148,32 @@ export const TWISTY_LOADER = new InjectionToken<() => Promise<unknown>>('TWISTY_
     .moves {
       font-family: var(--font-mono);
       font-size: clamp(1.125rem, 4.5vw, 1.625rem);
-      line-height: 1.4;
-      word-spacing: 0.3em;
+      line-height: 1.6;
+      word-spacing: 0.1em;
+    }
+
+    /* Every move is the same box in every state, its outline drawn inside it (an inset shadow), so
+       a change of state moves nothing. */
+    .move {
+      display: inline-block;
+      padding: 0 0.2em;
+      border-radius: 0.3em;
+      line-height: 1.3;
+      box-shadow: inset 0 0 0 2px var(--move-outline, transparent);
+
+      &[data-state='done'] {
+        --move-outline: var(--ok);
+        color: var(--ok);
+      }
+
+      &[data-state='partial'] {
+        --move-outline: var(--warn);
+      }
+
+      &[data-state='wrong'] {
+        --move-outline: var(--danger);
+        color: var(--danger);
+      }
     }
 
     .picture {
@@ -153,6 +226,12 @@ export class ScrambleView {
   protected readonly progress = computed(() => {
     const attempt = this.session.attempt();
     return attempt?.state === 'scrambling' ? attempt.progress : null;
+  });
+
+  /** The scramble's moves with their states (see {@link scrambleTokens}). */
+  protected readonly tokens = computed(() => {
+    const scramble = this.session.scramble();
+    return scramble === null ? [] : scrambleTokens(scramble, this.session.attempt());
   });
 
   protected readonly undo = computed(() => {
