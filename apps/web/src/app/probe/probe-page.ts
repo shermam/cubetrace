@@ -9,6 +9,8 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
+
+import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { describeError, member } from './probe-guards';
 import {
   listCameras,
@@ -18,6 +20,7 @@ import {
   type EncodersSection,
   type PartialReport,
   type ProbeReport,
+  type ProbeScope,
   type SectionKey,
   type VideoInput,
 } from './probe-report';
@@ -102,7 +105,7 @@ const SECTIONS: readonly Pick<SectionView, 'key' | 'title' | 'about'>[] = [
 })
 export class ProbePage {
   private readonly document = inject(DOCUMENT);
-  private readonly scope: object = this.document.defaultView ?? {};
+  private readonly scope: ProbeScope = inject(BROWSER_GLOBALS);
   private readonly stop = new AbortController();
   private readonly preview = viewChild.required<ElementRef<HTMLVideoElement>>('preview');
   private readonly sections = signal<PartialReport>({});
