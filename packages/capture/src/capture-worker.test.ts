@@ -74,6 +74,8 @@ class FakeVideoEncoder {
   static supported = new Set<string>();
   static instances: FakeVideoEncoder[] = [];
   static asked: VideoEncoderConfig[] = [];
+  /** The chunks' duration: null, or 0 as Chrome gives chunks of frames without a duration. */
+  static chunkDuration: number | null = null;
 
   static isConfigSupported(config: VideoEncoderConfig): Promise<{ supported: boolean }> {
     FakeVideoEncoder.asked.push(config);
@@ -108,7 +110,7 @@ class FakeVideoEncoder {
     const chunk = new FakeChunk(
       keyFrame ? 'key' : 'delta',
       frame.timestamp,
-      null,
+      FakeVideoEncoder.chunkDuration,
       keyFrame ? 50 : 10,
     );
     if (this.holdOutput) {
@@ -333,6 +335,7 @@ beforeEach(() => {
   FakeVideoEncoder.supported = new Set(['vp09.00.40.08 no-preference']);
   FakeVideoEncoder.instances = [];
   FakeVideoEncoder.asked = [];
+  FakeVideoEncoder.chunkDuration = null;
   FakeAudioEncoder.supported = new Set(['opus']);
   FakeAudioEncoder.instances = [];
   FakeAudioEncoder.frameUs = 21_333;
@@ -486,6 +489,17 @@ describe('CaptureWorker', () => {
     expect(capture.worker.buffer.video[0].durationUs).toBe(33_333);
     // The bytes are the chunk's, copied out once.
     expect([...new Uint8Array(capture.worker.buffer.video[0].data)]).toEqual(Array(50).fill(1));
+  });
+
+  it('gives the chunks of frames without a duration one frame interval, where Chrome says 0', async () => {
+    FakeVideoEncoder.chunkDuration = 0;
+    const capture = harness();
+    await capture.feed(0, 20);
+
+    expect(capture.worker.buffer.video.map((chunk) => chunk.durationUs)).toEqual(
+      Array(6).fill(33_333),
+    );
+    expect(capture.worker.buffer.bufferSeconds).toBeCloseTo(6 / 30, 3);
   });
 
   it("keeps the encoder's decoder config with the buffer, its description copied", async () => {

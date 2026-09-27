@@ -436,7 +436,12 @@ export class CaptureWorker {
       kind: 'video',
       type: chunk.type,
       timestampUs: chunk.timestamp,
-      durationUs: chunk.duration ?? Math.round(1e6 / this.#frameRate()),
+      // A frame without a duration (Chrome's fake camera): one frame interval at the measured rate.
+      // Chrome gives such chunks a duration of 0 rather than null.
+      durationUs:
+        chunk.duration !== null && chunk.duration > 0
+          ? chunk.duration
+          : Math.round(1e6 / this.#frameRate()),
       byteLength: chunk.byteLength,
       arrivalHostMs: this.#frameArrival(chunk.timestamp),
       data: copyOut(chunk),
