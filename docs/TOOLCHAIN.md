@@ -167,9 +167,10 @@ files excluded from ESLint and Prettier. The fork's `package.json` has no `main`
 the entry point is imported by path, `gan-web-bluetooth/src/index.js`, and it ships no declaration
 for it (TS7016): `packages/gan/src/driver.ts` types the part of the API the wrapper uses,
 transcribed from the fork's `src/types.d.ts`, and imports the module under one
-`@ts-expect-error`. The import is dynamic, so the driver is a lazy chunk of its own that Chrome
-downloads when a real cube connects (59 kB raw, 19 kB transferred, in the T1.5 check); the service
-worker prefetches it with the other chunks. To update: `npm install
+`@ts-expect-error`. The import is dynamic, so the driver is a lazy chunk of its own (59 kB raw, 19 kB
+transferred, in the T1.5 check), which Chrome downloads once the cube code is there, in a browser
+with Web Bluetooth (the preload, "Cube connection" below; before T1.14, on the first connection); the
+service worker prefetches it with the other chunks. To update: `npm install
 github:shermam/gan-web-bluetooth#<commit> -w @cubetrace/gan`, compare the fork's `src/types.d.ts`
 with `driver.ts`, run the tests and the hardware checks of `docs/MANUAL-TESTS.md`.
 
@@ -241,8 +242,8 @@ picker needs, for a few seconds). The pill, the dialog,
 `CubeService`, `SettingsService` and both packages load in lazy chunks right after the first
 render, shared with the Timer page. The initial bundle grew from 247.2 to 261.2 kB raw (69.6 to
 73.5 kB transferred): 12.9 kB of Angular's `@defer` runtime, the placeholder, the dialog's open
-state and the shared styles. The GAN driver is still a chunk of its own that loads when a real
-cube connects. Checked again with T1.6b, once `scramble.ts` imported cubing.js lazily (see "cubing.js"):
+state and the shared styles. The GAN driver is still a chunk of its own, which `CubeService` starts
+loading as soon as it exists (T1.14, below). Checked again with T1.6b, once `scramble.ts` imported cubing.js lazily (see "cubing.js"):
 an eager pill and dialog then bring no cubing.js along, but still cost 42 kB raw (13.8 kB
 transferred) on the initial bundle, 305.4 kB against 263.3 kB, because the chunk optimizer then
 merges core's attempt, phase and scramble modules into `main`; the `@defer` blocks stay. Checked
@@ -292,6 +293,46 @@ T1.9 the solution was queued while the scramble played, so its timers were set b
 render: its first move waited behind the render (and the frame after it) while the other moves kept
 their times, and a solve measured 2 to 11 ms shorter than recorded, and up to 47 ms with the CPU
 loaded (demo solve 1 lasts 750 ms at speed 20, where 5% is 37 ms).
+
+**The GAN driver is preloaded** (T1.14). The first click on Connect could open the device picker
+only once the driver's chunk had downloaded, and Chrome keeps a click's user activation, which
+`requestDevice` needs, for a few seconds only. So `CubeService` calls `loadGanDriver()` when it is
+created, in a browser with Web Bluetooth, right after the first render (the pill's `@defer` block),
+without awaiting it and dropping a failure. `loadGanDriver()` keeps its promise, and
+`connectGanCube` awaits that same promise, so a click after the download does not wait for it; a
+failed load is not kept, and the click tries again. The unit tests give `CubeService` a loader that
+imports nothing (`GAN_DRIVER_LOADER`).
+
+**Mark as solved** (T1.14) is `CubeConnection.resetToSolved()`. A GAN connection writes the driver's
+`REQUEST_RESET` (in the fork, a message that sets the cube's own state to solved, for the Gen2,
+Gen3 and Gen4 protocols), then takes the solved state and emits it as a `facelets` event with
+`reset: true`, then sends `REQUEST_FACELETS`: the cube's answer confirms the reset or, if the cube
+disagrees, is adopted like any report. The flag lets `SessionService` tell a reset from a report: a
+report of the solved state during a solve ends it (a resync, `docs/DATA-MODEL.md` §7), while a reset
+drops the attempt without a record (§3). A notice sent before the event would have left the attempt
+dropped even when the reset failed. The demo cube's replay stops at a reset (`FakeCube.stop()`), as
+a solver's hands would; otherwise the rest of its scramble and solution would go on from the solved
+state.
+
+**The idle disconnection and the tab's visibility** (T1.14). `CubeService` restarts a timer on every
+move of a GAN cube, and when a cube connects, on Mark as solved and when the setting changes; when
+it runs out, it disconnects the cube with a reason that says why. The demo cube, which has no
+battery, is never disconnected this way. The timers and the tab's visibility come through
+`BROWSER_GLOBALS` (`setTimeout`, `clearTimeout` and `document`), which the unit tests fake with
+`FakeTimers`, on the clock of `FakePerformance`, and `FakeDocument`. Chrome throttles the timers of
+hidden tabs (to one wake-up a second, and some timers to one a minute once the tab has been hidden
+for five minutes), so in a background tab the disconnection can come up to a minute late; that is
+fine. When the tab is shown again with a cube connected, `CubeService` asks the cube for its state
+once, so that turns the app missed while the tab was hidden are caught up (the facelets report is
+adopted, and the timer resyncs); nothing connects by itself, since Web Bluetooth needs a click.
+
+**Disconnect diagnostics** (T1.14). When a connection ends without the app asking (`disconnect()`),
+`CubeService.disconnectReason` is the connection's own reason followed by how long the cube had gone
+without a turn (or since connecting), whether the tab was hidden, and, past two minutes, that GAN
+cubes go to sleep; the pill's tooltip, the Timer page and the connect dialog show it. The console
+gets one `console.info` line with the raw facts, for the owner to paste into an issue:
+`cubetrace: the cube disconnected {"reason":…,"idleMs":…,"visibilityState":…,"hiddenMs":…,
+"connectedMs":…,"battery":…,"model":…}` (ms; `hiddenMs` is null while the tab is visible).
 
 ## cubing.js
 
@@ -381,6 +422,8 @@ cube.
 | 4. Reload | `reload.spec.ts` | After a solve, a reload: the page shows the stored solve and attempt 2 at once, and the demo solve, replayed again, becomes attempt 2 of the same session. |
 | 5. Export | `export.spec.ts`, and the export of every other flow | A session with a solved, corrected attempt and a DNF validates against both schemas; copies that break either schema fail with ajv's message. |
 | 6. Settings | `inspection.spec.ts` | The inspection switch on: the armed attempt shows the countdown from 15; switched off: 0.00 and no countdown. |
+| Mark as solved (T1.14) | `reset.spec.ts` | Demo solve 0 at speed 0.25: "Mark as solved" in the Cube section while the scramble is part-way: the net shows solved, the demo cube stays connected, attempt 1 begins again (0 / 21, the same scramble), no row; the recorded views show the scrambling attempt just before. A page load with `?demo=0&speed=20` then solves attempt 1 in the same session, and the export has that one attempt. |
+| Idle setting (T1.14) | `cube.spec.ts`, last test | Settings shows the idle disconnection at 5 minutes; 1 survives a reload; 61 is refused with its message. The timer itself is tested in the unit tests, on a fake clock. |
 | Scramble marks (T1.13) | `scramble-colours.spec.ts` | Demo solve 1 at speed 20: each of its 11 half turns marked partial after its first quarter turn, then done; every view while scrambling agrees with its progress; all moves but the last done before the attempt arms, all done while armed, none from the solve on. `&misscramble=5` (demo solve 0): move 6 marked wrong exactly while the undo guidance shows, then done; all done while armed. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the

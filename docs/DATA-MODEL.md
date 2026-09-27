@@ -56,7 +56,10 @@ during a mis-scramble are part of the scramble phase; `result.scrambleCorrected`
 cube left the scramble's path at some point) and `result.scrambleExtraMoves` counts the moves
 beyond the scramble's own, in quarter turns (the cube reports every move as a quarter turn, so
 one wrong turn undone counts 2). Only the first `pickup` counts. Moves after `solve_end`, or
-after the solver marks a DNF, are not part of the attempt.
+after the solver marks a DNF, are not part of the attempt. "Mark as solved" (the app telling the
+cube that it is solved, when the cube's own state and the physical cube went apart) drops an attempt
+that has not ended and begins it again, from the solved state, with the same scramble and index: a
+reset never produces a record.
 
 ## 4. CFOP phases
 

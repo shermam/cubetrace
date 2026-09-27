@@ -12,6 +12,18 @@ versions follow [Semantic Versioning](https://semver.org/).
   the scramble, next to the undo list as before; the whole scramble green once it is complete, until
   the solve starts. The demo cube now makes a scramble's half turns as two quarter turns, as a real
   cube does, so the yellow shows in demo mode too (T1.13).
+- "Mark as solved", in the Timer page's Cube section and in the connected cube's details (the pill):
+  it tells the cube that it is solved, for when the cube's own state and the cube in your hands went
+  apart (turns made while it was asleep or disconnected). The attempt under way begins again with
+  its scramble, and nothing is recorded; with the demo cube, the replay stops there (T1.14).
+- A cube left 5 minutes without a turn is disconnected, to save its battery (Settings → Idle cube,
+  0 to 60 minutes, 0 for never); the pill's tooltip and the Timer page say why, and Reconnect takes
+  one click (T1.14).
+- When the cube disconnects by itself, the reason says how long it had gone without a turn and
+  whether the tab was in the background (and that GAN cubes go to sleep, after two minutes), and the
+  browser's console gets one line with the details, to paste into an issue. Back in the tab, a
+  connected cube is asked for its state, so that turns made meanwhile are caught up. The GAN driver
+  now loads right after the page, so that the click on Connect does not wait for it (T1.14).
 
 ### Changed
 

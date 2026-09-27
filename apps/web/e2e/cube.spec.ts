@@ -202,3 +202,24 @@ test('Settings: a MAC address survives a reload; an invalid one is refused', asy
   await expect(list).toContainText('AB:12:CD:34:EF:56');
   await expect(list).not.toContainText('GAN356i3_E2E2');
 });
+
+test('Settings: the idle disconnection is 5 minutes by default, and a new value survives a reload', async ({
+  page,
+}) => {
+  await page.goto('/settings');
+  const idle = page.getByLabel('Disconnect the cube after this many minutes without a turn');
+  await expect(idle).toHaveValue('5');
+
+  await idle.fill('1');
+  await idle.blur();
+  await page.reload();
+  await expect(idle).toHaveValue('1');
+
+  await idle.fill('61');
+  await idle.blur();
+  await expect(page.getByTestId('idle-error')).toHaveText(
+    'The minutes must be a whole number from 0 to 60.',
+  );
+  await page.reload();
+  await expect(idle).toHaveValue('1');
+});
