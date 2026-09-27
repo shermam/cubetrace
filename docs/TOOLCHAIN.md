@@ -20,7 +20,8 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | angular-eslint | 22.5.0 | root `package.json` | provides the `ng lint` builder |
 | Prettier | 3.9.9 (`eslint-config-prettier` 10.1.8) | root `package.json` | |
 | `@types/node` | 22.20.4 | root `package.json` | Node-side TypeScript only (configs, Playwright) |
-| rxjs, tslib | 7.8.2, 2.8.1 | `apps/web/package.json` | Angular runtime dependencies |
+| rxjs, tslib | 7.8.2, 2.8.1 | `apps/web/package.json`; rxjs also `packages/gan/package.json` | Angular runtime dependencies; rxjs is also the type of `CubeConnection.events$` |
+| gan-web-bluetooth (the owner's fork) | 3.0.2 plus 3 commits: git `52417a1` | `packages/gan/package.json` | GAN cube driver, a git dependency pinned to that commit; see "GAN driver" below |
 | `@angular/service-worker` | 22.2.0 | `apps/web/package.json` | added by `ng add @angular/pwa@22.2.0` (T1.7); `@angular/pwa` itself is only the schematic and is not installed |
 | cubing | not installed yet | — | T1.2 adds it; the latest release on 2026-09-27 is 0.63.7 |
 
@@ -149,3 +150,76 @@ adds about 5 seconds to `npm run e2e`.
 
 **Pages are lazy-loaded.** Each route loads its page component on demand, so the initial bundle
 stays small when cubing.js (large) arrives with the Timer page.
+
+## GAN driver
+
+Added by T1.5 on 2026-09-27. `@cubetrace/gan` wraps the owner's fork of the GAN driver,
+[shermam/gan-web-bluetooth](https://github.com/shermam/gan-web-bluetooth) (MIT, by Andy Fedotov;
+the fork is by the owner).
+
+**A git dependency, pinned to commit `52417a1fcbe83a9cb1e76ab959a30a9cf9ffc3cb`** (the fork's
+`main` on 2026-09-27): `"gan-web-bluetooth": "github:shermam/gan-web-bluetooth#52417a1…"` in
+`packages/gan/package.json`. The fork has no build step (plain ES-module JavaScript in `src/`, no
+`prepare` script), so npm installs it as it is: `npm ci` downloads the commit's tarball from
+codeload.github.com, or clones it with git where that host is blocked (the agents' containers;
+checked with an empty npm cache). Vendoring was not needed, and would also have needed the copied
+files excluded from ESLint and Prettier. The fork's `package.json` has no `main` or `exports`, so
+the entry point is imported by path, `gan-web-bluetooth/src/index.js`, and it ships no declaration
+for it (TS7016): `packages/gan/src/driver.ts` types the part of the API the wrapper uses,
+transcribed from the fork's `src/types.d.ts`, and imports the module under one
+`@ts-expect-error`. The import is dynamic, so the driver is a lazy chunk of its own that Chrome
+downloads when a real cube connects (59 kB raw, 19 kB transferred, in the T1.5 check); the service
+worker prefetches it with the other chunks. To update: `npm install
+github:shermam/gan-web-bluetooth#<commit> -w @cubetrace/gan`, compare the fork's `src/types.d.ts`
+with `driver.ts`, run the tests and the hardware checks of `docs/MANUAL-TESTS.md`.
+
+**What the fork changes from upstream** [afedotov/gan-web-bluetooth](https://github.com/afedotov/gan-web-bluetooth)
+3.0.2 (three commits on the 3.0.2 release, May 2026; `git diff 65173e2 52417a1`):
+
+- No dependencies and no build: the TypeScript is rewritten as JavaScript with JSDoc
+  (`src/types.d.ts` keeps the types), the rollup bundle is gone, `aes-js` is copied into
+  `src/aes.js` (a comment in `src/gan-cube-encrypter.js` explains why WebCrypto's AES-CBC could not
+  replace it), and RxJS is replaced by the browser's native Observable API (WICG:
+  `EventTarget.prototype.when()`, `Observable.from`; present in Chromium 141).
+- So `events$` is a cold native Observable: every subscription adds its own
+  `characteristicvaluechanged` listener and runs the stateful protocol decoder again. The wrapper
+  subscribes exactly once and multicasts through an RxJS Subject.
+- The connection has no `disconnect()` and never emits `DISCONNECT`: its stream completes on
+  `gattserverdisconnected`, and the cubes' own "disconnect" messages are ignored instead of
+  closing the link. The wrapper turns the completion into a `disconnected` event, and disconnects
+  by calling `gatt.disconnect()` on the device that the driver passes to the MAC provider.
+- `now()` lost upstream's `process.hrtime` branch for Node; nothing changes in a browser.
+- A regression in the Gen3 driver (GAN356 i Carry 2): `#evictMoveBuffer` pushes nothing
+  (`evictedEvents.push()`), so that cube emits no moves; and the Gen3 and Gen4 `#checkIfMoveMissed`
+  read the head of a move buffer that can be empty. Both of the owner's cubes (GAN 12 ui FreePlay,
+  GAN 356 i3) speak the Gen2 protocol, which the fork leaves unchanged apart from the
+  `DISCONNECT` handling above.
+
+**Timestamps, verified in the fork's source.** Every driver event carries `timestamp`, the
+driver's `now()` when its Bluetooth message arrived: `Math.floor(window.performance.now())` in a
+window, `Date.now()` elsewhere (`src/utils.js`). So `hostMs = performance.timeOrigin + timestamp`
+(up to 1 ms early because of the floor), and `hostMs = timestamp` outside a window
+(`driverTimeToHost` in `connection.ts`). A Gen2 message carries up to seven moves; the driver emits
+them oldest first, all with the message's `timestamp`, and sets `localTimestamp` on the newest only
+(`null` on the others). That is the packet boundary, exposed as `packetLast` on move events
+(`localTimestamp !== null`); the older moves of a packet share its `hostMs`. Moves that the Gen3
+and Gen4 drivers recover after a loss also have `localTimestamp: null`. `cubeTimestamp` (Gen2: the
+driver's running sum of the cube's 16-bit move-to-move deltas) is `cubeMs`; a recovered move
+without one keeps the previous `cubeMs`.
+
+**Connecting.** The Gen2 driver ignores moves until its first `FACELETS` event, so the wrapper
+sends `REQUEST_FACELETS` as soon as the link is up (then `REQUEST_HARDWARE` and `REQUEST_BATTERY`,
+one GATT write at a time, as Chrome requires), and `connectGanCube` resolves with the first valid
+facelets report: asked again after 1.5 s, given up after 5 s (the way a mistyped MAC shows up).
+
+**The Chrome flag.** The fork's README names no flag. The driver reads the MAC address with
+`BluetoothDevice.watchAdvertisements()`, and the author's sample app (linked from the README) asks
+for `chrome://flags/#enable-experimental-web-platform-features`. In Chromium
+(`runtime_enabled_features.json5`, `content/child/runtime_features.cc`), `getDevices()` and
+`watchAdvertisements()` are experimental features that
+`chrome://flags/#enable-web-bluetooth-new-permissions-backend` (Android and desktop) turns on by
+itself. Checked in Chromium 141 on 2026-09-27: with only Web Bluetooth enabled, both are missing;
+adding the `WebBluetoothNewPermissionsBackend` feature exposes both. The support check names that narrower
+flag (the one `docs/USER-ACTIONS.md` names) and uses `navigator.bluetooth.getDevices` to detect
+`watchAdvertisements`, which lives on devices, not on `navigator`. On Linux, Web Bluetooth itself
+needs `#enable-experimental-web-platform-features`.
