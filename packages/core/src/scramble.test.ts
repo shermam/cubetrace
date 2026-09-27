@@ -3,12 +3,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import type { Face, Move, ScrambleProgress } from './index';
+import type { Move, ScrambleProgress } from './index';
 import {
   FACE_ORDER,
   NotationError,
   SOLVED,
   ScrambleTracker,
+  adjacentFaces,
   applyMoves,
   formatMoves,
   generateScramble,
@@ -121,7 +122,7 @@ describe('generateScramble (cubing.js, in a Node worker thread)', () => {
       expect(s).toMatch(SCRAMBLE_TEXT);
       expect(isSolved(scrambleTarget(s)), s).toBe(false);
     }
-    // Random states: twenty equal ones would mean a broken generator.
+    // Random states: two equal scrambles among twenty would mean a broken generator.
     expect(new Set(scrambles).size).toBe(20);
   });
 });
@@ -279,7 +280,8 @@ describe('ScrambleTracker', () => {
       tracker.onMove(m);
     }
     const first = wrongMove(moves.slice(5, 7));
-    const second: Move = { face: opposite(first.face), turns: 3 };
+    // On a face next to the first one's, so that the two do not commute and the order matters.
+    const second: Move = { face: adjacentFaces(first.face)[0], turns: 3 };
     tracker.onMove(first);
     expect(tracker.onMove(second)).toMatchObject({
       matched: 5,
@@ -405,9 +407,8 @@ describe('ScrambleTracker', () => {
 
   it('always reaches the target when a scrambler errs at random and follows the undo guidance', () => {
     const next = random(20260927);
-    const faces: readonly Face[] = FACE_ORDER;
     const randomMove = (): Move => ({
-      face: faces[Math.floor(next() * 6)],
+      face: FACE_ORDER[Math.floor(next() * 6)],
       turns: ([1, 2, 3] as const)[Math.floor(next() * 3)],
     });
     let detours = 0;
@@ -416,14 +417,13 @@ describe('ScrambleTracker', () => {
       const tracker = new ScrambleTracker(s.scramble);
       let madeQuarters = 0;
       let before = tracker.progress;
-      const make = (m: Move): ScrambleProgress => {
+      const make = (m: Move): void => {
         madeQuarters += quarterTurns([m]);
         const progress = tracker.onMove(m);
         expect(progress.matched).toBeGreaterThanOrEqual(before.matched);
         expect(progress.extraMoves).toBeGreaterThanOrEqual(before.extraMoves);
         expect(progress.undo.length > 0).toBe(progress.diverged);
         before = progress;
-        return progress;
       };
       for (let step = 0; !tracker.progress.done; step++) {
         expect(step, s.scramble).toBeLessThan(2000);

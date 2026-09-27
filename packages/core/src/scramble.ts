@@ -7,7 +7,7 @@ import { setSearchDebug } from 'cubing/search';
 import type { Facelets } from './cube';
 import { SOLVED, applyMove, applyMoves, assertFacelets } from './cube';
 import type { Move } from './notation';
-import { NotationError, formatMoves, inverseSequence, parseMoves } from './notation';
+import { NotationError, formatMoves, inverseSequence, parseMoves, quarterTurns } from './notation';
 import { opposite } from './pieces';
 
 /**
@@ -81,8 +81,9 @@ export interface ScrambleProgress {
   diverged: boolean;
   /**
    * Moves to make, in order, to get back to the last state on the scramble path: the inverse of
-   * the moves made since the cube left it, with consecutive turns of one face merged, so that it
-   * shrinks by one as each of its moves is made. Empty when not diverged.
+   * the moves made since the cube left it, consecutive turns of one face merged, so that it gets
+   * shorter as it is followed (making its first move removes it; a half turn made as two quarter
+   * turns becomes a quarter turn first). Empty when not diverged.
    */
   undo: Move[];
   /**
@@ -91,11 +92,6 @@ export interface ScrambleProgress {
    * mistakes and their corrections: one wrong quarter turn undone costs 2.
    */
   extraMoves: number;
-}
-
-/** Quarter turns of one move: a half turn counts 2. */
-function quarters(m: Move): number {
-  return m.turns === 2 ? 2 : 1;
 }
 
 /**
@@ -129,7 +125,7 @@ const NOT_STARTED: Stage = { turn: null, covered: 0, whole: false };
 
 /** Not started, halfway through a half turn (in either direction), or whole. */
 function stagesOf(m: Move): Stage[] {
-  const whole: Stage = { turn: m, covered: quarters(m), whole: true };
+  const whole: Stage = { turn: m, covered: quarterTurns([m]), whole: true };
   if (m.turns !== 2) {
     return [NOT_STARTED, whole];
   }
@@ -184,7 +180,7 @@ export class ScrambleTracker {
     const pathQuarters = [0];
     for (const [k, m] of this.#moves.entries()) {
       expected.push(applyMove(expected[k], m));
-      pathQuarters.push(pathQuarters[k] + quarters(m));
+      pathQuarters.push(pathQuarters[k] + quarterTurns([m]));
     }
     this.#expected = expected;
     this.#pathQuarters = pathQuarters;
@@ -206,7 +202,7 @@ export class ScrambleTracker {
   /** Takes one move of the cube and returns the progress after it (also {@link progress}). */
   onMove(m: Move): ScrambleProgress {
     this.#current = applyMove(this.#current, m);
-    this.#madeQuarters += quarters(m);
+    this.#madeQuarters += quarterTurns([m]);
     const k = this.#matchedIndex();
     if (k !== null) {
       // Back on the path, or further along it: the moves since the last match are discarded.
