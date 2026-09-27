@@ -2,13 +2,13 @@ import { expect, test } from '@playwright/test';
 
 import { demoPath, expectSolves } from './helpers/timer';
 
-// The video quality (docs/PLAN.md, T2.10) with Chrome's fake camera at 30 fps and its fake microphone
-// (the prompts answered "Allow"): High, chosen in Settings, records at 8 Mbps at 1920×1080 and 30 fps,
-// which Camera settings say in the recording's counters; Standard, chosen there, starts the recording
-// again at 4 Mbps and stays across a reload. The fake camera's test pattern takes about 1.2 Mbps
-// whatever the encoder is allowed (docs/TOOLCHAIN.md), so the clips' sizes cannot tell the qualities
-// apart here: the owner's round 2 weighs them on the MacBook (docs/MANUAL-TESTS.md, T2.10). Launch
-// options force a browser of their own for this file.
+// The video quality (docs/PLAN.md, T2.10) with Chrome's fake camera at 30 fps and its fake
+// microphone (the prompts answered "Allow"): High, chosen in Settings, records at 8 Mbps at
+// 1920×1080 and 30 fps, which Camera settings say in the recording's counters; Standard, chosen
+// there, starts the recording again at 4 Mbps and stays across a reload. The fake camera's test
+// pattern takes about 1.2 Mbps whatever the encoder is allowed (docs/TOOLCHAIN.md), so the clips'
+// sizes cannot tell the qualities apart here: the owner's round 2 weighs them on the MacBook
+// (docs/MANUAL-TESTS.md, T2.10). Launch options force a browser of their own for this file.
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],

@@ -29,9 +29,9 @@ export interface VideoQualityOption {
 }
 
 /**
- * The bitrate `quality` gives at the resolution and frame rate asked for. "Best" counts 30 fps, what
- * every camera measured so far delivers at 1080p (docs/DEVICES.md), and "Exactly 60 fps" 60; the
- * encoder takes the frames' real size and rate, which the recording's counters show with its
+ * The bitrate `quality` gives at the resolution and frame rate asked for. "Best" counts 30 fps,
+ * what every camera measured so far delivers at 1080p (docs/DEVICES.md), and "Exactly 60 fps" 60;
+ * the encoder takes the frames' real size and rate, which the recording's counters show with its
  * bitrate.
  */
 export function expectedBitrate(
@@ -59,7 +59,9 @@ export function attemptSizeText(bitsPerSecond: number): string {
   return `≈ ${String(Math.round(attemptBytes(bitsPerSecond) / 1_000_000))} MB per attempt`;
 }
 
-/** The video qualities with their bitrate and size per attempt at the resolution and rate asked for. */
+/**
+ * The video qualities with their bitrate and size per attempt at the resolution and rate asked for.
+ */
 export function videoQualityOptions(
   resolution: CameraResolution,
   rate: CameraFrameRate,

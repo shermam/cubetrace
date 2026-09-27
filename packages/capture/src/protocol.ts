@@ -1,9 +1,9 @@
 // The messages between the window (pipeline.ts), the capture worker (capture-worker.ts) and the clip
 // worker (clip-worker.ts), and the settings and counters they share (docs/PLAN.md, T2.2; the clips
-// of T2.3; the clip worker of T2.4; the sync check's motion of T2.5; the video quality of T2.10). The
-// window starts both workers and gives each an end of a channel between them: the capture worker cuts
-// a clip and moves the cut through it to the clip worker, which muxes and writes it and answers the
-// window. Plain TypeScript: nothing here touches a browser API.
+// of T2.3; the clip worker of T2.4; the sync check's motion of T2.5; the video quality of T2.10).
+// The window starts both workers and gives each an end of a channel between them: the capture
+// worker cuts a clip and moves the cut through it to the clip worker, which muxes and writes it and
+// answers the window. Plain TypeScript: nothing here touches a browser API.
 import type { VideoClip, VideoSegment } from '@cubetrace/core';
 
 import type { VideoQuality } from './bitrate';
@@ -15,9 +15,7 @@ import { DEFAULT_BOUNDS } from './ring-buffer';
 export interface CaptureConfig {
   /** Record the stream's audio track too, when it has one. Default true. */
   readonly audio?: boolean;
-  /**
-   * The video encoder's bitrate (bitrate.ts, `videoBitrate`). Default `standard`: 4 Mbps at 1080p30.
-   */
+  /** The video encoder's bitrate (bitrate.ts). Default `standard`: 4 Mbps at 1080p30. */
   readonly quality?: VideoQuality;
   /** How far back a cut can reach, in seconds of video. Default 90. */
   readonly bufferSeconds?: number;
@@ -54,8 +52,8 @@ export interface CaptureStats {
   /** The video codec in use (`avc1.640028`, `avc1.4d0028` or `vp09.00.40.08`); null before it is chosen. */
   readonly codec: string | null;
   /**
-   * The bitrate the video encoder is configured with, bits per second (`videoBitrate` at the frames'
-   * size and rate and the config's quality); null before the encoder is chosen.
+   * The bitrate the video encoder is configured with, bits per second (`videoBitrate` at the
+   * frames' size and rate and the config's quality); null before the encoder is chosen.
    */
   readonly bitrate: number | null;
   /** `mp4a.40.2`, `opus`, or null: no audio (none asked for, none in the stream, or no encoder). */

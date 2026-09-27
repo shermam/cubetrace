@@ -609,10 +609,10 @@ has checked that it exists: no global declaration, so none can clash with anothe
 **Codecs.** The worker asks `VideoEncoder.isConfigSupported` in this order: H.264 High
 (`avc1.640028`) with `hardwareAcceleration: 'prefer-hardware'` (the platform's encoder or nothing),
 then `'no-preference'`, then H.264 Main (`avc1.4d0028`) the same way, then VP9 (`vp09.00.40.08`,
-`'no-preference'`). Every config asks the bitrate of the start's video quality (T2.10: 4, 8 or
-12 Mbps at 1080p30, 1.5 times as much at 1080p60, in proportion to the pixels at other sizes; before
-T2.10, 8 and 12), `latencyMode: 'quality'` and the frame rate measured from the frames' timestamps
-during the first half second; H.264 adds `avc: {format: 'avc'}`, which puts the
+`'no-preference'`). Every config asks the bitrate of the start's video quality (T2.10: 4, 8 or 12
+Mbps at 1080p30, 1.5 times as much at 1080p60, in proportion to the pixels at other sizes; before
+T2.10, 8 and 12), `latencyMode: 'quality'` and the frame rate measured from the frames'
+timestamps during the first half second; H.264 adds `avc: {format: 'avc'}`, which puts the
 parameter sets in the decoder config's `description`, as MP4 wants them. Audio: AAC-LC
 (`mp4a.40.2`) at 128 kbps and the track's sample rate and channels, else Opus, else none. The
 codecs chosen are in the counters (`codec`, `audioCodec`) and in every cut.
@@ -781,8 +781,7 @@ frame (`docs/MANUAL-TESTS.md`, T2.4).
 **When it records.** While the camera is on and a session is under way, or a cube is connected (the
 first attempt of a new session begins with the connection, and its scramble clip needs the two
 seconds before it in memory), and the storage is under 95% of the quota. A new stream (another
-camera, another resolution) or a change of Settings' "Record audio" or "Video quality" (T2.10)
-starts it again; the camera
+camera, another resolution) or a new "Record audio" or "Video quality" starts it again; the camera
 off, no session and no cube, or storage from 95% stop it. The microphone comes from its own
 `getUserMedia({audio: true})`; a refusal records the video alone and says so. `SessionService`
 emits `milestones$` (an attempt `armed`, `ended` with its record and its end, or `dropped` without a

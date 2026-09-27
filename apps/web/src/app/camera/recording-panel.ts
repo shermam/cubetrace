@@ -201,8 +201,8 @@ export class RecordingPanel {
     return `${video}, ${stats.audioCodec ?? 'no audio'}`;
   });
   /**
-   * What an attempt's clips take at the video quality: at the bitrate recording now, else at the one
-   * Settings' resolution and frame rate give.
+   * What an attempt's clips take at the video quality: at the bitrate recording now, else at the
+   * one Settings' resolution and frame rate give.
    */
   protected readonly estimate = computed(() => {
     const bitrate =

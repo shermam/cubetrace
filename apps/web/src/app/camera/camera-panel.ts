@@ -78,10 +78,10 @@ interface Drag {
  * Edit shows over a larger picture of the camera (mirrored for a front camera, like a mirror; the
  * frames are not; drag the rectangle to move it, drag a corner to resize it, by mouse or touch; the
  * arrow keys move it and Shift + arrows resize it; kept per camera), the sharpness meter, the
- * camera's manual controls, the resolution, frame rate, video quality (T2.10) and audio of Settings,
- * and in plain words why the camera did not open or opened otherwise than asked; below them, the
- * recording (T2.4, `RecordingPanel`), which this panel's `RecordingService` runs from the moment the
- * Timer page loads it.
+ * camera's manual controls, the resolution, frame rate, video quality (T2.10) and audio of
+ * Settings, and in plain words why the camera did not open or opened otherwise than asked; below
+ * them, the recording (T2.4, `RecordingPanel`), which this panel's `RecordingService` runs from the
+ * moment the Timer page loads it.
  *
  * Closed at first; the first time the camera is on it opens by itself, so that its controls are
  * found, and from then on it stays as it was left (Settings keeps it). The larger picture is there

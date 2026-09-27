@@ -1,6 +1,6 @@
 // The capture worker (docs/PLAN.md, T2.2): it reads the camera's frames and the microphone's audio
-// from the streams the window transfers, encodes them with WebCodecs into the ring buffer (the video
-// at the bitrate of the start's quality, T2.10), sends the counters once per second and answers cuts. For a clip (T2.3) it only cuts: since T2.4 the cut
+// from the streams the window transfers, encodes them with WebCodecs into the ring buffer, sends
+// the counters once per second and answers cuts. For a clip (T2.3) it only cuts: since T2.4 the cut
 // moves, with its request, to the clip worker (clip-worker.ts), which muxes and writes it, so that
 // saving a clip never holds up the frames here (docs/TOOLCHAIN.md, "Two workers"). While the window
 // runs a sync check (T2.5), it also measures the motion of every frame in the framing rectangle
@@ -8,6 +8,7 @@
 // capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain TypeScript: no Angular. The
 // encoders, the clock and the timer come in through `WorkerEnvironment`, so the logic also runs in
 // Node's tests with fakes; the last lines wire it to the worker's global scope.
+// It encodes the video at the bitrate of the start's quality (bitrate.ts, T2.10).
 import { videoBitrate, type VideoQuality } from './bitrate';
 import { cut } from './cut';
 import type { FramingRect } from './framing';

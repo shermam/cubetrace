@@ -43,11 +43,10 @@ to create the `v0.2.0` release from GitHub after it.
    are in the page footer.
 2. Go through the sections below in this order: **T2.1** (camera panel), **T2.4** (recording),
    **T2.10** (video quality), **T2.5** (sync check), **T2.7** (layout), then **T2.3** (clips, in the
-   capture lab). Since T2.7,
-   the "Camera section" of the T2.1 and T2.4 items is Camera settings, a disclosure below the Cube
-   section, and the framing rectangle is moved after Framing → Edit. Tick an item when it passes on
-   every row. When it fails or does something unexpected on a row, write the row (such as
-   "ThinkPhone, rear") and what happened next to it.
+   capture lab). Since T2.7, the "Camera section" of the T2.1 and T2.4 items is Camera settings, a
+   disclosure below the Cube section, and the framing rectangle is moved after Framing → Edit. Tick
+   an item when it passes on every row. When it fails or does something unexpected on a row, write
+   the row (such as "ThinkPhone, rear") and what happened next to it.
 3. Every failure becomes a GitHub issue with the row's device, Chrome version, camera and cube, the
    steps, what happened and what was expected (a screenshot, or the console line, when it shows it).
    The known limitations below are expected: report one only if it behaves otherwise than said.
