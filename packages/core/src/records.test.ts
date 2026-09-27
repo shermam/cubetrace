@@ -34,7 +34,10 @@ const VALIDATE = {
 const PARSE = { attempt: parseAttempt, session: parseSession };
 type Kind = keyof typeof PARSE;
 
-/** The exports of the owner's round 1 (fixtures/hardware/), as they are: schema version 1. */
+/**
+ * The owner's exports (fixtures/hardware/), as they are: schema version 1 from round 1 (the GAN 12
+ * ui on the laptop and on the phone) and schema version 2 from the i3 round (with clips).
+ */
 const HARDWARE = (() => {
   const folder = new URL('../../../fixtures/hardware/', import.meta.url);
   return readdirSync(folder)
@@ -42,14 +45,25 @@ const HARDWARE = (() => {
     .sort()
     .map((file) => {
       const json: unknown = JSON.parse(readFileSync(new URL(file, folder), 'utf8'));
+      const session: unknown = Reflect.get(json as object, 'session');
       const attempts: unknown = Reflect.get(json as object, 'attempts');
       return {
         file,
-        session: Reflect.get(json as object, 'session') as unknown,
+        schema: Reflect.get(session as object, 'schema') as unknown,
+        session,
         attempts: Array.isArray(attempts) ? (attempts as unknown[]) : [],
       };
     });
 })();
+
+/** The export whose file name has `name` in it. */
+function hardware(name: string): (typeof HARDWARE)[number] {
+  const found = HARDWARE.find(({ file }) => file.includes(name));
+  if (found === undefined) {
+    throw new Error(`No export of ${name} in fixtures/hardware/.`);
+  }
+  return found;
+}
 
 /** What ajv says of `value`: valid against the schema of the version it claims, or not, and where. */
 function schemaSays(kind: Kind, value: unknown): { valid: boolean; paths: string[] } {
@@ -144,11 +158,13 @@ const CORPUS: [Kind, string, unknown][] = [
   ['attempt', 'a DNF without a move', untouchedAttempt()],
   ['attempt', 'a solved attempt of version 1', asVersion1Attempt(solvedAttempt())],
   ['attempt', 'a DNF of version 1', asVersion1Attempt(dnfAttempt())],
-  ['attempt', 'the first attempt on the laptop', HARDWARE[0].attempts[0]],
+  ['attempt', 'the first attempt on the laptop', hardware('gan12ui').attempts[0]],
+  ['attempt', 'the first attempt of the i3, with its clips', hardware('gan356i3').attempts[0]],
   ['session', 'a session with cameras', sessionWithCamera()],
   ['session', 'a new session', sessionRecord()],
   ['session', 'a session of version 1', asVersion1Session(sessionRecord())],
-  ['session', 'the session on the phone', HARDWARE[1].session],
+  ['session', 'the session on the phone', hardware('thinkphone').session],
+  ['session', 'the session of the i3, with its camera', hardware('gan356i3').session],
 ];
 
 describe('parseAttempt and parseSession', () => {
@@ -192,8 +208,9 @@ describe('parseAttempt and parseSession', () => {
   });
 
   it('read the real-hardware exports of version 1, which upgrade to valid records of version 2', () => {
-    expect(HARDWARE.map(({ attempts }) => attempts.length)).toEqual([12, 3]);
-    for (const { file, session, attempts } of HARDWARE) {
+    const round1 = HARDWARE.filter(({ schema }) => schema === 1);
+    expect(round1.map(({ attempts }) => attempts.length)).toEqual([12, 3]);
+    for (const { file, session, attempts } of round1) {
       expect(VALIDATE.session[1](session), file).toBe(true);
       const s = parseSession(session);
       expect(VALIDATE.session[2](s), JSON.stringify(VALIDATE.session[2].errors)).toBe(true);
@@ -208,6 +225,31 @@ describe('parseAttempt and parseSession', () => {
         expect(VALIDATE.attempt[2](a), JSON.stringify(VALIDATE.attempt[2].errors)).toBe(true);
         expect(a, at).toMatchObject({ schema: 2, session: s.id, clock: null, video: [] });
         expect({ ...a, schema: 1, clock: undefined }, at).toEqual(attempt);
+      }
+    }
+  });
+
+  it('read the real-hardware export of version 2 as it is: a camera, a fit and two clips per attempt', () => {
+    const i3 = HARDWARE.filter(({ schema }) => schema === 2);
+    expect(i3.map(({ file, attempts }) => [file, attempts.length])).toEqual([
+      ['2026-09-27-macbook-pro-2021-gan356i3.json', 5],
+    ]);
+    for (const { file, session, attempts } of i3) {
+      expect(VALIDATE.session[2](session), JSON.stringify(VALIDATE.session[2].errors)).toBe(true);
+      const s = parseSession(session);
+      expect(s, file).toEqual(session);
+      expect(s.cameras.map(({ label }) => label)).toEqual(['laptop']);
+      for (const [k, attempt] of attempts.entries()) {
+        const at = `${file} attempts[${String(k)}]`;
+        expect(VALIDATE.attempt[2](attempt), JSON.stringify(VALIDATE.attempt[2].errors)).toBe(true);
+        const a = parseAttempt(attempt);
+        expect(a, at).toEqual(attempt);
+        expect(a.session, at).toBe(s.id);
+        expect(a.clock, at).not.toBeNull();
+        expect(
+          a.video.map(({ camera, segment }) => `${camera} ${segment}`),
+          at,
+        ).toEqual(['laptop scramble', 'laptop solve']);
       }
     }
   });

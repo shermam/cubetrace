@@ -1,10 +1,12 @@
 /// <reference types="node" />
-// The real-hardware regression of docs/PLAN.md T2.0: the owner's round 1 exports (fixtures/hardware/,
-// schema version 1: a GAN 12 ui FreePlay on a MacBook and on the ThinkPhone, 15 solved attempts)
-// hold the moves on both clocks. Within an attempt the cube's clock runs 0.7% slow, while across the
-// pauses between attempts both clocks advance equally (docs/DEVICES.md): one fit per attempt holds
-// to the Bluetooth jitter, one fit per connection does not. The exports do not say which moves ended
-// their Bluetooth packet, so every move is taken as a sample. Node's types for this file only.
+// The real-hardware regression of docs/PLAN.md T2.0: the owner's exports (fixtures/hardware/) hold
+// the moves on both clocks. Round 1 (schema version 1: a GAN 12 ui FreePlay on a MacBook and on the
+// ThinkPhone, 15 solved attempts): within an attempt the cube's clock runs 0.7% slow, while across
+// the pauses between attempts both clocks advance equally (docs/DEVICES.md), so one fit per attempt
+// holds to the Bluetooth jitter and one fit per connection does not. The i3 round (schema version 2:
+// a GAN 356 i3 on the MacBook, 5 solved attempts with clips) has a cube 0.1% slow and keeps the fit
+// the app made on the day. The round-1 exports do not say which moves ended their Bluetooth packet,
+// so every move is taken as a sample. Node's types for this file only.
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -15,6 +17,8 @@ const FOLDER = new URL('../../../fixtures/hardware/', import.meta.url);
 
 interface Export {
   file: string;
+  /** From the file name: the GAN 12 ui FreePlay of round 1, or the GAN 356 i3 of its round. */
+  cube: 'gan12ui' | 'gan356i3';
   attempts: AttemptRecord[];
 }
 
@@ -27,11 +31,12 @@ const EXPORTS: Export[] = readdirSync(FOLDER)
     if (!Array.isArray(attempts)) {
       throw new Error(`${file}: an export has a list of attempts.`);
     }
-    return { file, attempts: attempts.map((a: unknown) => parseAttempt(a)) };
+    const cube: Export['cube'] = file.includes('gan356i3') ? 'gan356i3' : 'gan12ui';
+    return { file, cube, attempts: attempts.map((a: unknown) => parseAttempt(a)) };
   });
 
-const ATTEMPTS = EXPORTS.flatMap(({ file, attempts }) =>
-  attempts.map((attempt) => ({ at: `${file} #${String(attempt.index)}`, attempt })),
+const ATTEMPTS = EXPORTS.flatMap(({ file, cube, attempts }) =>
+  attempts.map((attempt) => ({ at: `${file} #${String(attempt.index)}`, cube, attempt })),
 );
 
 /** The fit of `moves`, every one of them a sample. */
@@ -56,22 +61,33 @@ const RESIDUAL_P95_MS = 25;
 const PLAN_SLOPE: readonly [number, number] = [1.0069, 1.0072];
 const PLAN_RESIDUAL_P95_MS = 20;
 
+/**
+ * The GAN 356 i3's clock runs 0.1% slow (docs/DEVICES.md): the five attempts of its round fit
+ * slopes of 1.00096 to 1.00170, with a 95th percentile of the absolute residuals of 17.9 to 22.0 ms.
+ */
+const I3_SLOPE: readonly [number, number] = [1.0008, 1.002];
+
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((p, q) => p - q);
   return sorted[Math.floor(sorted.length / 2)];
 }
 
 describe('the cube clock of the real-hardware exports (fixtures/hardware)', () => {
-  it('has the two exports of round 1, with 15 solved attempts', () => {
-    expect(EXPORTS.map(({ file, attempts }) => [file, attempts.length])).toEqual([
-      ['2026-09-27-macbook-pro-2021-gan12ui.json', 12],
-      ['2026-09-27-thinkphone-gan12ui.json', 3],
+  it('has the two exports of round 1 and the one of the i3 round, 20 solved attempts', () => {
+    expect(EXPORTS.map(({ file, cube, attempts }) => [file, cube, attempts.length])).toEqual([
+      ['2026-09-27-macbook-pro-2021-gan12ui.json', 'gan12ui', 12],
+      ['2026-09-27-macbook-pro-2021-gan356i3.json', 'gan356i3', 5],
+      ['2026-09-27-thinkphone-gan12ui.json', 'gan12ui', 3],
     ]);
     expect(ATTEMPTS.every(({ attempt }) => attempt.result.status === 'solved')).toBe(true);
   });
 
-  it('fits every attempt with the cube 0.7% slow, to the Bluetooth jitter', () => {
-    const fits = ATTEMPTS.map(({ at, attempt }) => ({ at, fit: fitOf(attempt.moves) }));
+  it('fits every attempt of the 12 ui with the cube 0.7% slow, to the Bluetooth jitter', () => {
+    const fits = ATTEMPTS.filter(({ cube }) => cube === 'gan12ui').map(({ at, attempt }) => ({
+      at,
+      fit: fitOf(attempt.moves),
+    }));
+    expect(fits).toHaveLength(15);
     console.log(
       fits
         .map(
@@ -89,6 +105,19 @@ describe('the cube clock of the real-hardware exports (fixtures/hardware)', () =
     expect(slope).toBeGreaterThanOrEqual(PLAN_SLOPE[0]);
     expect(slope).toBeLessThanOrEqual(PLAN_SLOPE[1]);
     expect(median(fits.map(({ fit }) => fit.residualP95Ms))).toBeLessThan(PLAN_RESIDUAL_P95_MS);
+  });
+
+  it('fits every attempt of the GAN 356 i3 with the cube 0.1% slow, to the same jitter', () => {
+    const fits = ATTEMPTS.filter(({ cube }) => cube === 'gan356i3').map(({ at, attempt }) => ({
+      at,
+      fit: fitOf(attempt.moves),
+    }));
+    expect(fits).toHaveLength(5);
+    for (const { at, fit } of fits) {
+      expect(fit.a, at).toBeGreaterThanOrEqual(I3_SLOPE[0]);
+      expect(fit.a, at).toBeLessThanOrEqual(I3_SLOPE[1]);
+      expect(fit.residualP95Ms, at).toBeLessThan(RESIDUAL_P95_MS);
+    }
   });
 
   it("misses by hundreds of ms with one fit over a whole connection: the laptop's attempts 2 to 12", () => {
@@ -132,9 +161,22 @@ describe('the cube clock of the real-hardware exports (fixtures/hardware)', () =
       const record = machine.toRecord();
       expect(record.result.timeMs, at).toBe(attempt.result.timeMs);
       expect(record.result.movesQtm, at).toBe(attempt.result.movesQtm);
-      // Everything else as recorded on the day, too: events, phases, the whole result.
-      expect({ ...record, clock: null }, at).toEqual(attempt);
-      expect(record.clock, at).toEqual(fitOf(attempt.moves));
+      // Everything else as recorded on the day, too: events, phases, the whole result. The clips
+      // of a schema-2 export are the camera's, not the machine's.
+      expect({ ...record, clock: null, video: [] }, at).toEqual({
+        ...attempt,
+        clock: null,
+        video: [],
+      });
+      const fit = fitOf(attempt.moves);
+      expect(record.clock, at).toEqual(fit);
+      // A schema-2 export keeps the fit the app made on the day. On the i3 every move ended its
+      // Bluetooth packet (one move per notification), so that fit has every move as a sample and is
+      // this one.
+      if (attempt.clock !== null) {
+        expect(attempt.clock.samples, at).toBe(attempt.moves.length);
+        expect(attempt.clock, at).toEqual(fit);
+      }
     }
   });
 });

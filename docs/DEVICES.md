@@ -48,7 +48,7 @@ Both devices with the GAN 12 ui FreePlay, which reports model `uiFp 138`, hardwa
 firmware `8.62`, gyroscope present. 12 solves on the laptop (mean 17.2 s) and 3 on the phone
 (mean 18.9 s): every attempt solved, eight phases, `replayOk`, cross on `U`, a pickup detected
 from the gyroscope on every attempt (inspection 2.2–6.8 s). Both exports validate against the
-schemas. The GAN 356 i3 was flat and is still to be tested.
+schemas. The GAN 356 i3 was flat that morning; its round is below.
 
 What the exports show about the cube's clock (a fit of host time on cube time, per attempt and per
 session, over all 1,802 moves; `fixtures/hardware/README.md`):
@@ -73,7 +73,9 @@ its `hostMs` anyway, and the session-level `clock.cube` of schema 1 stays as a c
 string `GANi3I1w`, hardware `0.1`, firmware `7.76`, gyroscope present. Five solves; per-attempt
 clock slopes 1.0010–1.0017 (this cube's clock runs about 0.1% slow, against the 12 ui's 0.7%:
 the rate is a property of the cube), residual p95 18–22 ms (a little more jitter than the 12 ui's
-13–15 ms), a pickup on every attempt.
+13–15 ms), a pickup on every attempt. Every move of the five attempts ended its Bluetooth packet
+(one move per notification, 556 of 556), so the recorded fits have every move as a sample and
+`clock-hardware.test.ts` reproduces them exactly by replaying the export.
 
 ## First recordings (2026-09-27, MacBook Pro 2021, FaceTime camera)
 
