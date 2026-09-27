@@ -186,6 +186,60 @@ export function polyfillDialog(): void {
   });
 }
 
+/**
+ * `performance` for the host clock: `timeOrigin` plus the milliseconds that the test has advanced.
+ * `hostMs` is the value the app reads as its host time.
+ */
+export class FakePerformance {
+  readonly timeOrigin: number;
+  private elapsed = 0;
+
+  constructor(timeOrigin = 1_790_000_000_000) {
+    this.timeOrigin = timeOrigin;
+  }
+
+  readonly now = (): number => this.elapsed;
+
+  /** The host time now: `timeOrigin + now()`. */
+  get hostMs(): number {
+    return this.timeOrigin + this.elapsed;
+  }
+
+  advance(ms: number): void {
+    this.elapsed += ms;
+  }
+}
+
+/** `requestAnimationFrame`: callbacks wait until the test runs a frame with `frame()`. */
+export class FakeAnimationFrames {
+  private nextHandle = 1;
+  private readonly pending = new Map<number, FrameRequestCallback>();
+
+  readonly request = (callback: FrameRequestCallback): number => {
+    const handle = this.nextHandle++;
+    this.pending.set(handle, callback);
+    return handle;
+  };
+
+  readonly cancel = (handle: number): void => {
+    this.pending.delete(handle);
+  };
+
+  /** How many callbacks wait for the next frame. */
+  get waiting(): number {
+    return this.pending.size;
+  }
+
+  /** Runs the callbacks requested before this frame (those they request wait for the next). */
+  frame(timestamp = 0): void {
+    const callbacks = [...this.pending.values()];
+    this.pending.clear();
+    for (const callback of callbacks) {
+      callback(timestamp);
+    }
+  }
+}
+
 /** Lets pending promises and timers run. */
 export function settle(): Promise<void> {
   return new Promise((resolve) => {
