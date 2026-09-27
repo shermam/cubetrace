@@ -19,6 +19,9 @@ __screenshots__/
 npm-debug.log*
 yarn-error.log*
 
+# Generated before every build (apps/web/scripts/write-version.mts)
+apps/web/src/environments/version.ts
+
 # Local environment (never commit secrets)
 .env
 .env.*
