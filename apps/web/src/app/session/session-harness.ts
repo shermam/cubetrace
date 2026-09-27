@@ -53,6 +53,8 @@ export function setup(
     store?: SessionStore;
     localStorage?: FakeLocalStorage;
     scrambles?: string[];
+    /** The navigator's Web Bluetooth; default Chrome with the flag on (`bluetoothNavigator(true)`). */
+    navigator?: Partial<Navigator>;
     /** More providers, such as a stand-in for the scramble picture's loader. */
     providers?: Provider[];
   } = {},
@@ -71,7 +73,7 @@ export function setup(
       {
         provide: BROWSER_GLOBALS,
         useValue: {
-          navigator: { ...bluetoothNavigator(true), wakeLock, storage },
+          navigator: { ...(opts.navigator ?? bluetoothNavigator(true)), wakeLock, storage },
           localStorage,
           performance: perf,
           requestAnimationFrame: frames.request,
