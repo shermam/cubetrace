@@ -452,3 +452,87 @@ describe('ScrambleTracker', () => {
     expect(detours).toBeGreaterThan(300);
   });
 });
+
+describe('ScrambleTracker.setState (resync with the state the cube reports)', () => {
+  const scramble = "F2 U2 R B2 D' L B' L' B U2 L2 F2 U F2 U R2 D2 B2 U' L2 D'";
+  const moves = parseMoves(scramble);
+  const total = moves.length;
+  /** The state after the first `k` moves of the scramble. */
+  const after = (k: number): string => applyMoves(SOLVED, moves.slice(0, k));
+
+  it('jumps ahead to a later state on the path, and the scramble goes on from there', () => {
+    const tracker = new ScrambleTracker(scramble);
+    for (const m of moves.slice(0, 3)) {
+      tracker.onMove(m);
+    }
+    expect(tracker.setState(after(7))).toEqual({ ...NOTHING_YET, matched: 7, total });
+    expect(tracker.state).toBe(after(7));
+    for (const m of moves.slice(7)) {
+      tracker.onMove(m);
+    }
+    expect(tracker.progress).toEqual({ ...NOTHING_YET, matched: total, total, done: true });
+  });
+
+  it('is done when the reported state is the target', () => {
+    const tracker = track(scramble, 'F2');
+    const progress = tracker.setState(scrambleTarget(scramble));
+    expect(progress).toEqual({ ...NOTHING_YET, matched: total, total, done: true });
+    expect(tracker.progress).toBe(progress);
+  });
+
+  it('off the path: diverged with an empty undo and extraMoves unchanged, until a move brings it back', () => {
+    const tracker = track('R U F', 'R');
+    const off = applyMoves(SOLVED, parseMoves('R B'));
+    expect(tracker.setState(off)).toEqual({ ...NOTHING_YET, matched: 1, total: 3, diverged: true });
+    // Moves made while the way back is unknown build no undo either.
+    expect(tracker.onMove(parseMove('L'))).toMatchObject({ diverged: true, undo: [] });
+    expect(tracker.onMove(parseMove("L'"))).toMatchObject({ diverged: true, undo: [] });
+    // B' leads back to the state after R: on the path again; only the seen moves are counted.
+    expect(tracker.onMove(parseMove("B'"))).toEqual({
+      ...NOTHING_YET,
+      matched: 1,
+      total: 3,
+      extraMoves: 3,
+    });
+    tracker.onMove(parseMove('U'));
+    expect(tracker.onMove(parseMove('F')).done).toBe(true);
+  });
+
+  it('keeps extraMoves when the reported state puts a diverged cube back on the path', () => {
+    const tracker = track('R U F', 'R B');
+    expect(tracker.progress).toMatchObject({ diverged: true, extraMoves: 1 });
+    expect(tracker.setState(applyMoves(SOLVED, parseMoves('R U')))).toEqual({
+      ...NOTHING_YET,
+      matched: 2,
+      total: 3,
+      extraMoves: 1,
+    });
+  });
+
+  it('treats a state halfway through a half turn as on the path, as onMove does', () => {
+    const tracker = track("R U2 F'", 'R');
+    expect(tracker.setState(applyMoves(SOLVED, parseMoves('R U')))).toEqual({
+      ...NOTHING_YET,
+      matched: 1,
+      total: 3,
+    });
+    expect(tracker.onMove(parseMove('U')).matched).toBe(2);
+  });
+
+  it('searches from the last matched state on: an earlier state of the path is off it', () => {
+    const tracker = new ScrambleTracker(scramble);
+    for (const m of moves.slice(0, 5)) {
+      tracker.onMove(m);
+    }
+    expect(tracker.setState(after(2))).toEqual({
+      ...NOTHING_YET,
+      matched: 5,
+      total,
+      diverged: true,
+    });
+  });
+
+  it('rejects a state that is not a cube state', () => {
+    expect(() => new ScrambleTracker('R U').setState(SOLVED.slice(1))).toThrow(/^Invalid facelets/);
+  });
+});
