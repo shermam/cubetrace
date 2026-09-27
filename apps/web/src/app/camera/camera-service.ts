@@ -157,6 +157,8 @@ export class CameraService {
   private readonly streamSignal = signal<MediaStream | null>(null);
   private readonly labelSignal = signal('');
   private readonly settingsSignal = signal<JsonObject | null>(null);
+  /** The settings as the camera opened, before any control: its automatic modes. */
+  private readonly openingSettingsSignal = signal<JsonObject | null>(null);
   private readonly capabilitiesSignal = signal<JsonObject | null>(null);
   private readonly sharpnessSignal = signal<number | null>(null);
   private readonly sharpnessSamplesSignal = signal(0);
@@ -180,11 +182,15 @@ export class CameraService {
   readonly settings = this.settingsSignal.asReadonly();
   /** The open camera's `getCapabilities()` as JSON. */
   readonly capabilities = this.capabilitiesSignal.asReadonly();
-  /** The manual controls the open camera has; null while none is open. */
+  /**
+   * The manual controls the open camera has; null while none is open. The modes include those the
+   * camera opened in: an automatic focus that a camera does not list stays one to go back to after
+   * a switch to manual (the ThinkPhone's front camera).
+   */
   readonly controls = computed(() => {
     const capabilities = this.capabilitiesSignal();
-    const settings = this.settingsSignal();
-    return capabilities === null ? null : controlsOf(capabilities, settings ?? undefined);
+    const opening = this.openingSettingsSignal();
+    return capabilities === null ? null : controlsOf(capabilities, opening ?? undefined);
   });
   /** The controls' current values, as the camera reports them. */
   readonly values = computed<ControlValues>(() => {
@@ -581,6 +587,7 @@ export class CameraService {
     };
     this.labelSignal.set(track.label);
     this.takeSnapshot(track);
+    this.openingSettingsSignal.set(this.settingsSignal());
     const deviceId = track.getSettings().deviceId;
     if (typeof deviceId === 'string' && deviceId !== '') {
       this.prefs.setCameraPick(this.prefs.hostLabel(), deviceId, track.label);
@@ -624,6 +631,7 @@ export class CameraService {
     this.streamSignal.set(null);
     this.labelSignal.set('');
     this.settingsSignal.set(null);
+    this.openingSettingsSignal.set(null);
     this.capabilitiesSignal.set(null);
     this.sharpnessSignal.set(null);
     this.sharpnessSamplesSignal.set(0);

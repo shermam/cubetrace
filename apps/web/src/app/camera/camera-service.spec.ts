@@ -427,6 +427,8 @@ describe('CameraService', () => {
     await front.start();
     await front.setControl('focusDistance', 0.5);
     expect(front.values()).toMatchObject({ focusMode: 'manual', focusDistance: 0.5 });
+    // Automatic focus, which it opened in, stays one to choose.
+    expect(front.controls()?.focusModes).toEqual(['continuous', 'manual']);
     await front.setControl('focusMode', 'continuous');
     expect(media.tracks).toHaveLength(2);
     expect(media.tracks[0].readyState).toBe('ended');
