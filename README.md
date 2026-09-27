@@ -198,7 +198,7 @@ packages/capture/  @cubetrace/capture: the camera and the recording
   src/capture-worker.ts, ring-buffer.ts, cut.ts   the capture worker: the encoders, the last 90 s in memory, the cuts
   src/clip-worker.ts, mux.ts, clip-writer.ts      the clip worker: MP4 muxing with mediabunny, the files written into OPFS
   src/motion.ts, clapperboard.ts            the sync check: the motion in the framing rectangle, and the lag it gives
-fixtures/          real solves and cube identities, the tests' reference data (read-only); fixtures/media/: an encoded second of video
+fixtures/          real solves, cube identities, the round 1 exports (hardware/) and a second of encoded video (media/): the tests' reference data (read-only)
 docs/              plan, architecture, data model, toolchain, manual tests, devices, owner's actions, changelog, screenshots
 ```
 
@@ -212,6 +212,7 @@ The packages are plain TypeScript, tested in Node, and never import Angular.
 - [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md): the JSON the app produces
 - [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md): versions, commands and toolchain decisions
 - [`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md): checks that need a real cube or phone
+- [`docs/DEVICES.md`](docs/DEVICES.md): what the owner's devices and their cameras can do, measured
 - [`docs/USER-ACTIONS.md`](docs/USER-ACTIONS.md): things only the owner can do
 - [`docs/CHANGELOG.md`](docs/CHANGELOG.md): what each version changed
 

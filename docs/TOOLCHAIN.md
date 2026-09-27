@@ -485,8 +485,8 @@ before T2.4 (47 tests), the recording flow alone taking about 30 s. With T2.5 an
 tests and took 2.7 min in CI (2 min 43 s for the `npm run e2e` step, on `main` at 21c7bca) and
 2.8 min locally (2 min 50 s with the servers). With T2.6's two flows and the `encoding` project it
 has 57 tests and took 2.8, 2.9 and 2.9 min locally in three runs in a row on 2026-09-27 (2 min 52 s
-to 2 min 58 s with the servers); the specs that record take 132 to 135 s of it, one after the
-other.
+to 2 min 58 s with the servers), and 2.8 min in CI (2 min 50 s for the `npm run e2e` step) in
+its pull request's first run; the specs that record take 132 to 135 s of it, one after the other.
 
 ## packages/capture
 

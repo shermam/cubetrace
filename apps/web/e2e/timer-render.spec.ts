@@ -37,7 +37,8 @@ const KEY = '__cubetraceFirstRender';
 /**
  * On every page load from now on, records the first animation frame at which the clock (the time,
  * with its text), the first row of the solve list and the camera's preview are on the page with a
- * size, on the clock of `performance.now()`.
+ * size, on the clock of `performance.now()`; and leaves the page without MediaStreamTrackProcessor,
+ * so that it does not record.
  */
 async function stampFirstRender(page: Page): Promise<void> {
   await page.addInitScript((key: string) => {
