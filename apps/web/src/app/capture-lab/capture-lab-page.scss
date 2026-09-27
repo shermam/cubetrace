@@ -100,3 +100,12 @@ pre {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
 }
+
+video {
+  display: block;
+  width: 100%;
+  max-width: 40rem;
+  margin-top: var(--space-3);
+  border-radius: var(--radius);
+  background: #000;
+}

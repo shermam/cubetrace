@@ -119,6 +119,18 @@ describe('transferList', () => {
     const others: CaptureMessage[] = [
       { type: 'cut', id: 1, startHostMs: 0, endHostMs: 1 },
       { type: 'cut-failed', id: 1, message: 'Nothing is buffered yet.' },
+      {
+        type: 'mux-and-write',
+        id: 2,
+        startHostMs: 0,
+        endHostMs: 1,
+        sessionId: 'a',
+        index: 1,
+        camera: 'laptop',
+        segment: 'solve',
+        fpsNominal: 30,
+      },
+      { type: 'mux-and-write-failed', id: 2, message: 'Nothing is buffered yet.' },
       { type: 'stop' },
       { type: 'stopped' },
       { type: 'error', message: 'The camera stopped sending frames.', fatal: true },
@@ -178,9 +190,13 @@ describe('message guards', () => {
   it('tell the messages of each direction apart', () => {
     expect(isWindowToWorker({ type: 'cut', id: 1, startHostMs: 0, endHostMs: 1 })).toBe(true);
     expect(isWindowToWorker({ type: 'stop' })).toBe(true);
+    expect(isWindowToWorker({ type: 'mux-and-write' })).toBe(true);
     expect(isWindowToWorker({ type: 'stats' })).toBe(false);
     expect(isWorkerToWindow({ type: 'stats' })).toBe(true);
     expect(isWorkerToWindow({ type: 'cut-done' })).toBe(true);
+    expect(isWorkerToWindow({ type: 'mux-and-write-done' })).toBe(true);
+    expect(isWorkerToWindow({ type: 'mux-and-write-failed' })).toBe(true);
+    expect(isWorkerToWindow({ type: 'mux-and-write' })).toBe(false);
     expect(isWorkerToWindow({ type: 'stopped' })).toBe(true);
     expect(isWorkerToWindow({ type: 'start' })).toBe(false);
     for (const other of [null, undefined, 'stop', 3, {}, { type: 3 }, []]) {

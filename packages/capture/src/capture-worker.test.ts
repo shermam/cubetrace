@@ -1,3 +1,7 @@
+import { ATTEMPT_SCHEMA, type VideoClip } from '@cubetrace/core';
+import { FakeDirectoryHandle } from '@cubetrace/storage';
+import { Ajv2020 } from 'ajv/dist/2020';
+import { ALL_FORMATS, BufferSource, Input } from 'mediabunny';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -17,8 +21,10 @@ import {
   resolveCaptureConfig,
   transferList,
   type CaptureStats,
+  type MuxAndWriteRequest,
   type WorkerToWindow,
 } from './protocol';
+import { readMediaSample } from './test-media';
 
 // The worker's loop with fake encoders, fake frames and a fake clock: a 30 fps camera whose
 // timestamps are on a capture clock (µs) and whose frames arrive in the worker at a constant offset
@@ -74,6 +80,8 @@ class FakeVideoEncoder {
   static supported = new Set<string>();
   static instances: FakeVideoEncoder[] = [];
   static asked: VideoEncoderConfig[] = [];
+  /** The chunks' duration: null, or 0 as Chrome gives chunks of frames without a duration. */
+  static chunkDuration: number | null = null;
 
   static isConfigSupported(config: VideoEncoderConfig): Promise<{ supported: boolean }> {
     FakeVideoEncoder.asked.push(config);
@@ -108,7 +116,7 @@ class FakeVideoEncoder {
     const chunk = new FakeChunk(
       keyFrame ? 'key' : 'delta',
       frame.timestamp,
-      null,
+      FakeVideoEncoder.chunkDuration,
       keyFrame ? 50 : 10,
     );
     if (this.holdOutput) {
@@ -238,6 +246,8 @@ function settle(): Promise<void> {
 
 interface Harness {
   readonly worker: CaptureWorker;
+  /** The origin private file system the worker writes clips into. */
+  readonly root: FakeDirectoryHandle;
   readonly video: Source<FrameLike>;
   readonly audio: Source<AudioLike>;
   readonly posted: WorkerToWindow[];
@@ -255,6 +265,7 @@ function harness(options: { audio?: boolean; frameRate?: number | null } = {}): 
   const posted: WorkerToWindow[] = [];
   let tick: (() => void) | undefined;
   const state = { now: arrivalOf(0) - 1 };
+  const root = new FakeDirectoryHandle('', { syncAccessHandle: true });
   const env: WorkerEnvironment = {
     VideoEncoder: FakeVideoEncoder,
     AudioEncoder: FakeAudioEncoder,
@@ -269,6 +280,7 @@ function harness(options: { audio?: boolean; frameRate?: number | null } = {}): 
         tick = undefined;
       };
     },
+    opfsRoot: () => Promise.resolve(root),
   };
   const worker = new CaptureWorker(env);
   const video = new Source<FrameLike>();
@@ -282,6 +294,7 @@ function harness(options: { audio?: boolean; frameRate?: number | null } = {}): 
   );
   return {
     worker,
+    root,
     video,
     audio,
     posted,
@@ -333,6 +346,7 @@ beforeEach(() => {
   FakeVideoEncoder.supported = new Set(['vp09.00.40.08 no-preference']);
   FakeVideoEncoder.instances = [];
   FakeVideoEncoder.asked = [];
+  FakeVideoEncoder.chunkDuration = null;
   FakeAudioEncoder.supported = new Set(['opus']);
   FakeAudioEncoder.instances = [];
   FakeAudioEncoder.frameUs = 21_333;
@@ -486,6 +500,17 @@ describe('CaptureWorker', () => {
     expect(capture.worker.buffer.video[0].durationUs).toBe(33_333);
     // The bytes are the chunk's, copied out once.
     expect([...new Uint8Array(capture.worker.buffer.video[0].data)]).toEqual(Array(50).fill(1));
+  });
+
+  it('gives the chunks of frames without a duration one frame interval, where Chrome says 0', async () => {
+    FakeVideoEncoder.chunkDuration = 0;
+    const capture = harness();
+    await capture.feed(0, 20);
+
+    expect(capture.worker.buffer.video.map((chunk) => chunk.durationUs)).toEqual(
+      Array(6).fill(33_333),
+    );
+    expect(capture.worker.buffer.bufferSeconds).toBeCloseTo(6 / 30, 3);
   });
 
   it("keeps the encoder's decoder config with the buffer, its description copied", async () => {
@@ -667,5 +692,177 @@ describe('CaptureWorker', () => {
       type: 'key',
       timestampUs: timestampOf(41),
     });
+  });
+});
+
+describe('CaptureWorker saving clips', () => {
+  const SESSION = '3f1c2b7e-8a4d-4f2e-9b1a-0c5d6e7f8a9b';
+
+  /**
+   * A worker whose buffer holds the recorded sample (fixtures/media/), pushed as its encoders would
+   * have, and a file system with the session's folder.
+   */
+  async function sampleWorker() {
+    const root = new FakeDirectoryHandle('', { syncAccessHandle: true });
+    await root.plant(`sessions/${SESSION}/session.json`, '{}');
+    const posted: WorkerToWindow[] = [];
+    const worker = new CaptureWorker({
+      VideoEncoder: undefined,
+      AudioEncoder: undefined,
+      now: () => 0,
+      post: (message) => {
+        transferList(message);
+        posted.push(message);
+      },
+      every: () => () => undefined,
+      opfsRoot: () => Promise.resolve(root),
+    });
+    const sample = readMediaSample();
+    const buffer = worker.buffer;
+    const { chunks: video, decoderConfig: videoConfig, ...videoTrack } = sample.video;
+    buffer.setVideoTrack(videoTrack);
+    if (videoConfig !== null) {
+      buffer.setVideoDecoderConfig(videoConfig);
+    }
+    const audio = sample.audio;
+    if (audio !== null) {
+      const { codec, sampleRate, numberOfChannels, decoderConfig } = audio;
+      buffer.setAudioTrack({ codec, sampleRate, numberOfChannels });
+      if (decoderConfig !== null) {
+        buffer.setAudioDecoderConfig(decoderConfig);
+      }
+    }
+    for (const chunk of [...video, ...(audio?.chunks ?? [])].sort(
+      (p, q) => p.timestampUs - q.timestampUs,
+    )) {
+      buffer.push(chunk);
+    }
+    const request = (
+      id: number,
+      changes: Partial<MuxAndWriteRequest> = {},
+    ): MuxAndWriteRequest => ({
+      type: 'mux-and-write',
+      id,
+      startHostMs: sample.startHostMs,
+      endHostMs: sample.endHostMs,
+      sessionId: SESSION,
+      index: 3,
+      camera: 'laptop',
+      segment: 'solve',
+      fpsNominal: 30,
+      ...changes,
+    });
+    return { worker, posted, root, sample, request };
+  }
+
+  function clipOf(message: WorkerToWindow | undefined): VideoClip {
+    if (message?.type !== 'mux-and-write-done') {
+      throw new Error(`expected a clip, got ${JSON.stringify(message)}`);
+    }
+    return message.clip;
+  }
+
+  it('cuts, muxes and writes the clip into the attempt folder, and answers with its video[] entry', async () => {
+    const { worker, posted, root, sample, request } = await sampleWorker();
+
+    await worker.muxAndWrite(request(1));
+
+    const clip = clipOf(posted.at(-1));
+    expect(posted.at(-1)).toMatchObject({ id: 1 });
+    const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
+    ajv.addSchema(ATTEMPT_SCHEMA);
+    const validate = ajv.getSchema(`${String(ATTEMPT_SCHEMA['$id'])}#/$defs/clip`);
+    expect(validate?.(clip), JSON.stringify(validate?.errors)).toBe(true);
+    expect(clip).toMatchObject({
+      camera: 'laptop',
+      segment: 'solve',
+      file: 'laptop.solve.mp4',
+      codec: 'vp09.00.40.08',
+      audio: 'opus',
+      width: 1920,
+      height: 1080,
+      fpsNominal: 30,
+      frames: sample.video.chunks.length,
+      firstFrameHostMs: sample.frames.t0HostMs,
+      framesFile: 'laptop.solve.frames.json',
+      crop: null,
+      syncResidualMs: null,
+    });
+    const folder = `sessions/${SESSION}/attempts/0003`;
+    const mp4 = root.files().get(`${folder}/laptop.solve.mp4`)?.bytes;
+    expect(mp4?.length).toBe(clip.bytes);
+    const input = new Input({
+      source: new BufferSource(mp4 ?? new Uint8Array(0)),
+      formats: ALL_FORMATS,
+    });
+    const videoTrack = await input.getPrimaryVideoTrack();
+    expect((await videoTrack?.computePacketStats())?.packetCount).toBe(clip.frames);
+    expect(
+      JSON.parse(root.files().get(`${folder}/laptop.solve.frames.json`)?.text ?? ''),
+    ).toMatchObject({ camera: 'laptop', segment: 'solve', dtMs: sample.frames.dtMs });
+    // The buffer's own bytes were muxed, neither copied into the answer nor moved away.
+    expect(transferList(posted[0])).toEqual([]);
+    expect(worker.buffer.video.every((chunk) => chunk.data.byteLength === chunk.byteLength)).toBe(
+      true,
+    );
+  });
+
+  it('says why when there is no clip: nothing buffered, the start older than the buffer, no session folder', async () => {
+    const { worker, posted, sample, request } = await sampleWorker();
+    const empty = new CaptureWorker({
+      VideoEncoder: undefined,
+      AudioEncoder: undefined,
+      now: () => 0,
+      post: (message) => posted.push(message),
+      every: () => () => undefined,
+      opfsRoot: () => Promise.reject(new Error('unused')),
+    });
+
+    await empty.muxAndWrite(request(1));
+    await worker.muxAndWrite(request(2, { startHostMs: sample.startHostMs - 60_000 }));
+    await worker.muxAndWrite(request(3, { sessionId: 'gone' }));
+    await worker.muxAndWrite(request(4, { camera: 'Laptop' }));
+
+    expect(posted).toEqual([
+      { type: 'mux-and-write-failed', id: 1, message: 'RangeError: Nothing is buffered yet.' },
+      {
+        type: 'mux-and-write-failed',
+        id: 2,
+        message: expect.stringMatching(
+          /^Error: Cannot mux a cut whose start is older than the buffer \(truncatedStart\)/,
+        ) as unknown,
+      },
+      {
+        type: 'mux-and-write-failed',
+        id: 3,
+        message: 'Error: No session gone: its folder is missing.',
+      },
+      {
+        type: 'mux-and-write-failed',
+        id: 4,
+        message: expect.stringMatching(/^RangeError: "Laptop" is not a camera label/) as unknown,
+      },
+    ]);
+  });
+
+  it('saves the clips one at a time, in the order asked, and stops once they are written', async () => {
+    const { worker, posted, root, request } = await sampleWorker();
+
+    worker.handle(request(1, { segment: 'scramble' }));
+    worker.handle(request(2));
+    await worker.stop();
+
+    // The cuts were taken when asked: the buffer emptied by the stop did not change them.
+    expect(worker.buffer.video).toEqual([]);
+
+    expect(posted.map((message) => [message.type, 'id' in message ? message.id : null])).toEqual([
+      ['mux-and-write-done', 1],
+      ['mux-and-write-done', 2],
+      ['stopped', null],
+    ]);
+    expect([...root.files().keys()].filter((path) => path.endsWith('.mp4')).sort()).toEqual([
+      `sessions/${SESSION}/attempts/0003/laptop.scramble.mp4`,
+      `sessions/${SESSION}/attempts/0003/laptop.solve.mp4`,
+    ]);
   });
 });

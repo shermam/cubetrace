@@ -216,3 +216,17 @@ Chrome's version and what the panel said (the Track and Measured lines, the shar
   setting instead.
 - [ ] Another app holding the camera (a video call on the laptop): Turn on says the camera is in use
   by another app.
+
+## T2.3 — clips
+
+On https://shermam.github.io/cubetrace/capture-lab, on the MacBook's FaceTime camera and on both
+ThinkPhone cameras (Playwright's Chromium in CI encodes VP9 and Opus only, so H.264 and AAC clips are
+muxed nowhere else). Next to each item, write the device, the camera and Chrome's version.
+
+- [ ] Start, wait 5 s, "Mux and save the last 3 s": the status says Saved with the number of frames;
+  "Last clip" lists `lab.solve.frames.json` and `lab.solve.mp4`; the video plays the camera's
+  picture with its sound, upright on the phone held upright; the line under it says the video
+  element's duration and the frames file's, about the same. In the JSON, write down `codec` (H.264,
+  `avc1.640028` or `avc1.4d0028`, expected on both devices) and `audio` (`mp4a.40.2` or `opus`).
+- [ ] Cut length 30, wait 35 s, "Mux and save the last 30 s": write down the time it says it took
+  and the MP4's size; the counters' dropped frames stay as they were.

@@ -251,6 +251,22 @@ describe('cut', () => {
     }
   });
 
+  it("shares the buffer's bytes when asked not to copy them, for a cut used in the worker", () => {
+    const buffer = recording(10);
+    const shared = cut(buffer, hostOf(buffer, 45), hostOf(buffer, 100), { copy: false });
+    const copied = cut(buffer, hostOf(buffer, 45), hostOf(buffer, 100));
+
+    expect(shared).toEqual(copied);
+    expect(shared.video.chunks[0]).toBe(buffer.video[30]);
+    expect(shared.audio?.chunks.every((chunk) => buffer.audio.includes(chunk))).toBe(true);
+    // Evictions let go of the chunks without touching them: the cut keeps its bytes.
+    for (let index = 300; index < 3000; index += 1) {
+      buffer.push(frame(index));
+    }
+    expect(buffer.video[0].timestampUs).toBeGreaterThan(timestampOf(100));
+    expect(shared.video.chunks.map(frameIndex)).toEqual(copied.video.chunks.map(frameIndex));
+  });
+
   it('carries the video and audio descriptions and decoder configs', () => {
     const result = cut(recording(3), 0, Number.MAX_SAFE_INTEGER);
 

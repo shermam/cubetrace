@@ -47,15 +47,32 @@ export interface Cut {
   readonly frames: CutFrames;
 }
 
+/** How `cut` hands out the chunks' bytes. */
+export interface CutOptions {
+  /**
+   * Whether each chunk comes with a copy of its bytes (the default), which the cut owns and can
+   * transfer to the window. False shares the buffer's own bytes, which the buffer never changes
+   * (eviction only lets go of them): for a cut used in the worker itself, such as the muxer's
+   * (T2.3), which must then neither transfer nor change them.
+   */
+  readonly copy?: boolean;
+}
+
 /**
  * The chunks for `[startHostMs, endHostMs]`: the video from the last keyframe at or before the
  * start to the last frame at or before the end, and the audio chunks that overlap that span, each
  * with a copy of its bytes (the buffer keeps its own, so overlapping cuts work; the copies move to
- * the window without another copy, see `cutBuffers`). Frame times on the host clock are the frames'
- * timestamps plus the buffer's arrival offset. Throws a RangeError when the interval is empty or
- * inverted, or nothing is buffered at or before its end.
+ * the window without another copy, see `cutBuffers`) unless `options.copy` is false. Frame times on
+ * the host clock are the frames' timestamps plus the buffer's arrival offset. Throws a RangeError
+ * when the interval is empty or inverted, or nothing is buffered at or before its end.
  */
-export function cut(buffer: RingBuffer, startHostMs: number, endHostMs: number): Cut {
+export function cut(
+  buffer: RingBuffer,
+  startHostMs: number,
+  endHostMs: number,
+  options: CutOptions = {},
+): Cut {
+  const take = options.copy === false ? (chunk: EncodedChunkRecord) => chunk : copyChunk;
   if (!Number.isFinite(startHostMs) || !Number.isFinite(endHostMs) || endHostMs < startHostMs) {
     throw new RangeError(
       `Cannot cut from ${String(startHostMs)} to ${String(endHostMs)}: not an interval.`,
@@ -81,7 +98,7 @@ export function cut(buffer: RingBuffer, startHostMs: number, endHostMs: number):
     first -= 1;
   }
   const newest = video[video.length - 1];
-  const chunks = video.slice(first, last + 1).map(copyChunk);
+  const chunks = video.slice(first, last + 1).map(take);
   const spanStartUs = chunks[0].timestampUs;
   const lastChunk = chunks[chunks.length - 1];
   const spanEndUs = lastChunk.timestampUs + lastChunk.durationUs;
@@ -92,7 +109,7 @@ export function cut(buffer: RingBuffer, startHostMs: number, endHostMs: number):
     truncatedStart,
     truncatedEnd: hostMs(newest) + newest.durationUs / 1000 < endHostMs,
     video: { ...track, chunks },
-    audio: cutAudio(buffer, spanStartUs, spanEndUs),
+    audio: cutAudio(buffer, spanStartUs, spanEndUs, take),
     frames: {
       t0HostMs: round(chunks[0].timestampUs / 1000 + fit.offsetMs, 2),
       dtMs: frameIntervals(chunks),
@@ -141,7 +158,12 @@ export function frameIntervals(chunks: readonly EncodedChunkRecord[]): number[] 
   });
 }
 
-function cutAudio(buffer: RingBuffer, spanStartUs: number, spanEndUs: number): CutAudio | null {
+function cutAudio(
+  buffer: RingBuffer,
+  spanStartUs: number,
+  spanEndUs: number,
+  take: (chunk: EncodedChunkRecord) => EncodedChunkRecord,
+): CutAudio | null {
   const track = buffer.audioTrack;
   if (track === null) {
     return null;
@@ -151,7 +173,7 @@ function cutAudio(buffer: RingBuffer, spanStartUs: number, spanEndUs: number): C
       (chunk) =>
         chunk.timestampUs < spanEndUs && chunk.timestampUs + chunk.durationUs > spanStartUs,
     )
-    .map(copyChunk);
+    .map(take);
   return { ...track, chunks, arrival: chunks.length > 0 ? arrivalFit(chunks) : null };
 }
 

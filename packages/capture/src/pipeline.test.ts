@@ -1,14 +1,16 @@
+import type { VideoClip } from '@cubetrace/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Cut } from './cut';
 import {
   CUT_TIMEOUT_MS,
+  SAVE_CLIP_TIMEOUT_MS,
   STOP_TIMEOUT_MS,
   captureSupport,
   startCapture,
   type CaptureHandle,
 } from './pipeline';
-import type { CaptureStats, StartMessage, WorkerToWindow } from './protocol';
+import type { CaptureStats, SaveClipParams, StartMessage, WorkerToWindow } from './protocol';
 
 /** A worker that records what the window posts and answers when the test says. */
 class FakeWorker extends EventTarget {
@@ -78,6 +80,33 @@ const STATS: CaptureStats = {
 
 /** A stand-in for a cut: the pipeline passes it through untouched. */
 const A_CUT = { startHostMs: 1, endHostMs: 2 } as unknown as Cut;
+
+const PARAMS: SaveClipParams = {
+  startHostMs: 1000,
+  endHostMs: 4000,
+  sessionId: '3f1c2b7e-8a4d-4f2e-9b1a-0c5d6e7f8a9b',
+  index: 2,
+  camera: 'laptop',
+  segment: 'solve',
+  fpsNominal: 30,
+};
+
+const A_CLIP: VideoClip = {
+  camera: 'laptop',
+  segment: 'solve',
+  file: 'laptop.solve.mp4',
+  bytes: 171_275,
+  codec: 'vp09.00.40.08',
+  audio: 'opus',
+  width: 1920,
+  height: 1080,
+  crop: null,
+  fpsNominal: 30,
+  frames: 90,
+  firstFrameHostMs: 1000.5,
+  framesFile: 'laptop.solve.frames.json',
+  syncResidualMs: null,
+};
 
 beforeEach(() => {
   FakeProcessor.tracks = [];
@@ -224,6 +253,61 @@ describe('CaptureHandle', () => {
     await expect(capture.cut(1000, 2000)).rejects.toThrow('The capture has stopped.');
     // start, cut, stop: nothing is posted after the stop.
     expect(worker.messages()).toHaveLength(3);
+  });
+
+  it('asks the worker to save a clip and resolves with its video[] entry, or rejects with its reason', async () => {
+    const capture = start();
+    const first = capture.saveClip(PARAMS);
+    const second = capture.saveClip({ ...PARAMS, segment: 'scramble' });
+
+    expect(worker.messages().slice(1)).toEqual([
+      { type: 'mux-and-write', id: 1, ...PARAMS },
+      { type: 'mux-and-write', id: 2, ...PARAMS, segment: 'scramble' },
+    ]);
+    // Nothing is transferred either way: the MP4 stays in the worker.
+    expect(worker.posted.slice(1).map((entry) => entry.transfer)).toEqual([[], []]);
+    worker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP });
+    worker.reply({
+      type: 'mux-and-write-failed',
+      id: 2,
+      message: 'Error: No session gone: its folder is missing.',
+    });
+
+    await expect(first).resolves.toBe(A_CLIP);
+    await expect(second).rejects.toThrow('Error: No session gone: its folder is missing.');
+  });
+
+  it('gives up on a clip the worker does not save within 30 s', async () => {
+    vi.useFakeTimers();
+    const capture = start();
+    const clip = capture.saveClip(PARAMS);
+    const failure = expect(clip).rejects.toThrow(/did not answer within 30000 ms/);
+
+    vi.advanceTimersByTime(SAVE_CLIP_TIMEOUT_MS - 1);
+    worker.reply({ type: 'cut-done', id: 1, cut: A_CUT });
+    vi.advanceTimersByTime(1);
+
+    await failure;
+  });
+
+  it('stops only once the clips being saved are written, and refuses new ones meanwhile', async () => {
+    const capture = start();
+    const saving = capture.saveClip(PARAMS);
+    const stopping = capture.stop();
+    await Promise.resolve();
+
+    // Still saving: no stop yet, and no new clip.
+    expect(worker.messages().at(-1)).toMatchObject({ type: 'mux-and-write', id: 1 });
+    await expect(capture.saveClip(PARAMS)).rejects.toThrow('The capture has stopped.');
+    worker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP });
+    await expect(saving).resolves.toBe(A_CLIP);
+    await vi.waitFor(() => {
+      expect(worker.messages().at(-1)).toEqual({ type: 'stop' });
+    });
+    worker.reply({ type: 'stopped' });
+    await stopping;
+
+    expect(worker.terminated).toBe(true);
   });
 
   it('terminates a worker that does not answer the stop', async () => {
