@@ -6,8 +6,14 @@ import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { FakeFetch, FakeLocalStorage } from '../device/fake-browser';
 import { SettingsService } from '../settings/settings-service';
 import { CubeService, GAN_CONNECTOR, MOVE_HISTORY } from './cube-service';
-import { DEMO_FILE, FakeGanConnector, asGanCube, bluetoothNavigator } from './cube-testing';
-import { DEMO_SOLVES_URL, parseDemoSolves } from './demo';
+import {
+  DEMO_FILE,
+  FakeGanConnector,
+  asGanCube,
+  bluetoothNavigator,
+  demoSolve,
+} from './cube-testing';
+import { DEMO_MISSCRAMBLE_PAUSE_MS, DEMO_SOLVES_URL, parseDemoSolves } from './demo';
 
 const TIMEOUT_MESSAGE =
   'The cube did not report its state within 5 s of connecting. If its MAC address was typed, ' +
@@ -375,6 +381,110 @@ describe('CubeService', () => {
       cube.autoStartDemo({ demo: '0', speed: '20' });
       expect(cube.kind()).toBe('gan');
       expect(fetch.requests).toEqual([]);
+    });
+
+    it("starts the solution after the page has rendered the scramble's end", async () => {
+      // Real timers: fake ones give a zero-delay timer set during a timer's callback 1 ms more than
+      // one set right after it, which is not the order a browser keeps.
+      const { cube } = setup();
+      const [solve] = parseDemoSolves(DEMO_FILE);
+      const order: string[] = [];
+      let moves = 0;
+      const replayed = new Promise<void>((resolve) => {
+        cube.events$.subscribe((event) => {
+          if (event.type !== 'move') {
+            return;
+          }
+          moves++;
+          const move = formatMove(event.m);
+          order.push(move);
+          // As Angular does when a move changes a signal: a render on a zero-delay timer, and work
+          // that the render schedules in turn (a frame).
+          setTimeout(() => {
+            order.push(`render ${move}`);
+            setTimeout(() => order.push(`frame ${move}`), 0);
+          }, 0);
+          if (moves === 4) {
+            resolve();
+          }
+        });
+      });
+
+      cube.connectDemo(solve, 20);
+      await replayed;
+      // Demo solve 0 is R U, then U' R': the scramble's last move, its render and the frame that
+      // follows, and only then the solution's first move.
+      const at = ['U', 'render U', 'frame U', "U'"].map((entry) => order.indexOf(entry));
+      expect(
+        at.every((index, i) => index >= 0 && (i === 0 || index > at[i - 1])),
+        order.join(' '),
+      ).toBe(true);
+    });
+
+    it('a mis-scramble: a wrong turn after scramble move k, undone after a pause', async () => {
+      vi.useFakeTimers();
+      const { cube } = setup();
+      const [solve] = parseDemoSolves({
+        solves: [
+          demoSolve("R U F D'", [
+            ['D', 0],
+            ["F'", 120],
+            ["U'", 300],
+            ["R'", 450],
+          ]),
+        ],
+      });
+
+      cube.connectDemo(solve, 10, 2);
+      // At speed 10 the scramble moves are 10 ms apart; after move 2 (U) comes the wrong turn, R.
+      await vi.advanceTimersByTimeAsync(20);
+      expect(movesOf(cube)).toEqual(['R', 'U', 'R']);
+      // It stays for the pause, divided by the speed, before the cube undoes it (the fake clock
+      // runs the inverse's zero-delay timer, set by the pause's timer, 1 ms later).
+      await vi.advanceTimersByTimeAsync(DEMO_MISSCRAMBLE_PAUSE_MS / 10 - 1);
+      expect(movesOf(cube)).toEqual(['R', 'U', 'R']);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(movesOf(cube)).toEqual(['R', 'U', 'R', "R'"]);
+
+      await vi.runAllTimersAsync();
+      expect(movesOf(cube)).toEqual(['R', 'U', 'R', "R'", 'F', "D'", 'D', "F'", "U'", "R'"]);
+      expect(cube.solved()).toBe(true);
+      expect(cube.lastError()).toBeNull();
+    });
+
+    it("passes the address's ?misscramble on, unless the scramble has no move after it", async () => {
+      vi.useFakeTimers();
+      const { cube } = setup();
+
+      await cube.startDemo({ demo: '0', speed: '20', misscramble: '1' });
+      await vi.runAllTimersAsync();
+      // Demo solve 0 is R U, solved by U' R'; after R and before U, the wrong turn is F.
+      expect(movesOf(cube)).toEqual(['R', 'F', "F'", 'U', "U'", "R'"]);
+      expect(cube.solved()).toBe(true);
+
+      // Demo solve 2's scramble has a single move: nothing after it, so no wrong turn.
+      await cube.startDemo({ demo: '2', speed: '20', misscramble: '1' });
+      await vi.runAllTimersAsync();
+      expect(movesOf(cube)).toEqual(['L', "L'"]);
+    });
+
+    it('reconnect() replays the mis-scramble; a disconnection stops it in its pause', async () => {
+      vi.useFakeTimers();
+      const { cube } = setup();
+      const [solve] = parseDemoSolves(DEMO_FILE);
+
+      cube.connectDemo(solve, 20, 1);
+      await vi.advanceTimersByTimeAsync(5);
+      expect(movesOf(cube)).toEqual(['R', 'F']);
+      await cube.disconnect();
+      await vi.runAllTimersAsync();
+      expect(movesOf(cube)).toEqual(['R', 'F']);
+      expect(cube.lastError()).toBeNull();
+
+      await cube.reconnect();
+      await vi.runAllTimersAsync();
+      expect(movesOf(cube)).toEqual(['R', 'F', "F'", 'U', "U'", "R'"]);
+      expect(cube.solved()).toBe(true);
     });
 
     it('replaces a connected cube, and reconnect() replays the same solve', async () => {

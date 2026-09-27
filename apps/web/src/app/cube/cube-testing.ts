@@ -69,7 +69,7 @@ export interface DemoFileSolve {
 }
 
 /** A solve for the demo file: `scramble`, then `solution` (moves with cube times). */
-function demoSolve(scramble: string, solution: [string, number][]): DemoFileSolve {
+export function demoSolve(scramble: string, solution: [string, number][]): DemoFileSolve {
   return {
     scramble,
     scrambled_facelets: applyMoves(SOLVED, parseMoves(scramble)),

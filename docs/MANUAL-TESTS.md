@@ -72,6 +72,7 @@ time says so when a browser has none).
   time matches a stopwatch within 0.2 s; the next scramble is there at once.
 - [ ] Mis-scramble on purpose (one wrong turn): the undo list shows the inverse move, greys it out
   when made and clears; the attempt arms afterwards, and its row in the solve list says Corrected.
+  (Without a cube, `/?demo=0&speed=1&misscramble=5` shows the same with the demo cube.)
 - [ ] CFOP breakdown looks right for a solve you narrate (cross, four pairs, two-look OLL, PLL): the
   last solve's bar has its eight phases in order; hovering (or tapping) a segment gives its ms and
   moves; "Numbers" lists them next to the session average.

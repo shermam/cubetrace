@@ -41,6 +41,10 @@ every solve as data. Deployed at https://shermam.github.io/cubetrace/.
 - Demo mode: a fake cube that replays one of 30 recorded solves, from "Demo cube" in the connect
   dialog or `?demo=<0-29>&speed=<x>` on the Timer page, so the app can be tried without a cube
   (T1.6a).
+- End-to-end tests of the timer's flows with the demo cube, which `&misscramble=<k>` makes turn a
+  wrong face after scramble move k and undo it: full attempts checked against the recorded solves, a
+  mis-scramble, a DNF, a reload mid-session, the inspection setting, and exports validated against
+  the JSON Schemas (T1.9).
 - Settings: this device's label, the cubes' MAC addresses, inspection, the next scramble right
   after a solve, and the demo speed; keep the screen on; keep my data (T1.6a, T1.7).
 - An installable app that opens offline, keeps the screen on during a session (the header shows
