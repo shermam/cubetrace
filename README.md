@@ -49,14 +49,30 @@ scramble, the solve, the time and the breakdown. "Try the demo", next to "Connec
 Timer page, replays a random one at the speed set in Settings. The demo solves are downloaded when a
 demo starts, so demo mode needs the network.
 
+**Recording.** Turn the camera on in the Camera section of the Timer page (below the Cube section;
+choose the camera, frame the cube with the rectangle, and check the sharpness meter). While it is on
+and a session is under way, the app keeps the last 90 s of the camera and the microphone in memory,
+and every attempt gets two clips: its scramble, from 2 s before the first turn to 1 s after the cube
+matches the scramble, and its solve, from 3 s before the first turn to 1 s after the cube is solved
+(a clip begins at a keyframe, up to a second earlier). They are MP4 files, saved about a second after
+their end into the attempt's folder with the time of each frame, and listed in the attempt's record;
+the timing of the attempt never waits for them. The solve list shows a badge on each attempt with
+clips, which opens a viewer: the clip plays next to the attempt's moves by time, the one on screen
+highlighted, and Download saves both clips, their frame times and `attempt.json`. The Camera section
+and the Sessions page show how much of the browser's storage is used: from 80% they warn, and from
+95% the camera stops recording (the timer goes on) until sessions are exported or deleted. Settings
+→ Camera → Record audio turns the microphone off. A clip that could not be saved is said once and
+written in the session's notes.
+
 **Install it** from Chrome's menu (Install app, or Add to Home screen on Android) or with the
 install button in the address bar on a laptop. The installed app opens offline, and Chrome grants it
 persistent storage more readily (Settings → Keep my data).
 
 **Your data** stays in the browser, in the site's origin private file system (OPFS): a folder per
-session with its `session.json` and an `attempt.json` per attempt
+session with its `session.json` and a folder per attempt with its `attempt.json` and its clips
 ([`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)). Nothing is uploaded. The Sessions page exports a
-session as one JSON file, or deletes it; clearing the site's data in Chrome deletes all of them.
+session's records as one JSON file, or deletes the session with its clips; clearing the site's data
+in Chrome deletes all of them.
 Phase 3 adds cloud storage, so that the sessions of every device end up in one dataset.
 
 ## Screenshots
