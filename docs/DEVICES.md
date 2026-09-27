@@ -6,29 +6,29 @@ probe reports are in `docs/devices/`; the session exports of the rounds are in
 
 ## Probes of 2026-09-27
 
-| | MacBook Pro 2021 | ThinkPhone (motorola) |
-|---|---|---|
-| OS, Chrome | macOS 26.6.2 (arm64), Chrome 153.0.8010.53 | Android 16, Chrome 155.0.8059.16 |
-| Camera probed | FaceTime HD (built-in), 1920×1080 | front camera, 1920×1080 (portrait, 1080×1920 frames); the rear camera is not probed yet |
-| Frame rate | capability max 30; measured 30.05 fps over 10 s | capability max 60, the track *says* 60, but the sensor delivered 30 (mediaTime steps of 33.3 ms; measured 30.0 fps) |
-| Frame interval at the callback (p5 / p50 / p95) | 17.7 / 33.3 / 43.2 ms | 17.0 / 33.3 / 50.0 ms |
-| Sensor timestamps (`mediaTime` steps) | 33.35 ms, steady | 33.3 ms (p5–p95), steady |
-| `captureTime − now` at the callback | −10 ms (p5 −17, p95 −3) | −10 ms (p5 −18, p95 −4) |
-| Dropped frames in 10 s | 0 | 0 |
-| Manual controls | none (no exposure, focus or white-balance capabilities) | exposure (manual, 0.05–250 ms, ISO), focus (manual, 0–3.19), white balance, colour temperature, zoom: a FULL-class camera |
-| H.264 `VideoEncoder` | High and Main, 1080p30 and 1080p60, hardware: all supported | same, all supported |
-| `MediaStreamTrackProcessor` | main thread only (not in workers) | main thread only |
-| `VideoEncoder` in a worker | yes | yes |
-| Storage quota | 10.74 GB, not persisted (Keep my data not granted) | 10.74 GB, persisted |
-| Web Bluetooth | present; `getDevices` and `watchAdvertisements` present (the MAC flag is on) | present; `getDevices` absent (the MAC flag is off, so the MAC address had to be typed once) |
-| CPU, memory | 8 cores, 16 GB (as reported) | 8 cores, 8 GB (as reported) |
-| Screen | 3360×1890 CSS px at 2×, landscape | 509×1130 CSS px at 2.125×, portrait |
+| | MacBook Pro 2021 | ThinkPhone, front camera | ThinkPhone, rear camera |
+|---|---|---|---|
+| OS, Chrome | macOS 26.6.2 (arm64), Chrome 153.0.8010.53 | Android 16, Chrome 155.0.8059.16 | same |
+| Camera probed | FaceTime HD (built-in), 1920×1080 | front camera, 1920×1080 (portrait, 1080×1920 frames) | rear camera, 1920×1080 (portrait, 1080×1920 frames) |
+| Frame rate | capability max 30; measured 30.05 fps over 10 s | capability max 60, the track *says* 60, but the sensor delivered 30 (mediaTime steps of 33.3 ms; measured 30.0 fps) | capability max 60, the track says 60, the sensor delivered 30 (mediaTime steps of 33.3 ms) |
+| Frame interval at the callback (p5 / p50 / p95) | 17.7 / 33.3 / 43.2 ms | 17.0 / 33.3 / 50.0 ms | 16.6 / 33.3 / 50.1 ms |
+| Sensor timestamps (`mediaTime` steps) | 33.35 ms, steady | 33.3 ms (p5–p95), steady | 33.32 ms, steady |
+| `captureTime − now` at the callback | −10 ms (p5 −17, p95 −3) | −10 ms (p5 −18, p95 −4) | −10 ms (p5 −19, p95 −4) |
+| Dropped frames in 10 s | 0 | 0 | 0 |
+| Manual controls | none (no exposure, focus or white-balance capabilities) | exposure (manual, 0.05–250 ms, ISO), focus (manual, 0–3.19), white balance, colour temperature, zoom: a FULL-class camera | exposure (manual, 0.08–288 ms, ISO 100–1594), focus (manual, single-shot, continuous; 0.1–8.2), white balance (manual), colour temperature, zoom 1–8×, **torch** |
+| H.264 `VideoEncoder` | High and Main, 1080p30 and 1080p60, hardware: all supported | same, all supported | same, all supported |
+| `MediaStreamTrackProcessor` | main thread only (not in workers) | main thread only | main thread only |
+| `VideoEncoder` in a worker | yes | yes | yes |
+| Storage quota | 10.74 GB, not persisted (Keep my data not granted) | 10.74 GB, persisted | same phone |
+| Web Bluetooth | present; `getDevices` and `watchAdvertisements` present (the MAC flag is on) | present; `getDevices` absent (the MAC flag is off, so the MAC address had to be typed once) | same phone |
+| CPU, memory | 8 cores, 16 GB (as reported) | 8 cores, 8 GB (as reported) | same phone |
+| Screen | 3360×1890 CSS px at 2×, landscape | 509×1130 CSS px at 2.125×, portrait | same phone |
 
 What this means for phase 2:
 
-- **30 fps is what both default cameras deliver**, whatever the track settings say; plan the
-  pipeline and the storage for 30 fps and treat 60 fps as a bonus to be measured per camera
-  (the ThinkPhone's rear camera, next probe).
+- **30 fps is what all three cameras deliver at 1080p**, whatever the track settings say (both
+  ThinkPhone cameras claim 60 and deliver 30); plan the pipeline and the storage for 30 fps. T2.1
+  tries `frameRate: {exact: 60}` and 1280×720 to see whether 60 fps exists at all on the phone.
 - **The sensor clock is steady** (`mediaTime` steps of 33.3 ms with no jitter) while the
   callback time jitters by ±10–17 ms: frame times must come from `mediaTime`/`captureTime`,
   never from when the frame reached JavaScript, as the design says.
@@ -37,8 +37,10 @@ What this means for phase 2:
   encoder itself runs in a worker with hardware H.264 on both.
 - **About 10 GB of local staging** per device: at the design's ~4.4 MB per attempt and camera,
   a few thousand attempts, so uploads (phase 3) must keep up rather than accumulate.
-- **Manual exposure exists on the phone** (front camera at least): the fixed-shutter "master"
-  recording of the design is possible there; the MacBook's camera has no controls.
+- **Manual exposure exists on both ThinkPhone cameras** (the rear one down to 0.08 ms, with ISO to
+  1594, manual focus, manual white balance, zoom and a torch): the fixed-shutter "master" recording of
+  the design is possible there, and the torch can serve as the optional sharper clapperboard mark;
+  the MacBook's camera has no controls.
 
 ## Manual round 1 (2026-09-27, v0.1.0)
 

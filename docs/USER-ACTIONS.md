@@ -18,7 +18,7 @@ adds items; the owner ticks them when done (date and any detail that others need
   device's session export (Sessions → Export) in a GitHub issue, attached as a file (ten attempts
   make about 160 kB, too long to paste into an issue), and open an issue for every failure. The
   coordinator tags `v0.1.0` after the round.
-- [x] 2026-09-27 — Device probe run on the MacBook Pro 2021 (FaceTime) and the ThinkPhone (front camera): `docs/DEVICES.md`. Still to run: the ThinkPhone's **rear** camera, the Moto g60 (both cameras) and the MacBook Pro 2016, when convenient.
+- [x] 2026-09-27 — Device probe run on the MacBook Pro 2021 (FaceTime) and the ThinkPhone (front and rear cameras): `docs/DEVICES.md`. Still to run, when convenient: the Moto g60 (both cameras) and the MacBook Pro 2016.
 - [ ] `chrome://flags` on each device: keep `#enable-web-bluetooth-new-permissions-backend`
   (or whatever flag the app's connect screen names) enabled so the cube's MAC address can
   be read automatically; otherwise enter the MAC once per cube in Settings.
@@ -36,6 +36,7 @@ adds items; the owner ticks them when done (date and any detail that others need
     cents. Cloud Functions will run in `us-central1`, inside `nam5`.
   - [x] Web app registered (2026-09-27); its config object (public by design) goes into the
     repo when phase 3 lands.
+  - [x] 2026-09-27 — `shermam.github.io` added to Authentication → Settings → Authorized domains.
   - [ ] **No CLI login needed: one service account, two keys** (decided 2026-09-27). In the
     Google Cloud console of `cubetrace-cacd9`: IAM → Service accounts → create `deploy` with
     the roles Firebase Admin, Service Account User, Secret Manager Admin, Cloud Run Admin,
