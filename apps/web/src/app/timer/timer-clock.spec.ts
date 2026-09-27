@@ -9,6 +9,7 @@ import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { asGanCube, bluetoothNavigator } from '../cube/cube-testing';
 import { polyfillDialog, settle } from '../device/fake-browser';
 import { type Setup, inverse, ready, setup, turn } from '../session/session-harness';
+import { SYNC_GRACE_MS, SYNC_SETTLE_MS } from '../session/session-service';
 import { TimerClock } from './timer-clock';
 
 /** The clock with the connect dialog, which the app shell holds once for every page. */
@@ -334,6 +335,33 @@ describe('TimerClock', () => {
     expect(s.service.attempts()).toEqual([]);
     expect(text(fixture, 'attempt-index')).toBe('Attempt 1');
     expect(has(fixture, 'save-status')).toBe(false);
+  });
+
+  it('says while a sync check runs what to do, and once it is over that the attempt waits for the cube to be still', async () => {
+    const s = setup();
+    const fake = await ready(s);
+    const fixture = TestBed.createComponent(TimerClock);
+    s.service.suspendForSyncCheck();
+    await fixture.whenStable();
+    expect(text(fixture, 'timer-status')).toBe(
+      'Sync check: turn one face, pause, turn it back; repeat five times.',
+    );
+
+    turn(s, fake, 'U', 1200);
+    turn(s, fake, "U'", 1200);
+    s.service.holdAfterSyncCheck();
+    await fixture.whenStable();
+    expect(text(fixture, 'timer-status')).toBe(
+      'Sync check over: the attempt begins once the cube is still.',
+    );
+    s.timers.advance(SYNC_SETTLE_MS);
+    await fixture.whenStable();
+    expect(text(fixture, 'timer-status')).toBe(
+      'Sync check over: the attempt begins once the cube is still.',
+    );
+    s.timers.advance(SYNC_GRACE_MS);
+    await fixture.whenStable();
+    expect(text(fixture, 'timer-status')).toBe('Scramble the cube as shown.');
   });
 
   it('says under a result which attempt it was and whether it is saved; nothing under a running time', async () => {

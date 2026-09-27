@@ -19,6 +19,8 @@ import { connect, inverse, ready, scripted, setup, turn } from './session-harnes
 import {
   CURRENT_SESSION_KEY,
   HARDWARE_WAIT_MS,
+  SYNC_GRACE_MS,
+  SYNC_SETTLE_MS,
   UNKNOWN_CUBE,
   type AttemptMilestone,
 } from './session-service';
@@ -976,9 +978,14 @@ describe('SessionService', () => {
       expect(s.service.attempts()).toEqual([]);
       expect(s.service.suspendForSyncCheck()).toBe(true);
 
-      // Over: attempt 1 begins again at once (the cube is solved), with its scramble.
+      // Over: attempt 1 begins again once the cube has been still for a second (it is solved),
+      // with its scramble.
       s.service.resumeAfterSyncCheck();
       expect(s.service.suspended()).toBe(false);
+      expect(s.service.phase()).toBe('sync-check');
+      expect(s.service.syncCheckOver()).toBe(true);
+      s.timers.advance(SYNC_GRACE_MS);
+      expect(s.service.syncCheckOver()).toBe(false);
       expect(s.service.phase()).toBe('scrambling');
       const again = s.service.attempt();
       expect(again).toMatchObject({
@@ -1013,6 +1020,7 @@ describe('SessionService', () => {
       expect(s.service.suspendForSyncCheck()).toBe(true);
       turn(s, fake, 'D', 1200);
       s.service.resumeAfterSyncCheck();
+      s.timers.advance(SYNC_GRACE_MS);
 
       expect(s.service.phase()).toBe('solve-first');
       expect(s.service.attempt()).toBeNull();
@@ -1025,6 +1033,73 @@ describe('SessionService', () => {
         events: { scrambleStart: null },
       });
       expect(s.service.attempts()).toEqual([]);
+    });
+
+    it('holds the suspension after the check until the cube has been still for 2 s, each turn putting it off; a dismissal ends it at once', async () => {
+      const s = setup();
+      const fake = await ready(s);
+      expect(s.service.suspendForSyncCheck()).toBe(true);
+      turn(s, fake, 'U', 1200);
+      turn(s, fake, "U'", 1200);
+
+      // The check ended: nothing begins yet.
+      s.service.holdAfterSyncCheck();
+      expect(s.service.suspended()).toBe(true);
+      expect(s.service.syncCheckOver()).toBe(true);
+      expect(s.service.phase()).toBe('sync-check');
+      // Turns go on after it: each puts off the end.
+      s.timers.advance(1500);
+      turn(s, fake, 'F', 0);
+      s.timers.advance(1500);
+      turn(s, fake, "F'", 0);
+      s.timers.advance(SYNC_SETTLE_MS - 1);
+      expect(s.service.suspended()).toBe(true);
+      expect(s.service.attempt()).toBeNull();
+      // Still for 2 s: the suspension ends, and a second later attempt 1 begins, its moves its own.
+      s.timers.advance(1);
+      expect(s.service.suspended()).toBe(false);
+      expect(s.service.attempt()).toBeNull();
+      s.timers.advance(SYNC_GRACE_MS);
+      expect(s.service.attempt()).toMatchObject({
+        index: 1,
+        scramble: 'R U F',
+        state: 'scrambling',
+      });
+
+      // Another check, over: dismissed (its result closed), the suspension ends at once.
+      expect(s.service.suspendForSyncCheck()).toBe(true);
+      turn(s, fake, 'U', 1200);
+      s.service.holdAfterSyncCheck();
+      s.service.resumeAfterSyncCheck();
+      expect(s.service.suspended()).toBe(false);
+      expect(s.service.syncCheckOver()).toBe(true);
+    });
+
+    it('after the suspension, ignores turns until the cube has been still for a second, and begins the attempt only with it solved', async () => {
+      const s = setup();
+      const fake = await ready(s);
+      expect(s.service.suspendForSyncCheck()).toBe(true);
+      turn(s, fake, 'U', 1200);
+      turn(s, fake, "U'", 1200);
+      s.service.resumeAfterSyncCheck();
+
+      // A turn and its turning back half a second apart, the check's: no attempt takes them.
+      s.timers.advance(500);
+      turn(s, fake, 'U', 0);
+      s.timers.advance(500);
+      expect(s.service.attempt()).toBeNull();
+      turn(s, fake, "U'", 0);
+      s.timers.advance(SYNC_GRACE_MS - 1);
+      expect(s.service.attempt()).toBeNull();
+      expect(s.service.phase()).toBe('sync-check');
+      s.timers.advance(1);
+      expect(s.service.attempt()).toMatchObject({ index: 1, events: { scrambleStart: null } });
+
+      // The scramble is the attempt's from its first turn.
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 500);
+      const [record] = s.service.attempts();
+      expect(record.moves.map((move) => move.m)).toEqual(['R', 'U', 'F', "F'", "U'", "R'"]);
     });
 
     it('refuses a check while an attempt is armed or solving', async () => {
@@ -1061,6 +1136,7 @@ describe('SessionService', () => {
       turn(s, fake, "U'", 1200);
 
       s.service.resumeAfterSyncCheck();
+      s.timers.advance(SYNC_GRACE_MS);
       // The next scramble, made during the solve, is there once its promise has settled.
       await settle();
       expect(s.service.phase()).toBe('scrambling');
