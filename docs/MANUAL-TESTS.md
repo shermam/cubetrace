@@ -42,11 +42,12 @@ to create the `v0.2.0` release from GitHub after it.
    it is connected); the camera is the one chosen in Camera settings; the app's version and commit
    are in the page footer.
 2. Go through the sections below in this order: **T2.1** (camera panel), **T2.4** (recording),
-   **T2.10** (video quality), **T2.5** (sync check), **T2.7** (layout), then **T2.3** (clips, in the
-   capture lab). Since T2.7, the "Camera section" of the T2.1 and T2.4 items is Camera settings, a
-   disclosure below the Cube section, and the framing rectangle is moved after Framing → Edit. Tick
-   an item when it passes on every row. When it fails or does something unexpected on a row, write
-   the row (such as "ThinkPhone, rear") and what happened next to it.
+   **T2.10** (video quality), **T2.5** (sync check), **T2.7** (layout), **T2.9** (a long scramble, a
+   reconnection, the sound), then **T2.3** (clips, in the capture lab). Since T2.7, the "Camera
+   section" of the T2.1 and T2.4 items is Camera settings, a disclosure below the Cube section, and
+   the framing rectangle is moved after Framing → Edit. Tick an item when it passes on every row.
+   When it fails or does something unexpected on a row, write the row (such as "ThinkPhone, rear")
+   and what happened next to it.
 3. Every failure becomes a GitHub issue with the row's device, Chrome version, camera and cube, the
    steps, what happened and what was expected (a screenshot, or the console line, when it shows it).
    The known limitations below are expected: report one only if it behaves otherwise than said.
@@ -91,8 +92,8 @@ to create the `v0.2.0` release from GitHub after it.
   about a second after each turn. With the whole frame as the framing rectangle (or most of it) it
   asks first for a rectangle around the cube (T2.8).
 - The first scramble after the camera is turned on needs 2 s of recording before its first turn: a
-  scramble begun sooner loses its clip ("A clip could not be saved…"), which a T2.4 item uses on
-  purpose.
+  scramble begun sooner gets a clip that begins late, marked "· late" on its badge (since T2.9; it
+  used to be lost), which a T2.4 item uses on purpose.
 - Demo mode needs the network: its solves are downloaded when a demo starts.
 - A clip begins at the keyframe at or before its margin: 2 to 3 s before the scramble's first turn,
   3 to 4 s before the solve's.
@@ -346,12 +347,39 @@ clips of the timer.
 - [ ] Twenty minutes of solves with the camera on, on the phone on its stand, plugged in: write down
   how warm it gets (touch: cool, warm, hot), whether Chrome or the phone slows down, the dropped
   frames in the Recording part at the end (0 expected), and how much the storage meter went up.
-- [ ] A failed clip: with the camera on, turn it off right after a solve (within a second): the
-  solve's clip is still saved (the clips waiting for their time are saved at once when recording
-  stops). To see a failure, start the camera and a solve at once (the first scramble within 2 s of
-  Turn on): the Recording part says "A clip could not be saved…" once, Chrome's console (on the
-  phone, `chrome://inspect`) has one line `cubetrace: clip failed: scramble of attempt N: …`, and the
+- [ ] A clip at the edge of the recording: with the camera on, turn it off right after a solve
+  (within a second): the solve's clip is still saved (the clips waiting for their time are saved at
+  once when recording stops). Then start the camera and a solve at once (the first scramble within
+  2 s of Turn on): the scramble's clip is saved all the same, beginning late (T2.9): the Recording
+  part says "Scramble clip of attempt N starts X s late: the buffer holds Y s" (with Dismiss), the
+  badge says "· late", Chrome's console (on the phone, `chrome://inspect`) has one line
+  `cubetrace: clip truncated: scramble of attempt N starts X s late (the buffer held Y s)`, and the
   session's export has that line in `notes`; the attempt itself is saved as usual.
+
+## T2.9 — a long scramble, a reconnection, the sound
+
+On https://shermam.github.io/cubetrace/, Timer page, with the camera on, on the MacBook (the GAN 356
+i3, whose round found these, then the 12 ui). Next to each item, write the device, Chrome's version
+and what the app said. Export the session at the end (Sessions → Export) and attach it.
+
+- [ ] A long scramble: scramble with a 3-minute pause after its first few turns (put the cube down),
+  then finish it and solve. Both clips are saved (the badge says "2 clips"): the scramble clip is
+  the last minute of the scramble and a second after it (about 61 s, not the whole 3 minutes), with
+  no "late" mark; no "A clip could not be saved…". In the export, the attempt has both `video`
+  entries and `session.json`'s `notes` has no `clip failed` line for it.
+- [ ] A solve after a reconnection: in Settings → Idle cube, disconnect the cube after 1 minute
+  without a turn; scramble halfway, wait until the cube pill says "Reconnect", click it, finish the
+  scramble and solve. In the export, that attempt's `clock` has `a` between 0.99 and 1.01 (the
+  owner's cubes: about 1.001 for the i3, 1.007 for the 12 ui) and `samples` counts the moves after
+  the reconnection only; `residualP95Ms` is tens of ms, not thousands. Set the idle disconnection
+  back.
+- [ ] The sound: the Recording part's Codecs line says the audio codec (`mp4a.40.2` or `opus`) or
+  where the audio is ("no audio yet (waiting for the microphone)", "audio stopped", "no audio"): write
+  it down. Play a clip in the viewer with its volume up (the viewer starts muted: unmute it): it has
+  sound, or the Recording part and the session's `notes` say why not (`notice: …`,
+  `clip without audio: … : <reason>`): copy those lines into the round's issue. If a notice says the
+  microphone sends no audio, check that no other app holds it and that it is not muted, then try
+  again.
 
 ## T2.7 — layout
 

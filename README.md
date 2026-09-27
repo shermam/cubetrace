@@ -92,7 +92,7 @@ without re-encoding about a second after their end.
 
 | Clip | From | To |
 |---|---|---|
-| scramble | 2 s before the scramble's first turn | 1 s after the cube matches the scramble |
+| scramble | 2 s before the scramble's first turn, but at most 60 s before the cube matches it | 1 s after the cube matches the scramble |
 | solve | 3 s before the solve's first turn | 1 s after the cube is solved, or the DNF |
 
 A clip begins at the keyframe at or before its start, so up to a second earlier. A DNF before the
@@ -102,8 +102,13 @@ or `phone-front` and `phone-rear` on a phone) and the segment, such as `laptop.s
 time of each of its frames on the device's clock (`laptop.solve.frames.json`), and is listed in the
 attempt's `attempt.json` (`video`); the attempt's timing never waits for them. A clip that could not
 be saved is said once in Camera settings, in Chrome's console (`cubetrace: clip failed: …`) and in
-the session's `notes`. The first scramble after the camera is turned on needs its 2 s in memory:
-turn the camera on a few seconds before scrambling.
+the session's `notes`. A clip whose start is older than the 90 s in memory (the first scramble right
+after the camera is turned on, a solve longer than that) begins at the oldest frame there instead:
+it is marked "late" on its badge and in the viewer (`truncatedStart` in its entry), and said in
+Camera settings and in the session's `notes` (`clip truncated: …`); turn the camera on a few seconds
+before scrambling. The sound is recorded when Chrome gives the microphone: when it is not, Camera
+settings say where it is (no sound from the microphone yet, stopped, and why), and a clip without
+sound says why in a notice and in the session's `notes`.
 
 **The sync check** measures how far the camera's frames lag the cube. When the camera records in a
 session that has no check of it yet, with a cube connected, the check is due by itself before the

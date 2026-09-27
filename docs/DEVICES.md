@@ -109,8 +109,17 @@ Two consequences:
   makes these attempts 17–21 MB, 2.2–2.7 GB a day, four days of the quota; High is the 8 Mbps
   measured here, and Maximum 12. Crop-at-source must still arrive earlier than planned, and phase
   3's upload becomes urgent.
-- **No audio track** in any clip (`audio: null`), although "Record audio" defaults to on: the
-  microphone stream or the AAC/Opus encoder was not there. Under investigation (issue #33).
+- **No audio track** in any clip (`audio: null`), although Chrome asked for the microphone and got
+  it, "Record audio" was on and no notice said "Recording without audio" (issue #33). The causes the
+  code allowed were all silent: no `AudioData` from the microphone's track (muted, or held by
+  another app), an encoder whose first chunk carried no decoder config (the muxer then left the
+  audio out), or audio timestamps on another clock than the frames' (the buffer then dropped it at
+  once, or kept it for ever, and no chunk overlapped a clip). CI's clips, from Chromium's fake
+  microphone, do have their Opus track (checked in T2.9, and asserted since). Since T2.9 each cause
+  is said: the Recording part's Codecs line gives the audio's state, a notice comes 3 s after the
+  first frame when the microphone sends nothing, and a clip without sound says why in the session's
+  notes; the second and the third are fixed (a decoder config made from the encoder's settings; the
+  audio placed by the arrival times). Round 2 tells which it was on the MacBook.
 
 ## VideoFrame.timestamp
 

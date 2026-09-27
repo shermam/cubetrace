@@ -48,10 +48,11 @@ Deployed at https://shermam.github.io/cubetrace/.
 - The camera's picture beside the time (under it on a phone), mirrored for a front camera, with the
   framing rectangle drawn on it and one line under it: the frame rate, the sharpness, what the
   recording does and how full storage is (T2.7).
-- Recording (T2.2, T2.3, T2.4): with the camera on and a session under way, the camera and the
+- Recording (T2.2, T2.3, T2.4, T2.9): with the camera on and a session under way, the camera and the
   microphone are encoded into the last 90 s kept in memory (H.264 and AAC where Chrome has encoders
   for them, VP9 and Opus otherwise), and every attempt gets two MP4 clips cut from it without
-  re-encoding: its scramble, from 2 s before its first turn to 1 s after the cube matches it, and its
+  re-encoding: its scramble, from 2 s before its first turn (at most 60 s before the cube matches it:
+  a pause inside a scramble is not worth minutes of video) to 1 s after the cube matches it, and its
   solve, from 3 s before its first turn to 1 s after the cube is solved or the DNF. They are saved
   with the time of every frame into the attempt's folder and listed in its record; the attempt's
   timing never waits for them.
@@ -82,6 +83,14 @@ Deployed at https://shermam.github.io/cubetrace/.
 - Development: `packages/capture` (the camera, the encoder pipeline and its ring buffer in a worker,
   the cuts, MP4 muxing with mediabunny and clip writing in a second worker, the motion measurement
   and the clapperboard), and end-to-end tests of the recording with Chrome's fake camera (T2.1–T2.7).
+- Where the sound is (T2.9, issue #33): the Recording part of Camera settings says it when it is not
+  being recorded ("no audio yet (waiting for the microphone)", "audio stopped"), and so do the
+  capture lab's counters; 3 s after the camera starts without a sound from the microphone, a notice
+  says that it sends none (muted, or held by another app); the notices of a recording stay together
+  rather than the last alone, and each is written in the session's notes (`notice: …`). A clip
+  without sound while the sound is recorded says why, in a notice and once in the notes
+  (`clip without audio: …`): no audio from the microphone, no decoder config, no audio in the clip's
+  span, or the encoder's error.
 
 ### Changed
 
@@ -99,6 +108,19 @@ Deployed at https://shermam.github.io/cubetrace/.
   clock runs slow only while it is turned), so it placed the moves of a long session hundreds of
   milliseconds off: every `attempt.json` now keeps the fit of its own moves (`clock`), and
   `session.json`'s `clock.cube` is only a coarse summary (issue #22, T2.0).
+- A clip whose start was older than the 90 s kept in memory was refused, so an attempt with a long
+  pause in its scramble lost its scramble clip: it is saved from the oldest keyframe in memory,
+  marked `truncatedStart` in its `video` entry (optional in the schema: older files read as false)
+  and "late" on the solve lists and in the clip viewer, with a notice and a line in the session's
+  notes, `clip truncated: … starts X s late (the buffer held Y s)` (issue #34, T2.9).
+- An attempt's clock fit went through a reconnection of the cube, whose clock starts again at 0, and
+  recorded a line through both clocks (a slope of −0.81 on the owner's GAN 356 i3): the fit now
+  starts again with the cube's clock, as it does when the i3's count of a pause over 65.5 s runs out
+  (T2.9).
+- Clips without an audio track (issue #33, T2.9): when the audio encoder's first chunk has no decoder
+  config, the clip gets one made from the encoder's settings (for AAC with its AudioSpecificConfig);
+  when the sound's timestamps count on another clock than the frames', the arrival times place it,
+  and the clip's notes say by how much; the round on the owner's MacBook tells which cause it was.
 
 ## 0.1.0 — 2026-09-27
 
