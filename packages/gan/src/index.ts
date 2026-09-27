@@ -12,6 +12,12 @@ export type {
   CubeMoveEvent,
   MacProvider,
 } from './types';
+export {
+  FACELETS_RETRY_MS,
+  FIRST_FACELETS_TIMEOUT_MS,
+  connectGanCube,
+  normalizeMac,
+} from './connection';
 export { MAC_FLAG_URL, checkBluetoothSupport } from './support';
 export type { FakeCubeOptions, ScheduledMove } from './fake';
 export { FAKE_CUBE_BATTERY, FAKE_CUBE_HARDWARE, FakeCube } from './fake';
