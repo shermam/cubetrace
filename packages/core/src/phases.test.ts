@@ -442,7 +442,6 @@ describe('detectPhases on hand-built solves', () => {
   it('splits a solve into the eight phases, with slots, skips and times', () => {
     expect(detect(FULL)).toEqual({
       crossFace: 'D',
-      crossFaceSwitched: false,
       phases: FULL_PHASES,
       solvedAtMove: 33,
       complete: true,
@@ -497,10 +496,9 @@ describe('detectPhases on hand-built solves', () => {
     expect(r.phases.slice(1)).toEqual(FULL_PHASES.slice(1));
   });
 
-  it('uses a forced cross face and never switches', () => {
+  it('uses a forced cross face', () => {
     const r = detect(FULL, { crossFace: 'F' });
     expect(r.crossFace).toBe('F');
-    expect(r.crossFaceSwitched).toBe(false);
     expect(endIndices(r)).toEqual([12, 12, 12, 33, 33, 33, 33, 33]);
     expect(r.phases.map((p) => p.slot).filter((slot) => slot !== undefined)).toEqual([
       'DR',
@@ -529,7 +527,6 @@ describe('detectPhases on hand-built solves', () => {
     const r = detectPhases(FULL.scrambled, FULL.moves.slice(0, 20));
     expect(r).toEqual({
       crossFace: 'D',
-      crossFaceSwitched: false,
       phases: FULL_PHASES.slice(0, 7),
       solvedAtMove: null,
       complete: false,
@@ -539,7 +536,6 @@ describe('detectPhases on hand-built solves', () => {
   it('reports nothing without moves', () => {
     expect(detectPhases(FULL.scrambled, [])).toEqual({
       crossFace: null,
-      crossFaceSwitched: false,
       phases: [],
       solvedAtMove: null,
       complete: false,
@@ -569,20 +565,18 @@ describe('detectPhases on fixture solves', () => {
     expect(r.phases[4]).toMatchObject({ name: 'f2l4', slot: 'BL' });
   });
 
-  it('switches to a face whose cross has a pair before any pair counts on the first (solves[13])', () => {
-    // The F cross completes by accident at move 49. The solver's cross is U: it completes at move
-    // 89 with its four pairs and an oriented last layer, and no pair has counted on F yet.
+  it('keeps a cross completed first by accident, as Cubeast does (solves[13])', () => {
+    // The F cross completes first, at move 49. The solver's own cross is U: it completes only at
+    // move 89, with its four pairs and an oriented last layer, and a PLL follows. The cross face
+    // stays F, and the boundaries are Cubeast's.
     const s = SOLVES[13];
     const r = detect(s);
-    expect(r.crossFace).toBe('U');
-    expect(r.crossFaceSwitched).toBe(true);
-    expect(endIndices(r)).toEqual([89, 89, 89, 89, 89, 89, 89, 109]);
-    // Forcing F keeps the first cross, as Cubeast does, and gives Cubeast's boundaries.
-    const onF = detect(s, { crossFace: 'F' });
-    expect(onF.crossFaceSwitched).toBe(false);
-    expect(onF.phases.map((p) => p.endMs)).toEqual([
+    expect(r.crossFace).toBe('F');
+    expect(r.phases.map((p) => p.endMs)).toEqual([
       18961, 31614, 31614, 34635, 34635, 34635, 34635, 34635,
     ]);
+    // Forcing U gives the breakdown on the solver's own cross.
+    expect(endIndices(detect(s, { crossFace: 'U' }))).toEqual([89, 89, 89, 89, 89, 89, 89, 109]);
   });
 });
 
@@ -614,7 +608,7 @@ describe('colour neutrality', () => {
     expect([...crossFaces].sort()).toEqual(['B', 'D', 'F', 'L', 'R', 'U']);
   });
 
-  it('gives the same phases for fixture solves rotated in all 24 ways, a switch included', () => {
+  it('gives the same phases for fixture solves rotated in all 24 ways, solves[13] included', () => {
     for (const [i, s] of SOLVES.entries()) {
       if (i % 25 !== 0 && i !== 13) {
         continue;

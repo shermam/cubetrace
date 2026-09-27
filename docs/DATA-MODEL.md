@@ -60,11 +60,11 @@ and `result.scramble_extra_moves` counts the moves beyond the scramble's own.
 Names, in order: `cross`, `f2l1`, `f2l2`, `f2l3`, `f2l4`, `eoll`, `ocll`, `pll`
 (two-look OLL is the reference method; a one-look OLL solver completes `eoll` and `ocll`
 on the same move). Colour-neutral: the cross face is whichever face completes a cross
-first after `solve_start`.
+first after `solve_start`, and it never changes.
 
 | Phase | Ends at the first move after which… |
 |---|---|
-| `cross` | some face `X` has its four edges in place and oriented (all four edge stickers on `X` show `X`'s colour and the other sticker of each edge matches its adjacent centre); `X` becomes `crossFace`. Faces whose cross was already complete at `scramble_done` are excluded. If one move completes several crosses, the one with the most pairs in place wins. |
+| `cross` | some face `X` has its four edges in place and oriented (all four edge stickers on `X` show `X`'s colour and the other sticker of each edge matches its adjacent centre); `X` becomes `crossFace`. Faces whose cross was already complete at `scramble_done` are excluded. If one move completes several crosses, the one with the most pairs in place wins, then the first in the order `U R F D L B`. |
 | `f2l1`..`f2l4` | one more of the four corner–edge pairs of the first two layers (relative to `crossFace`) is fully in place, counting pairs only while the cross is complete; slots are numbered by completion order (pairs completed by the same move in a fixed order of the slots), and the record says which physical slot each was |
 | `eoll` | all four last-layer edges show the last-layer colour on the last-layer face |
 | `ocll` | all four last-layer corners do too |
@@ -72,18 +72,18 @@ first after `solve_start`.
 
 Per phase: `startMs` (previous phase's `endMs`, or `solve_start` for the cross), `endMs`,
 `moves` (count), `recognitionMs` (from `startMs` to the phase's first move) and
-`executionMs` (from the phase's first move to `endMs`). If the solver abandons the first
-cross and completes an F2L pair on another face with a complete cross, `crossFace`
-switches to that face (the one with the most pairs if several qualify) and the phases are
-recomputed.
+`executionMs` (from the phase's first move to `endMs`). A cross completed first by
+accident is kept, as Cubeast keeps it, even when the solver then builds the first two
+layers on another face.
 
-Checked against the 300 Cubeast fixtures in T1.3 (99.7% of the phase boundaries within
-±1 ms). Pairs count only while the cross is complete because, during an insertion that
+Checked against the 300 Cubeast fixtures in T1.3: all 2400 phase boundaries agree within
+±1 ms. Pairs count only while the cross is complete because, during an insertion that
 takes a cross edge out, another pair can sit in place for a move or two: counting it ended
 the phase before the insertion was over on 5 of the 300 solves (4 of them with the wrong
-slot), where Cubeast waits for the cross. Cubeast switched the cross face on no fixture;
-the rule above applies to one of them, whose first cross completed by accident, and there
-it finds the solver's own cross where Cubeast keeps the accidental one.
+slot), where Cubeast waits for the cross.
+
+Later: with more data, evaluate choosing as the cross face the face whose first two layers
+complete first (the solver's real cross), which would relabel solves like fixture 13.
 
 ## 5. Files
 

@@ -136,7 +136,7 @@ function table({ elapsedMs, agree, mismatches }: Comparison): string {
     ...(mismatches.length === 0 ? [] : ['Mismatches (fixture, phase: ours vs Cubeast, ms):']),
     ...mismatches.map(
       (m) =>
-        `  solves[${String(m.fixture)}] ${m.phase}: ${String(m.ours)} vs ${String(m.cubeast)} (cross ${String(m.report.crossFace)}${m.report.crossFaceSwitched ? ', switched' : ''})`,
+        `  solves[${String(m.fixture)}] ${m.phase}: ${String(m.ours)} vs ${String(m.cubeast)} (cross ${String(m.report.crossFace)})`,
     ),
   ].join('\n');
 }
@@ -159,22 +159,13 @@ describe('agreement with Cubeast on the 300 fixture solves', () => {
     }
   });
 
-  it('matches at least 95% of the (fixture, phase) boundaries within ±1 ms, in under 2 s', () => {
+  it('matches every (fixture, phase) boundary within ±1 ms, in under 2 s', () => {
     const r = result();
     console.log(table(r));
     const total = r.agree.reduce((a, b) => a + b, 0);
     expect(r.elapsedMs).toBeLessThan(2000);
+    // The acceptance threshold of docs/PLAN.md T1.3, then what the detector actually achieves.
     expect(total / (FIXTURES.length * PHASE_NAMES.length)).toBeGreaterThanOrEqual(THRESHOLD);
-  });
-
-  it('disagrees only on solves[13], where it switches the cross face and Cubeast does not', () => {
-    // Cubeast keeps the first cross, F, completed by accident at move 49; the detector switches to
-    // U, the solver's cross, when it completes with its pairs at move 89 (phases.test.ts). Cubeast's
-    // PLL, the last phase, agrees.
-    const r = result();
-    expect(r.mismatches.map((m) => `${String(m.fixture)} ${m.phase}`)).toEqual(
-      PHASE_NAMES.slice(0, 7).map((phase) => `13 ${phase}`),
-    );
-    expect(r.mismatches.every((m) => m.report.crossFaceSwitched)).toBe(true);
+    expect(r.mismatches).toEqual([]);
   });
 });

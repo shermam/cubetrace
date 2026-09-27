@@ -47,14 +47,8 @@ export interface PhaseRecord {
 }
 
 export interface PhaseReport {
-  /** The face the cross was built on; `null` if no cross was completed. */
+  /** The face whose cross completed first, which never changes; `null` if no cross completed. */
   crossFace: Face | null;
-  /**
-   * True when the first cross found was abandoned: a pair completed on another face with a
-   * complete cross before any pair completed on the first one, and the phases were recomputed
-   * with that other face as the cross face.
-   */
-  crossFaceSwitched: boolean;
   /** The phases completed, in order; all eight when `complete`. */
   phases: PhaseRecord[];
   /** Index into the input moves of the first move after which the cube is solved. */
@@ -64,7 +58,7 @@ export interface PhaseReport {
 }
 
 export interface DetectPhasesOptions {
-  /** Forces the cross face: no detection, no switching. */
+  /** Forces the cross face instead of detecting it. */
   crossFace?: Face;
   /**
    * When the solve started, in the clock of the moves, if that was before the first move (a timer
@@ -208,8 +202,8 @@ function countedSlots(f: Facelets, crossFace: Face): EdgePos[] {
 
 /**
  * Of `faces`, the one with the most pairs counting on it, the first of them on a tie: the choice
- * when one move completes several crosses, or when the cross face switches. Preferring progress
- * over the order of the faces keeps the choice colour-neutral unless the counts tie.
+ * when one move completes several crosses. Preferring progress over the order of the faces keeps
+ * the choice colour-neutral unless the counts tie.
  */
 function mostPairs(f: Facelets, faces: readonly Face[]): Face | undefined {
   let best: Face | undefined;
@@ -234,16 +228,13 @@ interface Scan {
   crossFace: Face | null;
   ends: PhaseEnd[];
   solvedAt: number | null;
-  /** Set when the cross face has to switch to this face (see `scan`). */
-  switchTo: Face | null;
 }
 
 /**
  * Walks the moves once, ending each phase at the first move after which its predicate holds; one
- * move may end several phases. With `forced`, the cross face is that face. Otherwise it is the
- * first face whose cross completes (faces whose cross is complete in `scrambled` excluded), and the
- * walk stops with `switchTo` if, before any pair counts on it, a pair counts on another face whose
- * cross is complete.
+ * move may end several phases. The cross face is `forced`, or else the first face whose cross
+ * completes (faces whose cross is complete in `scrambled` excluded); it never changes, even when
+ * that cross was completed by accident and the solver builds the first two layers on another face.
  */
 function scan(scrambled: Facelets, moves: readonly TimedMove[], forced: Face | undefined): Scan {
   const candidates =
@@ -261,7 +252,7 @@ function scan(scrambled: Facelets, moves: readonly TimedMove[], forced: Face | u
       );
       if (first === undefined) {
         if (isSolved(f)) {
-          return { crossFace, ends, solvedAt: i, switchTo: null };
+          return { crossFace, ends, solvedAt: i };
         }
         continue;
       }
@@ -270,16 +261,6 @@ function scan(scrambled: Facelets, moves: readonly TimedMove[], forced: Face | u
     }
     if (ends.length <= 4) {
       const slots = countedSlots(f, crossFace);
-      if (forced === undefined && ends.length === 1 && slots.length === 0) {
-        const current = crossFace;
-        const other = mostPairs(
-          f,
-          FACE_ORDER.filter((x) => x !== current && countedSlots(f, x).length > 0),
-        );
-        if (other !== undefined) {
-          return { crossFace, ends, solvedAt: null, switchTo: other };
-        }
-      }
       // f2lK ends when K pairs count; its slot is one that no earlier f2l phase took (pairs
       // completed by the same move are taken in EDGE_FACELETS order).
       while (ends.length <= 4 && slots.length >= ends.length) {
@@ -301,10 +282,10 @@ function scan(scrambled: Facelets, moves: readonly TimedMove[], forced: Face | u
       if (ends.length === 7) {
         ends.push({ index: i });
       }
-      return { crossFace, ends, solvedAt: i, switchTo: null };
+      return { crossFace, ends, solvedAt: i };
     }
   }
-  return { crossFace, ends, solvedAt: null, switchTo: null };
+  return { crossFace, ends, solvedAt: null };
 }
 
 /**
@@ -319,11 +300,7 @@ export function detectPhases(
   moves: readonly TimedMove[],
   opts: DetectPhasesOptions = {},
 ): PhaseReport {
-  let result = scan(scrambled, moves, opts.crossFace);
-  const crossFaceSwitched = result.switchTo !== null;
-  if (result.switchTo !== null) {
-    result = scan(scrambled, moves, result.switchTo);
-  }
+  const result = scan(scrambled, moves, opts.crossFace);
   const phases: PhaseRecord[] = [];
   let startMs = moves.length > 0 ? (opts.solveStartMs ?? moves[0].ms) : 0;
   let previousEnd = -1;
@@ -349,7 +326,6 @@ export function detectPhases(
   }
   return {
     crossFace: result.crossFace,
-    crossFaceSwitched,
     phases,
     solvedAtMove: result.solvedAt,
     complete: phases.length === PHASE_NAMES.length,
