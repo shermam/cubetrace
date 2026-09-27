@@ -61,6 +61,13 @@ test('High in Settings records at 8 Mbps; Standard in Camera settings at 4 Mbps,
   await expect(panelQuality).toHaveValue('standard');
   await expect(state).toHaveAttribute('data-status', 'recording', { timeout: 15_000 });
   await expect(codecs).toHaveText(/^vp09\.00\.40\.08 at 4 Mbps, /);
+
+  // On a phone 320 px wide the choices are cut short; the page does not scroll sideways.
+  const overflow = (): Promise<number> =>
+    page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  await page.setViewportSize({ width: 320, height: 720 });
+  await expect.poll(overflow).toBeLessThanOrEqual(0);
   await page.goto('/settings');
   await expect(quality).toHaveValue('standard');
+  await expect.poll(overflow).toBeLessThanOrEqual(0);
 });

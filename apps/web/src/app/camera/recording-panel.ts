@@ -61,7 +61,7 @@ import { attemptSizeText, bitrateText, expectedBitrate } from './video-quality';
         <p class="muted" data-testid="recording-last-clip">{{ last }}</p>
       }
       <app-storage-meter />
-      <p class="muted" data-testid="recording-estimate">{{ estimate() }}</p>
+      <p class="estimate" data-testid="recording-estimate">{{ estimate() }}</p>
       <p class="hint">
         While the camera is on and a session is under way, the last 90 s are kept in memory, and
         every attempt gets two clips in its folder: its scramble from 2 s before the first turn to 1
@@ -100,12 +100,14 @@ import { attemptSizeText, bitrateText, expectedBitrate } from './video-quality';
 
     .state,
     .muted,
+    .estimate,
     .hint,
     dt {
       color: var(--text-muted);
     }
 
-    .state {
+    .state,
+    .estimate {
       font-size: 0.875rem;
     }
 

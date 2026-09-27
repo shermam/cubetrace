@@ -12,6 +12,12 @@ section {
   > select {
     width: min(100%, 20rem);
   }
+
+  // The video quality's choices are longer: as wide as they are, within the page.
+  > select.wide {
+    width: auto;
+    max-width: 100%;
+  }
 }
 
 h2 {
