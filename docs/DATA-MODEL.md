@@ -64,8 +64,8 @@ first after `solve_start`.
 
 | Phase | Ends at the first move after which… |
 |---|---|
-| `cross` | some face `X` has its four edges in place and oriented (all four edge stickers on `X` show `X`'s colour and the other sticker of each edge matches its adjacent centre); `X` becomes `crossFace`. Faces whose cross was already complete at `scramble_done` are excluded. |
-| `f2l1`..`f2l4` | one more of the four corner–edge pairs of the first two layers (relative to `crossFace`) is fully in place; slots are numbered by completion order, and the record says which physical slot each was |
+| `cross` | some face `X` has its four edges in place and oriented (all four edge stickers on `X` show `X`'s colour and the other sticker of each edge matches its adjacent centre); `X` becomes `crossFace`. Faces whose cross was already complete at `scramble_done` are excluded. If one move completes several crosses, the one with the most pairs in place wins. |
+| `f2l1`..`f2l4` | one more of the four corner–edge pairs of the first two layers (relative to `crossFace`) is fully in place; slots are numbered by completion order (pairs completed by the same move in a fixed order of the slots), and the record says which physical slot each was |
 | `eoll` | all four last-layer edges show the last-layer colour on the last-layer face |
 | `ocll` | all four last-layer corners do too |
 | `pll` | the cube is solved |
@@ -74,8 +74,8 @@ Per phase: `startMs` (previous phase's `endMs`, or `solve_start` for the cross),
 `moves` (count), `recognitionMs` (from `startMs` to the phase's first move) and
 `executionMs` (from the phase's first move to `endMs`). If the solver abandons the first
 cross and completes an F2L pair on another face with a complete cross, `crossFace`
-switches to that face and the phases are recomputed (a rule validated against the Cubeast
-fixtures).
+switches to that face (the one with the most pairs if several qualify) and the phases are
+recomputed (a rule validated against the Cubeast fixtures).
 
 ## 5. Files
 

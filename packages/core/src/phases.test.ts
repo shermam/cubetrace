@@ -303,15 +303,37 @@ function rotateEdge(pos: EdgePos, rotation: Rotation): EdgePos {
   return rotated;
 }
 
+/**
+ * The report with the slots of f2l phases ending on the same move in alphabetical order. Pairs
+ * completed by one move are taken in EDGE_FACELETS order, which depends on the frame: rotated
+ * solves agree on which slots those phases took, not on their order.
+ */
+function sortSameMoveSlots(r: PhaseReport): PhaseReport {
+  const phases = r.phases.map((p) => ({ ...p }));
+  const byMove = new Map<number, PhaseRecord[]>();
+  for (const p of phases) {
+    if (p.slot !== undefined) {
+      byMove.set(p.endMoveIndex, [...(byMove.get(p.endMoveIndex) ?? []), p]);
+    }
+  }
+  for (const group of byMove.values()) {
+    const slots = group.flatMap((p) => (p.slot === undefined ? [] : [p.slot])).sort();
+    group.forEach((p, k) => {
+      p.slot = slots[k];
+    });
+  }
+  return { ...r, phases };
+}
+
 /** What the report of a rotated solve must be: the same phases, faces and slots carried along. */
 function rotateReport(r: PhaseReport, rotation: Rotation): PhaseReport {
-  return {
+  return sortSameMoveSlots({
     ...r,
     crossFace: r.crossFace === null ? null : rotation[r.crossFace],
     phases: r.phases.map((p) =>
       p.slot === undefined ? p : { ...p, slot: rotateEdge(p.slot, rotation) },
     ),
-  };
+  });
 }
 
 // ---- Tests ----
@@ -552,7 +574,7 @@ describe('colour neutrality', () => {
     const crossFaces = new Set<Face | null>();
     for (const rotation of ROTATIONS) {
       const rotated = detect(rotateSolve(FULL, rotation));
-      expect(rotated).toEqual(rotateReport(r, rotation));
+      expect(sortSameMoveSlots(rotated)).toEqual(rotateReport(r, rotation));
       crossFaces.add(rotated.crossFace);
     }
     expect([...crossFaces].sort()).toEqual(['B', 'D', 'F', 'L', 'R', 'U']);
@@ -566,7 +588,7 @@ describe('colour neutrality', () => {
       const r = detect(s);
       expect(r.complete).toBe(true);
       for (const rotation of ROTATIONS) {
-        expect(detect(rotateSolve(s, rotation)), `solves[${String(i)}]`).toEqual(
+        expect(sortSameMoveSlots(detect(rotateSolve(s, rotation))), `solves[${String(i)}]`).toEqual(
           rotateReport(r, rotation),
         );
       }

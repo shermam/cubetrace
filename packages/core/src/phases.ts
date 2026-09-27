@@ -201,6 +201,24 @@ function countedSlots(f: Facelets, crossFace: Face): EdgePos[] {
   return f2lSlotsComplete(f, crossFace);
 }
 
+/**
+ * Of `faces`, the one with the most pairs counting on it, the first of them on a tie: the choice
+ * when one move completes several crosses, or when the cross face switches. Preferring progress
+ * over the order of the faces keeps the choice colour-neutral unless the counts tie.
+ */
+function mostPairs(f: Facelets, faces: readonly Face[]): Face | undefined {
+  let best: Face | undefined;
+  let bestCount = -1;
+  for (const face of faces) {
+    const count = countedSlots(f, face).length;
+    if (count > bestCount) {
+      best = face;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
 /** Where a phase ended: the index of the move that completed it, and an f2l phase's slot. */
 interface PhaseEnd {
   index: number;
@@ -232,31 +250,35 @@ function scan(scrambled: Facelets, moves: readonly TimedMove[], forced: Face | u
   for (const [i, { m }] of moves.entries()) {
     f = applyMove(f, m);
     if (crossFace === null) {
-      const done = candidates.filter((x) => crossComplete(f, x));
-      if (done.length === 0) {
+      const first = mostPairs(
+        f,
+        candidates.filter((x) => crossComplete(f, x)),
+      );
+      if (first === undefined) {
         if (isSolved(f)) {
           return { crossFace, ends, solvedAt: i, switchTo: null };
         }
         continue;
       }
-      // Crosses completed by the same move: the one with more pairs, then FACE_ORDER.
-      crossFace = done.reduce((best, x) =>
-        countedSlots(f, x).length > countedSlots(f, best).length ? x : best,
-      );
+      crossFace = first;
       ends.push({ index: i });
     }
     if (ends.length <= 4) {
       const slots = countedSlots(f, crossFace);
       if (forced === undefined && ends.length === 1 && slots.length === 0) {
         const current = crossFace;
-        const other = FACE_ORDER.find(
-          (x) => x !== current && crossComplete(f, x) && countedSlots(f, x).length > 0,
+        const other = mostPairs(
+          f,
+          FACE_ORDER.filter(
+            (x) => x !== current && crossComplete(f, x) && countedSlots(f, x).length > 0,
+          ),
         );
         if (other !== undefined) {
           return { crossFace, ends, solvedAt: null, switchTo: other };
         }
       }
-      // f2lK ends when K pairs count; its slot is one that no earlier f2l phase took.
+      // f2lK ends when K pairs count; its slot is one that no earlier f2l phase took (pairs
+      // completed by the same move are taken in EDGE_FACELETS order).
       while (ends.length <= 4 && slots.length >= ends.length) {
         const slot = slots.find((s) => !slotsDone.includes(s));
         if (slot === undefined) {
