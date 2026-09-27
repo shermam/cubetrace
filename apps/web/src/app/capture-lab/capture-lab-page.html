@@ -92,7 +92,8 @@
       above, connect a cube with the cube button at the top (a GAN cube, or the demo cube), press
       Sync check, then turn one face, pause, turn it back; repeat five times, pausing about a second
       after every turn. It says how far the camera lags the cube, or why it cannot tell, and what
-      measuring each frame cost the capture worker.
+      measuring each frame cost the capture worker. While it watches, the bars show how much the
+      latest frame changed: wave a hand in front of the camera to see it register.
     </p>
     <div class="fields">
       <label for="lab-sync-seconds">Watch for (s)</label>
@@ -114,7 +115,35 @@
       <button type="button" [disabled]="!syncRunning()" (click)="stopSync()">End the check</button>
     </div>
     <p class="status" role="status" data-testid="lab-sync-status">{{ syncStatus() }}</p>
+    @if (syncRun()) {
+      <div
+        class="motion"
+        data-testid="lab-motion"
+        [attr.data-mean]="motion().mean"
+        [attr.data-changed]="motion().changed"
+      >
+        <div class="row">
+          <label for="lab-motion-mean">Mean difference</label>
+          <meter id="lab-motion-mean" min="0" max="16" [value]="motion().mean"></meter>
+          <span class="value" data-testid="lab-motion-mean">{{ motion().meanText }}</span>
+        </div>
+        <div class="row">
+          <label for="lab-motion-changed">Changed area</label>
+          <meter id="lab-motion-changed" min="0" max="0.05" [value]="motion().changed"></meter>
+          <span class="value" data-testid="lab-motion-changed">{{ motion().changedText }}</span>
+        </div>
+      </div>
+      <p class="about" data-testid="lab-meter">{{ meterLine() }}</p>
+    }
     @if (syncJson()) {
+      <div class="actions">
+        <button type="button" data-testid="lab-sync-download" (click)="downloadSync()">
+          Download check data
+        </button>
+      </div>
+      @if (syncNotice(); as notice) {
+        <p class="error">{{ notice }}</p>
+      }
       <details>
         <summary>What it found (JSON)</summary>
         <pre data-testid="lab-sync-json">{{ syncJson() }}</pre>

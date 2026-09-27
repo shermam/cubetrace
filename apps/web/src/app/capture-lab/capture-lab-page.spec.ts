@@ -2,7 +2,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { settle } from '../device/fake-browser';
-import { CaptureLabPage } from './capture-lab-page';
+import { CaptureLabPage, meterText, motionBars } from './capture-lab-page';
 
 /** Stands for a browser API (a constructor) the page only checks the presence of. */
 const present = (): void => undefined;
@@ -108,5 +108,40 @@ describe('CaptureLabPage', () => {
     expect(getUserMedia).toHaveBeenCalledWith(expect.objectContaining({ audio: false }));
     expect(button(fixture, 'Cut the last 10 s').disabled).toBe(true);
     expect(button(fixture, 'Mux and save the last 10 s').disabled).toBe(true);
+  });
+});
+
+describe("the capture lab's sync check lines", () => {
+  it('shows the latest frame’s motion as two bars with their values', () => {
+    expect(motionBars(null)).toEqual({ mean: 0, changed: 0, meanText: '–', changedText: '–' });
+    expect(
+      motionBars({ timestampUs: 0, arrivalHostMs: 0, mean: 1.73, changed: 0.004213, costMs: 1 }),
+    ).toEqual({
+      mean: 1.73,
+      changed: 0.004213,
+      meanText: '1.7 levels',
+      changedText: '0.42% of the pixels',
+    });
+  });
+
+  it("says the frames' pixel format and how they are read", () => {
+    expect(meterText(null)).toBe('Frames: none measured yet.');
+    const meter = {
+      format: 'NV12',
+      path: 'copy' as const,
+      frameWidth: 1920,
+      frameHeight: 1080,
+      region: { x: 0, y: 0, w: 1920, h: 1080 },
+      planeWidth: 320,
+      planeHeight: 180,
+      changeLevels: 12,
+    };
+    expect(meterText(meter)).toBe(
+      'Frames: NV12, 1920×1080, copied out (VideoFrame.copyTo); the region 1920×1080 at (0, 0) ' +
+        'measured on 320×180 pixels, a pixel changed when its luma moves by more than 12 levels.',
+    );
+    expect(meterText({ ...meter, format: null, path: 'draw' })).toContain(
+      'Frames: no pixel format, 1920×1080, drawn into a canvas',
+    );
   });
 });

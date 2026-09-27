@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DOCUMENT, DestroyRef, computed, inject, signal } from '@angular/core';
 import {
   SYNC_CHECK_MS,
   attemptPath,
@@ -6,12 +6,22 @@ import {
   startCapture,
   type CaptureHandle,
   type CaptureStats,
+  type MotionMeterInfo,
+  type MotionSample,
 } from '@cubetrace/capture';
 import type { FramesJson, VideoClip } from '@cubetrace/core';
 
+import { APP_BUILD } from '../../environments/version';
+import {
+  syncReport,
+  syncReportFileName,
+  syncSummaryLine,
+  type SyncReportContext,
+} from '../camera/sync-report';
 import { SyncRun } from '../camera/sync-run';
 import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow, type BrowserGlobals } from '../device/browser-globals';
+import { downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
 import { summarizeCut, type CutSummary } from './cut-summary';
 
@@ -68,8 +78,11 @@ interface CameraOption {
  * frames.json into a scratch folder of the origin private file system, and plays it back from
  * there. "Sync check" (T2.5) runs the Timer's sync check on this camera's whole frame with whatever
  * cube is connected (a GAN cube, or the demo cube), without a session, and prints what it found
- * and what measuring each frame cost the capture worker. Not in the navigation: it is reached by
- * its address, like a tool.
+ * and what measuring each frame cost the capture worker; while it runs, two bars show the latest
+ * frame's motion (the mean difference and the changed area, T2.8), so that a hand waved in front
+ * of the camera can be seen to register, with the frames' pixel format and how they are read, and
+ * its diagnostics can be downloaded as the Timer's can. Not in the navigation: it is reached by its
+ * address, like a tool.
  */
 @Component({
   selector: 'app-capture-lab-page',
@@ -78,9 +91,12 @@ interface CameraOption {
 })
 export class CaptureLabPage {
   private readonly globals = inject(BROWSER_GLOBALS);
+  private readonly document = inject(DOCUMENT);
   private readonly cube = inject(CubeService);
   private handle: CaptureHandle | undefined;
   private stream: MediaStream | undefined;
+  /** Where the lab's sync check ran, for its diagnostics. */
+  private syncContext: SyncReportContext | null = null;
   /** The video track's frame rate setting: the saved clip's `fpsNominal`. */
   private frameRate = 30;
 
@@ -137,6 +153,12 @@ export class CaptureLabPage {
     const outcome = this.syncRun()?.outcome() ?? null;
     return outcome === null ? '' : JSON.stringify(outcome, null, 2);
   });
+  /** The latest frame's motion, for the live bars. */
+  protected readonly motion = computed(() => motionBars(this.syncRun()?.last() ?? null));
+  /** How the capture worker reads the frames: their format, copied or drawn, the plane. */
+  protected readonly meterLine = computed(() => meterText(this.syncRun()?.meter() ?? null));
+  /** Why the check's data could not be downloaded, if it could not. */
+  protected readonly syncNotice = signal<string | null>(null);
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
@@ -156,12 +178,34 @@ export class CaptureLabPage {
       return;
     }
     const globals = this.globals;
+    const settings = this.stream?.getVideoTracks().at(0)?.getSettings() ?? {};
+    this.syncContext = {
+      label: LAB_CAMERA,
+      deviceLabel: this.stream?.getVideoTracks().at(0)?.label ?? '',
+      frameSize:
+        settings.width === undefined || settings.height === undefined
+          ? null
+          : { width: settings.width, height: settings.height },
+      framing: null,
+      app: APP_BUILD,
+      userAgent: globals.navigator?.userAgent ?? null,
+    };
+    this.syncNotice.set(null);
     this.syncRun.set(
       new SyncRun({
-        watch: (rect, onSample, onError) => handle.watchMotion(rect, onSample, onError),
+        watch: (rect, onSample, onError, onMeter) =>
+          handle.watchMotion(rect, onSample, onError, onMeter),
         rect: null,
         events$: this.cube.events$,
         durationMs: this.syncSeconds() * 1000,
+        // A tool: it watches the time it is given (or less, all ten turns matched).
+        untilDone: false,
+        onEnd: (outcome, run) => {
+          const report = outcome === null ? null : this.syncReportOf(run);
+          if (report !== null) {
+            console.info(syncSummaryLine(report));
+          }
+        },
         now: () => hostNow(globals),
         setTimeout: (callback, ms) =>
           globals.setTimeout === undefined
@@ -180,6 +224,28 @@ export class CaptureLabPage {
 
   protected stopSync(): void {
     this.syncRun()?.cancel();
+  }
+
+  /** "Download check data": the check's diagnostics as a JSON file, as the Timer's panel gives. */
+  protected downloadSync(): void {
+    const run = this.syncRun();
+    const report = run === null ? null : this.syncReportOf(run);
+    if (report === null) {
+      return;
+    }
+    try {
+      downloadJson(this.globals, this.document, syncReportFileName(report.createdMs), report);
+    } catch (error: unknown) {
+      this.syncNotice.set(`The check's data could not be saved: ${errorMessage(error)}`);
+    }
+  }
+
+  private syncReportOf(run: SyncRun) {
+    const outcome = run.outcome();
+    const context = this.syncContext;
+    return outcome === null || context === null
+      ? null
+      : syncReport(run.data(), outcome, context, hostNow(this.globals));
   }
 
   protected setSyncSeconds(text: string): void {
@@ -423,7 +489,7 @@ function syncStatusOf(run: SyncRun | null): string {
     case 'running':
       return (
         `Watching: ${String(run.secondsLeft())} s left; ${String(run.moves())} turns, ` +
-        `${String(run.onsets())} motion onsets, ${String(run.frames())} frames measured.`
+        `${String(run.matched())} seen by the camera, ${String(run.frames())} frames measured.`
       );
     case 'cancelled':
       return 'Stopped.';
@@ -446,6 +512,53 @@ function syncStatusOf(run: SyncRun | null): string {
     `The camera lags the cube by ${String(outcome.offsetMs)} ms (spread ` +
     `${String(outcome.clapperboardResidualMs)} ms over ${String(outcome.clapperboardSamples)} ` +
     `turns).${cost}`
+  );
+}
+
+/** The live bars of the lab's sync check: the latest frame's motion, with their texts. */
+export interface MotionBars {
+  /** Mean absolute difference, luma levels. */
+  readonly mean: number;
+  /** Changed area, a share of the pixels. */
+  readonly changed: number;
+  /** "1.7 levels" and "0.42% of the pixels"; dashes before the first frame. */
+  readonly meanText: string;
+  readonly changedText: string;
+}
+
+/** The bars for `sample`, the latest frame's motion (null before the first). */
+export function motionBars(sample: MotionSample | null): MotionBars {
+  if (sample === null) {
+    return { mean: 0, changed: 0, meanText: '–', changedText: '–' };
+  }
+  return {
+    mean: sample.mean,
+    changed: sample.changed,
+    meanText: `${sample.mean.toFixed(1)} levels`,
+    changedText: `${(sample.changed * 100).toFixed(2)}% of the pixels`,
+  };
+}
+
+/**
+ * How the capture worker reads the frames, in one line: "NV12 frames of 1920×1080, copied out
+ * (VideoFrame.copyTo); the region 1920×1080 at (0, 0) measured on 320×180 pixels, a pixel changed
+ * when its luma moves by more than 12 levels."
+ */
+export function meterText(meter: MotionMeterInfo | null): string {
+  if (meter === null) {
+    return 'Frames: none measured yet.';
+  }
+  const format = meter.format ?? 'no pixel format';
+  const read =
+    meter.path === 'copy'
+      ? 'copied out (VideoFrame.copyTo)'
+      : 'drawn into a canvas (their format is not copied, or they are to be shown turned)';
+  const { region } = meter;
+  return (
+    `Frames: ${format}, ${String(meter.frameWidth)}×${String(meter.frameHeight)}, ${read}; ` +
+    `the region ${String(region.w)}×${String(region.h)} at (${String(region.x)}, ` +
+    `${String(region.y)}) measured on ${String(meter.planeWidth)}×${String(meter.planeHeight)} ` +
+    `pixels, a pixel changed when its luma moves by more than ${String(meter.changeLevels)} levels.`
   );
 }
 
