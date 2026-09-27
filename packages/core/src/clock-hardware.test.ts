@@ -80,10 +80,11 @@ const PLAN_RESIDUAL_P95_MS = 20;
 const I3_SLOPE: readonly [number, number] = [1.0008, 1.002];
 
 /**
- * The i3's attempt 6 after the cube reconnected: its 112 moves fit a slope of 1.000862 with a 95th
- * percentile of the absolute residuals of 32.6 ms, more jitter than the other attempts' (six late
- * packets of 33 to 50 ms among its 112; its scramble alone fits to 30.5 ms and its solve to 32.2, so
- * the jitter is the packets', not a bend of the line).
+ * The residual bound of the i3's attempt 6 after the cube reconnected, 35 ms rather than the 25 ms
+ * of every other attempt (`RESIDUAL_P95_MS`): six late packets set it. Its 112 moves fit a slope of
+ * 1.000862 with a 95th percentile of the absolute residuals of 32.6 ms because six of its packets
+ * came 33 to 50 ms late (its scramble alone fits to 30.5 ms and its solve to 32.2, so the jitter is
+ * the packets', not a bend of the line).
  */
 const I3_RECONNECTED_RESIDUAL_P95_MS = 35;
 
