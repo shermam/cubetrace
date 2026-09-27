@@ -1,0 +1,15 @@
+// Breakpoints of the responsive layout, for `@use` in component styles
+// (`@use '../../styles/layout';`). Styles are written for a phone in portrait first; wider
+// screens add to them inside these mixins. Media queries cannot read CSS custom properties,
+// which is why these are Sass variables while the other tokens live in styles.scss.
+
+// The header fits on one row: brand, navigation and status.
+$header-one-row: 40rem;
+// Pages may use two columns (laptops; tablets in landscape).
+$two-columns: 60rem;
+
+@mixin from($width) {
+  @media (min-width: $width) {
+    @content;
+  }
+}
