@@ -1,6 +1,7 @@
-// The connect dialog's words for a failed connection (docs/PLAN.md, T1.6a: "errors in plain
-// words"). The messages matched below are Chrome's (Web Bluetooth), the GAN driver's
-// (gan-web-bluetooth/src/gan-smart-cube.js) and @cubetrace/gan's (packages/gan/src/connection.ts).
+// The words for a failed connection, under the connect button and in the connect dialog
+// (docs/PLAN.md, T1.6a: "errors in plain words"). The messages matched below are Chrome's (Web
+// Bluetooth), the GAN driver's (gan-web-bluetooth/src/gan-smart-cube.js) and @cubetrace/gan's
+// (packages/gan/src/connection.ts).
 
 /** What was known about the MAC address when the connection failed. */
 export interface MacContext {
@@ -29,7 +30,7 @@ export function describeConnectError(error: unknown, macContext: MacContext): st
   if (/Unable to determine cube MAC address/i.test(message)) {
     return macContext.cancelled
       ? "Not connected: the cube's MAC address is needed to talk to it, and none was given."
-      : "Not connected: Chrome could not read the cube's MAC address. Turn on the flag below, or type the address when asked.";
+      : "Not connected: Chrome could not read the cube's MAC address. Turn on the Chrome flag that lets it, or type the address when asked.";
   }
   if (/did not report its state/i.test(message)) {
     const check =
