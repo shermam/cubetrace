@@ -1,6 +1,6 @@
 {
   "name": "@cubetrace/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Cube simulator, notation, scrambles, attempt state machine and CFOP phases. Plain TypeScript; never imports Angular.",
   "license": "MIT",

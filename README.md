@@ -1,30 +1,78 @@
 # cubetrace
 
-A Chrome web app that records speedcube solves in sync with a GAN Bluetooth cube: a
-Cubeast-like timer (scrambles, CFOP breakdown) whose side effect is a dataset of video and
-move logs. It runs on a laptop or on a phone alone; phones can join as extra cameras.
+cubetrace is a Chrome web app that times speedcube solves on a GAN Bluetooth cube. It works like
+Cubeast: it shows a scramble, follows the cube while you scramble it, starts the time with your
+first turn, stops it when the cube is solved, and breaks each solve into its CFOP phases. Its side
+effect is a dataset: every attempt is kept with its scramble, every move on the device's clock and
+on the cube's, and its phases. The later phases of the [plan](docs/PLAN.md) add video: the device's
+own camera first, then phones as extra cameras, each recording the solves in sync with the moves.
 
-**Status:** phase 1 scaffold. The app has its four pages (Timer, Sessions, Settings, Probe) as
-placeholders; the plan is in [`docs/PLAN.md`](docs/PLAN.md).
+**Status:** version 0.1.0, phase 1 (the timer), before the owner's first test round on the real
+cubes and phones ([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md)). What it does is listed in
+[`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
-## Repository
+## Use it
 
-```
-apps/web/        Angular app (standalone components, SCSS, routing, no SSR); Playwright tests in apps/web/e2e/
-packages/core/   @cubetrace/core: cube simulator, scrambles, attempt state machine, CFOP phases (plain TypeScript)
-packages/gan/    @cubetrace/gan: GAN Bluetooth driver wrapper and the fake cube (plain TypeScript)
-fixtures/        real solves used as test oracles (read-only)
-docs/            plan, architecture, data model, toolchain, changelog
-```
+Open **https://shermam.github.io/cubetrace/** in Chrome on Android, macOS or Windows. The cube talks
+to the app over Web Bluetooth, which Safari, Firefox and Chrome on iPhone and iPad lack; Chrome on
+Linux has it behind `chrome://flags/#enable-experimental-web-platform-features`.
 
-## Requirements
+**Connect a cube.** Turn the cube on, click the cube pill in the header ("No cube") or "Connect a
+cube" on the Timer page, then "Connect cube", and choose the cube in Chrome's list of Bluetooth
+devices. The GAN driver also needs the cube's MAC address:
 
-Node.js 22 (at least 22.22.3, which Angular CLI 22.2 requires) and npm 10. The app targets
-Chrome (Web Bluetooth, WebCodecs) on Android, macOS and Windows.
+- With `chrome://flags/#enable-web-bluetooth-new-permissions-backend` enabled, Chrome reads it by
+  itself. The connect dialog names this flag and has a Copy button: paste it in the address bar, set
+  the flag to Enabled, relaunch Chrome.
+- Without the flag, the dialog asks for the address: six hex bytes such as `AB:12:CD:34:EF:56`
+  (`chrome://bluetooth-internals` lists nearby devices with their addresses). With "Remember it for
+  this cube" on, Settings keeps it, and the next connection does not ask.
 
-## Commands
+Once the cube is connected, the pill shows its model and battery. Scramble the cube as the Timer
+page shows: the progress counts the moves, and a wrong turn brings up the moves that undo it. The
+time starts with the first turn after the scramble and stops when the cube is solved. `N` skips the
+scramble, `Esc` marks a DNF, `Delete` removes the last attempt.
 
-Run from the repository root.
+**Demo mode.** Without a cube, https://shermam.github.io/cubetrace/?demo=0&speed=20 connects a fake
+cube that replays recorded solve 0 (of 30, `?demo=0` to `?demo=29`) at 20 times its speed: the
+scramble, the solve, the time and the breakdown. "Demo cube" in the connect dialog replays a random
+one at the speed set in Settings. The demo solves are downloaded when a demo starts, so demo mode
+needs the network.
+
+**Install it** from Chrome's menu (Install app, or Add to Home screen on Android) or with the
+install button in the address bar on a laptop. The installed app opens offline, and Chrome grants it
+persistent storage more readily (Settings → Keep my data).
+
+**Your data** stays in the browser, in the site's origin private file system (OPFS): a folder per
+session with its `session.json` and an `attempt.json` per attempt
+([`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)). Nothing is uploaded. The Sessions page exports a
+session as one JSON file, or deletes it; clearing the site's data in Chrome deletes all of them.
+Phase 3 adds cloud storage, so that the sessions of every device end up in one dataset.
+
+## Screenshots
+
+Demo mode at real-time speed, taken with Playwright from a production build served as GitHub Pages
+serves it. The timer on a laptop after two solves: the next scramble and its picture, the last time,
+the CFOP breakdown and the solve list.
+
+![The Timer page on a laptop: a scramble with its picture on the left, the time 14.99 under it with "#2 · Saved" and "Attempt 3", and on the right the CFOP breakdown of the last solve and of the session average, and the solve list with its statistics](docs/screenshots/timer-laptop.png)
+
+The same on a phone in portrait, 390 px wide, and the connect dialog in Chrome without the MAC
+address flag:
+
+<p>
+  <img src="docs/screenshots/timer-phone.png" width="260" alt="The Timer page on a phone: scramble, picture, time, breakdown and solves stacked in one column">
+  <img src="docs/screenshots/connect-dialog.png" width="400" alt="The connect dialog: the Bluetooth hint, the flag's address with a Copy button, the three steps to enable it, and the Connect cube and Demo cube buttons">
+</p>
+
+The Sessions page, with Export and Delete for each session:
+
+![The Sessions page: two sessions with their date, device label, cube, number of attempts and mean, each with Export and Delete buttons](docs/screenshots/sessions.png)
+
+## Development
+
+Requirements: Node.js 22.22.3 or a later 22.x release (the Angular CLI's minimum; `engines` also
+accepts 24.15 and later) with npm 10. Run the commands from the repository root.
 
 | Command | What it does |
 |---|---|
@@ -37,16 +85,27 @@ Run from the repository root.
 | `npm run lint` | type-check, `eslint .`, then `ng lint` for the app |
 | `npm run format` / `npm run format:check` | Prettier write / check |
 
-Before the first `npm run e2e` on a new machine: `npx playwright install chromium`.
-Exact versions and the reasons behind the setup are in [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md).
+`npm run e2e` needs the Chromium build that Playwright 1.56.1 drives. On a new machine, install it
+once with `npx playwright install chromium`. The versions and the reasons behind the setup are in
+[`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md); the rules for contributors, human or agent, are in
+[`CLAUDE.md`](CLAUDE.md).
 
-## Deploy
+Every push to `main` builds the app with `--base-href /cubetrace/` and publishes it to GitHub Pages
+(`.github/workflows/pages.yml`). Pull requests and pushes run `.github/workflows/ci.yml`: lint,
+format check, tests, build and the end-to-end tests.
 
-Every push to `main` builds the app with `--base-href /cubetrace/` and publishes it to
-GitHub Pages, at https://shermam.github.io/cubetrace/ (`.github/workflows/pages.yml`). Pages
-must be enabled once by the owner (Settings → Pages → Source: GitHub Actions; see
-[`docs/USER-ACTIONS.md`](docs/USER-ACTIONS.md)). Pull requests and pushes run
-`.github/workflows/ci.yml`: lint, format check, tests, build and the end-to-end tests.
+## Repository layout
+
+```
+apps/web/          the Angular app (standalone components, signals, SCSS, PWA); Playwright tests in apps/web/e2e/
+packages/core/     @cubetrace/core: notation, cube simulator, scrambles, CFOP phases, attempt state machine, records, statistics, JSON Schemas
+packages/gan/      @cubetrace/gan: GAN Bluetooth driver wrapper, Bluetooth support check, fake cube
+packages/storage/  @cubetrace/storage: the session store over the origin private file system
+fixtures/          real solves and cube identities, the tests' reference data (read-only)
+docs/              plan, architecture, data model, toolchain, manual tests, owner's actions, changelog, screenshots
+```
+
+The packages are plain TypeScript, tested in Node, and never import Angular.
 
 ## Documentation
 
@@ -57,8 +116,24 @@ must be enabled once by the owner (Settings → Pages → Source: GitHub Actions
 - [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md): versions, commands and toolchain decisions
 - [`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md): checks that need a real cube or phone
 - [`docs/USER-ACTIONS.md`](docs/USER-ACTIONS.md): things only the owner can do
-- [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
+- [`docs/CHANGELOG.md`](docs/CHANGELOG.md): what each version changed
 
-## License
+## Data
 
-[MIT](LICENSE)
+- **Records.** An attempt is an `attempt.json`: its scramble and the scrambled state, its events
+  (scramble shown, started and done, pickup, solve start and end), every move with its host and cube
+  time, the result and the eight CFOP phases. A session is a `session.json`: the device, the cube,
+  the settings, the fit of the cube's clock to the device's, and a summary. Both are specified in
+  [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) (schema version 1) and as JSON Schemas (draft 2020-12)
+  in [`packages/core/schema/`](packages/core/schema/), which the tests check records against.
+- **Fixtures.** `fixtures/solves.json` holds 300 real solves from the owner's Cubeast export: the
+  scramble, the scrambled state, the raw move stream on the cube's clock, and Cubeast's results and
+  phase times. `fixtures/identities.json` holds reference cube states for the simulator's tests. A
+  private script generated both; they are read-only. The tests compare against them, and demo mode
+  replays the first 30 solves.
+
+## Licence
+
+MIT ([`LICENSE`](LICENSE)), copyright 2026 shermam. The app bundles cubing.js (MPL-2.0 or
+GPL-3.0-or-later), the owner's fork of gan-web-bluetooth (MIT), Angular (MIT) and RxJS
+(Apache-2.0), each under its own licence.

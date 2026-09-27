@@ -21,7 +21,9 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
 /**
  * The time and the attempt's controls (docs/PLAN.md, T1.6b): what the timer is waiting for, the
  * big time (see `timerDisplay`), the attempt's number, and Skip scramble (N), DNF (Esc), Delete last
- * (Delete) and New session. The keys are handled by the timer page.
+ * (Delete) and New session. The keys are handled by the timer page. While the time is a result
+ * (solved or DNF), the line under it names that attempt and says whether its record is saved: the
+ * attempt's number below it is already the next attempt's with auto-advance.
  */
 @Component({
   selector: 'app-timer-clock',
@@ -37,14 +39,16 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
     >
       {{ display().text }}
     </p>
-    <p class="attempt">
-      <span data-testid="attempt-index">Attempt {{ session.index() }}</span>
-      @if (session.session() !== null) {
-        ·
+    <p class="result">
+      @if (result(); as result) {
+        <span data-testid="result-index">#{{ result.index }}</span> ·
         <span data-testid="save-status" [attr.data-saving]="session.saving()">{{
-          session.saving() ? 'Saving…' : 'Saved'
+          result.save
         }}</span>
       }
+    </p>
+    <p class="attempt">
+      <span data-testid="attempt-index">Attempt {{ session.index() }}</span>
     </p>
     @if (session.phase() === 'no-cube') {
       <button type="button" class="primary" data-testid="timer-connect" (click)="dialogs.open()">
@@ -113,9 +117,16 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
     }
 
     .status,
+    .result,
     .attempt,
     .muted {
       color: var(--text-muted);
+    }
+
+    .result {
+      /* Kept when empty, so that the buttons do not move when a solve starts or ends. */
+      min-height: 1lh;
+      font-size: 0.875rem;
     }
 
     .time {
@@ -167,6 +178,21 @@ export class TimerClock {
   private readonly settings = inject(SettingsService);
 
   protected readonly display = this.session.display;
+
+  /**
+   * The attempt whose result the time shows, and whether its record is saved ("Saving…", "Saved",
+   * or "Not saved", which the alert below explains); null while the time is not a result.
+   */
+  protected readonly result = computed((): { index: number; save: string } | null => {
+    const kind = this.display().kind;
+    const last = this.session.lastResult();
+    if ((kind !== 'solved' && kind !== 'dnf') || last === null) {
+      return null;
+    }
+    const save =
+      this.session.saveError() !== null ? 'Not saved' : this.session.saving() ? 'Saving…' : 'Saved';
+    return { index: last.index, save };
+  });
 
   protected readonly status = computed(() => {
     const phase = this.session.phase();

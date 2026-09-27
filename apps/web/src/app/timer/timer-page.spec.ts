@@ -1,6 +1,6 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { MemorySessionStore, coreVersion } from '@cubetrace/core';
+import { MemorySessionStore } from '@cubetrace/core';
 import type { MockInstance } from 'vitest';
 
 import { ConnectDialogService } from '../connect/connect-dialog-service';
@@ -65,7 +65,6 @@ describe('TimerPage', () => {
     expect(cube?.hasAttribute('open')).toBe(false);
     expect(cube?.querySelector('summary')?.textContent).toContain('No cube');
     expect(cube?.querySelector('app-live-cube-panel')).not.toBeNull();
-    expect(query(fixture, '[data-testid="core-version"]')?.textContent).toBe(coreVersion());
     expect(autoStartDemo).not.toHaveBeenCalled();
   });
 

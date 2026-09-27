@@ -4,6 +4,30 @@ Agents cannot run these; the owner does, after the coordinator asks. Each task t
 hardware path appends its checklist here. Record the date, the device, the browser version
 and the result next to each item.
 
+## Round 1 (v0.1.0)
+
+The first release's round (`docs/PLAN.md`, T1.10): the T1.5, T1.6 and T1.7 sections below, on
+https://shermam.github.io/cubetrace/, on one laptop (Chrome, macOS or Windows) and on the
+ThinkPhone (Chrome for Android), with both cubes. The coordinator tags `v0.1.0` after it.
+
+1. Before starting, fill in one row of the table per device and cube. Chrome's version is the first
+   line of `chrome://version`; the cube's strings are in the connect dialog once it is connected
+   (Model, Hardware, Firmware); the app's version and commit are in the page footer.
+2. Tick an item below when it passes on every row. When it fails or does something unexpected on
+   a row, write the row (such as "ThinkPhone, 356 i3") and what happened next to it.
+3. Every failure becomes a GitHub issue with the row's device, Chrome version and cube, the steps,
+   what happened and what was expected (a screenshot, or the move log, when it shows it).
+4. At the end, export each device's session (Sessions → Export) and attach the files to one issue.
+   Attach them rather than paste them: an export takes about 16 kB per attempt, and an issue holds
+   65,536 characters (zip the files if GitHub refuses `.json`).
+
+| Date | Device, OS | Chrome | Cube: model, hardware, firmware | App (footer) | Result |
+|---|---|---|---|---|---|
+| | laptop: | | GAN 12 ui FreePlay: | | |
+| | laptop: | | GAN 356 i3: | | |
+| | ThinkPhone, Android: | | GAN 12 ui FreePlay: | | |
+| | ThinkPhone, Android: | | GAN 356 i3: | | |
+
 ## T1.5 — cube connection
 
 Through the connect dialog (T1.6a: click the cube pill in the header, or "Connect a cube" on the
@@ -35,7 +59,8 @@ Bluetooth packet.
 ## T1.6 — timer
 
 On the Timer page, with a cube connected as in T1.5. The page shows the scramble (moves and picture)
-with its progress, the time with the attempt's number, the buttons Skip scramble (N), DNF (Esc),
+with its progress, the time with the attempt's number (under a result, also that attempt's number
+and whether its record is saved, such as "#3 · Saved"), the buttons Skip scramble (N), DNF (Esc),
 Delete last (Delete) and New session, the CFOP breakdown, the solve list with its statistics, and
 the Cube section. Sessions are kept in the browser's origin private file system (a warning under the
 time says so when a browser has none).
@@ -72,8 +97,9 @@ time says so when a browser has none).
 
 ## T1.7 — PWA on the phone
 
-On https://shermam.github.io/cubetrace/ after the Pages deploy. Until T1.6 the wake lock is
-turned on with the switch in Settings; from T1.6 on, the timer turns it on during a session.
+On https://shermam.github.io/cubetrace/. The timer keeps the screen on by itself while a cube is
+connected during a session (T1.6 section); the switch in Settings keeps it on at any time, which the
+wake lock items below check.
 
 - [ ] ThinkPhone (Chrome for Android): menu → Install app (or Add to Home screen). The home
   screen shows the cube icon and the name "cubetrace"; opened from there, the app has no address
