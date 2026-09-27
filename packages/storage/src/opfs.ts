@@ -17,6 +17,14 @@ export interface OpfsFileHandle {
   readonly name: string;
   getFile(): Promise<{ text(): Promise<string> }>;
   createWritable(): Promise<OpfsWritable>;
+  /**
+   * Renames the file within its directory, replacing a file that has the new name in one step, and
+   * the handle takes the new name (Chrome 111 and later; missing before). Chrome rejects with
+   * `NoModificationAllowedError` while a writable stream on the file is open, with
+   * `InvalidModificationError` if the new name is a directory's, and with `NotFoundError` if the
+   * file is gone.
+   */
+  move?(newName: string): Promise<void>;
 }
 
 /** The part of `FileSystemDirectoryHandle` the store uses. */
