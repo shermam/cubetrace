@@ -7,7 +7,7 @@ import { CameraService } from './camera-service';
 import { RecordingService, STORAGE_FULL } from './recording-service';
 
 /**
- * The recording's part of the Camera section (docs/PLAN.md, T2.4): whether it records and why not,
+ * The recording's part of Camera settings (docs/PLAN.md, T2.4): whether it records and why not,
  * the pipeline's counters (frames in, encoded and dropped, the buffer, the codecs), the last clip
  * saved, a clip that failed (once, until dismissed), and the storage meter. The logic is the
  * `RecordingService`'s; this only shows it.

@@ -52,7 +52,7 @@ describe('TimerPage', () => {
     return (fixture.nativeElement as HTMLElement).querySelector(selector);
   }
 
-  it('lays out the scramble, the time, the breakdown and the solves, the Cube and Camera sections', async () => {
+  it('lays out the scramble, the time and the preview, the breakdown and the solves, the Cube section and Camera settings', async () => {
     setup();
     const fixture = await render();
 

@@ -7,7 +7,7 @@ import {
   type MeteringMode,
 } from '@cubetrace/capture';
 
-// Text and slider arithmetic for the Camera section of the Timer page (docs/PLAN.md, T2.1).
+// Text and slider arithmetic for the camera's preview and settings on the Timer page (T2.1, T2.7).
 
 /** How a mode reads in the controls. */
 export function modeLabel(mode: MeteringMode): string {

@@ -38,7 +38,7 @@ export type CameraResolution = '1080p' | '720p';
 
 /**
  * The frame rate the camera is asked for: `best`, ideally 60 (the camera's best rate); `60`, exactly
- * 60 (a camera without a 60 fps mode then opens at its best rate, and the Camera section says so);
+ * 60 (a camera without a 60 fps mode then opens at its best rate, and Camera settings say so);
  * `30`, ideally 30.
  */
 export type CameraFrameRate = 'best' | '60' | '30';
