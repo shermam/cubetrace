@@ -102,6 +102,7 @@ const STATS: CaptureStats = {
   bufferSeconds: 12.5,
   bufferBytes: 1_500_000,
   codec: 'vp09.00.40.08',
+  bitrate: 4_000_000,
   audioCodec: 'opus',
 };
 
@@ -177,7 +178,7 @@ describe('startCapture', () => {
     expect(startMessage).toMatchObject({
       type: 'start',
       frameRate: 30,
-      config: { audio: true, bufferSeconds: 90, bufferBytes: 160_000_000 },
+      config: { audio: true, quality: 'standard', bufferSeconds: 90, bufferBytes: 160_000_000 },
     });
     expect(transfer).toEqual([startMessage.video, startMessage.audio, startMessage.clips]);
     // The other end of the capture worker's channel goes to the clip worker.
@@ -209,6 +210,14 @@ describe('startCapture', () => {
     expect((worker.posted[0].message as StartMessage).audio).toBeNull();
     // The audio track was never handed to a processor.
     expect(FakeProcessor.tracks).toEqual([videoTrack, videoTrack]);
+  });
+
+  it('gives the capture worker the quality asked for, Standard by default', () => {
+    start({ quality: 'maximum' });
+    expect((worker.posted[0].message as StartMessage).config.quality).toBe('maximum');
+
+    start();
+    expect((worker.posted[0].message as StartMessage).config.quality).toBe('standard');
   });
 
   it('lets go of the frames when a worker cannot start, and of the capture worker', () => {

@@ -80,15 +80,23 @@ afterEach(() => {
 });
 
 describe('resolveCaptureConfig', () => {
-  it('records audio into a 90 s, 160 MB buffer unless told otherwise', () => {
+  it('records audio at Standard quality into a 90 s, 160 MB buffer unless told otherwise', () => {
     expect(resolveCaptureConfig()).toEqual({
       audio: true,
+      quality: 'standard',
       bufferSeconds: 90,
       bufferBytes: 160_000_000,
     });
     expect(resolveCaptureConfig({ audio: false, bufferSeconds: 30 })).toEqual({
       audio: false,
+      quality: 'standard',
       bufferSeconds: 30,
+      bufferBytes: 160_000_000,
+    });
+    expect(resolveCaptureConfig({ quality: 'high' })).toEqual({
+      audio: true,
+      quality: 'high',
+      bufferSeconds: 90,
       bufferBytes: 160_000_000,
     });
   });
