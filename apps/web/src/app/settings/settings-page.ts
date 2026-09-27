@@ -18,7 +18,7 @@ const RESOLUTION_TEXT: Readonly<Record<CameraResolution, string>> = {
 };
 
 const FRAME_RATE_TEXT: Readonly<Record<CameraFrameRate, string>> = {
-  best: 'As fast as the camera goes (asks for 60 fps)',
+  best: 'Best (asks for 60 fps)',
   '60': 'Exactly 60 fps',
   '30': '30 fps',
 };

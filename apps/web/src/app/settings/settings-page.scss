@@ -8,7 +8,8 @@ section {
   border-radius: var(--radius);
   background: var(--surface);
 
-  > input {
+  > input,
+  > select {
     width: min(100%, 20rem);
   }
 }

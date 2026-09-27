@@ -209,11 +209,7 @@ describe('SettingsPage', () => {
     const options = (select: HTMLSelectElement | null) =>
       Array.from(select?.options ?? [], (option) => option.text.trim());
     expect(options(resolution)).toEqual(['1920×1080', '1280×720']);
-    expect(options(rate)).toEqual([
-      'As fast as the camera goes (asks for 60 fps)',
-      'Exactly 60 fps',
-      '30 fps',
-    ]);
+    expect(options(rate)).toEqual(['Best (asks for 60 fps)', 'Exactly 60 fps', '30 fps']);
     expect(resolution?.value).toBe('1080p');
     expect(rate?.value).toBe('best');
     expect(threshold.value).toBe('20');

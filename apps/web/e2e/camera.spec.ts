@@ -130,3 +130,22 @@ test('exactly 60 fps from Settings: the 20 fps fake camera opens at its best rat
   );
   await expect(page.getByTestId('camera-track')).toHaveText('1280×720 at 20 fps');
 });
+
+test.describe('on a phone in portrait', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('the Camera section, on, fits the screen without scrolling sideways', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('camera-section').locator('summary').click();
+    await page.getByTestId('camera-toggle').click();
+    await expect(page.getByTestId('camera-measured')).toHaveText(/fps, frames 1920×1080$/, {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId('camera-reset')).toBeVisible();
+    const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    }));
+    expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+  });
+});
