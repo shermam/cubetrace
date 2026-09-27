@@ -1,5 +1,4 @@
 <div class="head">
-  <h2 id="live-cube-heading">Cube</h2>
   @if (cube.facelets() !== null) {
     <p class="solved" data-testid="cube-solved" [class.is-solved]="cube.solved()">
       {{ cube.solved() ? 'Solved' : 'Not solved' }}

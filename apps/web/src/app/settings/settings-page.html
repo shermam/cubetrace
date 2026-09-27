@@ -18,7 +18,9 @@
       ({{ error }})
     }
   </p>
-  <p class="hint">The timer will also turn it on by itself during a session (T1.6).</p>
+  <p class="hint">
+    The timer also turns it on by itself while a cube is connected during a session.
+  </p>
 </section>
 
 <section aria-labelledby="storage-heading">
@@ -34,7 +36,7 @@
   <button type="button" class="primary" [disabled]="!canPersist()" (click)="keepData()">
     Keep my data
   </button>
-  <p class="hint">The timer will also ask when the first session starts (T1.6).</p>
+  <p class="hint">The timer also asks, once, when it starts its first session.</p>
   @if (storage.refused()) {
     <p class="hint" data-testid="storage-refused">
       The browser said no. Chrome grants it to installed apps and to sites used often: install
@@ -147,7 +149,10 @@
     />
     Next scramble right after a solve
   </label>
-  <p class="hint">The timer that uses them arrives with T1.6b.</p>
+  <p class="hint">
+    Inspection counts 15 s down on the timer once the cube matches the scramble (no penalty is
+    applied). A new session records the values it starts with.
+  </p>
 </section>
 
 <section aria-labelledby="demo-heading">
