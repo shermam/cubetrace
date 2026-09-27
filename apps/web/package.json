@@ -27,6 +27,8 @@
     "@angular/service-worker": "^22.2.0",
     "@cubetrace/core": "*",
     "@cubetrace/gan": "*",
+    "@cubetrace/storage": "*",
+    "cubing": "^0.63.7",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },
