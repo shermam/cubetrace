@@ -1,4 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+// Types only: the camera code stays out of the chunks that load SettingsService on every page.
+import type { ControlValues, FrameSize, FramingRect, StoredFraming } from '@cubetrace/capture';
 import { normalizeMac } from '@cubetrace/gan';
 
 import { DEMO_SPEED_DEFAULT, isDemoSpeed } from '../cube/demo';
@@ -31,6 +33,57 @@ export function isIdleDisconnectMinutes(minutes: number): boolean {
   return Number.isInteger(minutes) && minutes >= 0 && minutes <= IDLE_DISCONNECT_MAX_MINUTES;
 }
 
+/** The frame size the camera is asked for (Settings, Camera). */
+export type CameraResolution = '1080p' | '720p';
+
+/**
+ * The frame rate the camera is asked for: `best`, ideally 60 (the camera's best rate); `60`, exactly
+ * 60 (a camera without a 60 fps mode then opens at its best rate, and the Camera section says so);
+ * `30`, ideally 30.
+ */
+export type CameraFrameRate = 'best' | '60' | '30';
+
+export const CAMERA_RESOLUTIONS: readonly CameraResolution[] = ['1080p', '720p'];
+export const CAMERA_FRAME_RATES: readonly CameraFrameRate[] = ['best', '60', '30'];
+
+/**
+ * The sharpness meter says "good" from this value up, by default: calibrated on Chrome's fake camera
+ * (@cubetrace/capture's SHARPNESS_THRESHOLD_DEFAULT, repeated here so that this file imports no
+ * camera code).
+ */
+export const SHARPNESS_THRESHOLD_DEFAULT = 20;
+
+/** The largest sharpness threshold the setting accepts. */
+export const SHARPNESS_THRESHOLD_MAX = 100_000;
+
+/** Whether `threshold` is a value of the sharpness setting: a number above 0, up to the maximum. */
+export function isSharpnessThreshold(threshold: number): boolean {
+  return Number.isFinite(threshold) && threshold > 0 && threshold <= SHARPNESS_THRESHOLD_MAX;
+}
+
+/** The camera chosen on a host, by its host label: its device id and its label. */
+export interface CameraPick {
+  readonly host: string;
+  readonly deviceId: string;
+  readonly label: string;
+}
+
+/** The manual controls chosen for a camera, by its label (the torch is not kept). */
+interface CameraControlsEntry {
+  readonly camera: string;
+  readonly values: ControlValues;
+}
+
+/** A framing rectangle of a camera (by its label) for frames of one size. */
+interface CameraFramingEntry extends StoredFraming {
+  readonly camera: string;
+}
+
+/** At most this many framing rectangles are kept (cameras × frame sizes); the oldest go first. */
+const MAX_FRAMINGS = 24;
+/** At most this many cameras keep their manual controls, and hosts their chosen camera. */
+const MAX_CAMERA_ENTRIES = 12;
+
 /** What `localStorage` holds; every field is checked on reading and falls back on its own. */
 interface StoredSettings {
   /** Null: the default label of this device. */
@@ -40,6 +93,13 @@ interface StoredSettings {
   readonly inspection: boolean;
   readonly autoAdvance: boolean;
   readonly idleDisconnectMinutes: number;
+  readonly cameraOn: boolean;
+  readonly cameraResolution: CameraResolution;
+  readonly cameraFrameRate: CameraFrameRate;
+  readonly sharpnessThreshold: number;
+  readonly cameraPicks: readonly CameraPick[];
+  readonly cameraControls: readonly CameraControlsEntry[];
+  readonly cameraFramings: readonly CameraFramingEntry[];
 }
 
 const DEFAULTS: StoredSettings = {
@@ -49,6 +109,13 @@ const DEFAULTS: StoredSettings = {
   inspection: false,
   autoAdvance: true,
   idleDisconnectMinutes: IDLE_DISCONNECT_DEFAULT_MINUTES,
+  cameraOn: false,
+  cameraResolution: '1080p',
+  cameraFrameRate: 'best',
+  sharpnessThreshold: SHARPNESS_THRESHOLD_DEFAULT,
+  cameraPicks: [],
+  cameraControls: [],
+  cameraFramings: [],
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -62,9 +129,12 @@ export function macAddressProblem(text: string): string {
 /**
  * The settings the timer and the cube connection need (docs/PLAN.md, T1.6a): the host label that
  * sessions record, the cubes' MAC addresses by Bluetooth name, the idle disconnection (T1.14), the
- * demo speed, inspection and auto-advance. Signals, kept in `localStorage` (through
- * BROWSER_GLOBALS) as one JSON object that is written on every change. Where the browser blocks
- * storage the settings last until the page closes, and `saveError` says so.
+ * demo speed, inspection and auto-advance; and the camera's (T2.1): on or off, the resolution and
+ * frame rate asked for, the sharpness threshold, the camera chosen on each host (by host label),
+ * and per camera (by its label) the manual controls chosen and the framing rectangles. Signals,
+ * kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every
+ * change. Where the browser blocks storage the settings last until the page closes, and
+ * `saveError` says so.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
@@ -92,6 +162,14 @@ export class SettingsService {
    * 0: never. A whole number from 0 to 60, 5 by default.
    */
   readonly idleDisconnectMinutes = computed(() => this.stored().idleDisconnectMinutes);
+  /** The camera is on: the Timer page opens it when it loads. */
+  readonly cameraOn = computed(() => this.stored().cameraOn);
+  readonly cameraResolution = computed(() => this.stored().cameraResolution);
+  readonly cameraFrameRate = computed(() => this.stored().cameraFrameRate);
+  /** The sharpness meter says "good" from this value up. */
+  readonly sharpnessThreshold = computed(() => this.stored().sharpnessThreshold);
+  /** The framing rectangles of every camera, oldest first. */
+  readonly cameraFramings = computed(() => this.stored().cameraFramings);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -168,6 +246,80 @@ export class SettingsService {
     return true;
   }
 
+  setCameraOn(on: boolean): void {
+    if (on !== this.stored().cameraOn) {
+      this.update({ cameraOn: on });
+    }
+  }
+
+  setCameraResolution(resolution: CameraResolution): void {
+    this.update({ cameraResolution: resolution });
+  }
+
+  setCameraFrameRate(rate: CameraFrameRate): void {
+    this.update({ cameraFrameRate: rate });
+  }
+
+  /** Sets the sharpness threshold; returns false, changing nothing, unless it is above 0. */
+  setSharpnessThreshold(threshold: number): boolean {
+    if (!isSharpnessThreshold(threshold)) {
+      return false;
+    }
+    this.update({ sharpnessThreshold: threshold });
+    return true;
+  }
+
+  /** The camera chosen on the host labelled `host`, or null. */
+  cameraPickFor(host: string): CameraPick | null {
+    return this.stored().cameraPicks.find((pick) => pick.host === host) ?? null;
+  }
+
+  /** Remembers the camera chosen on the host labelled `host`. */
+  setCameraPick(host: string, deviceId: string, label: string): void {
+    const current = this.cameraPickFor(host);
+    if (current?.deviceId === deviceId && current.label === label) {
+      return;
+    }
+    const others = this.stored().cameraPicks.filter((pick) => pick.host !== host);
+    this.update({ cameraPicks: [...others, { host, deviceId, label }].slice(-MAX_CAMERA_ENTRIES) });
+  }
+
+  /** The manual controls chosen for the camera labelled `camera` (empty: all automatic). */
+  cameraControlsFor(camera: string): ControlValues {
+    return this.stored().cameraControls.find((entry) => entry.camera === camera)?.values ?? {};
+  }
+
+  /** Keeps the manual controls chosen for the camera labelled `camera`; empty values forget them. */
+  setCameraControls(camera: string, values: ControlValues): void {
+    // The torch is a light for the moment: it is never switched on by itself at the next start.
+    const kept = Object.fromEntries(
+      Object.entries(values).filter(([name, value]) => name !== 'torch' && value !== undefined),
+    ) as ControlValues;
+    const others = this.stored().cameraControls.filter((entry) => entry.camera !== camera);
+    const entries = Object.keys(kept).length === 0 ? others : [...others, { camera, values: kept }];
+    this.update({ cameraControls: entries.slice(-MAX_CAMERA_ENTRIES) });
+  }
+
+  /** The framing rectangles kept for the camera labelled `camera`, oldest first. */
+  cameraFramingsOf(camera: string): readonly StoredFraming[] {
+    return this.stored().cameraFramings.filter((entry) => entry.camera === camera);
+  }
+
+  /** Keeps `rect` as the framing of the camera labelled `camera` for frames of `size`. */
+  setCameraFraming(camera: string, size: FrameSize, rect: FramingRect): void {
+    const others = this.stored().cameraFramings.filter(
+      (entry) =>
+        entry.camera !== camera || entry.width !== size.width || entry.height !== size.height,
+    );
+    const entry: CameraFramingEntry = {
+      camera,
+      width: size.width,
+      height: size.height,
+      rect: { x: rect.x, y: rect.y, w: rect.w, h: rect.h },
+    };
+    this.update({ cameraFramings: [...others, entry].slice(-MAX_FRAMINGS) });
+  }
+
   private update(change: Partial<StoredSettings>): void {
     const next = { ...this.stored(), ...change };
     this.stored.set(next);
@@ -201,6 +353,10 @@ function readSettings(storage: Storage | null): StoredSettings {
   const inspection = member(parsed, 'inspection');
   const autoAdvance = member(parsed, 'autoAdvance');
   const idleDisconnectMinutes = member(parsed, 'idleDisconnectMinutes');
+  const cameraOn = member(parsed, 'cameraOn');
+  const cameraResolution = member(parsed, 'cameraResolution');
+  const cameraFrameRate = member(parsed, 'cameraFrameRate');
+  const sharpnessThreshold = member(parsed, 'sharpnessThreshold');
   return {
     hostLabel:
       typeof hostLabel === 'string' && hostLabel.trim() !== ''
@@ -215,7 +371,104 @@ function readSettings(storage: Storage | null): StoredSettings {
       typeof idleDisconnectMinutes === 'number' && isIdleDisconnectMinutes(idleDisconnectMinutes)
         ? idleDisconnectMinutes
         : DEFAULTS.idleDisconnectMinutes,
+    cameraOn: typeof cameraOn === 'boolean' ? cameraOn : DEFAULTS.cameraOn,
+    cameraResolution:
+      CAMERA_RESOLUTIONS.find((r) => r === cameraResolution) ?? DEFAULTS.cameraResolution,
+    cameraFrameRate:
+      CAMERA_FRAME_RATES.find((r) => r === cameraFrameRate) ?? DEFAULTS.cameraFrameRate,
+    sharpnessThreshold:
+      typeof sharpnessThreshold === 'number' && isSharpnessThreshold(sharpnessThreshold)
+        ? sharpnessThreshold
+        : DEFAULTS.sharpnessThreshold,
+    cameraPicks: readList(member(parsed, 'cameraPicks'), readCameraPick).slice(-MAX_CAMERA_ENTRIES),
+    cameraControls: readList(member(parsed, 'cameraControls'), readCameraControls).slice(
+      -MAX_CAMERA_ENTRIES,
+    ),
+    cameraFramings: readList(member(parsed, 'cameraFramings'), readCameraFraming).slice(
+      -MAX_FRAMINGS,
+    ),
   };
+}
+
+/** The entries of a stored list that `read` accepts; anything else is dropped. */
+function readList<T>(value: unknown, read: (item: unknown) => T | null): T[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return (value as unknown[]).flatMap((item) => {
+    const entry = read(item);
+    return entry === null ? [] : [entry];
+  });
+}
+
+function readCameraPick(item: unknown): CameraPick | null {
+  const host = member(item, 'host');
+  const deviceId = member(item, 'deviceId');
+  const label = member(item, 'label');
+  return typeof host === 'string' && typeof deviceId === 'string' && deviceId !== ''
+    ? { host, deviceId, label: typeof label === 'string' ? label : '' }
+    : null;
+}
+
+const METERING_MODES: readonly unknown[] = ['none', 'manual', 'single-shot', 'continuous'];
+const MODE_CONTROLS: readonly string[] = ['exposureMode', 'focusMode', 'whiteBalanceMode'];
+const NUMBER_CONTROLS: readonly string[] = [
+  'exposureTime',
+  'iso',
+  'focusDistance',
+  'colorTemperature',
+  'zoom',
+];
+
+function readCameraControls(item: unknown): CameraControlsEntry | null {
+  const camera = member(item, 'camera');
+  const stored = member(item, 'values');
+  if (typeof camera !== 'string') {
+    return null;
+  }
+  const values: Record<string, unknown> = {};
+  for (const name of MODE_CONTROLS) {
+    const value = member(stored, name);
+    if (METERING_MODES.includes(value)) {
+      values[name] = value;
+    }
+  }
+  for (const name of NUMBER_CONTROLS) {
+    const value = member(stored, name);
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      values[name] = value;
+    }
+  }
+  return Object.keys(values).length === 0 ? null : { camera, values };
+}
+
+function readCameraFraming(item: unknown): CameraFramingEntry | null {
+  const camera = member(item, 'camera');
+  const width = member(item, 'width');
+  const height = member(item, 'height');
+  const rect = member(item, 'rect');
+  const [x, y, w, h] = ['x', 'y', 'w', 'h'].map((key) => member(rect, key));
+  const whole = (value: unknown): value is number => Number.isInteger(value);
+  if (
+    typeof camera !== 'string' ||
+    !whole(width) ||
+    !whole(height) ||
+    width <= 0 ||
+    height <= 0 ||
+    !whole(x) ||
+    !whole(y) ||
+    !whole(w) ||
+    !whole(h) ||
+    x < 0 ||
+    y < 0 ||
+    w <= 0 ||
+    h <= 0 ||
+    x + w > width ||
+    y + h > height
+  ) {
+    return null;
+  }
+  return { camera, width, height, rect: { x, y, w, h } };
 }
 
 /** The valid entries of a stored list, normalized; anything else is dropped. */

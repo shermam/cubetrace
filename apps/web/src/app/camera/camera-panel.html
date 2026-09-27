@@ -1,0 +1,145 @@
+<details class="camera" data-testid="camera-section" [open]="startOpen">
+  <summary>
+    <h2>Camera</h2>
+    <span class="state" data-testid="camera-state" [attr.data-status]="camera.status()">{{
+      summary()
+    }}</span>
+  </summary>
+
+  <div class="panel">
+    <div class="bar">
+      @if (camera.devices().length > 0) {
+        <label class="picker">
+          <span>Camera</span>
+          <select
+            #deviceSelect
+            data-testid="camera-device"
+            [disabled]="camera.status() === 'starting'"
+            (change)="select(deviceSelect.value)"
+          >
+            @for (device of camera.devices(); track device.deviceId) {
+              <option
+                [value]="device.deviceId"
+                [selected]="device.deviceId === camera.selectedId()"
+              >
+                {{ device.name }}
+              </option>
+            }
+          </select>
+        </label>
+      }
+      <button
+        type="button"
+        data-testid="camera-toggle"
+        [class.primary]="camera.status() === 'off'"
+        (click)="toggle()"
+      >
+        {{ camera.status() === 'off' ? 'Turn on' : 'Turn off' }}
+      </button>
+    </div>
+
+    @switch (camera.status()) {
+      @case ('off') {
+        <p class="muted" data-testid="camera-off">
+          The camera is off. Turned on, it stays on across pages and reloads until it is turned off;
+          the first time, Chrome asks for the permission.
+        </p>
+      }
+      @case ('starting') {
+        <p class="muted" data-testid="camera-starting">Opening the camera…</p>
+      }
+    }
+    @if (camera.error(); as error) {
+      <p class="error" role="alert" data-testid="camera-error">{{ error }}</p>
+    }
+    @if (camera.notice(); as notice) {
+      <p class="notice" role="status" data-testid="camera-notice">{{ notice }}</p>
+    }
+
+    @if (camera.stream()) {
+      <div
+        #frame
+        class="frame"
+        data-testid="camera-frame"
+        [class.mirrored]="camera.mirrored()"
+        [style.--aspect]="aspect()"
+      >
+        <video
+          #preview
+          muted
+          playsinline
+          aria-label="Camera preview"
+          data-testid="camera-preview"
+        ></video>
+        @if (box(); as area) {
+          <div
+            class="framing"
+            role="group"
+            tabindex="0"
+            aria-label="Framing rectangle: drag it to move it, drag a corner to resize it; arrow keys move it, Shift and arrow keys resize it"
+            data-testid="camera-framing"
+            [style.left.%]="area.left"
+            [style.top.%]="area.top"
+            [style.width.%]="area.width"
+            [style.height.%]="area.height"
+            (pointerdown)="grab($event)"
+            (pointermove)="move($event)"
+            (pointerup)="release($event)"
+            (pointercancel)="release($event)"
+            (keydown)="nudge($event)"
+          >
+            <span class="handle nw" data-handle="nw"></span>
+            <span class="handle ne" data-handle="ne"></span>
+            <span class="handle sw" data-handle="sw"></span>
+            <span class="handle se" data-handle="se"></span>
+          </div>
+        }
+      </div>
+
+      <dl class="facts">
+        <dt>Track</dt>
+        <dd data-testid="camera-track">{{ track() }}</dd>
+        <dt>Measured</dt>
+        <dd data-testid="camera-measured">{{ measured() }}</dd>
+        <dt>Framing</dt>
+        <dd>
+          <span data-testid="camera-framing-rect">{{ framingLine() }}</span>
+          <button type="button" class="link" data-testid="camera-full-frame" (click)="wholeFrame()">
+            Full frame
+          </button>
+        </dd>
+      </dl>
+
+      <div
+        class="sharpness"
+        data-testid="camera-sharpness"
+        [attr.data-samples]="camera.sharpnessSamples()"
+        [attr.data-good]="camera.sharpnessGood()"
+      >
+        <span id="camera-sharpness-label">Sharpness</span>
+        <meter
+          aria-labelledby="camera-sharpness-label"
+          min="0"
+          max="1"
+          low="0"
+          optimum="1"
+          [high]="thresholdBar()"
+          [value]="bar()"
+        ></meter>
+        <span class="value" data-testid="camera-sharpness-value">{{ sharpnessValue() }}</span>
+        <span
+          class="verdict"
+          data-testid="camera-sharpness-verdict"
+          [class.good]="camera.sharpnessGood()"
+          >{{ verdict() }}</span
+        >
+      </div>
+      <p class="hint">
+        Of the framing rectangle, every 10th frame; good from {{ threshold() }} up (Settings). Aim
+        for good with the cube in the rectangle: light helps most.
+      </p>
+
+      <app-camera-controls />
+    }
+  </div>
+</details>

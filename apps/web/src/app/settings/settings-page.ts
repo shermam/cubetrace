@@ -2,7 +2,26 @@ import { Component, type ElementRef, computed, inject, signal, viewChild } from 
 
 import { type StoragePersistence, StorageService } from '../device/storage-service';
 import { WAKE_LOCK_TEXT, WakeLockService } from '../device/wake-lock-service';
-import { type CubeMac, SettingsService } from './settings-service';
+import {
+  CAMERA_FRAME_RATES,
+  CAMERA_RESOLUTIONS,
+  type CameraFrameRate,
+  type CameraResolution,
+  type CubeMac,
+  SHARPNESS_THRESHOLD_DEFAULT,
+  SettingsService,
+} from './settings-service';
+
+const RESOLUTION_TEXT: Readonly<Record<CameraResolution, string>> = {
+  '1080p': '1920×1080',
+  '720p': '1280×720',
+};
+
+const FRAME_RATE_TEXT: Readonly<Record<CameraFrameRate, string>> = {
+  best: 'Best (asks for 60 fps)',
+  '60': 'Exactly 60 fps',
+  '30': '30 fps',
+};
 
 const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
   unsupported: 'This browser has no Storage API, so it cannot be asked to keep the data.',
@@ -14,7 +33,8 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
 /**
  * `/settings`: the screen wake lock and storage persistence (T1.7), then what the timer and the
  * cube connection use (T1.6a): the host label, the cubes' MAC addresses, the idle disconnection
- * (T1.14), inspection, auto-advance and the demo speed, all kept by `SettingsService`.
+ * (T1.14), inspection, auto-advance, the camera's resolution, frame rate and sharpness threshold
+ * (T2.1) and the demo speed, all kept by `SettingsService`.
  */
 @Component({
   selector: 'app-settings-page',
@@ -40,6 +60,16 @@ export class SettingsPage {
   protected readonly macError = signal<string | null>(null);
   protected readonly speedError = signal<string | null>(null);
   protected readonly idleError = signal<string | null>(null);
+  protected readonly thresholdError = signal<string | null>(null);
+  protected readonly resolutions = CAMERA_RESOLUTIONS.map((value) => ({
+    value,
+    label: RESOLUTION_TEXT[value],
+  }));
+  protected readonly frameRates = CAMERA_FRAME_RATES.map((value) => ({
+    value,
+    label: FRAME_RATE_TEXT[value],
+  }));
+  protected readonly sharpnessDefault = SHARPNESS_THRESHOLD_DEFAULT;
 
   constructor() {
     void this.storage.refresh();
@@ -103,6 +133,29 @@ export class SettingsPage {
       this.settings.setIdleDisconnectMinutes(minutes)
         ? null
         : 'The minutes must be a whole number from 0 to 60.',
+    );
+  }
+
+  protected setCameraResolution(value: string): void {
+    const resolution = CAMERA_RESOLUTIONS.find((option) => option === value);
+    if (resolution !== undefined) {
+      this.settings.setCameraResolution(resolution);
+    }
+  }
+
+  protected setCameraFrameRate(value: string): void {
+    const rate = CAMERA_FRAME_RATES.find((option) => option === value);
+    if (rate !== undefined) {
+      this.settings.setCameraFrameRate(rate);
+    }
+  }
+
+  protected setSharpnessThreshold(text: string): void {
+    const threshold = text.trim() === '' ? Number.NaN : Number(text);
+    this.thresholdError.set(
+      this.settings.setSharpnessThreshold(threshold)
+        ? null
+        : 'The threshold must be a number above 0 (100000 at most).',
     );
   }
 

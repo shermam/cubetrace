@@ -173,3 +173,46 @@ wake lock items below check.
   window; there is no banner about missing APIs.
 - [ ] Firefox or Safari on any device: a banner names the missing APIs and says the app needs
   Chrome; the pages still render.
+
+## T2.1 — camera panel
+
+On https://shermam.github.io/cubetrace/, Timer page, the Camera section below the Cube section, on
+the MacBook and on the ThinkPhone (both cameras). Next to each item, write the device, the camera,
+Chrome's version and what the panel said (the Track and Measured lines, the sharpness numbers).
+
+- [ ] MacBook, FaceTime camera: Turn on asks for the camera once; the picker shows "FaceTime HD
+  Camera (…)"; the preview shows the laptop's view, not mirrored (this camera does not say which way
+  it faces); Track "1920×1080 at 30 fps" and Measured about "30.0 fps, frames 1920×1080"; the
+  controls say "This camera has no manual controls" (`docs/DEVICES.md`: no exposure, focus or white
+  balance on it).
+- [ ] ThinkPhone: the picker says "Front camera" and "Rear camera"; the front camera's preview is
+  mirrored like a mirror, the rear camera's is not. Held upright, Measured says frames 1080×1920 and
+  about 30 fps, whatever Track claims (60 fps on both cameras, `docs/DEVICES.md`).
+- [ ] ThinkPhone, front and rear: Exposure (Mode, Time, ISO), Focus, White balance and Zoom appear;
+  the rear camera also has Torch, which lights and goes off.
+- [ ] Manual exposure on the phone: Exposure → Manual keeps the picture as it was; Time down to
+  about 2 ms (1/500 s) darkens it, ISO up brightens it again. Turn the camera off and on, and reload:
+  Manual and the same time come back. Reset to auto: the camera reopens, every control on Auto.
+- [ ] Focus on the front camera (it lists only manual focus): Focus → Manual, move Distance, then
+  Focus → Auto: the focus is automatic again (the panel reopens the camera for it when the camera
+  does not go back by itself). Write down whether the preview blinked (it reopened).
+- [ ] Settings → Frame rate "Exactly 60 fps", then the Timer page, on each camera, at 1920×1080 and
+  at 1280×720: either Measured says about 60 fps (this camera has 60 fps: write it down) or the
+  notice says it has no 60 fps mode and Measured says 30. Then back to "Best (asks for 60 fps)".
+- [ ] Sharpness meter, with the cube held in the framing rectangle in the room's usual light: write
+  down the number. Cover the lens: it drops near 0 and says soft. Turn a face fast: it drops while
+  the cube moves. Point it at something sharp and well lit: good. From those numbers, is the
+  threshold (Settings, 20 by default) between sharp and soft? Write down the value that would be.
+- [ ] Framing rectangle: drag its inside, then a corner, with the mouse on the laptop and a finger on
+  the phone; the page does not scroll while a finger drags the rectangle. Reload: the rectangle is
+  where it was left, for that camera. On the phone, turn to landscape: the rectangle is the full
+  frame there; back to portrait, the portrait rectangle is back.
+- [ ] Camera on across reloads: on, reload: it opens again by itself with the section open; off,
+  reload: it stays off. While it is on, the Sessions and Settings pages keep it on (the camera light
+  stays on); Turn off turns it off.
+- [ ] Permission: block the camera for the site (the camera icon in the address bar, or the site
+  settings) and Turn on: the panel says the permission was denied and how to allow it. On the Mac,
+  with Chrome denied the camera in System Settings → Privacy & Security → Camera, it names that
+  setting instead.
+- [ ] Another app holding the camera (a video call on the laptop): Turn on says the camera is in use
+  by another app.
