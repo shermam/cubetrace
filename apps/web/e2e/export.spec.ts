@@ -24,6 +24,12 @@ test('an exported session validates against the JSON Schemas of session.json and
 
   const exported = await exportSession(page);
   expect(exported.session.summary).toEqual({ attempts: 2, solved: 1, dnf: 1 });
+  // Schema version 2: each attempt keeps the cube clock fit of its own moves, every one of which
+  // the demo cube sends in its own Bluetooth packet.
+  for (const attempt of exported.attempts) {
+    expect(attempt.schema).toBe(2);
+    expect(attempt.clock?.samples).toBe(attempt.moves.length);
+  }
   expect(
     exported.attempts.map(({ index, result }) => [index, result.status, result.scrambleCorrected]),
   ).toEqual([
@@ -37,6 +43,6 @@ test('an exported session validates against the JSON Schemas of session.json and
     'attempts[0]/crossFace must be equal to one of the allowed values',
   );
   expect(() =>
-    validateExport({ ...exported, session: { ...exported.session, schema: 2 } }),
+    validateExport({ ...exported, session: { ...exported.session, schema: 1 } }),
   ).toThrow('session/schema must be equal to constant');
 });

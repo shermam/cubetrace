@@ -94,6 +94,9 @@ describe('SessionService', () => {
     expect(exported.session.summary).toEqual({ attempts: 1, solved: 1, dnf: 0 });
     expect(exported.session.clock.cube.samples).toBe(6);
     expect(exported.session.clock.cube.a).toBeCloseTo(1, 9);
+    // The attempt keeps the fit of its own moves (schema version 2).
+    expect(exported.attempts[0]).toMatchObject({ schema: 2, clock: { samples: 6 }, video: [] });
+    expect(exported.attempts[0].clock?.a).toBeCloseTo(1, 9);
     expect(s.service.saving()).toBe(false);
 
     // Auto-advance: the next attempt begins with the scramble made during the solve.
@@ -105,6 +108,44 @@ describe('SessionService', () => {
       state: 'scrambling',
     });
     expect(s.service.display().text).toBe('2.03');
+  });
+
+  it("fits the attempt's cube clock on the moves that ended their Bluetooth packet only", async () => {
+    const s = setup();
+    await s.service.whenReady();
+    s.service.prepare();
+    await settle();
+    const fake = new FakeCube({ now: () => s.perf.hostMs });
+    const { connection, emit } = scripted(fake);
+    await connect(s, connection);
+    expect(s.service.phase()).toBe('scrambling');
+
+    // The cube's clock 0.7% slow; U and F' arrive in the packets of F and U', with their times.
+    const host = (cubeMs: number): number => 1_790_000_000_000 + 1.007 * cubeMs;
+    const moves: [string, number, number][] = [
+      ['R', 1000, 1000],
+      ['U', 1100, 1300],
+      ['F', 1300, 1300],
+      ["F'", 3000, 3150],
+      ["U'", 3150, 3150],
+      ["R'", 3400, 3400],
+    ];
+    for (const [m, cubeMs, arrivalCubeMs] of moves) {
+      emit({
+        type: 'move',
+        m: parseMoves(m)[0],
+        cubeMs,
+        hostMs: host(arrivalCubeMs),
+        packetLast: cubeMs === arrivalCubeMs,
+      });
+    }
+    await s.service.whenSaved();
+    const [record] = await s.store.loadAttempts(s.service.session()?.id ?? '');
+    expect(record.result).toMatchObject({ status: 'solved', replayOk: true });
+    expect(record.moves).toHaveLength(6);
+    expect(record.clock?.samples).toBe(4);
+    expect(record.clock?.a).toBeCloseTo(1.007, 6);
+    expect(record.clock?.residualP95Ms).toBeLessThan(0.01);
   });
 
   it('waits for Next after a solve when auto-advance is off', async () => {

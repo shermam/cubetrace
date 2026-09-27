@@ -1,6 +1,9 @@
 // The attempt state machine (docs/PLAN.md T1.4, docs/ARCHITECTURE.md): the cube's moves in, the
-// events of docs/DATA-MODEL.md §3 and the record of §7 (attempt.json) out. Pure and synchronous:
-// every time comes from the caller, so that recorded solves can be replayed through it.
+// events of docs/DATA-MODEL.md §3 and the record of §7 (attempt.json, schema version 2) out, with
+// the cube clock fit of the attempt's own moves (T2.0). Pure and synchronous: every time comes from
+// the caller, so that recorded solves can be replayed through it.
+import type { CubeClockParams } from './clock';
+import { CubeClockFit } from './clock';
 import type { Facelets } from './cube';
 import { SOLVED, applyMove, applyMoves, assertFacelets, isSolved } from './cube';
 import type { Face, Move } from './notation';
@@ -24,6 +27,11 @@ export interface CubeMoveInput {
   cubeMs: number;
   /** The host clock when the move's Bluetooth packet arrived. */
   hostMs: number;
+  /**
+   * Whether the move is the newest of its Bluetooth packet, the one whose arrival `hostMs`
+   * measures (default true): only such moves are samples of the attempt's clock fit.
+   */
+  packetLast?: boolean;
 }
 
 export interface AttemptOptions {
@@ -88,9 +96,80 @@ export interface AttemptResult {
 /** A phase as attempt.json records it: a {@link PhaseRecord} without its index into the moves. */
 export type AttemptPhase = Omit<PhaseRecord, 'endMoveIndex'>;
 
-/** attempt.json, schema version 1 (docs/DATA-MODEL.md §7). */
+/** The two video clips of an attempt: its scramble and its solve (docs/DATA-MODEL.md §3 and §7). */
+export type VideoSegment = 'scramble' | 'solve';
+
+/**
+ * A rectangle in whole pixels of a camera's frames, as recorded (after any rotation): the framing
+ * rectangle of docs/DATA-MODEL.md §6.
+ */
+export interface CropRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** One entry of `video` in attempt.json: a clip in the attempt's folder (docs/DATA-MODEL.md §7). */
+export interface VideoClip {
+  /** The camera's label in session.json's `cameras`. */
+  camera: string;
+  segment: VideoSegment;
+  /** The MP4 file, `<camera>.<segment>.mp4`. */
+  file: string;
+  /** The MP4 file's size. */
+  bytes: number;
+  /** The video codec string, such as `avc1.640028`. */
+  codec: string;
+  /** The audio codec string, such as `mp4a.40.2`; null without an audio track. */
+  audio: string | null;
+  /** Of the encoded frames. */
+  width: number;
+  height: number;
+  /** The camera's framing rectangle when the clip was recorded; null for the whole frame. */
+  crop: CropRect | null;
+  /** The frame rate the camera's track reported. */
+  fpsNominal: number;
+  /** The number of frames in the clip. */
+  frames: number;
+  /** The host time of the clip's first frame: `t0HostMs` of its frames file. */
+  firstFrameHostMs: number;
+  /** The clip's frame times ({@link FramesJson}), `<camera>.<segment>.frames.json`. */
+  framesFile: string;
+  /** The camera's lag behind the cube when the clip was recorded; null before a sync check. */
+  syncResidualMs: number | null;
+}
+
+/**
+ * `<camera>.<segment>.frames.json`, schema version 2 (docs/DATA-MODEL.md §9): the frame times of
+ * one clip. Frame k is at host time `t0HostMs + dtMs[0] + … + dtMs[k]`.
+ */
+export interface FramesJson {
+  schema: 2;
+  camera: string;
+  segment: VideoSegment;
+  /** The host time of the first frame, from the arrival fit. */
+  t0HostMs: number;
+  /**
+   * Per frame, the time since the previous frame, from the frames' own timestamps, in steps of
+   * 0.1 ms (the differences of the frame times rounded to 0.1 ms, so that the sums do not drift);
+   * 0 for the first frame.
+   */
+  dtMs: number[];
+  /** The indices of the keyframes, increasing, starting with 0. */
+  keyframes: number[];
+  /** The fit of the frames' arrival host times on their own timestamps that gives `t0HostMs`. */
+  arrival: {
+    /** The median of arrival host time minus the frame's timestamp, in ms. */
+    offsetMs: number;
+    /** The 95th percentile of the absolute residuals: the jitter of the arrivals. */
+    residualP95Ms: number;
+  };
+}
+
+/** attempt.json, schema version 2 (docs/DATA-MODEL.md §7). */
 export interface AttemptRecord {
-  schema: 1;
+  schema: 2;
   session: string;
   index: number;
   scramble: string;
@@ -101,11 +180,16 @@ export interface AttemptRecord {
   events: AttemptEvents;
   /** Every move the cube reported during the attempt, in order, corrections included. */
   moves: AttemptMove[];
+  /**
+   * The cube clock fit of the attempt's `packetLast` moves, from its first move to `solveEnd` or
+   * the DNF: `hostMs ≈ a·cubeMs + b`; null without two of them at different cube times.
+   */
+  clock: CubeClockParams | null;
   result: AttemptResult;
   /** The phases completed, in order: all eight for a solve the moves replay. */
   phases: AttemptPhase[];
-  /** Phase 2: the video segments. Always empty in phase 1. */
-  video: [];
+  /** The video clips, one per camera and segment; empty without a camera. */
+  video: VideoClip[];
 }
 
 /**
@@ -114,7 +198,8 @@ export interface AttemptRecord {
  * scramble's target the attempt is `armed` (`scrambleDone`); the next move is `solveStart` and the
  * attempt is `solving` until the cube is solved (`solveEnd`). Moves after `solved` or `dnf` are
  * ignored: the caller starts the next attempt with a new machine. {@link toRecord} then gives
- * attempt.json, with the phases of the solve (`detectPhases` on the solve's moves in host time).
+ * attempt.json, with the phases of the solve (`detectPhases` on the solve's moves in host time) and
+ * the cube clock fit of the moves it records (docs/DATA-MODEL.md §7).
  */
 export class AttemptMachine {
   readonly #session: string;
@@ -134,6 +219,8 @@ export class AttemptMachine {
   /** The tracker's `extraMoves` at `scrambleDone`. */
   #scrambleExtraMoves: number | null = null;
   #dnfMs: number | null = null;
+  /** The cube clock fit of the moves recorded: this attempt's, since the cube's clock drifts. */
+  readonly #clock = new CubeClockFit();
 
   /**
    * Throws if the session is not a UUID v4, the index is not a positive integer, the scramble is
@@ -194,8 +281,16 @@ export class AttemptMachine {
     return this.#dnfMs;
   }
 
-  /** Takes one move of the cube and returns the state after it. */
+  /**
+   * Takes one move of the cube and returns the state after it. Throws a RangeError, and takes
+   * nothing, if a time is not finite.
+   */
   onMove(input: CubeMoveInput): AttemptState {
+    if (!Number.isFinite(input.cubeMs) || !Number.isFinite(input.hostMs)) {
+      throw new RangeError(
+        `A move's times must be finite, got cube ${String(input.cubeMs)} ms and host ${String(input.hostMs)} ms.`,
+      );
+    }
     const move: TimedMove = { m: { face: input.m.face, turns: input.m.turns }, ms: input.hostMs };
     switch (this.#state) {
       case 'scrambling': {
@@ -287,7 +382,8 @@ export class AttemptMachine {
 
   /**
    * attempt.json (docs/DATA-MODEL.md §7) of the attempt, which must be over (solved or DNF: call
-   * {@link markDnf} to end it otherwise); throws before that. `video` is empty (phase 2).
+   * {@link markDnf} to end it otherwise); throws before that. `video` is empty: the caller adds the
+   * clips (phase 2).
    */
   toRecord(): AttemptRecord {
     if (this.#state !== 'solved' && this.#state !== 'dnf') {
@@ -306,7 +402,7 @@ export class AttemptMachine {
     const inspectionStart = pickup ?? scrambleDone;
     const movesQtm = quarterTurns(solveMoves);
     return {
-      schema: 1,
+      schema: 2,
       session: this.#session,
       index: this.#index,
       scramble: this.#scramble,
@@ -314,6 +410,7 @@ export class AttemptMachine {
       crossFace: report.crossFace,
       events: { ...this.#events },
       moves: this.#moves.map((m) => ({ ...m })),
+      clock: this.#clock.hasLine ? this.#clock.params : null,
       result: {
         timeMs,
         inspectionMs:
@@ -332,6 +429,7 @@ export class AttemptMachine {
 
   #record(input: CubeMoveInput, phase: MovePhase): void {
     this.#moves.push({ m: formatMove(input.m), hostMs: input.hostMs, cubeMs: input.cubeMs, phase });
+    this.#clock.addSample(input.cubeMs, input.hostMs, input.packetLast ?? true);
   }
 
   /** After the tracker took a move or a state: a divergence is a correction; the target arms. */

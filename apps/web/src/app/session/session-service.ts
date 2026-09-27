@@ -154,11 +154,12 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  *   (the machine starts from a solved cube; otherwise the page says "Solve the cube first"). Its
  *   scramble is the one on screen: the demo solve's when the demo cube has just connected, else
  *   one generated in advance. Its index follows the last saved attempt's.
- * - Moves go to the machine and to the cube clock fit, which starts over with every connection
- *   (the cube's clock restarts at 0). A `facelets` report that differs from the machine's state is
- *   adopted (`resync`), so the attempt follows the cube; its record then says `replayOk: false`
- *   if moves of the solve went unseen. The gyroscope marks the pickup: the first reading after
- *   the attempt is armed is the reference, and a rotation of more than 15° from it is the pickup.
+ * - Moves go to the machine, whose record keeps the cube clock fit of the attempt's own moves, and
+ *   to the session's coarse clock fit, which starts over with every connection (the cube's clock
+ *   restarts at 0). A `facelets` report that differs from the machine's state is adopted
+ *   (`resync`), so the attempt follows the cube; its record then says `replayOk: false` if moves
+ *   of the solve went unseen. The gyroscope marks the pickup: the first reading after the attempt
+ *   is armed is the reference, and a rotation of more than 15° from it is the pickup.
  * - When an attempt ends (solved or DNF) its record is saved with the session's summary and
  *   clock fit; with auto-advance the next attempt begins at once with a scramble generated
  *   during the solve. A disconnection pauses the running time and leaves the attempt as it is;
@@ -620,7 +621,12 @@ export class SessionService {
       return;
     }
     const before = current.machine.state;
-    current.machine.onMove({ m: event.m, cubeMs: event.cubeMs, hostMs: event.hostMs });
+    current.machine.onMove({
+      m: event.m,
+      cubeMs: event.cubeMs,
+      hostMs: event.hostMs,
+      packetLast: event.packetLast,
+    });
     this.afterChange(current, before);
   }
 

@@ -15,6 +15,7 @@ import type {
 import {
   ATTEMPT_SCHEMA,
   AttemptMachine,
+  CubeClockFit,
   NotationError,
   SOLVED,
   applyMoves,
@@ -142,7 +143,7 @@ describe('AttemptMachine', () => {
 
     const record = validRecord(m);
     expect(record).toMatchObject({
-      schema: 1,
+      schema: 2,
       session: SESSION,
       index: 1,
       scramble: SCRAMBLE,
@@ -167,6 +168,8 @@ describe('AttemptMachine', () => {
       },
       video: [],
     });
+    // The clock fit of the six moves, each the newest of its packet (the default).
+    expect(record.clock).toMatchObject({ samples: 6 });
     expect(record.moves).toEqual([
       { m: 'R', hostMs: 1100, cubeMs: 50, phase: 'scramble' },
       { m: 'U', hostMs: 1200, cubeMs: 150, phase: 'scramble' },
@@ -521,5 +524,106 @@ describe('AttemptMachine: records', () => {
     const record = validRecord(m);
     expect(record.result).toMatchObject({ status: 'solved', replayOk: true, movesQtm: 8 });
     expect(record.scrambledFacelets satisfies Facelets).toBe(scrambleTarget(scramble));
+  });
+});
+
+describe('AttemptMachine: the clock fit', () => {
+  /** The cube's clock 0.7% slow, as on the owner's cube (docs/DEVICES.md). */
+  const host = (cubeMs: number): number => 1.007 * cubeMs + 1_790_000_000_000;
+
+  /** Feeds `moves` 150 ms apart on the cube clock from `startCubeMs`, on the line `host`. */
+  function feedOnLine(m: Machine, moves: string, startCubeMs: number, packetLast?: boolean): void {
+    for (const [i, move] of parseMoves(moves).entries()) {
+      const cubeMs = startCubeMs + 150 * i;
+      m.onMove({ m: move, cubeMs, hostMs: host(cubeMs), packetLast });
+    }
+  }
+
+  it("fits the host time on the cube time of the attempt's moves, scramble and solve", () => {
+    const m = machine();
+    feedOnLine(m, SCRAMBLE, 10_000);
+    feedOnLine(m, SOLUTION, 14_000);
+    const { clock } = validRecord(m);
+    // Host times of 1.79e12 ms are exact to 0.25 µs, hence the tolerances.
+    expect(clock?.samples).toBe(6);
+    expect(clock?.a).toBeCloseTo(1.007, 7);
+    expect(clock?.b).toBeCloseTo(1_790_000_000_000, 2);
+    expect(clock?.residualP95Ms).toBeLessThan(0.001);
+  });
+
+  it('takes only the moves that ended their Bluetooth packet as samples; packetLast defaults to true', () => {
+    const m = machine();
+    feedOnLine(m, 'R U', 10_000);
+    // F and F' came in one packet with U': they carry its arrival time, off the line.
+    m.onMove({ m: parseMove('F'), cubeMs: 10_300, hostMs: host(14_300), packetLast: false });
+    m.onMove({ m: parseMove("F'"), cubeMs: 14_000, hostMs: host(14_300), packetLast: false });
+    m.onMove({ m: parseMove("U'"), cubeMs: 14_300, hostMs: host(14_300), packetLast: true });
+    feedOnLine(m, "R'", 14_600);
+    const record = validRecord(m);
+    expect(record.moves).toHaveLength(6);
+    expect(record.clock?.samples).toBe(4);
+    expect(record.clock?.a).toBeCloseTo(1.007, 7);
+    expect(record.clock?.residualP95Ms).toBeLessThan(0.001);
+    // What a CubeClockFit makes of the same moves.
+    const fit = new CubeClockFit();
+    for (const [i, move] of record.moves.entries()) {
+      fit.addSample(move.cubeMs, move.hostMs, i < 2 || i >= 4);
+    }
+    expect(record.clock).toEqual(fit.params);
+  });
+
+  it('stops at the end: moves after solved, or after a DNF, are not samples', () => {
+    const solved = machine();
+    feedOnLine(solved, `${SCRAMBLE} ${SOLUTION}`, 10_000);
+    const before = solved.toRecord().clock;
+    feedOnLine(solved, 'R R', 20_000);
+    expect(solved.toRecord().clock).toEqual(before);
+
+    const dnf = machine();
+    feedOnLine(dnf, `${SCRAMBLE} F'`, 10_000);
+    dnf.markDnf(host(11_000));
+    feedOnLine(dnf, 'R R', 20_000);
+    expect(validRecord(dnf).clock?.samples).toBe(4);
+  });
+
+  it('has no clock without two samples at different cube times', () => {
+    const untouched = machine();
+    untouched.markDnf(2000);
+    expect(validRecord(untouched).clock).toBeNull();
+
+    const one = machine();
+    feedOnLine(one, 'R', 10_000);
+    one.markDnf(host(11_000));
+    expect(validRecord(one).clock).toBeNull();
+
+    const packet = machine();
+    feedOnLine(packet, 'R U', 10_000, false);
+    feedOnLine(packet, 'F', 10_300);
+    packet.markDnf(host(11_000));
+    expect(validRecord(packet).clock).toBeNull();
+
+    const sameTime = machine();
+    sameTime.onMove({ m: parseMove('R'), cubeMs: 10_000, hostMs: host(10_000) });
+    sameTime.onMove({ m: parseMove('U'), cubeMs: 10_000, hostMs: host(10_000) + 3 });
+    sameTime.markDnf(host(11_000));
+    expect(validRecord(sameTime).clock).toBeNull();
+  });
+
+  it('rejects a move whose time is not finite, and takes nothing from it', () => {
+    const m = machine();
+    feedOnLine(m, 'R U', 10_000);
+    expect(() => m.onMove({ m: parseMove('F'), cubeMs: Number.NaN, hostMs: 1 })).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      m.onMove({ m: parseMove('F'), cubeMs: 1, hostMs: Number.POSITIVE_INFINITY }),
+    ).toThrow(RangeError);
+    expect(m.state).toBe('scrambling');
+    expect(m.scrambleProgress.matched).toBe(2);
+    m.markDnf(host(11_000));
+    expect(validRecord(m)).toMatchObject({
+      moves: [{ m: 'R' }, { m: 'U' }],
+      clock: { samples: 2 },
+    });
   });
 });

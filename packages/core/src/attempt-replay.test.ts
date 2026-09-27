@@ -1,7 +1,8 @@
 /// <reference types="node" />
 // The acceptance test of docs/PLAN.md T1.4: every fixture solve replayed through the attempt
 // machine, as the cube would report it, and every record validated against the schema of
-// attempt.json. Node's types for this file only (node:fs).
+// attempt.json (version 2 since T2.0, with the attempt's clock fit). Node's types for this file
+// only (node:fs).
 import { Ajv2020 } from 'ajv/dist/2020';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -114,10 +115,10 @@ function replay(s: Fixture, i: number): Replay {
   const states: string[] = [];
   for (const [k, m] of scrambleMoves.entries()) {
     const ms = scrambleDoneMs - 100 * (scrambleMoves.length - 1 - k);
-    states.push(machine.onMove({ m, cubeMs: ms, hostMs: ms }));
+    states.push(machine.onMove({ m, cubeMs: ms, hostMs: ms, packetLast: true }));
   }
   for (const { m, ms } of s.moves) {
-    states.push(machine.onMove({ m, cubeMs: ms, hostMs: ms }));
+    states.push(machine.onMove({ m, cubeMs: ms, hostMs: ms, packetLast: true }));
   }
   return { record: machine.toRecord(), scrambleMoves: scrambleMoves.length, states };
 }
@@ -202,6 +203,19 @@ describe('the 300 fixture solves replayed through the attempt machine', () => {
       expect(record.phases, at).toEqual(recorded(report.phases));
       expect(record.moves.length, at).toBe(scrambleMoves + s.moves.length);
       expect(record.moves.filter((m) => m.phase === 'solve').length, at).toBe(s.moves.length);
+    }
+  });
+
+  it('fits the clock of every attempt: cube ms on both clocks give a = 1, b = 0 and no residual', () => {
+    for (const [i, { record }] of result().replays.entries()) {
+      const at = `solves[${String(i)}]`;
+      const clock = record.clock;
+      expect(clock, at).not.toBeNull();
+      expect(Math.abs((clock?.a ?? 0) - 1), at).toBeLessThan(1e-6);
+      expect(Math.abs(clock?.b ?? 1), at).toBeLessThan(1e-6);
+      expect(clock?.residualP95Ms, at).toBe(0);
+      // Every move is the newest of its packet, scramble and solve alike.
+      expect(clock?.samples, at).toBe(record.moves.length);
     }
   });
 
