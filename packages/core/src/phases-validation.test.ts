@@ -1,6 +1,7 @@
 /// <reference types="node" />
 // The acceptance test of docs/PLAN.md T1.3: detectPhases on the 300 fixture solves, each phase's
-// end compared with Cubeast's cumulative step time. Node's types for this file only (node:fs).
+// end compared with Cubeast's cumulative step time, and its recognition time with Cubeast's. Node's
+// types for this file only (node:fs).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -11,6 +12,8 @@ interface CubeastStep {
   name: string;
   /** Cubeast's end of the step, in ms from the solve's start. */
   cumulativeTime: number;
+  /** Cubeast's recognition time of the step. */
+  recognitionTime: number;
 }
 
 interface Fixture {
@@ -63,6 +66,7 @@ const FIXTURES: Fixture[] = items(
   steps: items(field(s, 'cubeast_steps')).map((step) => ({
     name: text(field(step, 'name')),
     cumulativeTime: integer(field(step, 'cumulative_time')),
+    recognitionTime: integer(field(step, 'recognition_time')),
   })),
 }));
 
@@ -79,7 +83,10 @@ const CUBEAST_STEPS = [
 ];
 
 const TOLERANCE_MS = 1;
+/** docs/PLAN.md T1.3: the share of (fixture, phase) boundaries that must agree. */
 const THRESHOLD = 0.95;
+/** The share of recognition times that must agree, among the phases whose boundaries agree. */
+const RECOGNITION_THRESHOLD = 0.95;
 
 interface Mismatch {
   fixture: number;
@@ -91,17 +98,24 @@ interface Mismatch {
 
 interface Comparison {
   elapsedMs: number;
+  reports: PhaseReport[];
   /** Per phase, in PHASE_NAMES order, the fixtures whose boundary agrees. */
   agree: number[];
+  /** Per phase, of the fixtures whose boundary agrees, those whose recognition time agrees too. */
+  recognitionAgree: number[];
   mismatches: Mismatch[];
 }
 
-/** Runs the detector on every fixture (timed) and compares each boundary with Cubeast's. */
+/**
+ * Runs the detector on every fixture (timed) and compares each boundary with Cubeast's, then, where
+ * the boundary agrees, the recognition time.
+ */
 function compare(): Comparison {
   const start = performance.now();
   const reports = FIXTURES.map((s) => detectPhases(s.scrambled, s.moves));
   const elapsedMs = performance.now() - start;
   const agree = PHASE_NAMES.map(() => 0);
+  const recognitionAgree = PHASE_NAMES.map(() => 0);
   const mismatches: Mismatch[] = [];
   for (const [i, s] of FIXTURES.entries()) {
     const report = reports[i];
@@ -110,30 +124,38 @@ function compare(): Comparison {
       const record = report.phases.at(k);
       const ours = record === undefined ? null : record.endMs - first;
       const cubeast = s.steps[k].cumulativeTime;
-      if (ours !== null && Math.abs(ours - cubeast) <= TOLERANCE_MS) {
-        agree[k] += 1;
-      } else {
+      if (record === undefined || ours === null || Math.abs(ours - cubeast) > TOLERANCE_MS) {
         mismatches.push({ fixture: i, phase, ours, cubeast, report });
+        continue;
+      }
+      agree[k] += 1;
+      if (Math.abs(record.recognitionMs - s.steps[k].recognitionTime) <= TOLERANCE_MS) {
+        recognitionAgree[k] += 1;
       }
     }
   }
-  return { elapsedMs, agree, mismatches };
+  return { elapsedMs, reports, agree, recognitionAgree, mismatches };
 }
 
-function table({ elapsedMs, agree, mismatches }: Comparison): string {
-  const pairs = FIXTURES.length * PHASE_NAMES.length;
-  const total = agree.reduce((a, b) => a + b, 0);
-  const percent = (n: number, of: number): string => `${((100 * n) / of).toFixed(1)}%`;
+function sum(ns: readonly number[]): number {
+  return ns.reduce((a, b) => a + b, 0);
+}
+
+function table({ elapsedMs, agree, recognitionAgree, mismatches }: Comparison): string {
+  const share = (n: number, of: number): string =>
+    `${String(n)}/${String(of)} (${((100 * n) / of).toFixed(1)}%)`;
   return [
-    `Phase boundaries within ±${String(TOLERANCE_MS)} ms of Cubeast (${String(FIXTURES.length)} solves, ${elapsedMs.toFixed(0)} ms):`,
-    '| phase | agree | share |',
+    `Agreement with Cubeast within ±${String(TOLERANCE_MS)} ms (${String(FIXTURES.length)} solves, detection in ${elapsedMs.toFixed(0)} ms):`,
+    '| phase | boundary | recognition, where the boundary agrees |',
     '|---|---|---|',
     ...PHASE_NAMES.map(
       (phase, k) =>
-        `| ${phase} | ${String(agree[k])}/${String(FIXTURES.length)} | ${percent(agree[k], FIXTURES.length)} |`,
+        `| ${phase} | ${share(agree[k], FIXTURES.length)} | ${share(recognitionAgree[k], agree[k])} |`,
     ),
-    `| all | ${String(total)}/${String(pairs)} | ${percent(total, pairs)} |`,
-    ...(mismatches.length === 0 ? [] : ['Mismatches (fixture, phase: ours vs Cubeast, ms):']),
+    `| all | ${share(sum(agree), FIXTURES.length * PHASE_NAMES.length)} | ${share(sum(recognitionAgree), sum(agree))} |`,
+    ...(mismatches.length === 0
+      ? []
+      : ['Boundary mismatches (fixture, phase: ours vs Cubeast, ms):']),
     ...mismatches.map(
       (m) =>
         `  solves[${String(m.fixture)}] ${m.phase}: ${String(m.ours)} vs ${String(m.cubeast)} (cross ${String(m.report.crossFace)})`,
@@ -146,9 +168,9 @@ describe('agreement with Cubeast on the 300 fixture solves', () => {
   const result = (): Comparison => (comparison ??= compare());
 
   it("measures Cubeast's times from the first move", () => {
-    // The last step ends at time_ms, which is the time from the first move to the last one; the
-    // cross has no recognition time. So a phase's end compares with its cumulative time as
-    // endMs - (first move's ms).
+    // The last step ends at time_ms, which is the time from the first move to the last one, and
+    // the cross has no recognition time, even when its first move turns the last layer. So a
+    // phase's end compares with its cumulative time as endMs - (first move's ms).
     expect(FIXTURES).toHaveLength(300);
     for (const s of FIXTURES) {
       expect(s.steps.map((step) => step.name)).toEqual(CUBEAST_STEPS);
@@ -156,16 +178,30 @@ describe('agreement with Cubeast on the 300 fixture solves', () => {
       const last = s.moves[s.moves.length - 1].ms;
       expect(s.timeMs).toBe(last - first);
       expect(s.steps[7].cumulativeTime).toBe(s.timeMs);
+      expect(s.steps[0].recognitionTime).toBe(0);
     }
   });
 
   it('matches every (fixture, phase) boundary within ±1 ms, in under 2 s', () => {
     const r = result();
     console.log(table(r));
-    const total = r.agree.reduce((a, b) => a + b, 0);
     expect(r.elapsedMs).toBeLessThan(2000);
     // The acceptance threshold of docs/PLAN.md T1.3, then what the detector actually achieves.
-    expect(total / (FIXTURES.length * PHASE_NAMES.length)).toBeGreaterThanOrEqual(THRESHOLD);
+    expect(sum(r.agree) / (FIXTURES.length * PHASE_NAMES.length)).toBeGreaterThanOrEqual(THRESHOLD);
     expect(r.mismatches).toEqual([]);
+  });
+
+  it('splits recognition from execution as Cubeast does on at least 95% of the phases', () => {
+    // Recognition runs to the first move that does not turn the last layer. Where Cubeast differs,
+    // it is its move merging, which the data model does not do: two turns of one face in a row show
+    // as one double turn, and turns of two opposite faces as one slice, stamped with the later turn,
+    // so Cubeast's recognition ends one turn later (docs/DATA-MODEL.md §4).
+    const r = result();
+    expect(sum(r.recognitionAgree) / sum(r.agree)).toBeGreaterThanOrEqual(RECOGNITION_THRESHOLD);
+    for (const report of r.reports) {
+      for (const p of report.phases) {
+        expect(p.recognitionMs + p.executionMs).toBe(p.endMs - p.startMs);
+      }
+    }
   });
 });

@@ -38,9 +38,13 @@ export interface PhaseRecord {
   endMs: number;
   /** Face turns in the phase; 0 for a phase already satisfied when the previous one ended. */
   moves: number;
-  /** From `startMs` to the phase's first move. */
+  /**
+   * From `startMs` to the move that starts the execution, as Cubeast splits phases: the cross's
+   * first move; for a later phase, its first move that does not turn the last-layer face (leading
+   * AUF turns count as recognition), or `endMs` if every move of the phase turns it.
+   */
   recognitionMs: number;
-  /** From the phase's first move to `endMs`. */
+  /** From that move to `endMs`: `recognitionMs + executionMs = endMs - startMs`. */
   executionMs: number;
   /** Index into the input moves of the move that completed the phase. */
   endMoveIndex: number;
@@ -289,6 +293,22 @@ function scan(scrambled: Facelets, moves: readonly TimedMove[], forced: Face | u
 }
 
 /**
+ * When the execution of a phase starts (docs/DATA-MODEL.md §4, as Cubeast splits phases): the
+ * cross's first move, whatever face it turns; for a later phase, its first move that does not turn
+ * `lastLayer`, since leading AUF turns are recognition. A phase with no moves, or whose moves all
+ * turn the last layer (a PLL finished by an AUF alone), is all recognition: `endMs`.
+ */
+function executionStartMs(
+  phaseMoves: readonly TimedMove[],
+  isCross: boolean,
+  lastLayer: Face,
+  endMs: number,
+): number {
+  const start = isCross ? phaseMoves.at(0) : phaseMoves.find(({ m }) => m.face !== lastLayer);
+  return start === undefined ? endMs : start.ms;
+}
+
+/**
  * The CFOP phases of a solve (docs/DATA-MODEL.md §4). `scrambled` is the state before the first
  * move and `moves` are the solve's face turns with their times. Each phase ends at the first move
  * after which its predicate holds; a phase already satisfied when the previous one ends is a skip
@@ -300,21 +320,24 @@ export function detectPhases(
   moves: readonly TimedMove[],
   opts: DetectPhasesOptions = {},
 ): PhaseReport {
-  const result = scan(scrambled, moves, opts.crossFace);
+  const { crossFace, ends, solvedAt } = scan(scrambled, moves, opts.crossFace);
   const phases: PhaseRecord[] = [];
-  let startMs = moves.length > 0 ? (opts.solveStartMs ?? moves[0].ms) : 0;
+  if (crossFace === null) {
+    return { crossFace, phases, solvedAtMove: solvedAt, complete: false };
+  }
+  let startMs = opts.solveStartMs ?? moves[0].ms;
   let previousEnd = -1;
-  for (const [k, end] of result.ends.entries()) {
-    const count = end.index - previousEnd;
+  for (const [k, end] of ends.entries()) {
+    const phaseMoves = moves.slice(previousEnd + 1, end.index + 1);
     const endMs = moves[end.index].ms;
-    const firstMoveMs = count > 0 ? moves[previousEnd + 1].ms : endMs;
+    const executionMs = endMs - executionStartMs(phaseMoves, k === 0, opposite(crossFace), endMs);
     const record: PhaseRecord = {
       name: PHASE_NAMES[k],
       startMs,
       endMs,
-      moves: count,
-      recognitionMs: count > 0 ? firstMoveMs - startMs : 0,
-      executionMs: count > 0 ? endMs - firstMoveMs : 0,
+      moves: phaseMoves.length,
+      recognitionMs: endMs - startMs - executionMs,
+      executionMs,
       endMoveIndex: end.index,
     };
     if (end.slot !== undefined) {
@@ -325,9 +348,9 @@ export function detectPhases(
     previousEnd = end.index;
   }
   return {
-    crossFace: result.crossFace,
+    crossFace,
     phases,
-    solvedAtMove: result.solvedAt,
+    solvedAtMove: solvedAt,
     complete: phases.length === PHASE_NAMES.length,
   };
 }

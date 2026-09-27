@@ -70,16 +70,32 @@ first after `solve_start`, and it never changes.
 | `ocll` | all four last-layer corners do too |
 | `pll` | the cube is solved |
 
+A cross completed first by accident is kept, as Cubeast keeps it, even when the solver
+then builds the first two layers on another face.
+
 Per phase: `startMs` (previous phase's `endMs`, or `solve_start` for the cross), `endMs`,
-`moves` (count), `recognitionMs` (from `startMs` to the phase's first move) and
-`executionMs` (from the phase's first move to `endMs`). A cross completed first by
-accident is kept, as Cubeast keeps it, even when the solver then builds the first two
-layers on another face.
+`moves` (count), and `recognitionMs` and `executionMs`, which add up to `endMs − startMs`
+and are split where the execution starts, as Cubeast splits phases:
+
+- after the cross, at the phase's first move that does not turn the last-layer face (the
+  face opposite `crossFace`): leading AUF turns are recognition, and a turn of any other
+  face, the cross face included, starts the execution;
+- a phase whose moves all turn the last-layer face (a PLL finished by an AUF alone) is all
+  recognition, with `executionMs` 0, as Cubeast reports the 4 fixture solves where this
+  happens;
+- the cross's execution starts at its first move, whatever face that turns, so its
+  recognition is 0 unless `solve_start` came before the first move (Cubeast's cross
+  recognition is 0 on all 300 fixtures, 8 of which start with a last-layer turn);
+- a phase with no moves (already satisfied when the previous one ended) has both 0.
 
 Checked against the 300 Cubeast fixtures in T1.3: all 2400 phase boundaries agree within
-±1 ms. Pairs count only while the cross is complete because, during an insertion that
-takes a cross edge out, another pair can sit in place for a move or two: counting it ended
-the phase before the insertion was over on 5 of the 300 solves (4 of them with the wrong
+±1 ms, and 2306 of the 2400 recognition times (96.1%). The other 94 come from Cubeast's
+move merging, which the data model does not do (§2): Cubeast shows repeated turns of one
+face as one move (`R R` as `R2`; 77 of them) and turns of opposite faces as a slice
+(`F' B` as `S`; 17), stamped with their last turn, so its recognition ends at that later turn.
+Pairs count only while the cross is complete because, during an insertion that takes a
+cross edge out, another pair can sit in place for a move or two: counting it ended the
+phase before the insertion was over on 5 of the 300 solves (4 of them with the wrong
 slot), where Cubeast waits for the cross.
 
 Later: with more data, evaluate choosing as the cross face the face whose first two layers

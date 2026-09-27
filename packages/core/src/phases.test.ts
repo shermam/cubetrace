@@ -449,6 +449,53 @@ describe('detectPhases on hand-built solves', () => {
     expect(PHASE_NAMES).toEqual(FULL_PHASES.map((p) => p.name));
   });
 
+  it('counts leading last-layer turns (AUFs) as recognition, as Cubeast does', () => {
+    // Every phase after the cross starts with a U turn, an AUF: its recognition runs to the first
+    // move that does not turn U, the last layer. The cross starts with U too and is all execution.
+    const groups = [
+      'U F2',
+      `U ${INSERT_FR}`,
+      INSERT_FL,
+      `U2 ${INSERT_BL}`,
+      INSERT_BR,
+      `U ${SUNE}`,
+      `U2 ${T_PERM} U'`,
+    ];
+    const r = detect(handBuilt(groups));
+    expect(r.phases.map((p) => [p.name, p.moves, p.recognitionMs, p.executionMs])).toEqual([
+      ['cross', 2, 0, 100],
+      ['f2l1', 4, 600, 200],
+      ['f2l2', 3, 500, 200],
+      ['f2l3', 4, 600, 200],
+      ['f2l4', 3, 500, 200],
+      ['eoll', 0, 0, 0],
+      ['ocll', 8, 600, 600],
+      ['pll', 16, 600, 1400],
+    ]);
+    for (const p of r.phases) {
+      expect(p.recognitionMs + p.executionMs).toBe(p.endMs - p.startMs);
+    }
+    // With solveStartMs the cross's recognition runs to its first move, a last-layer turn or not.
+    expect(detect(handBuilt(groups), { solveStartMs: 400 }).phases[0]).toMatchObject({
+      startMs: 400,
+      recognitionMs: 600,
+      executionMs: 100,
+    });
+  });
+
+  it('makes a phase whose moves all turn the last layer all recognition (a PLL of one AUF)', () => {
+    const r = detect(handBuilt(['F2', INSERT_FR, INSERT_FL, INSERT_BL, INSERT_BR, SUNE, 'U']));
+    expect(r.phases[7]).toEqual({
+      name: 'pll',
+      startMs: 4900,
+      endMs: 5400,
+      moves: 1,
+      recognitionMs: 500,
+      executionMs: 0,
+      endMoveIndex: 20,
+    });
+  });
+
   it('gives a pair already in place when the cross completes a skip (an XCross)', () => {
     const r = detect(handBuilt(['F2', INSERT_FL, INSERT_BL, INSERT_BR, SUNE, T_PERM]));
     expect(r.phases[1]).toEqual({
