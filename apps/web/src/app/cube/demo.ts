@@ -1,8 +1,9 @@
 // Demo mode (docs/PLAN.md, T1.6a): the fake cube replays one of the first 30 solves of
-// fixtures/solves.json, its scramble first and then its solution, so the app can be seen and
-// tested without a cube; `?misscramble=` adds a wrong turn and its undo to the scramble (T1.9, for
-// the end-to-end suite and to try the undo guidance). The solves are a slim copy of the fixtures
-// that scripts/write-demo-solves.mts writes to public/demo/solves.json before every build and dev
+// fixtures/solves.json, its scramble first (half turns as two quarter turns, as a real cube sends
+// them, T1.13) and then its solution, so the app can be seen and tested without a cube;
+// `?misscramble=` adds a wrong turn and its undo to the scramble (T1.9, for the end-to-end suite
+// and to try the undo guidance). The solves are a slim copy of the fixtures that
+// scripts/write-demo-solves.mts writes to public/demo/solves.json before every build and dev
 // server; the app fetches it only when a demo starts, so it is not in any bundle, and the service
 // worker does not prefetch it (ngsw-config.json caches JavaScript, CSS, images and fonts only).
 import { Injectable, inject } from '@angular/core';
@@ -55,6 +56,12 @@ export const DEMO_SOLVES_URL = 'demo/solves.json';
 
 /** The fixtures do not time the scramble: the demo turns it at one move per 100 ms. */
 export const DEMO_SCRAMBLE_GAP_MS = 100;
+
+/**
+ * The demo cube makes a half turn of the scramble as a smart cube reports one: two quarter turns in
+ * the same direction (clockwise), this far apart. The next move still comes 100 ms after the first.
+ */
+export const DEMO_HALF_TURN_GAP_MS = 60;
 
 /**
  * How long a mis-scramble's wrong turn stays before the demo cube undoes it, in ms of the replay's
@@ -137,14 +144,53 @@ export function chooseDemo(
   return { index, speed };
 }
 
-/** The scramble as timed moves for `FakeCube.play()`, one per 100 ms. */
+/**
+ * The scramble as timed moves for `FakeCube.play()`: one move per 100 ms from 0, a half turn as two
+ * clockwise quarter turns 60 ms apart ({@link DEMO_HALF_TURN_GAP_MS}), since a GAN cube reports every
+ * move as a quarter turn. {@link demoParts} plays it cut before each second quarter turn.
+ */
 export function scrambleSchedule(solve: DemoSolve): ScheduledMove[] {
-  return timed(parseMoves(solve.scramble));
+  return turnsOf(parseMoves(solve.scramble)).flat();
 }
 
-/** `moves` one per 100 ms, from 0. */
-function timed(moves: readonly Move[]): ScheduledMove[] {
-  return moves.map((m, i) => ({ m, ms: i * DEMO_SCRAMBLE_GAP_MS }));
+/** The turns of one move as the demo cube makes it: the move, or a half turn's two quarter turns. */
+type Turns = readonly [ScheduledMove] | readonly [ScheduledMove, ScheduledMove];
+
+/** Each of `moves` as the demo cube makes it, one move per 100 ms from 0 (see scrambleSchedule). */
+function turnsOf(moves: readonly Move[]): Turns[] {
+  return moves.map((m, i): Turns => {
+    const ms = i * DEMO_SCRAMBLE_GAP_MS;
+    if (m.turns !== 2) {
+      return [{ m, ms }];
+    }
+    const quarter: Move = { face: m.face, turns: 1 };
+    return [
+      { m: quarter, ms },
+      { m: quarter, ms: ms + DEMO_HALF_TURN_GAP_MS },
+    ];
+  });
+}
+
+/**
+ * `moves` as the demo cube makes them (see {@link scrambleSchedule}), as parts cut before the second
+ * quarter turn of every half turn, which starts its part 60 ms after the first: so the page renders
+ * the half-made turn (the scramble's token marked partial) before it is whole, however fast the
+ * replay (see {@link demoParts}). The first part starts `pauseMs` after the previous one.
+ */
+function scrambleParts(moves: readonly Move[], pauseMs: number): DemoPart[] {
+  const parts: DemoPart[] = [];
+  let part: ScheduledMove[] = [];
+  let pause = pauseMs;
+  for (const [first, second] of turnsOf(moves)) {
+    part.push(first);
+    if (second !== undefined) {
+      parts.push({ pauseMs: pause, moves: part });
+      part = [second];
+      pause = second.ms - first.ms;
+    }
+  }
+  parts.push({ pauseMs: pause, moves: part });
+  return parts;
 }
 
 /**
@@ -180,20 +226,22 @@ export interface DemoPart {
 }
 
 /**
- * What the demo cube plays, part after part: the scramble at one move per 100 ms
- * ({@link scrambleSchedule}), then the solution on its recorded timings. With `misscramble` k, the
- * scramble goes wrong after its move k: 100 ms later the cube makes {@link misscrambleMove}, and
- * {@link DEMO_MISSCRAMBLE_PAUSE_MS} after that its inverse, then the rest of the scramble. k must
- * be from 1 to one less than the number of scramble moves; any other value is ignored.
+ * What the demo cube plays, part after part: the scramble at one move per 100 ms, a half turn as two
+ * quarter turns 60 ms apart ({@link scrambleSchedule}), then the solution on its recorded timings.
+ * With `misscramble` k, the scramble goes wrong after its move k: 100 ms after that move began, the
+ * cube makes {@link misscrambleMove}, and {@link DEMO_MISSCRAMBLE_PAUSE_MS} after that its inverse,
+ * then the rest of the scramble. k must be from 1 to one less than the number of scramble moves; any
+ * other value is ignored.
  *
  * Each part after the first starts on a timer set once the previous part has ended, that is once
  * its last move has reached the app, which has then scheduled the page's update (Angular schedules
  * change detection on a zero-delay timer, or the next animation frame, when a signal changes). So
  * the page renders what that move led to before the next part begins, however fast the replay and
- * however late its timers fire: the undo guidance before the wrong turn's inverse, the armed
- * attempt before the solution's first move. The end-to-end suite relies on both. And the next
- * part's schedule counts from after that render, so the render does not delay its first move
- * against the others: the solve's time on the host clock stays the recorded one divided by the
+ * however late its timers fire: each half turn made halfway before its second quarter turn (the
+ * scramble is cut there, {@link scrambleParts}), the undo guidance before the wrong turn's inverse,
+ * the armed attempt before the solution's first move. The end-to-end suite relies on all three. And
+ * the next part's schedule counts from after that render, so the render does not delay its first
+ * move against the others: the solve's time on the host clock stays the recorded one divided by the
  * speed.
  */
 export function demoParts(solve: DemoSolve, misscramble: number | null = null): DemoPart[] {
@@ -205,15 +253,12 @@ export function demoParts(solve: DemoSolve, misscramble: number | null = null): 
     misscramble < 1 ||
     misscramble >= scramble.length
   ) {
-    return [{ pauseMs: 0, moves: timed(scramble) }, solution];
+    return [...scrambleParts(scramble, 0), solution];
   }
   const wrong = misscrambleMove(scramble, misscramble);
   return [
-    { pauseMs: 0, moves: timed([...scramble.slice(0, misscramble), wrong]) },
-    {
-      pauseMs: DEMO_MISSCRAMBLE_PAUSE_MS,
-      moves: timed([inverse(wrong), ...scramble.slice(misscramble)]),
-    },
+    ...scrambleParts([...scramble.slice(0, misscramble), wrong], 0),
+    ...scrambleParts([inverse(wrong), ...scramble.slice(misscramble)], DEMO_MISSCRAMBLE_PAUSE_MS),
     solution,
   ];
 }

@@ -27,12 +27,21 @@ test('a mis-scramble: the undo guidance shows the inverse and clears; the attemp
 
   // The record: the scramble's first five moves, a clockwise quarter turn of a face that neither
   // move 5 nor move 6 turns (nor the opposite faces), its inverse, then the rest of the scramble.
+  // The demo cube makes each half turn as two clockwise quarter turns, as a real cube reports it.
+  const quarterTurns = (moves: readonly string[]): string[] =>
+    moves.flatMap((move) => (move.endsWith('2') ? [move.charAt(0), move.charAt(0)] : [move]));
   const { attempts } = await exportSession(page);
   const [attempt] = attempts;
   const turned = attempt.moves.filter((move) => move.phase === 'scramble').map((move) => move.m);
-  const wrong = parseMove(turned[5]);
+  const before = quarterTurns(scramble.slice(0, 5));
+  const wrong = parseMove(turned[before.length]);
   const undo = formatMove(inverse(wrong));
-  expect(turned).toEqual([...scramble.slice(0, 5), turned[5], undo, ...scramble.slice(5)]);
+  expect(turned).toEqual([
+    ...before,
+    turned[before.length],
+    undo,
+    ...quarterTurns(scramble.slice(5)),
+  ]);
   expect(wrong.turns).toBe(1);
   const neighbours = parseMoves(`${scramble[4]} ${scramble[5]}`).map((move) => move.face);
   expect([...neighbours, ...neighbours.map(opposite)]).not.toContain(wrong.face);
