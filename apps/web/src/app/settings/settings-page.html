@@ -180,6 +180,63 @@
   </p>
 </section>
 
+<section aria-labelledby="camera-heading">
+  <h2 id="camera-heading">Camera</h2>
+  <label for="camera-resolution">Resolution</label>
+  <select
+    #resolutionSelect
+    id="camera-resolution"
+    data-testid="camera-resolution"
+    (change)="setCameraResolution(resolutionSelect.value)"
+  >
+    @for (option of resolutions; track option.value) {
+      <option [value]="option.value" [selected]="option.value === settings.cameraResolution()">
+        {{ option.label }}
+      </option>
+    }
+  </select>
+  <label for="camera-frame-rate">Frame rate</label>
+  <select
+    #rateSelect
+    id="camera-frame-rate"
+    data-testid="camera-frame-rate"
+    (change)="setCameraFrameRate(rateSelect.value)"
+  >
+    @for (option of frameRates; track option.value) {
+      <option [value]="option.value" [selected]="option.value === settings.cameraFrameRate()">
+        {{ option.label }}
+      </option>
+    }
+  </select>
+  <p class="hint">
+    What the camera is asked for; a camera that is on opens again with it. The Camera section of the
+    Timer page shows what the camera claims next to the frame rate it measures: some claim 60 fps
+    and deliver 30. “Exactly 60 fps” fails on a camera without a 60 fps mode, which then opens at
+    its best rate and says so.
+  </p>
+  <label for="sharpness-threshold">Sharpness threshold</label>
+  <input
+    #thresholdInput
+    id="sharpness-threshold"
+    type="number"
+    min="0"
+    step="any"
+    inputmode="decimal"
+    data-testid="sharpness-threshold"
+    [value]="settings.sharpnessThreshold()"
+    [attr.aria-invalid]="thresholdError() !== null"
+    (change)="setSharpnessThreshold(thresholdInput.value)"
+  />
+  @if (thresholdError(); as error) {
+    <p class="error" role="alert" data-testid="threshold-error">{{ error }}</p>
+  }
+  <p class="hint">
+    The sharpness meter says “good” from this value up ({{ sharpnessDefault }} by default, set on
+    Chrome's test camera). To set it for a camera: with the cube sharp in the framing rectangle,
+    note the meter; blur it (move it or cover the lens) and note it again; take a value in between.
+  </p>
+</section>
+
 <section aria-labelledby="demo-heading">
   <h2 id="demo-heading">Demo cube</h2>
   <label for="demo-speed">Replay speed</label>

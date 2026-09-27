@@ -200,6 +200,54 @@ describe('SettingsPage', () => {
     expect(TestBed.inject(SettingsService).idleDisconnectMinutes()).toBe(0);
   });
 
+  it('keeps the camera resolution, frame rate and sharpness threshold', async () => {
+    const fixture = await render();
+    const root = fixture.nativeElement as HTMLElement;
+    const resolution = root.querySelector<HTMLSelectElement>('#camera-resolution');
+    const rate = root.querySelector<HTMLSelectElement>('#camera-frame-rate');
+    const threshold = input(fixture, '#sharpness-threshold');
+    const options = (select: HTMLSelectElement | null) =>
+      Array.from(select?.options ?? [], (option) => option.text.trim());
+    expect(options(resolution)).toEqual(['1920×1080', '1280×720']);
+    expect(options(rate)).toEqual([
+      'As fast as the camera goes (asks for 60 fps)',
+      'Exactly 60 fps',
+      '30 fps',
+    ]);
+    expect(resolution?.value).toBe('1080p');
+    expect(rate?.value).toBe('best');
+    expect(threshold.value).toBe('20');
+
+    const choose = (select: HTMLSelectElement | null, value: string): void => {
+      if (select) {
+        select.value = value;
+        select.dispatchEvent(new Event('change'));
+      }
+    };
+    choose(resolution, '720p');
+    choose(rate, '60');
+    type(threshold, '12.5');
+    await update(fixture);
+    const settings = TestBed.inject(SettingsService);
+    expect(settings.cameraResolution()).toBe('720p');
+    expect(settings.cameraFrameRate()).toBe('60');
+    expect(settings.sharpnessThreshold()).toBe(12.5);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
+      cameraResolution: '720p',
+      cameraFrameRate: '60',
+      sharpnessThreshold: 12.5,
+    });
+
+    for (const bad of ['0', '-4', 'soft', '']) {
+      type(threshold, bad);
+      await update(fixture);
+      expect(text(fixture, 'threshold-error')).toBe(
+        'The threshold must be a number above 0 (100000 at most).',
+      );
+    }
+    expect(settings.sharpnessThreshold()).toBe(12.5);
+  });
+
   it('keeps the host label, inspection, auto-advance and the demo speed', async () => {
     const fixture = await render();
     const host = input(fixture, '#host-label');
