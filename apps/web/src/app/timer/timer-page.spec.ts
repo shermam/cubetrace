@@ -68,14 +68,14 @@ describe('TimerPage', () => {
     expect(autoStartDemo).not.toHaveBeenCalled();
   });
 
-  it('starts the demo that ?demo and ?speed ask for, once the stored session is read', async () => {
-    setup({ demo: '4', speed: '20' });
+  it('starts the demo that ?demo, ?speed and ?misscramble ask for, once the stored session is read', async () => {
+    setup({ demo: '4', speed: '20', misscramble: '5' });
     TestBed.createComponent(TimerPage);
     expect(autoStartDemo).not.toHaveBeenCalled();
 
     await TestBed.inject(SessionService).whenReady();
     await settle();
-    expect(autoStartDemo).toHaveBeenCalledWith({ demo: '4', speed: '20' });
+    expect(autoStartDemo).toHaveBeenCalledWith({ demo: '4', speed: '20', misscramble: '5' });
   });
 
   it('answers Esc, Delete and N, but not while typing, with a modifier or with the dialog open', async () => {
