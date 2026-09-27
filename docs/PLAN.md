@@ -38,6 +38,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | T1.11 | `storage`: atomic OPFS writes and tolerant reads (issue #12) | T1.6b | ✅ #15 |
 | T1.13 | `core`+`web`: scramble tokens coloured as they are made (done, half made, wrong) | T1.2, T1.6b | ✅ #16 |
 | T1.12 | `web`: one-click cube connection; the dialog only for the MAC prompt, details and errors | T1.6a | ✅ #17 |
+| T1.14 | `gan`+`web`: Mark as solved (cube reset), idle auto-disconnect, disconnect diagnostics, driver preload | T1.12 | 🟨 #18 |
 
 Waves for parallel work: T1.0 → {T1.1, T1.7, T1.8} → {T1.2, T1.3, T1.5} → {T1.4, T1.6a} → T1.6b →
 {T1.9, T1.10}. T1.6 was split into T1.6a and T1.6b on 2026-09-27 so that the owner can test the
