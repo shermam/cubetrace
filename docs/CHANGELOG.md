@@ -26,3 +26,5 @@ versions follow [Semantic Versioning](https://semver.org/).
   ideally 60 fps, measures its frame timing with `requestVideoFrameCallback`, checks H.264
   encoder support, worker APIs, storage and Web Bluetooth, and gives a JSON report to copy or
   download for `docs/DEVICES.md`.
+- Scrambles (T1.2): the Timer page shows a WCA random-state scramble generated in the browser by
+  cubing.js, offline too once the app is installed.
