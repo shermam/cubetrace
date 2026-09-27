@@ -1,4 +1,5 @@
 import { Component, computed, inject, input } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import type { AttemptRecord } from '@cubetrace/core';
 
 import { sessionStats } from '../session/session-stats';
@@ -53,35 +54,39 @@ function solveRow(attempt: AttemptRecord): SolveRow {
 /**
  * The session's solves, newest first (docs/PLAN.md, T1.6b): number, time, the eight phases as a
  * mini bar, flags, and a badge with the attempt's clips (T2.4) that opens them (`ClipViewing`);
- * above them the session's count, mean, best, ao5 and ao12.
+ * above them the session's count, mean, best, ao5 and ao12 (unless `showStats` is false). With a
+ * `limit` (the Timer page's 12, T2.7), only the newest ones, and under them how many the session
+ * has, with "See all", the session's page (`sessionId`).
  */
 @Component({
   selector: 'app-solve-list',
-  imports: [PhaseBar],
+  imports: [PhaseBar, RouterLink],
   template: `
     <h2>Solves</h2>
-    <dl class="stats" data-testid="session-stats">
-      <div>
-        <dt>Solves</dt>
-        <dd data-testid="stat-count">{{ stats().count }}</dd>
-      </div>
-      <div>
-        <dt>Mean</dt>
-        <dd data-testid="stat-mean">{{ stats().mean }}</dd>
-      </div>
-      <div>
-        <dt>Best</dt>
-        <dd data-testid="stat-best">{{ stats().best }}</dd>
-      </div>
-      <div>
-        <dt>ao5</dt>
-        <dd data-testid="stat-ao5">{{ stats().ao5 }}</dd>
-      </div>
-      <div>
-        <dt>ao12</dt>
-        <dd data-testid="stat-ao12">{{ stats().ao12 }}</dd>
-      </div>
-    </dl>
+    @if (showStats()) {
+      <dl class="stats" data-testid="session-stats">
+        <div>
+          <dt>Solves</dt>
+          <dd data-testid="stat-count">{{ stats().count }}</dd>
+        </div>
+        <div>
+          <dt>Mean</dt>
+          <dd data-testid="stat-mean">{{ stats().mean }}</dd>
+        </div>
+        <div>
+          <dt>Best</dt>
+          <dd data-testid="stat-best">{{ stats().best }}</dd>
+        </div>
+        <div>
+          <dt>ao5</dt>
+          <dd data-testid="stat-ao5">{{ stats().ao5 }}</dd>
+        </div>
+        <div>
+          <dt>ao12</dt>
+          <dd data-testid="stat-ao12">{{ stats().ao12 }}</dd>
+        </div>
+      </dl>
+    }
     @if (rows().length === 0) {
       <p class="muted">No solves in this session yet.</p>
     } @else {
@@ -116,6 +121,12 @@ function solveRow(attempt: AttemptRecord): SolveRow {
           </li>
         }
       </ol>
+      @if (footer(); as footer) {
+        <p class="footer" data-testid="solve-list-footer">
+          {{ footer.count }} ·
+          <a [routerLink]="footer.link" data-testid="solve-list-all">See all</a>
+        </p>
+      }
     }
   `,
   styles: `
@@ -198,6 +209,12 @@ function solveRow(attempt: AttemptRecord): SolveRow {
       }
     }
 
+    .footer {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      text-align: end;
+    }
+
     .clips {
       padding: 0 var(--space-1);
       border: 1px solid var(--line);
@@ -212,8 +229,34 @@ function solveRow(attempt: AttemptRecord): SolveRow {
 export class SolveList {
   /** The session's attempts, by index. */
   readonly attempts = input.required<readonly AttemptRecord[]>();
+  /** Show only the newest this many, with the footer; null (the default) shows them all. */
+  readonly limit = input<number | null>(null);
+  /** The session, whose page the footer's "See all" opens; no footer without it. */
+  readonly sessionId = input<string | null>(null);
+  /** The statistics above the list: count, mean, best, ao5 and ao12. */
+  readonly showStats = input(true);
   protected readonly viewer = inject(ClipViewing);
 
   protected readonly stats = computed(() => sessionStats(this.attempts()));
-  protected readonly rows = computed(() => [...this.attempts()].reverse().map(solveRow));
+  protected readonly rows = computed(() => newest(this.attempts(), this.limit()).map(solveRow));
+  /** "15 solves in this session", and the session's page; null without a limit or a session. */
+  protected readonly footer = computed(() => {
+    const id = this.sessionId();
+    const count = this.attempts().length;
+    return this.limit() === null || id === null || count === 0
+      ? null
+      : {
+          count: `${String(count)} ${count === 1 ? 'solve' : 'solves'} in this session`,
+          link: ['/sessions', id],
+        };
+  });
+}
+
+/** The newest `limit` attempts (all of them for null), newest first. */
+export function newest(
+  attempts: readonly AttemptRecord[],
+  limit: number | null,
+): readonly AttemptRecord[] {
+  const shown = limit === null ? attempts : attempts.slice(Math.max(0, attempts.length - limit));
+  return [...shown].reverse();
 }
