@@ -25,6 +25,13 @@ versions follow [Semantic Versioning](https://semver.org/).
   without re-encoding, with every frame's time on the host clock. Nothing records with it yet (the
   timer will, from T2.4); `/capture-lab`, a page outside the navigation, runs it on its own with its
   counters and cuts, for testing on a device.
+- Clips (T2.3, `packages/capture`): the capture worker turns any interval of the last 90 s into an
+  MP4 file, without re-encoding (with mediabunny: the camera's H.264 or VP9 and the microphone's AAC
+  or Opus as they were encoded, the file's index first so that it plays at once), and writes it with
+  the time of each of its frames (`<camera>.<segment>.frames.json`) into the attempt's folder of the
+  browser's storage, each file written whole, so that a page closed in the middle leaves no half
+  file. The timer does not record yet (T2.4); `/capture-lab` has "Mux and save the last … s", which
+  saves a clip into a scratch folder, lists its files and plays it back.
 
 ### Changed
 

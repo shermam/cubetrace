@@ -24,6 +24,7 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | gan-web-bluetooth (the owner's fork) | 3.0.2 plus 3 commits: git `52417a1` | `packages/gan/package.json` | GAN cube driver, a git dependency pinned to that commit; see "GAN driver" below |
 | `@angular/service-worker` | 22.2.0 | `apps/web/package.json` | added by `ng add @angular/pwa@22.2.0` (T1.7); `@angular/pwa` itself is only the schematic and is not installed |
 | cubing (cubing.js) | 0.63.7 | `packages/core/package.json`, `apps/web/package.json` | added by T1.2 for scrambles; the app uses it directly for the scramble picture (`cubing/twisty`, T1.6b); MPL-2.0 or GPL-3.0; needs Node 22.3 or later; see "cubing.js" below |
+| mediabunny | 1.60.0 | `packages/capture/package.json` | added by T2.3 to mux the encoded chunks into MP4 in the capture worker; MPL-2.0; brings `@types/dom-webcodecs` 0.1.13 and `@types/dom-mediacapture-transform` 0.1.12 (type declarations only); see "Clips" below |
 
 ## Commands
 
@@ -611,3 +612,110 @@ without the APIs, as the probe has) runs the pipeline on a chosen camera, shows 
 second and prints cuts as JSON, with the frame times and a summary of what the frames' clock is. The
 end-to-end test drives it; the owner runs it on the real devices in round 2 (`docs/DEVICES.md`,
 "VideoFrame.timestamp").
+
+## Clips: MP4 muxing and OPFS writing (`packages/capture`)
+
+Added by T2.3 on 2026-09-27: `mux.ts` turns a cut into an MP4 and its frames.json, `clip-writer.ts`
+writes both into the attempt's folder, and the capture worker does both on `saveClip`, so that the
+MP4 never crosses to the window. Neither file is exported by the package's index: they are the
+worker's.
+
+**Why mediabunny.** WebCodecs gives encoded chunks, and the browser has no API that writes them into
+a file a player opens. mediabunny (by Vanilagy, MPL-2.0) is a TypeScript library whose only
+dependencies are type declarations; it muxes encoded packets as they are, without decoding them,
+into MP4 among other formats; its modules are side-effect free, so a build keeps only what is used;
+it supersedes the same author's `mp4-muxer`, deprecated on npm in its favour; and it runs in Node,
+so the muxer is tested there. The plan named it (`docs/PLAN.md`, T2.3). 1.60.0 was the latest
+release on npm on 2026-09-27 (published on 2026-09-25); `packages/capture/package.json` asks
+`^1.60.0`, like the other dependencies, and the lockfile holds 1.60.0. MPL-2.0 is copyleft per file:
+the app bundles the files unmodified from npm, and a modified mediabunny file would have to be
+published under the same license. Its type declarations reference `@types/dom-webcodecs` and
+`@types/dom-mediacapture-transform`, which repeat declarations of TypeScript's own DOM library;
+`skipLibCheck` (in `tsconfig.base.json` since T1.0) keeps their conflicts out of the type check, and
+nothing in the repository relies on them.
+
+**How the packets are built.** `muxClip(cut, {camera, segment})` makes an `Output` with
+`Mp4OutputFormat({fastStart: 'in-memory'})` (the `moov` box before `mdat`, so that a player starts
+at once) and a `BufferTarget`, an `EncodedVideoPacketSource` (`avc` or `vp9`, from the codec string)
+and, when the cut has audio, an `EncodedAudioPacketSource` (`aac` or `opus`). Each chunk becomes
+`new EncodedPacket(bytes, type, timestamp, duration)` from the ring buffer's record, the times in
+seconds from the first frame's timestamp, so that the clip starts at 0 at its keyframe
+(`EncodedPacket.fromEncodedChunk` would need `EncodedVideoChunk` objects, which the buffer does not
+keep and Node does not have). The first packet of each track carries the encoder's decoder config:
+for H.264 its `description`, the avcC of `avc: {format: 'avc'}`; for VP9 mediabunny writes the vpcC
+from the codec string and the colour space (`vp09.00.40.08.01.06.06.06.00` on the fake camera); for
+Opus the dOps from the OpusHead description, its pre-skip included. The packets of both tracks go in
+by time, so the file interleaves them in half-second chunks. The audio keeps its place by its own
+timestamps (the capture clock is shared, `docs/DEVICES.md`): chunks that end before the first frame
+are left out, and the one that overlaps it starts before 0, which mediabunny writes as an edit list.
+The video's time scale is mediabunny's default, 57,600 per second, with no frame rate set, so the
+frames keep their measured intervals to 17 µs (the exact times are in frames.json). A frame whose
+chunk has no duration lasts until the next frame, and the last one the median interval. Muxing takes
+2 ms for 1 s of the fake camera, 20 ms for 30 s (5 MB) and 50 ms for 90 s (15 MB) in Node on the
+agents' containers (medians of the committed sample repeated); the bytes are the encoder's, never
+decoded.
+
+**Chrome's chunks of frames without a duration say 0, not null.** The fake camera's frames have no
+`duration`, and the VP9 encoder's chunks then have `duration` 0: the recorded sample showed it, and
+T2.2's worker, which replaced only a missing duration with the measured frame interval, had kept the
+0. It now replaces 0 too (`capture-worker.ts`), so the buffer's `bufferSeconds`, a cut's audio span
+and `truncatedEnd` count the last frame's duration, and the MP4's last frame lasts one interval.
+
+**Where the files are written.** `writeClip` writes `<camera>.<segment>.mp4` and
+`<camera>.<segment>.frames.json` (compact JSON) into `sessions/<sessionId>/attempts/<index>/` of the
+origin private file system, which the worker opens itself (`navigator.storage.getDirectory()`). The
+session's folder must exist (`createSession` makes it); the attempt's folder is made. Each file is
+written whole under a temporary name, `<name>.<8 base-36 digits>.tmp`, through a
+`FileSystemSyncAccessHandle` (dedicated workers only; its methods are synchronous since Chrome 108:
+the bytes go straight into the file, without the swap file of a writable stream), then moved into
+place with `move()` (Chrome 111), the frames file first, as the session store writes its records
+(T1.11), so that no clip file is ever half written and an MP4 always has its frames file. The next
+write or deletion of the same clip removes the temporary files that a write cut short left. Where a
+file has no access handle (the window, Node's fake without `syncAccessHandle`), a writable stream
+writes it; where handles have no `move()`, the files are written in place, as the store does then.
+`deleteClip` removes a clip's files and their temporary files. The worker saves one clip at a time,
+in the order asked, from a cut taken when asked (sharing the buffer's bytes, `cut(…, {copy:
+false})`), and its `stop` waits for the clips queued; the window's `stop()` waits for the clips
+being saved before it asks the worker to stop.
+
+**The worker imports nothing of `@cubetrace/storage` but types.** The first build of T2.3 imported
+the folder names and the temporary names from `@cubetrace/storage`, whose index also brings
+`@cubetrace/core` and, through it, cubing.js; the worker's bundler then emitted 26 chunks more into
+the build (among them a second copy of cubing.js's 670 kB search), none of which the worker loads,
+all of which `ngsw.json` lists for the service worker to prefetch. `clip-files.ts` therefore repeats
+the three names the clips need (`sessions`, `attempts`, the zero-padded index) and the temporary
+names, and `clip-files.test.ts` checks them against the session store's. Only types come from core
+and storage, which the compiler erases. `attemptPath` and `clipFiles` are exported for the window
+(the lab reads its clip back with them).
+
+**Sizes** (`ng build`, 2026-09-27, against `main` at 0ebb491 built the same way): the worker,
+`worker-<hash>.js`, is 136.4 kB raw, 33.4 kB transferred (11.5 and 4.4 kB before): mediabunny's
+`Output`, its ISOBMFF muxer with the boxes of every codec it knows, the packet sources and the clip
+writer; none of its demuxers, encoders or other formats. The initial bundle's `main-*.js` grew by 9
+bytes (260,686 to 260,695): one more name in its export list, Angular's URL sanitizer, which the
+lab's `<video [src]>` now imports from it; no code moved into it. The lab's chunk grew from 11.5 to
+15.9 kB, the package's window chunk, which the camera panel shares, from 11.7 to 12.7 kB
+(`saveClip`, `attemptPath`, `clipFiles`); every other chunk is the same but for a byte or two of
+chunk names.
+
+**The recorded sample.** `fixtures/media/fake-camera-vp9-1s.json` is one GOP (30 frames, 1 s) of
+Chrome's fake camera at 1080p30 with its Opus audio, a `Cut` with the bytes in base64 (236 kB),
+recorded through `/capture-lab` by `apps/web/scripts/record-media-fixture.mts`
+(`fixtures/media/README.md`); `test-media.ts` reads it for the tests of the muxer, the clip writer
+and the worker. The end-to-end test (`capture.spec.ts`) saves the last 3 s through the lab's "Mux
+and save" on the fake camera, reads both files back from the origin private file system, plays the
+MP4 in a `<video>` to its end and demuxes it with mediabunny in Node; in two runs: 98 and 99 frames
+(3.3 s from the keyframe before the start), 557 and 559 kB, cut, muxed and written in 42 and 48 ms,
+the element's duration within 0.1 ms of the frames' and as many frames played as frames.json has.
+The production build's worker saves a clip under `/cubetrace/` too.
+
+**Saving takes the worker from its frames for a moment.** Muxing is synchronous work in the capture
+worker, and so are the access handles' writes: while they run, the camera's frames wait in
+`MediaStreamTrackProcessor`, which drops the oldest beyond its `maxBufferSize` (the pipeline leaves
+Chrome's default). In a throwaway run on the fake camera (not committed), saving 30 s (926 frames,
+5.2 MB) took 90 ms (37 ms muxing, 55 ms writing, timed in the worker) and 60 s (10 MB) 130 ms, and
+the frames right after each save had one and two double intervals (a frame lost; frames.json shows
+it, as a double `dtMs`), while the counters' frames per second dipped to 29 and 27.7 in that second.
+T2.4 saves a solve's clip a second after it ends; if a lost frame in the next attempt's scramble
+matters, a larger `maxBufferSize` for the processor (`pipeline.ts`) or muxing in a second worker
+would avoid it (not done here).
