@@ -248,6 +248,71 @@ describe('muxClip on the recorded sample', () => {
   });
 });
 
+describe('muxClip with H.264 and AAC', () => {
+  // What the real devices encode, which CI's Chromium cannot (docs/TOOLCHAIN.md): the sample's
+  // chunks and times, described as H.264 High 4.0 (an avcC with a parameter set of each kind) and
+  // AAC-LC at 48 kHz mono (its AudioSpecificConfig). The muxer copies the bytes without reading
+  // them, so the file's structure is what is tested here, not its pictures.
+  const AVCC = new Uint8Array([
+    0x01, 0x64, 0x00, 0x28, 0xff, 0xe1, 0x00, 0x0a, 0x67, 0x64, 0x00, 0x28, 0xac, 0xd9, 0x40, 0x78,
+    0x02, 0x27, 0x01, 0x00, 0x04, 0x68, 0xeb, 0xe3, 0xcb,
+  ]);
+  const AUDIO_SPECIFIC_CONFIG = new Uint8Array([0x11, 0x88]);
+
+  it("writes an avc1 track with the encoder's avcC and an mp4a track, which read back as such", async () => {
+    const cut = readMediaSample();
+    const audio = cut.audio;
+    if (audio === null) {
+      throw new Error('The sample has audio.');
+    }
+    const h264: Cut = {
+      ...cut,
+      video: {
+        ...cut.video,
+        codec: 'avc1.640028',
+        decoderConfig: {
+          codec: 'avc1.640028',
+          codedWidth: 1920,
+          codedHeight: 1080,
+          description: AVCC.slice().buffer,
+        },
+      },
+      audio: {
+        ...audio,
+        codec: 'mp4a.40.2',
+        decoderConfig: {
+          codec: 'mp4a.40.2',
+          sampleRate: 48_000,
+          numberOfChannels: 1,
+          description: AUDIO_SPECIFIC_CONFIG.slice().buffer,
+        },
+      },
+    };
+    const muxed = await muxClip(h264, META);
+    const mp4 = await readBack(muxed.mp4);
+
+    expect(muxed.info).toMatchObject({ codec: 'avc1.640028', audio: 'mp4a.40.2' });
+    expect(mp4.boxes).toEqual(['ftyp', 'moov', 'mdat']);
+    expect(mp4.video).toMatchObject({ codec: 'avc', codecString: 'avc1.640028' });
+    expect(mp4.audio).toMatchObject({
+      codec: 'aac',
+      codecString: 'mp4a.40.2',
+      sampleRate: 48_000,
+      channels: 1,
+    });
+    expect(mp4.mimeType).toBe('video/mp4; codecs="avc1.640028, mp4a.40.2"');
+    const input = new Input({ source: new BufferSource(muxed.mp4), formats: ALL_FORMATS });
+    const config = await (await input.getPrimaryVideoTrack())?.getDecoderConfig();
+    expect(new Uint8Array(config?.description as ArrayBuffer)).toEqual(AVCC);
+    expect(mp4.video?.packets).toHaveLength(cut.video.chunks.length);
+    expect(mp4.audio?.packets).toHaveLength(audio.chunks.length);
+    const times = frameTimesMs(muxed.frames.dtMs);
+    mp4.video?.packets.forEach((packet, index) => {
+      expect(Math.abs(packet.timestamp * 1000 - times[index])).toBeLessThan(0.1);
+    });
+  });
+});
+
 describe('muxClip refuses', () => {
   it('an empty cut', async () => {
     const cut = readMediaSample();
