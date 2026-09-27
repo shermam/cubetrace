@@ -132,7 +132,7 @@ export class RecordingService {
   private readonly session = inject(SessionService);
   private readonly cube = inject(CubeService);
   private readonly settings = inject(SettingsService);
-  private readonly storage = inject(StorageService);
+  private readonly storageService = inject(StorageService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly starter = inject(CAPTURE_STARTER);
 
@@ -156,15 +156,15 @@ export class RecordingService {
   /** The last clip that could not be saved, as its note says; null once dismissed. */
   readonly failure = this.failureSignal.asReadonly();
   /** The origin's storage: usage, quota and the share in use; null until read. */
-  readonly storageUsage = computed<StorageMeterValue | null>(() => {
-    const usage = this.storage.usage();
-    const percent = this.storage.percent();
+  readonly storage = computed<StorageMeterValue | null>(() => {
+    const usage = this.storageService.usage();
+    const percent = this.storageService.percent();
     return usage === null || percent === null
       ? null
       : { usage: usage.usage, quota: usage.quota, percent };
   });
   /** `ok`, `warn` from 80% (export or delete sessions), `full` from 95% (recording stops). */
-  readonly storageLevel = this.storage.level;
+  readonly storageLevel = this.storageService.level;
   /** The browser can record (Chrome); the APIs it lacks otherwise. */
   readonly support: CaptureSupport;
 
@@ -200,7 +200,7 @@ export class RecordingService {
     effect(() => {
       const stream = this.camera.stream();
       const active = this.session.session() !== null || this.cube.status() === 'connected';
-      const full = this.storage.level() === 'full';
+      const full = this.storageService.level() === 'full';
       const audio = this.settings.recordAudio();
       untracked(() => {
         this.reconcile(stream, active, full, audio);
@@ -346,7 +346,7 @@ export class RecordingService {
         this.noticeSignal.set(error.message);
       }
     });
-    void this.storage.refresh();
+    void this.storageService.refresh();
   }
 
   /** The microphone, or null with a notice when it cannot be had: the video is recorded anyway. */
@@ -501,7 +501,7 @@ export class RecordingService {
       return;
     }
     this.lastClipSignal.set({ index: attempt.index, clip });
-    void this.storage.refresh();
+    void this.storageService.refresh();
   }
 
   /**
@@ -542,7 +542,7 @@ export class RecordingService {
       return;
     }
     const tick = (): void => {
-      void this.storage.refresh();
+      void this.storageService.refresh();
       this.refreshTimer = this.setTimer(tick, STORAGE_REFRESH_MS);
     };
     tick();

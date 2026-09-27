@@ -128,7 +128,7 @@ describe('RecordingService', () => {
     expect(session?.audio).toBe(true);
     await r.s.service.whenSaved();
     expect((await r.s.store.exportSession(sessionId(r))).session.cameras).toHaveLength(1);
-    expect(r.recording.storageUsage()).toEqual({ usage: 0, quota: 1e9, percent: 0 });
+    expect(r.recording.storage()).toEqual({ usage: 0, quota: 1e9, percent: 0 });
 
     // The camera off: the pipeline stops and lets the microphone go.
     r.camera.stop();
@@ -405,7 +405,7 @@ describe('RecordingService', () => {
     await r.storage.refresh();
     await sync(r);
     expect(r.recording.storageLevel()).toBe('warn');
-    expect(r.recording.storageUsage()?.percent).toBeCloseTo(85, 6);
+    expect(r.recording.storage()?.percent).toBeCloseTo(85, 6);
     expect(capture.stopped).toBe(false);
     expect(r.recording.status()).toBe('recording');
 
@@ -435,12 +435,12 @@ describe('RecordingService', () => {
     const r = rig();
     await recording(r);
     await settle();
-    const before = r.recording.storageUsage()?.usage;
+    const before = r.recording.storage()?.usage;
     r.s.storage.usage = 123_456;
     await wait(r, 59_000);
-    expect(r.recording.storageUsage()?.usage).toBe(before);
+    expect(r.recording.storage()?.usage).toBe(before);
     await wait(r, 1000);
-    expect(r.recording.storageUsage()?.usage).toBe(123_456);
+    expect(r.recording.storage()?.usage).toBe(123_456);
   });
 
   it('says why a browser without the capture APIs cannot record', async () => {
