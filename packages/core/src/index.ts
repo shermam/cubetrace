@@ -47,3 +47,5 @@ export {
 // T1.4 — attempts, sessions, clock, stats, store
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CubeClockFit } from './clock';
+export type { JsonSchema } from './schemas';
+export { ATTEMPT_SCHEMA, SESSION_SCHEMA } from './schemas';

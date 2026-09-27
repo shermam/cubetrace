@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/session.schema.json",
+  "title": "session.json",
+  "description": "One cubetrace session, schema version 1 (docs/DATA-MODEL.md §6). Times are host milliseconds: performance.timeOrigin + performance.now() on the host device.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "createdMs",
+    "app",
+    "host",
+    "cube",
+    "cameras",
+    "clock",
+    "audio",
+    "settings",
+    "notes",
+    "summary"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "id": {
+      "description": "A lowercase UUID v4; it names the session's folder (docs/DATA-MODEL.md §5).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "createdMs": { "description": "Host clock at creation.", "type": "number" },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit"],
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "description": "Short SHA of the build's commit.", "type": "string" }
+      }
+    },
+    "host": {
+      "description": "The device that runs the session and holds the cube.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "userAgent", "platform", "isPhone"],
+      "properties": {
+        "label": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "platform": { "type": "string" },
+        "isPhone": { "type": "boolean" }
+      }
+    },
+    "cube": {
+      "description": "What the cube says it is.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "hardware", "firmware", "gyro"],
+      "properties": {
+        "model": { "type": "string" },
+        "hardware": { "type": "string" },
+        "firmware": { "type": "string" },
+        "gyro": { "type": "boolean" }
+      }
+    },
+    "cameras": {
+      "description": "Phase 2: the cameras. Empty in schema version 1.",
+      "type": "array",
+      "maxItems": 0
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cube", "cameras"],
+      "properties": {
+        "cube": {
+          "description": "The cube clock fit, host ≈ a·cube + b, by least squares over the moves that ended their Bluetooth packet; {a: 1, b: 0, residualP95Ms: 0, samples: 0} before the first.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["a", "b", "residualP95Ms", "samples"],
+          "properties": {
+            "a": { "type": "number" },
+            "b": { "type": "number" },
+            "residualP95Ms": {
+              "description": "95th percentile (nearest rank) of the absolute residuals of the last 2000 samples.",
+              "type": "number",
+              "minimum": 0
+            },
+            "samples": {
+              "description": "The samples in the fit.",
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "cameras": {
+          "description": "Phase 2: the clock sync of each camera. Empty in schema version 1.",
+          "type": "object",
+          "additionalProperties": false
+        }
+      }
+    },
+    "audio": {
+      "description": "The cameras record audio with their video (phase 2); on by default.",
+      "type": "boolean"
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inspection15s", "autoAdvance"],
+      "properties": {
+        "inspection15s": { "type": "boolean" },
+        "autoAdvance": { "type": "boolean" }
+      }
+    },
+    "notes": { "type": "string" },
+    "summary": {
+      "description": "Counts of the session's attempts: each is solved or a DNF.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempts", "solved", "dnf"],
+      "properties": {
+        "attempts": { "type": "integer", "minimum": 0 },
+        "solved": { "type": "integer", "minimum": 0 },
+        "dnf": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

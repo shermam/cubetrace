@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/attempt.schema.json",
+  "title": "attempt.json",
+  "description": "One attempt of a cubetrace session, schema version 1 (docs/DATA-MODEL.md §7). Times are host milliseconds (performance.timeOrigin + performance.now() on the host device), except cubeMs, the cube's own clock.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "session",
+    "index",
+    "scramble",
+    "scrambledFacelets",
+    "crossFace",
+    "events",
+    "moves",
+    "result",
+    "phases",
+    "video"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "session": {
+      "description": "The id of the session: a lowercase UUID v4.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "index": {
+      "description": "The attempt's 1-based position in its session.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "scramble": {
+      "description": "Face turns separated by single spaces (docs/DATA-MODEL.md §2).",
+      "type": "string",
+      "pattern": "^[UDRLFB][2']?( [UDRLFB][2']?)*$"
+    },
+    "scrambledFacelets": {
+      "description": "The scramble applied to a solved cube: the state at scrambleDone.",
+      "$ref": "#/$defs/facelets"
+    },
+    "crossFace": {
+      "description": "The face whose cross completed first (docs/DATA-MODEL.md §4); null if none did.",
+      "enum": ["U", "R", "F", "D", "L", "B", null]
+    },
+    "events": {
+      "description": "The events of docs/DATA-MODEL.md §3; null when they did not happen.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scrambleShown",
+        "scrambleStart",
+        "scrambleDone",
+        "pickup",
+        "solveStart",
+        "solveEnd"
+      ],
+      "properties": {
+        "scrambleShown": { "type": "number" },
+        "scrambleStart": { "type": ["number", "null"] },
+        "scrambleDone": { "type": ["number", "null"] },
+        "pickup": { "type": ["number", "null"] },
+        "solveStart": { "type": ["number", "null"] },
+        "solveEnd": { "type": ["number", "null"] }
+      }
+    },
+    "moves": {
+      "description": "Every move the cube reported, in order, corrections of a mis-scramble included.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/move" }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timeMs",
+        "inspectionMs",
+        "movesQtm",
+        "tps",
+        "status",
+        "replayOk",
+        "scrambleCorrected",
+        "scrambleExtraMoves"
+      ],
+      "properties": {
+        "timeMs": {
+          "description": "solveEnd − solveStart; null on a DNF.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "inspectionMs": {
+          "description": "solveStart − (pickup ?? scrambleDone); null if the solve did not start.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "movesQtm": {
+          "description": "Quarter turns of the solve's moves (a half turn counts two).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "tps": {
+          "description": "movesQtm / (timeMs / 1000), rounded to two decimals; null without a time.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "status": { "enum": ["solved", "dnf"] },
+        "replayOk": {
+          "description": "The solve's moves take scrambledFacelets to solved in the simulator.",
+          "type": "boolean"
+        },
+        "scrambleCorrected": {
+          "description": "The cube left the scramble's path during the scramble.",
+          "type": "boolean"
+        },
+        "scrambleExtraMoves": {
+          "description": "Moves made during the scramble beyond the scramble's own, in quarter turns: one wrong quarter turn undone counts 2.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "phases": {
+      "description": "The CFOP phases completed, in order (docs/DATA-MODEL.md §4): all eight for a solve its moves replay.",
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/phase" }
+    },
+    "video": {
+      "description": "Phase 2: the video segments. Empty in schema version 1.",
+      "type": "array",
+      "maxItems": 0
+    }
+  },
+  "$defs": {
+    "facelets": {
+      "description": "A cube state: 54 stickers in Kociemba order (docs/DATA-MODEL.md §2).",
+      "type": "string",
+      "pattern": "^[URFDLB]{54}$"
+    },
+    "move": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["m", "hostMs", "cubeMs", "phase"],
+      "properties": {
+        "m": { "type": "string", "pattern": "^[UDRLFB][2']?$" },
+        "hostMs": { "type": "number" },
+        "cubeMs": { "type": "number" },
+        "phase": { "enum": ["scramble", "solve"] }
+      }
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "startMs", "endMs", "moves", "recognitionMs", "executionMs"],
+      "properties": {
+        "name": { "enum": ["cross", "f2l1", "f2l2", "f2l3", "f2l4", "eoll", "ocll", "pll"] },
+        "slot": {
+          "description": "F2L phases only: the pair's slot, named by its middle-layer edge position.",
+          "enum": ["UR", "UF", "UL", "UB", "DR", "DF", "DL", "DB", "FR", "FL", "BL", "BR"]
+        },
+        "startMs": { "type": "number" },
+        "endMs": { "type": "number" },
+        "moves": { "type": "integer", "minimum": 0 },
+        "recognitionMs": { "type": "number", "minimum": 0 },
+        "executionMs": { "type": "number", "minimum": 0 }
+      },
+      "if": {
+        "properties": { "name": { "enum": ["f2l1", "f2l2", "f2l3", "f2l4"] } },
+        "required": ["name"]
+      },
+      "then": { "required": ["slot"] },
+      "else": { "not": { "required": ["slot"] } }
+    }
+  }
+}
