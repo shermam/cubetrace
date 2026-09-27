@@ -10,10 +10,15 @@ adds items; the owner ticks them when done (date and any detail that others need
   `https://shermam.github.io/cubetrace/` after every merge. This is the development host
   for testing on the real phones and laptops (HTTPS is required for Web Bluetooth and the
   camera). Firebase Hosting replaces it in phase 3.
-- [ ] **Test on the real cube** after T1.6 lands (the coordinator will ask): connect the
-  GAN 12 ui FreePlay and the 356 i3 on one laptop and on the ThinkPhone, do ten attempts,
-  and paste the session export (Sessions → Export) into the PR or an issue. The checklist
-  is `docs/MANUAL-TESTS.md`.
+- [ ] **Test the cube connection on the real cubes** (T1.6a is deployed on Pages since
+  2026-09-27): open https://shermam.github.io/cubetrace/, click the "No cube" pill, connect the
+  GAN 12 ui FreePlay and the 356 i3 on one laptop and on the ThinkPhone, and go through the
+  T1.5 checklist of `docs/MANUAL-TESTS.md` (the move log is on the Timer page). Write the
+  results, the model strings the cubes report and the Chrome versions into that file, or
+  paste them into an issue.
+- [ ] **Test the timer** after T1.6b lands (the coordinator will ask): ten attempts on each
+  cube, then paste the session export (Sessions → Export) into the PR or an issue. The
+  checklist is the T1.6 section of `docs/MANUAL-TESTS.md`.
 - [ ] **Run the device probe** (`/probe` route, after T1.8 lands) on both phones (rear and
   front cameras) and on each laptop, and paste the JSON reports into `docs/DEVICES.md`.
   This decides the phase 2 camera settings.
