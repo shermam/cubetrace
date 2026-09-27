@@ -11,7 +11,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
-    "typecheck": "tsc -p tsconfig.node.json"
+    "typecheck": "tsc -p tsconfig.node.json",
+    "icons": "node scripts/generate-icons.mts"
   },
   "dependencies": {
     "@angular/common": "^22.2.0",
