@@ -5,7 +5,6 @@ import {
   MAX_ENCODE_QUEUE,
   VIDEO_ENCODERS,
   keyframeInterval,
-  videoBitrate,
   videoEncoderConfig,
   type AudioLike,
   type ChunkLike,
@@ -13,6 +12,7 @@ import {
   type FrameLike,
   type WorkerEnvironment,
 } from './capture-worker';
+import type { VideoQuality } from './bitrate';
 import {
   resolveCaptureConfig,
   transferList,
@@ -269,7 +269,9 @@ function clipPort(jobs: ClipJob[]): MessageTarget {
   };
 }
 
-function harness(options: { audio?: boolean; frameRate?: number | null } = {}): Harness {
+function harness(
+  options: { audio?: boolean; frameRate?: number | null; quality?: VideoQuality } = {},
+): Harness {
   const posted: WorkerToWindow[] = [];
   const jobs: ClipJob[] = [];
   let tick: (() => void) | undefined;
@@ -296,7 +298,7 @@ function harness(options: { audio?: boolean; frameRate?: number | null } = {}): 
   void worker.start(
     video.stream,
     options.audio === true ? audio.stream : null,
-    resolveCaptureConfig(),
+    resolveCaptureConfig({ quality: options.quality }),
     options.frameRate ?? 30,
     clipPort(jobs),
   );
@@ -373,22 +375,30 @@ describe('the encoder settings', () => {
     ]);
   });
 
-  it('asks 8 Mbps at 1080p30 and 12 at 1080p60, in the quality latency mode, H.264 as avc', () => {
-    expect(videoBitrate(1920, 1080, 30)).toBe(8_000_000);
-    expect(videoBitrate(1080, 1920, 30)).toBe(8_000_000);
-    expect(videoBitrate(1920, 1080, 60)).toBe(12_000_000);
-    expect(videoBitrate(1280, 720, 30)).toBe(3_555_556);
-    expect(videoEncoderConfig(VIDEO_ENCODERS[0], 1920, 1080, 29.97)).toEqual({
+  it("asks the quality's bitrate (bitrate.ts), in the quality latency mode, H.264 as avc", () => {
+    expect(videoEncoderConfig(VIDEO_ENCODERS[0], 1920, 1080, 29.97, 'standard')).toEqual({
       codec: 'avc1.640028',
       hardwareAcceleration: 'prefer-hardware',
       width: 1920,
       height: 1080,
-      bitrate: 8_000_000,
+      bitrate: 4_000_000,
       framerate: 30,
       latencyMode: 'quality',
       avc: { format: 'avc' },
     });
-    expect(videoEncoderConfig(VIDEO_ENCODERS[4], 1920, 1080, 30)).not.toHaveProperty('avc');
+    expect(videoEncoderConfig(VIDEO_ENCODERS[0], 1920, 1080, 29.97, 'high').bitrate).toBe(
+      8_000_000,
+    );
+    expect(videoEncoderConfig(VIDEO_ENCODERS[2], 1920, 1080, 60, 'maximum').bitrate).toBe(
+      18_000_000,
+    );
+    expect(videoEncoderConfig(VIDEO_ENCODERS[4], 1280, 720, 30, 'standard')).toMatchObject({
+      codec: 'vp09.00.40.08',
+      bitrate: 1_777_778,
+    });
+    expect(videoEncoderConfig(VIDEO_ENCODERS[4], 1920, 1080, 30, 'standard')).not.toHaveProperty(
+      'avc',
+    );
     expect(keyframeInterval(30)).toBe(30);
     expect(keyframeInterval(59.94)).toBe(60);
     expect(keyframeInterval(0.2)).toBe(1);
@@ -447,12 +457,12 @@ describe('CaptureWorker', () => {
     expect(FakeVideoEncoder.instances).toEqual([]);
     await capture.feed(15, 15);
 
-    // 30 fps from the timestamps, although the track claims 60: 8 Mbps, not 12.
+    // 30 fps from the timestamps, although the track claims 60: Standard's 4 Mbps, not 6.
     expect(capture.encoder().configs[0]).toMatchObject({
       width: 1920,
       height: 1080,
       framerate: 30,
-      bitrate: 8_000_000,
+      bitrate: 4_000_000,
     });
     // The warm-up's frames are closed without being encoded; the encoding starts with a keyframe.
     expect(capture.encoder().encoded).toEqual([{ timestamp: timestampOf(15), keyFrame: true }]);
@@ -545,6 +555,7 @@ describe('CaptureWorker', () => {
       bufferSeconds: 0.5,
       bufferBytes: 50 + 14 * 10,
       codec: 'vp09.00.40.08',
+      bitrate: 4_000_000,
       audioCodec: null,
     });
     await capture.feed(30, 59);
@@ -681,6 +692,27 @@ describe('CaptureWorker', () => {
     ]);
     expect(capture.worker.buffer.video).toHaveLength(26);
     expect(capture.video.cancelled).toBe(true);
+  });
+
+  it("encodes at the start's quality, at the new size too, and says the bitrate in the counters", async () => {
+    const capture = harness({ quality: 'maximum' });
+    await capture.feed(0, 10);
+    // Still measuring the frame rate: no encoder, no bitrate yet.
+    expect(capture.stats(arrivalOf(11))).toMatchObject({ codec: null, bitrate: null });
+
+    await capture.feed(11, 40);
+    expect(capture.encoder().configs[0]).toMatchObject({ width: 1920, height: 1080 });
+    expect(capture.encoder().configs[0].bitrate).toBe(12_000_000);
+    expect(capture.stats(arrivalOf(41))).toMatchObject({
+      codec: 'vp09.00.40.08',
+      bitrate: 12_000_000,
+    });
+
+    await capture.feed(41, 50, [1280, 720]);
+    expect(capture.encoder().configs.map((config) => config.bitrate)).toEqual([
+      12_000_000, 5_333_333,
+    ]);
+    expect(capture.stats(arrivalOf(51)).bitrate).toBe(5_333_333);
   });
 
   it('starts the buffer again at the new size when the frames change size', async () => {

@@ -609,8 +609,9 @@ has checked that it exists: no global declaration, so none can clash with anothe
 **Codecs.** The worker asks `VideoEncoder.isConfigSupported` in this order: H.264 High
 (`avc1.640028`) with `hardwareAcceleration: 'prefer-hardware'` (the platform's encoder or nothing),
 then `'no-preference'`, then H.264 Main (`avc1.4d0028`) the same way, then VP9 (`vp09.00.40.08`,
-`'no-preference'`). Every config asks 8 Mbps at 1080p30 and 12 at 1080p60 (in proportion to the
-pixels at other sizes), `latencyMode: 'quality'` and the frame rate measured from the frames'
+`'no-preference'`). Every config asks the bitrate of the start's video quality (T2.10: 4, 8 or 12
+Mbps at 1080p30, 1.5 times as much at 1080p60, in proportion to the pixels at other sizes; before
+T2.10, 8 and 12), `latencyMode: 'quality'` and the frame rate measured from the frames'
 timestamps during the first half second; H.264 adds `avc: {format: 'avc'}`, which puts the
 parameter sets in the decoder config's `description`, as MP4 wants them. Audio: AAC-LC
 (`mp4a.40.2`) at 128 kbps and the track's sample rate and channels, else Opus, else none. The
@@ -780,7 +781,7 @@ frame (`docs/MANUAL-TESTS.md`, T2.4).
 **When it records.** While the camera is on and a session is under way, or a cube is connected (the
 first attempt of a new session begins with the connection, and its scramble clip needs the two
 seconds before it in memory), and the storage is under 95% of the quota. A new stream (another
-camera, another resolution) or a change of Settings' "Record audio" starts it again; the camera
+camera, another resolution) or a new "Record audio" or "Video quality" starts it again; the camera
 off, no session and no cube, or storage from 95% stop it. The microphone comes from its own
 `getUserMedia({audio: true})`; a refusal records the video alone and says so. `SessionService`
 emits `milestones$` (an attempt `armed`, `ended` with its record and its end, or `dropped` without a
@@ -959,3 +960,18 @@ preview, beside the time (T2.7), which the Timer page loads right after it rende
 a chunk of its own, 2.8 kB (1.1 kB gzipped); the capture lab's chunk is 19.2 kB (16.0), the chunk of
 `SessionService` 24.1 kB (23.2: the suspension and `putCameraClock`), the Timer page's and Camera
 settings' unchanged but for a status line (28.2 and 25.2 kB).
+
+## Video quality (T2.10)
+
+Added by T2.10 on 2026-09-27. The bitrate rule is `packages/capture/src/bitrate.ts`: the capture
+worker configures its encoder with it, and the app's texts (`apps/web/src/app/camera/video-quality.ts`)
+show it, so that each choice says what the worker will ask for. `SettingsService`, in a chunk every
+page loads right after the first render, keeps only the list of qualities and their names, and still
+imports no camera code.
+
+**Sizes** (`ng build`, 2026-09-27, against `main` at 1cbd063): the initial bundle is unchanged,
+264.46 kB raw. The builder put `bitrate.ts` in the chunk of `@cubetrace/capture`'s window side, 17.6
+kB raw against 17.4, so the Settings page, whose own chunk is 16.4 kB raw against 15.1, now loads that
+chunk too (6.0 kB transferred), which the Timer page loads right after it renders anyway; the texts
+are a chunk of their own, 0.5 kB. Camera settings' chunk is 26.4 kB raw (25.2 before), the capture
+worker 18.3 kB (18.2), the capture lab's chunk 19.4 kB (19.2).

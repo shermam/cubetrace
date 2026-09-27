@@ -214,6 +214,27 @@
     and deliver 30. “Exactly 60 fps” fails on a camera without a 60 fps mode, which then opens at
     its best rate and says so.
   </p>
+  <label for="video-quality">Video quality</label>
+  <select
+    #qualitySelect
+    id="video-quality"
+    class="wide"
+    data-testid="video-quality"
+    (change)="setVideoQuality(qualitySelect.value)"
+  >
+    @for (option of qualities(); track option.value) {
+      <option [value]="option.value" [selected]="option.value === settings.videoQuality()">
+        {{ option.label }}
+      </option>
+    }
+  </select>
+  <p class="hint">
+    The recording's bitrate at the resolution and frame rate above, and about what an attempt's two
+    clips take at it (“Best” counts 30 fps, which every camera measured so far delivers; 60 fps
+    takes 1.5 times as much). Standard is plenty for the hands and the cube; High and Maximum fill
+    the browser's storage (Storage, above) two and three times as fast. A recording under way starts
+    again with the change.
+  </p>
   <label for="sharpness-threshold">Sharpness threshold</label>
   <input
     #thresholdInput

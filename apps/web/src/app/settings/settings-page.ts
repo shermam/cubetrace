@@ -1,5 +1,6 @@
 import { Component, type ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 
+import { videoQualityOptions } from '../camera/video-quality';
 import { type StoragePersistence, StorageService } from '../device/storage-service';
 import { WAKE_LOCK_TEXT, WakeLockService } from '../device/wake-lock-service';
 import { formatBytes } from '../shared/format-bytes';
@@ -11,6 +12,7 @@ import {
   type CubeMac,
   SHARPNESS_THRESHOLD_DEFAULT,
   SettingsService,
+  VIDEO_QUALITIES,
 } from './settings-service';
 
 const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
@@ -24,7 +26,8 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
  * `/settings`: the screen wake lock and storage persistence (T1.7), then what the timer and the
  * cube connection use (T1.6a): the host label, the cubes' MAC addresses, the idle disconnection
  * (T1.14), inspection, auto-advance, the camera's resolution, frame rate and sharpness threshold
- * (T2.1) and the demo speed, all kept by `SettingsService`.
+ * (T2.1), Record audio (T2.4), the video quality (T2.10) and the demo speed, all kept by
+ * `SettingsService`.
  */
 @Component({
   selector: 'app-settings-page',
@@ -59,6 +62,10 @@ export class SettingsPage {
     value,
     label: CAMERA_FRAME_RATE_TEXT[value],
   }));
+  /** Each quality with its bitrate and size per attempt at the resolution and frame rate chosen. */
+  protected readonly qualities = computed(() =>
+    videoQualityOptions(this.settings.cameraResolution(), this.settings.cameraFrameRate()),
+  );
   protected readonly sharpnessDefault = SHARPNESS_THRESHOLD_DEFAULT;
 
   constructor() {
@@ -137,6 +144,13 @@ export class SettingsPage {
     const rate = CAMERA_FRAME_RATES.find((option) => option === value);
     if (rate !== undefined) {
       this.settings.setCameraFrameRate(rate);
+    }
+  }
+
+  protected setVideoQuality(value: string): void {
+    const quality = VIDEO_QUALITIES.find((option) => option === value);
+    if (quality !== undefined) {
+      this.settings.setVideoQuality(quality);
     }
   }
 

@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { bluetoothNavigator } from '../cube/cube-testing';
 import { FAKE_WEBCAM, FakeMediaDevices, settle } from '../device/fake-browser';
 import { ready, setup, turn } from '../session/session-harness';
+import { SettingsService } from '../settings/settings-service';
 import { CameraService } from './camera-service';
 import { RecordingPanel } from './recording-panel';
 import { CAPTURE_STARTER, CLIP_TAIL_MS, ENCODER_SETTLE_MS } from './recording-service';
@@ -56,8 +57,39 @@ describe('RecordingPanel', () => {
     expect(stats?.getAttribute('data-dropped')).toBe('1');
     expect(stats?.textContent).toContain('30 per second in, 30 encoded, 1 dropped');
     expect(text(element, 'recording-buffer')).toBe('12.3 s, 1.5 MB');
-    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08, opus');
+    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 4 Mbps, opus');
     expect(element.querySelector('[data-testid="storage-meter"]')).not.toBeNull();
+  });
+
+  it("says the video's bitrate and what an attempt takes at the video quality", async () => {
+    const { s, starter, element, update, camera } = await render();
+    const settings = TestBed.inject(SettingsService);
+    // Not recording: at the bitrate of Settings' quality, resolution and frame rate.
+    expect(text(element, 'recording-estimate')).toBe('≈ 20 MB per attempt at this quality');
+    settings.setVideoQuality('high');
+    await update();
+    expect(text(element, 'recording-estimate')).toBe('≈ 40 MB per attempt at this quality');
+    settings.setCameraResolution('720p');
+    await update();
+    expect(text(element, 'recording-estimate')).toBe('≈ 18 MB per attempt at this quality');
+    settings.setCameraResolution('1080p');
+
+    // Recording: at the bitrate the encoder took, here for frames at 60 fps; the codec first.
+    await camera.start();
+    await ready(s);
+    await update();
+    starter.last.emitStats(statsOf(3, { codec: null, bitrate: null }));
+    await update();
+    expect(text(element, 'recording-codecs')).toBe('choosing…, opus');
+    starter.last.emitStats(
+      statsOf(3, { codec: 'avc1.640028', bitrate: 12_000_000, audioCodec: 'mp4a.40.2' }),
+    );
+    await update();
+    expect(text(element, 'recording-codecs')).toBe('avc1.640028 at 12 Mbps, mp4a.40.2');
+    expect(text(element, 'recording-estimate')).toBe('≈ 60 MB per attempt at this quality');
+    starter.last.emitStats(statsOf(4, { bitrate: 8_000_000, audioCodec: null }));
+    await update();
+    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 8 Mbps, no audio');
   });
 
   it('shows the last clip, a clip that failed until dismissed, and why recording stopped', async () => {

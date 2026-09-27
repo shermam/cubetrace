@@ -162,7 +162,7 @@
       <app-camera-controls />
     }
 
-    <div class="mode" role="group" aria-label="What the camera is asked for">
+    <div class="mode" role="group" aria-label="What the camera and the recording are asked for">
       <label>
         <span>Resolution</span>
         <select
@@ -186,6 +186,20 @@
         >
           @for (option of frameRates; track option.value) {
             <option [value]="option.value" [selected]="option.value === prefs.cameraFrameRate()">
+              {{ option.label }}
+            </option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Video quality</span>
+        <select
+          #qualitySelect
+          data-testid="camera-panel-video-quality"
+          (change)="setVideoQuality(qualitySelect.value)"
+        >
+          @for (option of qualities(); track option.value) {
+            <option [value]="option.value" [selected]="option.value === prefs.videoQuality()">
               {{ option.label }}
             </option>
           }

@@ -8,6 +8,8 @@
 // capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain TypeScript: no Angular. The
 // encoders, the clock and the timer come in through `WorkerEnvironment`, so the logic also runs in
 // Node's tests with fakes; the last lines wire it to the worker's global scope.
+// It encodes the video at the bitrate of the start's quality (bitrate.ts, T2.10).
+import { videoBitrate, type VideoQuality } from './bitrate';
 import { cut } from './cut';
 import type { FramingRect } from './framing';
 import {
@@ -65,30 +67,28 @@ export interface VideoEncoderChoice {
   readonly hardwareAcceleration: HardwareAcceleration;
 }
 
-/** 8 Mbps at 1080p30 and 12 at 1080p60 (docs/PLAN.md), in proportion to the pixels for other sizes. */
-export function videoBitrate(width: number, height: number, fps: number): number {
-  const at1080p = fps > 45 ? 12_000_000 : 8_000_000;
-  return Math.round((at1080p * width * height) / (1920 * 1080));
-}
-
 /** One keyframe per second's worth of frames. */
 export function keyframeInterval(fps: number): number {
   return Math.max(1, Math.round(fps));
 }
 
-/** The encoder settings of one rung of `VIDEO_ENCODERS` (docs/PLAN.md, T2.2). */
+/**
+ * The encoder settings of one rung of `VIDEO_ENCODERS` (docs/PLAN.md, T2.2), at the bitrate of
+ * `quality` for this frame size and rate (bitrate.ts, T2.10).
+ */
 export function videoEncoderConfig(
   choice: VideoEncoderChoice,
   width: number,
   height: number,
   fps: number,
+  quality: VideoQuality,
 ): VideoEncoderConfig {
   const config: VideoEncoderConfig = {
     codec: choice.codec,
     hardwareAcceleration: choice.hardwareAcceleration,
     width,
     height,
-    bitrate: videoBitrate(width, height, fps),
+    bitrate: videoBitrate(width, height, fps, quality),
     framerate: Math.max(1, Math.round(fps)),
     latencyMode: 'quality',
   };
@@ -197,6 +197,8 @@ export class CaptureWorker {
 
   #videoEncoder: VideoEncoderLike | undefined;
   #videoConfig: VideoEncoderConfig | undefined;
+  /** The start's quality: the encoder's bitrate, whatever the frames' size and rate. */
+  #quality: VideoQuality = 'standard';
   #trackFrameRate: number | null = null;
   #lastTimestampUs: number | undefined;
   #intervalsUs: number[] = [];
@@ -293,6 +295,7 @@ export class CaptureWorker {
     this.#started = true;
     this.#recording = true;
     this.#clips = clips;
+    this.#quality = config.quality;
     this.#buffer = new RingBuffer({
       maxSeconds: config.bufferSeconds,
       maxBytes: config.bufferBytes,
@@ -507,7 +510,7 @@ export class CaptureWorker {
     const height = even(frame.displayHeight);
     const fps = this.#frameRate();
     for (const choice of VIDEO_ENCODERS) {
-      const config = videoEncoderConfig(choice, width, height, fps);
+      const config = videoEncoderConfig(choice, width, height, fps, this.#quality);
       if (!(await isSupported(Encoder, config))) {
         continue;
       }
@@ -561,7 +564,7 @@ export class CaptureWorker {
       ...config,
       width,
       height,
-      bitrate: videoBitrate(width, height, config.framerate ?? this.#frameRate()),
+      bitrate: videoBitrate(width, height, config.framerate ?? this.#frameRate(), this.#quality),
     };
     encoder.configure(resized);
     this.#videoConfig = resized;
@@ -808,6 +811,7 @@ export class CaptureWorker {
       bufferSeconds: Math.round(this.#buffer.bufferSeconds * 1000) / 1000,
       bufferBytes: this.#buffer.bufferBytes,
       codec: this.#buffer.videoTrack?.codec ?? null,
+      bitrate: this.#videoConfig?.bitrate ?? null,
       audioCodec: this.#audioCodec,
     };
     this.#arrivedInWindow = 0;

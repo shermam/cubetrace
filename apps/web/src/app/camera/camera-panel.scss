@@ -170,12 +170,15 @@ meter {
   }
 }
 
-// Resolution, frame rate and audio: the settings of Settings → Camera, here too.
+// Resolution, frame rate, video quality and audio: the settings of Settings → Camera, here too.
+// A choice wider than a phone (the video quality's) is cut short rather than widen the page: the
+// group, its labels and their selects may be narrower than their contents.
 .mode {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
   align-items: center;
+  min-width: 0;
   font-size: 0.875rem;
 
   label {
@@ -183,9 +186,12 @@ meter {
     flex-wrap: wrap;
     gap: var(--space-1) var(--space-2);
     align-items: center;
+    min-width: 0;
+    max-width: 100%;
   }
 
   select {
+    min-width: 0;
     max-width: 100%;
   }
 }

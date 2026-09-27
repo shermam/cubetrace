@@ -74,3 +74,7 @@ export {
   percentile,
   singleTurns,
 } from './clapperboard';
+
+// T2.10 — the video quality: the encoder's bitrate, which the app also shows for each quality.
+export type { VideoQuality } from './bitrate';
+export { BITRATE_AT_1080P30, videoBitrate } from './bitrate';

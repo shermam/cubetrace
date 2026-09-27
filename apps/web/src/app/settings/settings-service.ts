@@ -1,6 +1,12 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 // Types only: the camera code stays out of the chunks that load SettingsService on every page.
-import type { ControlValues, FrameSize, FramingRect, StoredFraming } from '@cubetrace/capture';
+import type {
+  ControlValues,
+  FrameSize,
+  FramingRect,
+  StoredFraming,
+  VideoQuality,
+} from '@cubetrace/capture';
 import { normalizeMac } from '@cubetrace/gan';
 
 import { DEMO_SPEED_DEFAULT, isDemoSpeed } from '../cube/demo';
@@ -52,11 +58,35 @@ export const CAMERA_RESOLUTION_TEXT: Readonly<Record<CameraResolution, string>> 
   '720p': '1280×720',
 };
 
+/** The frame size each resolution asks the camera for. */
+export const CAMERA_RESOLUTION_SIZE: Readonly<Record<CameraResolution, FrameSize>> = {
+  '1080p': { width: 1920, height: 1080 },
+  '720p': { width: 1280, height: 720 },
+};
+
 /** How the frame rates read in Settings and in the Timer page's Camera settings. */
 export const CAMERA_FRAME_RATE_TEXT: Readonly<Record<CameraFrameRate, string>> = {
   best: 'Best (asks for 60 fps)',
   '60': 'Exactly 60 fps',
   '30': '30 fps',
+};
+
+/**
+ * The video qualities (T2.10): the recording's bitrate, 4, 8 or 12 Mbps at 1920×1080 and 30 fps
+ * (@cubetrace/capture's `videoBitrate`). Standard by default: the 8 Mbps of the first recordings
+ * took 35–42 MB per attempt, two days of the owner's solves to fill the browser's storage
+ * (docs/DEVICES.md, "First recordings").
+ */
+export const VIDEO_QUALITIES: readonly VideoQuality[] = ['standard', 'high', 'maximum'];
+
+/**
+ * How the video qualities are named in Settings and in the Timer page's Camera settings, where each
+ * is followed by its bitrate and the size of an attempt at it (camera/video-quality.ts).
+ */
+export const VIDEO_QUALITY_TEXT: Readonly<Record<VideoQuality, string>> = {
+  standard: 'Standard',
+  high: 'High',
+  maximum: 'Maximum',
 };
 
 /**
@@ -111,6 +141,7 @@ interface StoredSettings {
   readonly cameraFrameRate: CameraFrameRate;
   readonly sharpnessThreshold: number;
   readonly recordAudio: boolean;
+  readonly videoQuality: VideoQuality;
   /** Whether the Timer page's Camera settings are open; null until they were opened or closed. */
   readonly cameraSettingsOpen: boolean | null;
   readonly cameraPicks: readonly CameraPick[];
@@ -130,6 +161,7 @@ const DEFAULTS: StoredSettings = {
   cameraFrameRate: 'best',
   sharpnessThreshold: SHARPNESS_THRESHOLD_DEFAULT,
   recordAudio: true,
+  videoQuality: 'standard',
   cameraSettingsOpen: null,
   cameraPicks: [],
   cameraControls: [],
@@ -150,11 +182,11 @@ export function macAddressProblem(text: string): string {
  * demo speed, inspection and auto-advance; and the camera's (T2.1): on or off, the resolution and
  * frame rate asked for, the sharpness threshold, the camera chosen on each host (by host label),
  * and per camera (by its label) the manual controls chosen and the framing rectangles; and whether
- * the recording has the microphone's audio (T2.4, on by default, as the design has it), and
- * whether the Timer page's Camera settings are open (T2.7). Signals,
- * kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every
- * change. Where the browser blocks storage the settings last until the page closes, and
- * `saveError` says so.
+ * the recording has the microphone's audio (T2.4, on by default, as the design has it), its video
+ * quality (T2.10, Standard by default), and whether the Timer page's Camera settings are open
+ * (T2.7). Signals, kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is
+ * written on every change. Where the browser blocks storage the settings last until the page
+ * closes, and `saveError` says so.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
@@ -190,6 +222,8 @@ export class SettingsService {
   readonly sharpnessThreshold = computed(() => this.stored().sharpnessThreshold);
   /** The clips have the microphone's audio with the video (T2.4); on by default. */
   readonly recordAudio = computed(() => this.stored().recordAudio);
+  /** The recording's bitrate (T2.10); Standard, 4 Mbps at 1080p30, by default. */
+  readonly videoQuality = computed(() => this.stored().videoQuality);
   /**
    * Whether the Camera settings of the Timer page are open (T2.7): as they were left, or null
    * before they were first opened or closed.
@@ -290,6 +324,12 @@ export class SettingsService {
   setRecordAudio(on: boolean): void {
     if (on !== this.stored().recordAudio) {
       this.update({ recordAudio: on });
+    }
+  }
+
+  setVideoQuality(quality: VideoQuality): void {
+    if (quality !== this.stored().videoQuality) {
+      this.update({ videoQuality: quality });
     }
   }
 
@@ -397,6 +437,7 @@ function readSettings(storage: Storage | null): StoredSettings {
   const cameraFrameRate = member(parsed, 'cameraFrameRate');
   const sharpnessThreshold = member(parsed, 'sharpnessThreshold');
   const recordAudio = member(parsed, 'recordAudio');
+  const videoQuality = member(parsed, 'videoQuality');
   const cameraSettingsOpen = member(parsed, 'cameraSettingsOpen');
   return {
     hostLabel:
@@ -422,6 +463,8 @@ function readSettings(storage: Storage | null): StoredSettings {
         ? sharpnessThreshold
         : DEFAULTS.sharpnessThreshold,
     recordAudio: typeof recordAudio === 'boolean' ? recordAudio : DEFAULTS.recordAudio,
+    // Settings stored before T2.10 have none: Standard, as for a new device.
+    videoQuality: VIDEO_QUALITIES.find((q) => q === videoQuality) ?? DEFAULTS.videoQuality,
     cameraSettingsOpen:
       typeof cameraSettingsOpen === 'boolean' ? cameraSettingsOpen : DEFAULTS.cameraSettingsOpen,
     cameraPicks: readList(member(parsed, 'cameraPicks'), readCameraPick).slice(-MAX_CAMERA_ENTRIES),

@@ -40,6 +40,7 @@ import type { CameraInfo } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import {
+  CAMERA_RESOLUTION_SIZE,
   SettingsService,
   type CameraFrameRate,
   type CameraResolution,
@@ -94,10 +95,9 @@ export function modeChoice(
   resolution: CameraResolution,
   rate: CameraFrameRate,
 ): CameraChoice {
-  const size = resolution === '720p' ? { width: 1280, height: 720 } : { width: 1920, height: 1080 };
   return {
     deviceId,
-    ...size,
+    ...CAMERA_RESOLUTION_SIZE[resolution],
     fps: rate === '30' ? 30 : 60,
     ...(rate === '60' ? { exactFps: true } : {}),
   };

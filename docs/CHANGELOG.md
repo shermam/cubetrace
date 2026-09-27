@@ -28,6 +28,13 @@ Deployed at https://shermam.github.io/cubetrace/.
   solve, from 3 s before its first turn to 1 s after the cube is solved or the DNF. They are saved
   with the time of every frame into the attempt's folder and listed in its record; the attempt's
   timing never waits for them.
+- Video quality, in Camera settings and in Settings → Camera (T2.10, issue #33): Standard, the
+  default, records 4 Mbps at 1920×1080 and 30 fps, about 20 MB per attempt; High 8 Mbps (about 40 MB)
+  and Maximum 12 (about 60 MB); 1280×720 takes 0.44 times as much, and 60 fps 1.5 times. Each choice
+  says its bitrate and size at the resolution and frame rate chosen, the recording's counters the
+  bitrate in use, and a line under the storage meter what an attempt takes. The first recordings on a
+  MacBook took 35–42 MB per attempt at the 8 Mbps then asked for: two days of the owner's solves would
+  have filled the browser's storage.
 - Clip badges on the solve lists, which open the clip viewer (T2.4): the clip plays next to the
   attempt's moves by time, the one on screen highlighted; Download saves both clips, their frame
   times and `attempt.json`.

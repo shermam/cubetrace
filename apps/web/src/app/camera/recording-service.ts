@@ -17,6 +17,7 @@ import {
   type CaptureSupport,
   type FramingRect,
   type MotionSample,
+  type VideoQuality,
 } from '@cubetrace/capture';
 import type { CameraInfo, VideoClip, VideoSegment } from '@cubetrace/core';
 
@@ -102,19 +103,24 @@ interface PlannedClip {
   readonly save: () => Promise<void>;
 }
 
-/** What the pipeline is to run on: the camera's stream, with or without the microphone. */
+/**
+ * What the pipeline is to run on: the camera's stream, with or without the microphone, at a video
+ * quality.
+ */
 interface Target {
   readonly stream: MediaStream;
   readonly audio: boolean;
+  readonly quality: VideoQuality;
 }
 
 /**
  * The recording in the timer (docs/PLAN.md, T2.4). While the camera is on (`CameraService.stream`)
  * and a session is under way (or a cube is connected, so that the first attempt of a session has its
  * margin), the capture pipeline runs on the camera's stream, with the microphone's audio when
- * Settings says so ("Record audio"); it starts again when the stream changes (another camera,
- * another resolution) or the setting does, and stops when the camera goes off, no session is under
- * way, or storage is {@link STORAGE_STOP_PERCENT}% full (the timer goes on).
+ * Settings says so ("Record audio"), at the video quality Settings says (T2.10); it starts again
+ * when the stream changes (another camera, another resolution) or either setting does, and stops
+ * when the camera goes off, no session is under way, or storage is {@link STORAGE_STOP_PERCENT}%
+ * full (the timer goes on).
  *
  * Every attempt gets two clips, cut from the last 90 s the pipeline keeps in memory, as
  * `SessionService.milestones$` says: once the scramble is done, the scramble clip
@@ -207,8 +213,9 @@ export class RecordingService {
       const active = this.session.session() !== null || this.cube.status() === 'connected';
       const full = this.storageService.level() === 'full';
       const audio = this.settings.recordAudio();
+      const quality = this.settings.videoQuality();
       untracked(() => {
-        this.reconcile(stream, active, full, audio);
+        this.reconcile(stream, active, full, audio, quality);
       });
     });
     // The session's `cameras` holds the camera's entry while it records.
@@ -258,12 +265,16 @@ export class RecordingService {
     return handle.watchMotion(rect, onSample, onError);
   }
 
-  /** Starts, restarts or stops the pipeline as the camera, the session and the settings say. */
+  /**
+   * Starts, restarts or stops the pipeline as the camera, the session and the settings say. A
+   * restart, like a stop, saves the clips waiting for their time with what the buffer has.
+   */
   private reconcile(
     stream: MediaStream | null,
     active: boolean,
     full: boolean,
     audio: boolean,
+    quality: VideoQuality,
   ): void {
     if (stream === null) {
       this.stopRefreshing();
@@ -287,15 +298,15 @@ export class RecordingService {
       return;
     }
     const target = this.target;
-    if (target?.stream === stream && target.audio === audio) {
+    if (target?.stream === stream && target.audio === audio && target.quality === quality) {
       return;
     }
     const generation = ++this.generation;
-    this.target = { stream, audio };
+    this.target = { stream, audio, quality };
     void this.serially(async () => {
       await this.stopPipeline();
       if (generation === this.generation) {
-        await this.startPipeline(generation, stream, audio);
+        await this.startPipeline(generation, stream, audio, quality);
       }
     });
   }
@@ -322,6 +333,7 @@ export class RecordingService {
     generation: number,
     stream: MediaStream,
     audio: boolean,
+    quality: VideoQuality,
   ): Promise<void> {
     this.statusSignal.set('starting');
     this.errorSignal.set(null);
@@ -341,7 +353,7 @@ export class RecordingService {
     const audioTrack = microphone?.getAudioTracks().at(0) ?? null;
     let handle: CaptureHandle;
     try {
-      handle = this.starter.start(video, audioTrack, { audio: audioTrack !== null });
+      handle = this.starter.start(video, audioTrack, { audio: audioTrack !== null, quality });
     } catch (error: unknown) {
       this.fail(generation, `Recording could not start: ${errorMessage(error)}`);
       return;

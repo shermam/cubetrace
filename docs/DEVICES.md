@@ -92,9 +92,11 @@ Two consequences:
 - **35–42 MB per attempt** at the configured 8 Mbps ceiling, which real footage uses in full
   (the fake camera compressed to 1.2 Mbps and hid this): at the owner's cadence (about 130
   attempts a day) that is 4.5–5.5 GB a day, so the 10 GB local quota fills in two days and the
-  design's storage tables (4.4 MB per attempt and camera) were low by 8×. The bitrate must come
-  down (4 Mbps at 1080p30 is plenty for hands; a "Video quality" setting), crop-at-source must
-  arrive earlier than planned, and phase 3's upload becomes urgent.
+  design's storage tables (4.4 MB per attempt and camera) were low by 8×. The ceiling is now a
+  setting, Video quality (T2.10, issue #33): Standard, the default, asks 4 Mbps at 1080p30, which
+  makes these attempts 17–21 MB, 2.2–2.7 GB a day, four days of the quota; High is the 8 Mbps
+  measured here, and Maximum 12. Crop-at-source must still arrive earlier than planned, and phase
+  3's upload becomes urgent.
 - **No audio track** in any clip (`audio: null`), although "Record audio" defaults to on: the
   microphone stream or the AAC/Opus encoder was not there. Under investigation (issue #33).
 
@@ -176,7 +178,8 @@ demo cube's turns come close together, not as single turns (`docs/TOOLCHAIN.md`)
 What the owner's second round measures on each camera (`docs/MANUAL-TESTS.md`, "Round 2"), to fill
 in after it: the frame rate measured in Camera settings; the sharpness of the framing rectangle with
 the cube in it, in focus, moving and covered, and the threshold between them (20 by default, set on
-Chrome's test camera); the codecs Chrome chose; the sizes of one attempt's clips; and, on the phone
+Chrome's test camera); the codecs Chrome chose; the sizes of one attempt's clips (at Standard quality,
+T2.10); and, on the phone
 on its stand, 20 minutes of solves with the camera on. The sync check's numbers go into "Camera lag"
 above, and the capture lab's frame timestamps under "VideoFrame.timestamp".
 
