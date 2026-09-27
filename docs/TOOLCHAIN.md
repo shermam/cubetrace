@@ -8,8 +8,8 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 
 | Tool | Version | Declared in | Notes |
 |---|---|---|---|
-| Node.js | 22.23.3 | `engines` in `package.json`; `node-version: 22` in the workflows | Angular CLI 22.2 refuses Node older than 22.22.3 (or 24.15.0) |
-| npm | 10.9.9 (bundled with Node 22.23.3) | `engines` | npm workspaces: `apps/*`, `packages/*` |
+| Node.js | 22.23.3 locally, 22.23.2 in CI | `engines` in `package.json`; `node-version: 22` in the workflows | Angular CLI 22.2 refuses Node older than 22.22.3 (or 24.15.0) |
+| npm | 10.9.9 locally, 10.9.8 in CI (bundled with Node) | `engines` | npm workspaces: `apps/*`, `packages/*` |
 | Angular (`core`, `router`, `cli`, `build`, `compiler-cli`, ...) | 22.2.0 | `apps/web/package.json` | latest stable on npm |
 | TypeScript | 6.0.3 | root `package.json` | Angular 22.2 requires `>=6.0 <6.1` |
 | Vitest | 5.0.2 (Vite 8.3.1) | root `package.json` | packages and app share this one installation |
@@ -89,8 +89,9 @@ Playwright 1.56 only knows the system dependencies of Ubuntu up to 24.04. Upgrad
 means updating the containers' browsers too.
 
 **Node 22.22.3 or later.** Angular CLI 22.2 exits with an error on older Node 22 releases. The
-agents' containers had 22.22.2 on 2026-09-27; T1.0 was verified with the official Node 22.23.3
-binary from nodejs.org, the version `actions/setup-node` installs for `node-version: 22`.
+agents' containers had 22.22.2 on 2026-09-27; T1.0 was verified locally with the official Node
+22.23.3 binary from nodejs.org (the latest 22.x that day). In CI, `actions/setup-node` with
+`node-version: 22` uses the runner's cached 22.x release: 22.23.2 on the first run.
 
 **GitHub Pages.** `pages.yml` builds with `--base-href /cubetrace/`, copies `index.html` to
 `404.html` so that deep links (`/cubetrace/settings`) reach the Angular router, and uploads the
