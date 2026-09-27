@@ -39,7 +39,7 @@ const STATUS: Readonly<Record<TimerPhase, string>> = {
     </p>
     <p class="attempt">
       <span data-testid="attempt-index">Attempt {{ session.index() }}</span>
-      @if (session.session(); as current) {
+      @if (session.session() !== null) {
         ·
         <span data-testid="save-status" [attr.data-saving]="session.saving()">{{
           session.saving() ? 'Saving…' : 'Saved'
