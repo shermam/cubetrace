@@ -19,6 +19,10 @@ import { TimerClock } from './timer-clock';
 class ClockWithDialog {}
 
 describe('TimerClock', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   function text(fixture: ComponentFixture<unknown>, testId: string): string {
     const element = fixture.nativeElement as HTMLElement;
     return (
@@ -250,6 +254,52 @@ describe('TimerClock', () => {
       expect(s.connector.calls).toHaveLength(2);
       expect(connectButton().textContent.trim()).toBe('Connecting…');
       expect(dialogOpen()).toBe(false);
+    });
+
+    it('after 5 minutes without a turn the cube is disconnected: the page says why, and Reconnect is one click', async () => {
+      const s = setup();
+      const fake = await ready(s);
+      await render(s);
+      turn(s, fake, 'R');
+
+      s.timers.advance(5 * 60_000);
+      await stable();
+      expect(s.cube.status()).toBe('disconnected');
+      expect(text(clock, 'timer-status')).toBe(
+        'The cube disconnected: connect it again to go on with this attempt.',
+      );
+      expect(text(clock, 'disconnect-reason')).toBe(
+        "Disconnected after 5 minutes without a turn, to save the cube's battery.",
+      );
+      expect(connectButton().textContent.trim()).toBe('Reconnect');
+
+      connectButton().click();
+      await stable();
+      expect(s.connector.calls).toHaveLength(2);
+      expect(has(clock, 'disconnect-reason')).toBe(false);
+    });
+
+    it('back in the tab after the cube went away while it was hidden: Reconnect, and why; nothing connects by itself', async () => {
+      vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      const s = setup();
+      const fake = await ready(s);
+      await render(s);
+      s.page.setVisibility('hidden');
+      s.perf.advance(3 * 60_000);
+      await fake.disconnect('The Bluetooth connection was closed.');
+
+      s.page.setVisibility('visible');
+      await stable();
+      expect(text(clock, 'timer-status')).toBe(
+        'The cube disconnected: connect it again to go on with this attempt.',
+      );
+      expect(connectButton().textContent.trim()).toBe('Reconnect');
+      expect(text(clock, 'disconnect-reason')).toBe(
+        'The Bluetooth connection was closed. It happened after 3 min without a turn, while this ' +
+          'tab was in the background. GAN cubes go to sleep after a few minutes without turns.',
+      );
+      expect(s.connector.calls).toHaveLength(1);
+      expect(s.cube.status()).toBe('disconnected');
     });
   });
 

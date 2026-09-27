@@ -172,6 +172,34 @@ describe('SettingsPage', () => {
     expect(macList(fixture)).toEqual([['None stored.']]);
   });
 
+  it('keeps the idle disconnection, from 0 to 60 whole minutes', async () => {
+    const fixture = await render();
+    const idle = input(fixture, '#idle-minutes');
+    const label = (fixture.nativeElement as HTMLElement).querySelector('label[for="idle-minutes"]');
+    expect(label?.textContent.trim()).toBe(
+      'Disconnect the cube after this many minutes without a turn',
+    );
+    expect(idle.value).toBe('5');
+
+    type(idle, '1');
+    await update(fixture);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
+      idleDisconnectMinutes: 1,
+    });
+
+    for (const bad of ['61', '2.5', '-1', '']) {
+      type(idle, bad);
+      await update(fixture);
+      expect(text(fixture, 'idle-error')).toBe('The minutes must be a whole number from 0 to 60.');
+    }
+    expect(TestBed.inject(SettingsService).idleDisconnectMinutes()).toBe(1);
+
+    type(idle, '0');
+    await update(fixture);
+    expect(text(fixture, 'idle-error')).toBeUndefined();
+    expect(TestBed.inject(SettingsService).idleDisconnectMinutes()).toBe(0);
+  });
+
   it('keeps the host label, inspection, auto-advance and the demo speed', async () => {
     const fixture = await render();
     const host = input(fixture, '#host-label');

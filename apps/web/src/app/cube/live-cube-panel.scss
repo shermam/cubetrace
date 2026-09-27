@@ -27,6 +27,21 @@
   color: var(--text-muted);
 }
 
+// "Mark as solved", with what it does next to it (under it on a phone).
+.reset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+
+  p {
+    flex: 1 1 16rem;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+}
+
 .legend {
   font-size: 0.75rem;
 }
