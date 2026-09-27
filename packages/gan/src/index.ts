@@ -1,3 +1,15 @@
-// Public API of @cubetrace/gan: the GAN driver wrapper, the support check and the fake cube
-// (docs/PLAN.md, T1.5). Empty until then. Plain TypeScript: no Angular.
-export {};
+// Public API of @cubetrace/gan: one typed event stream for the app, whether the cube is a GAN cube
+// over Web Bluetooth or the fake cube (docs/PLAN.md, T1.5). Plain TypeScript: no Angular.
+export type {
+  BluetoothSupport,
+  CubeBatteryEvent,
+  CubeConnection,
+  CubeDisconnectedEvent,
+  CubeEvent,
+  CubeFaceletsEvent,
+  CubeGyroEvent,
+  CubeHardwareEvent,
+  CubeMoveEvent,
+  MacProvider,
+} from './types';
+export { MAC_FLAG_URL, checkBluetoothSupport } from './support';
