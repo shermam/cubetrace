@@ -15,6 +15,8 @@ import {
   type CaptureHandle,
   type CaptureStats,
   type CaptureSupport,
+  type FramingRect,
+  type MotionSample,
 } from '@cubetrace/capture';
 import type { CameraInfo, VideoClip, VideoSegment } from '@cubetrace/core';
 
@@ -237,6 +239,23 @@ export class RecordingService {
   /** Resolves once the starts and stops asked for so far are done (for tests). */
   settled(): Promise<void> {
     return this.queue;
+  }
+
+  /**
+   * Measures the motion of the camera's frames inside `rect` (frame pixels; null for the whole
+   * frame) for the sync check (T2.5, `SyncService`), through the pipeline's `watchMotion`, until the
+   * returned function is called; null while it does not record.
+   */
+  watchMotion(
+    rect: FramingRect | null,
+    onSample: (sample: MotionSample) => void,
+    onError: (message: string) => void,
+  ): (() => void) | null {
+    const handle = this.handle;
+    if (handle === null || this.statusSignal() !== 'recording') {
+      return null;
+    }
+    return handle.watchMotion(rect, onSample, onError);
   }
 
   /** Starts, restarts or stops the pipeline as the camera, the session and the settings say. */

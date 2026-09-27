@@ -115,3 +115,29 @@ and the cut would have to place it by its own offset), and `frames.arrival.resid
 arrival jitter in the worker (the probes saw ±10–17 ms at `requestVideoFrameCallback` on the main
 thread). The counters also say which codecs Chrome chose (H.264 expected on both devices) and
 whether frames were dropped.
+
+## Camera lag
+
+How far each camera's frames lag the cube, from the sync check (T2.5, `docs/DATA-MODEL.md` §6): the
+median, over the turns matched, of the motion's onset in the frames minus the turn's host time
+(`offsetMs` of `clock.cameras`), and the spread of those lags (95th minus 5th percentile,
+`clapperboardResidualMs`); with the capture worker's time per frame to measure the motion (the
+capture lab's Sync check). For the owner's round 2 (`docs/MANUAL-TESTS.md`, T2.5): two checks per
+camera, whose offsets should agree within 10 ms, each spread under 40 ms.
+
+| Camera | Date, Chrome | Check 1: offset / spread / turns | Check 2: offset / spread / turns | Per frame: median / p95 |
+|---|---|---|---|---|
+| MacBook Pro 2021, FaceTime HD | | | | |
+| ThinkPhone, front camera | | | | |
+| ThinkPhone, rear camera | | | | |
+
+Chrome's fake camera cannot give a lag, since nothing in its test pattern turns with the cube, but
+it gives the cost: in Playwright's Chromium 141 on the containers' four CPUs, while the same worker
+encoded 1080p30 VP9 in software, measuring a frame of the whole 1920×1080 picture took 1.1 to 1.2 ms
+at the median and 1.5 to 4.9 ms at the 95th percentile in four runs of the lab's e2e test (the
+highest with the rest of the suite running beside it): its luma copied out of the frame with
+`VideoFrame.copyTo` and averaged down to 160 pixels wide (drawing the frame into a canvas instead took
+10 to 20 ms there, `docs/TOOLCHAIN.md`). Over the whole frame its test pattern changes by about 1.7
+luma levels from one frame to the next, and by about 15 times that every 14 to 16 frames, so some of
+those jumps come after half a second of stillness: onsets that a check there cannot match, since the
+demo cube's turns come close together, not as single turns (`docs/TOOLCHAIN.md`).

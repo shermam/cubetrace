@@ -13,6 +13,7 @@ export type {
   CaptureError,
   CaptureStats,
   DeleteClipParams,
+  MotionSample,
   ResolvedCaptureConfig,
   SaveClipParams,
 } from './protocol';
@@ -46,3 +47,30 @@ export { DEFAULT_BOUNDS, RingBuffer } from './ring-buffer';
 // clip's files are is.
 export type { ClipFiles } from './clip-files';
 export { attemptPath, clipFiles } from './clip-files';
+
+// T2.5 — the clapperboard: the camera's lag behind the cube, from the motion the capture worker
+// measures in the framing rectangle during a sync check (`CaptureHandle.watchMotion`). motion.ts,
+// which measures it, is the worker's and is not exported, so that it stays in the worker's chunk.
+export type {
+  ClapperboardAnalysis,
+  ClapperboardFailure,
+  ClapperboardFit,
+  ClapperboardResult,
+} from './clapperboard';
+export {
+  MATCH_WINDOW_MS,
+  MAX_SPREAD_MS,
+  MIN_MATCHES,
+  MIN_ONSET_ENERGY,
+  ONSET_FACTOR,
+  ONSET_QUIET_MS,
+  SINGLE_TURN_MS,
+  SYNC_CHECK_MS,
+  detectClapperboard,
+  findOnsets,
+  frameHostTimes,
+  matchOnsets,
+  onsetThreshold,
+  percentile,
+  singleTurns,
+} from './clapperboard';

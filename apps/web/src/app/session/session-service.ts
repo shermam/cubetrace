@@ -19,6 +19,7 @@ import {
   type AttemptEvents,
   type AttemptRecord,
   type AttemptState,
+  type CameraClock,
   type CameraInfo,
   type CubeInfo,
   type Facelets,
@@ -85,14 +86,15 @@ export interface AttemptView {
 
 /**
  * Where the timer is, for the page's status line: `loading` (reading the stored session),
- * `no-cube`, `connecting`, `solve-first` (a cube is connected but not solved), `scramble-wait`
- * (making a scramble), `cube-info` (waiting for the cube to say what it is, which a new session
- * records), `next` (an attempt ended; auto-advance is off, so the next one waits for Next),
- * the attempt's own `scrambling`, `armed` and `solving`, and `paused` (an attempt is under way
- * and the cube is gone).
+ * `sync-check` (a sync check is under way: no attempt is tracked, T2.5), `no-cube`, `connecting`,
+ * `solve-first` (a cube is connected but not solved), `scramble-wait` (making a scramble),
+ * `cube-info` (waiting for the cube to say what it is, which a new session records), `next` (an
+ * attempt ended; auto-advance is off, so the next one waits for Next), the attempt's own
+ * `scrambling`, `armed` and `solving`, and `paused` (an attempt is under way and the cube is gone).
  */
 export type TimerPhase =
   | 'loading'
+  | 'sync-check'
   | 'no-cube'
   | 'connecting'
   | 'solve-first'
@@ -178,6 +180,18 @@ interface Current {
   clips: VideoClip[];
 }
 
+/**
+ * `clip` with its camera's lag behind the cube in `session` as its `syncResidualMs` (T2.5: the
+ * `offsetMs` of the camera's sync check, `clock.cameras`), unless it has one; null before a check.
+ */
+function withSyncResidual(clip: VideoClip, session: SessionRecord | null): VideoClip {
+  if (clip.syncResidualMs !== null || session === null) {
+    return clip;
+  }
+  const sync = session.clock.cameras[clip.camera] as CameraClock | undefined;
+  return sync === undefined ? clip : { ...clip, syncResidualMs: sync.offsetMs };
+}
+
 /** `clips` with `clip`, which replaces the clip of the same camera and segment. */
 function withClip(clips: readonly VideoClip[], clip: VideoClip): VideoClip[] {
   const at = clips.findIndex((c) => c.camera === clip.camera && c.segment === clip.segment);
@@ -257,7 +271,11 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  * - For the recording (T2.4, `RecordingService`): `milestones$` says when an attempt's scramble is
  *   done, when it ended and when it went without a record; `attachClip` adds a clip to the
  *   attempt's record (saved again, nothing else changed), `putCamera` the camera to the session's
- *   `cameras`, and `addNote` a line to its `notes`.
+ *   `cameras`, and `addNote` a line to its `notes`. For the sync check (T2.5, `SyncService`),
+ *   `putCameraClock` keeps a camera's lag behind the cube in `clock.cameras`, which the camera's
+ *   later clips carry as their `syncResidualMs`; `suspendForSyncCheck` and `resumeAfterSyncCheck`
+ *   keep the check's turns out of the attempts: while it runs no attempt is tracked, and an attempt
+ *   that had not started its solve begins again afterwards, with its scramble and number.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
@@ -288,6 +306,8 @@ export class SessionService {
   private readonly saveErrorSignal = signal<string | null>(null);
   private readonly scrambleErrorSignal = signal<string | null>(null);
   private readonly noticeSignal = signal<string | null>(null);
+  /** A sync check is under way (T2.5): attempts are not tracked meanwhile. */
+  private readonly suspendedSignal = signal(false);
 
   /** `opfs`: sessions are kept in the browser; `memory`: they last until the page closes. */
   readonly storageKind = this.sessionStorage.kind;
@@ -309,6 +329,11 @@ export class SessionService {
   readonly notice = this.noticeSignal.asReadonly();
   /** Records are being written to the store. */
   readonly saving = computed(() => this.pendingWritesSignal() > 0);
+  /**
+   * A sync check is under way (T2.5, `suspendForSyncCheck`): the cube's moves go to no attempt, and
+   * the next attempt begins once it ends.
+   */
+  readonly suspended = this.suspendedSignal.asReadonly();
 
   /** The index of the attempt under way, or of the next one. */
   readonly index = computed(() => {
@@ -333,6 +358,9 @@ export class SessionService {
   readonly phase = computed<TimerPhase>(() => {
     if (!this.readySignal()) {
       return 'loading';
+    }
+    if (this.suspendedSignal()) {
+      return 'sync-check';
     }
     const view = this.attemptSignal();
     const status = this.cube.status();
@@ -616,12 +644,15 @@ export class SessionService {
    * Adds `clip` to the attempt `ref` (T2.4), replacing a clip of the same camera and segment: while
    * the attempt is under way it is kept for its record (`kept`); once it has ended, its record is
    * saved again with the clip in `video` and nothing else changed (`saved`), also when the session
-   * is no longer the current one. Resolves to `gone`, changing nothing, when the attempt went
+   * is no longer the current one. The clip gets its camera's lag behind the cube as its
+   * `syncResidualMs` when the session has a sync check of that camera (T2.5); a clip attached
+   * before the check keeps null. Resolves to `gone`, changing nothing, when the attempt went
    * without a record or was deleted. Rejects when the record could not be saved (the timer says so
    * too, as for any save).
    */
   async attachClip(ref: AttemptRef, clip: VideoClip): Promise<ClipAttachment> {
     const current = this.current;
+    const session = this.sessionSignal();
     if (
       current !== null &&
       isActive(current.machine.state) &&
@@ -629,15 +660,19 @@ export class SessionService {
       current.index === ref.index &&
       current.machine.events.scrambleShown === ref.scrambleShown
     ) {
-      current.clips = withClip(current.clips, clip);
+      const own = session?.id === ref.session ? session : null;
+      current.clips = withClip(current.clips, withSyncResidual(clip, own));
       return 'kept';
     }
-    if (this.sessionSignal()?.id === ref.session) {
+    if (session?.id === ref.session) {
       const record = this.attemptsSignal().find((attempt) => isAttempt(attempt, ref));
       if (record === undefined) {
         return 'gone';
       }
-      const updated: AttemptRecord = { ...record, video: withClip(record.video, clip) };
+      const updated: AttemptRecord = {
+        ...record,
+        video: withClip(record.video, withSyncResidual(clip, session)),
+      };
       this.attemptsSignal.update((attempts) => attempts.map((a) => (a === record ? updated : a)));
       if (this.lastResultSignal() === record) {
         this.lastResultSignal.set(updated);
@@ -648,9 +683,11 @@ export class SessionService {
     // The session changed since (New session right after the solve): its record in the store.
     let outcome: ClipAttachment = 'gone';
     await this.save(async (store) => {
-      const record = (await store.loadAttempts(ref.session)).find((a) => isAttempt(a, ref));
+      const stored = await store.exportSession(ref.session);
+      const record = stored.attempts.find((a) => isAttempt(a, ref));
       if (record !== undefined) {
-        await store.saveAttempt({ ...record, video: withClip(record.video, clip) });
+        const attached = withSyncResidual(clip, stored.session);
+        await store.saveAttempt({ ...record, video: withClip(record.video, attached) });
         outcome = 'saved';
       }
     });
@@ -707,6 +744,64 @@ export class SessionService {
     const saved: SessionRecord = { ...session, cameras, audio };
     this.sessionSignal.set(saved);
     void this.save((store) => store.saveSession(saved));
+  }
+
+  /**
+   * Puts `clock`, a camera's clock sync (T2.5: its sync check), in the current session's
+   * `clock.cameras` under `label`, replacing the entry of that label, and saves session.json; from
+   * then on the camera's clips get its `offsetMs` as their `syncResidualMs` (`attachClip`). False,
+   * changing nothing, without a session.
+   */
+  putCameraClock(label: string, clock: CameraClock): boolean {
+    const session = this.sessionSignal();
+    if (session === null) {
+      return false;
+    }
+    const saved: SessionRecord = {
+      ...session,
+      clock: { ...session.clock, cameras: { ...session.clock.cameras, [label]: clock } },
+    };
+    this.sessionSignal.set(saved);
+    void this.save((store) => store.saveSession(saved));
+    return true;
+  }
+
+  /**
+   * Suspends attempt tracking for a sync check (T2.5), whose turns must not become an attempt's: an
+   * attempt under way that has not started its solve is dropped without a record, as "Mark as
+   * solved" drops it, and no attempt begins until `resumeAfterSyncCheck`, so the cube's moves go to
+   * none meanwhile (they still feed the session's coarse cube clock fit). Refused (false) while an
+   * attempt is armed or solving, and before the stored session has been read; true when tracking is
+   * suspended (already, or now).
+   */
+  suspendForSyncCheck(): boolean {
+    if (!this.readySignal() || this.solveStarted()) {
+      return false;
+    }
+    if (this.suspendedSignal()) {
+      return true;
+    }
+    const current = this.activeCurrent();
+    if (current !== null) {
+      this.dropForRestart(current);
+    }
+    this.suspendedSignal.set(true);
+    this.refresh();
+    return true;
+  }
+
+  /**
+   * Ends the suspension of `suspendForSyncCheck`: the attempt it dropped begins again, with its
+   * scramble and number, as soon as the cube is solved (at once if it is; otherwise the timer says
+   * to solve it first), as any next attempt does.
+   */
+  resumeAfterSyncCheck(): void {
+    if (!this.suspendedSignal()) {
+      return;
+    }
+    this.suspendedSignal.set(false);
+    this.refresh();
+    this.ensureAttempt();
   }
 
   /**
@@ -857,13 +952,21 @@ export class SessionService {
   private onReset(): void {
     const current = this.activeCurrent();
     if (current !== null) {
-      this.queuedSignal.set(current.scramble);
-      this.dropCurrent();
-      this.awaitingSignal.set(true);
-      this.pausedAtSignal.set(null);
+      this.dropForRestart(current);
       this.refresh();
     }
     this.ensureAttempt();
+  }
+
+  /**
+   * Drops the attempt under way without a record, so that it begins again with its scramble and
+   * number: "Mark as solved", and a sync check (T2.5).
+   */
+  private dropForRestart(current: Current): void {
+    this.queuedSignal.set(current.scramble);
+    this.dropCurrent();
+    this.awaitingSignal.set(true);
+    this.pausedAtSignal.set(null);
   }
 
   /** Resyncs the attempt to the state the cube reports, if it differs from the machine's. */
@@ -957,7 +1060,12 @@ export class SessionService {
 
   /** Begins the next attempt if one is due and everything it needs is there. */
   private ensureAttempt(): void {
-    if (!this.readySignal() || !this.awaitingSignal() || this.activeCurrent() !== null) {
+    if (
+      !this.readySignal() ||
+      !this.awaitingSignal() ||
+      this.activeCurrent() !== null ||
+      this.suspendedSignal()
+    ) {
       return;
     }
     const facelets = this.cube.facelets();

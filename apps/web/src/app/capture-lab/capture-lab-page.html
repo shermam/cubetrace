@@ -85,6 +85,43 @@
     </details>
   </section>
 
+  <section aria-labelledby="lab-sync">
+    <h2 id="lab-sync">Sync check</h2>
+    <p class="about">
+      The Timer's sync check on this camera's whole frame, without a session: start the camera
+      above, connect a cube with the cube button at the top (a GAN cube, or the demo cube), press
+      Sync check, then turn one face, pause, turn it back; repeat five times, pausing about a second
+      after every turn. It says how far the camera lags the cube, or why it cannot tell, and what
+      measuring each frame cost the capture worker.
+    </p>
+    <div class="fields">
+      <label for="lab-sync-seconds">Watch for (s)</label>
+      <input
+        id="lab-sync-seconds"
+        #syncSecondsInput
+        type="number"
+        min="1"
+        max="60"
+        step="1"
+        [value]="syncSeconds()"
+        (input)="setSyncSeconds(syncSecondsInput.value)"
+      />
+    </div>
+    <div class="actions">
+      <button type="button" [disabled]="!running() || syncRunning()" (click)="startSync()">
+        Sync check
+      </button>
+      <button type="button" [disabled]="!syncRunning()" (click)="stopSync()">End the check</button>
+    </div>
+    <p class="status" role="status" data-testid="lab-sync-status">{{ syncStatus() }}</p>
+    @if (syncJson()) {
+      <details>
+        <summary>What it found (JSON)</summary>
+        <pre data-testid="lab-sync-json">{{ syncJson() }}</pre>
+      </details>
+    }
+  </section>
+
   <section aria-labelledby="lab-cut">
     <h2 id="lab-cut">Last cut</h2>
     @if (lastCut()) {

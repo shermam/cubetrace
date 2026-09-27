@@ -22,6 +22,7 @@ import {
   type MuxAndWriteRequest,
   type WorkerToWindow,
 } from './protocol';
+import { SyntheticFrame, lumaPlane } from './test-frames';
 import { readMediaSample } from './test-media';
 
 // The worker's loop with fake encoders, fake frames and a fake clock: a 30 fps camera whose
@@ -873,5 +874,130 @@ describe('CaptureWorker saving clips', () => {
       [1, true],
       [2, true],
     ]);
+  });
+});
+
+describe('CaptureWorker during a sync check', () => {
+  /** A still picture, and the same with a bright square of 120 pixels at (600, 360). */
+  const STILL = lumaPlane(1920, 1080, 16);
+  const SQUARE = lumaPlane(1920, 1080, 16, [{ x: 600, y: 360, size: 120, value: 255 }]);
+
+  /** Feeds frames `from` to `to` showing `picture(index)`, each arriving at its own host time. */
+  async function feedPictures(
+    capture: Harness,
+    from: number,
+    to: number,
+    picture: (index: number) => Uint8Array,
+    format: string | null = 'I420',
+  ): Promise<SyntheticFrame[]> {
+    const fed: SyntheticFrame[] = [];
+    for (let index = from; index <= to; index += 1) {
+      const frame = new SyntheticFrame(timestampOf(index), picture(index), 1920, 1080, format);
+      capture.now = arrivalOf(index);
+      if (capture.video.push(frame)) {
+        fed.push(frame);
+      }
+      await settle();
+    }
+    return fed;
+  }
+
+  function samplesOf(posted: readonly WorkerToWindow[]) {
+    return posted.flatMap((message) => (message.type === 'sync-sample' ? [message] : []));
+  }
+
+  it('sends the motion of every frame in the framing rectangle until the check stops, and keeps encoding', async () => {
+    const capture = harness();
+    capture.worker.handle({ type: 'sync-start', id: 7, rect: { x: 480, y: 240, w: 960, h: 480 } });
+
+    const fed = await feedPictures(capture, 0, 29, (index) => (index >= 20 ? SQUARE : STILL));
+
+    const samples = samplesOf(capture.posted);
+    // None for the first frame: there is nothing to compare it with.
+    expect(samples).toHaveLength(29);
+    expect(samples.every((message) => message.id === 7)).toBe(true);
+    expect(samples[0].sample).toMatchObject({
+      timestampUs: timestampOf(1),
+      arrivalHostMs: arrivalOf(1),
+      energy: 0,
+    });
+    // The square appears at frame 20: 20 × 20 of the rectangle's 160 × 80 pixels, 239 levels up.
+    expect(samples.map((message) => message.sample.energy)).toEqual(
+      Array.from({ length: 29 }, (_, k) => (k + 1 === 20 ? 7.469 : 0)),
+    );
+    expect(samples.every((message) => message.sample.costMs >= 0)).toBe(true);
+    expect(capture.encoder().encoded.length).toBeGreaterThan(0);
+    expect(fed.every((frame) => frame.closed)).toBe(true);
+
+    // Another check's stop changes nothing; its own stops it.
+    capture.worker.handle({ type: 'sync-stop', id: 8 });
+    await feedPictures(capture, 30, 31, () => STILL);
+    expect(samplesOf(capture.posted)).toHaveLength(31);
+    capture.worker.handle({ type: 'sync-stop', id: 7 });
+    await feedPictures(capture, 32, 35, () => SQUARE);
+    expect(samplesOf(capture.posted)).toHaveLength(31);
+    expect(capture.errors()).toEqual([]);
+  });
+
+  it('measures a synthetic 1080p frame in under 2 ms (the median over 90 frames)', async () => {
+    const capture = harness();
+    capture.worker.handle({ type: 'sync-start', id: 1, rect: null });
+
+    await feedPictures(capture, 0, 90, (index) => (index % 2 === 0 ? STILL : SQUARE));
+
+    const costs = samplesOf(capture.posted)
+      .map((message) => message.sample.costMs)
+      .sort((a, b) => a - b);
+    expect(costs).toHaveLength(90);
+    const median = costs[45];
+    console.log(
+      `sync check in the worker, 1080p I420 frames in Node: median ${String(median)} ms, ` +
+        `95th percentile ${String(costs[Math.ceil(0.95 * costs.length) - 1])} ms`,
+    );
+    expect(median).toBeLessThan(2);
+  });
+
+  it("ends the check, saying why, when the frames' pixels cannot be read; recording goes on", async () => {
+    const capture = harness();
+    capture.worker.handle({ type: 'sync-start', id: 3, rect: null });
+    await capture.feed(0, 3);
+    capture.worker.handle({ type: 'sync-start', id: 4, rect: null });
+    await feedPictures(capture, 4, 6, () => STILL, null);
+
+    expect(capture.posted.filter((message) => message.type.startsWith('sync-'))).toEqual([
+      { type: 'sync-error', id: 3, message: "Error: The camera's frames cannot be read here." },
+      {
+        type: 'sync-error',
+        id: 4,
+        message: 'Error: The motion meter cannot read frames of no pixel format.',
+      },
+    ]);
+    expect(capture.errors()).toEqual([]);
+  });
+
+  it('draws the frames it cannot copy where it has a canvas', async () => {
+    const posted: WorkerToWindow[] = [];
+    const worker = new CaptureWorker({
+      VideoEncoder: FakeVideoEncoder,
+      AudioEncoder: undefined,
+      now: () => 0,
+      post: (message) => posted.push(message),
+      every: () => () => undefined,
+      // A canvas that draws each frame as a flat picture of its timestamp's last digits.
+      drawLuma: (frame, _region, size) => ({
+        luma: new Uint8Array(size.width * size.height).fill(frame.timestamp % 100),
+        ...size,
+      }),
+    });
+    const video = new Source<FrameLike>();
+    void worker.start(video.stream, null, resolveCaptureConfig(), 30);
+    worker.handle({ type: 'sync-start', id: 5, rect: null });
+
+    for (const timestamp of [1_000_010, 1_000_013, 1_000_020]) {
+      video.push(new SyntheticFrame(timestamp, STILL, 1920, 1080, null));
+      await settle();
+    }
+
+    expect(samplesOf(posted).map((message) => message.sample.energy)).toEqual([3, 7]);
   });
 });

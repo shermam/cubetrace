@@ -63,6 +63,11 @@ describe('CaptureLabPage', () => {
     expect(button(fixture, 'Stop').disabled).toBe(true);
     expect(button(fixture, 'Cut the last 3 s').disabled).toBe(true);
     expect(button(fixture, 'Mux and save the last 3 s').disabled).toBe(true);
+    // The sync check needs the camera running.
+    expect(button(fixture, 'Sync check').disabled).toBe(true);
+    expect(text(fixture, 'lab-sync-status')).toBe(
+      'Not run yet: start the camera, connect a cube (the cube button at the top), then Sync check.',
+    );
     expect(text(fixture, 'lab-clip-files')).toBeUndefined();
 
     button(fixture, 'Start').click();

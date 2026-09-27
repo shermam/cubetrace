@@ -2,12 +2,21 @@
 // from the streams the window transfers, encodes them with WebCodecs into the ring buffer, sends
 // the counters once per second and answers cuts. For a clip (T2.3) it only cuts: since T2.4 the cut
 // moves, with its request, to the clip worker (clip-worker.ts), which muxes and writes it, so that
-// saving a clip never holds up the frames here (docs/TOOLCHAIN.md, "Two workers"). Angular's
-// builder emits it as a chunk of its own (docs/TOOLCHAIN.md, "The capture pipeline");
-// `startCapture` (pipeline.ts) starts it. Plain TypeScript: no Angular. The encoders, the clock and
-// the timer come in through `WorkerEnvironment`, so the logic also runs in Node's tests with fakes;
-// the last lines wire it to the worker's global scope.
+// saving a clip never holds up the frames here (docs/TOOLCHAIN.md, "Two workers"). While the window
+// runs a sync check (T2.5), it also measures the motion of every frame in the framing rectangle
+// (motion.ts) and sends it. Angular's builder emits it as a chunk of its own (docs/TOOLCHAIN.md, "The
+// capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain TypeScript: no Angular. The
+// encoders, the clock and the timer come in through `WorkerEnvironment`, so the logic also runs in
+// Node's tests with fakes; the last lines wire it to the worker's global scope.
 import { cut } from './cut';
+import type { FramingRect } from './framing';
+import {
+  MOTION_WIDTH,
+  MotionMeter,
+  isMotionFrame,
+  type MotionFrame,
+  type PlaneSize,
+} from './motion';
 import {
   describeError,
   isWindowToWorker,
@@ -22,6 +31,7 @@ import {
   type WorkerToWindow,
 } from './protocol';
 import { RingBuffer } from './ring-buffer';
+import { LumaSampler, offscreenCanvas, type LumaImage } from './sharpness';
 
 /** Frames the video encoder may hold; beyond that, new frames are dropped and counted. */
 export const MAX_ENCODE_QUEUE = 8;
@@ -146,6 +156,17 @@ export interface WorkerEnvironment {
   post(message: WorkerToWindow): void;
   /** Calls `callback` every `ms` until the returned function is called. */
   every(ms: number, callback: () => void): () => void;
+  /**
+   * Draws the region of a frame whose pixels the motion meter cannot copy into a luma plane (a
+   * canvas); absent where there is none, and in the tests.
+   */
+  readonly drawLuma?: (frame: FrameLike, region: FramingRect, size: PlaneSize) => LumaImage | null;
+}
+
+/** A sync check under way (T2.5): its id, and the meter of its frames' motion. */
+interface SyncCheck {
+  readonly id: number;
+  readonly meter: MotionMeter<FrameLike & MotionFrame>;
 }
 
 /** An audio input's timestamp and arrival, kept until the chunks that start in it are out. */
@@ -198,6 +219,9 @@ export class CaptureWorker {
   /** The clip worker's end of their channel (the start's `clips`): where the clips' cuts go. */
   #clips: MessageTarget | null = null;
 
+  /** The sync check whose motion is measured, while the window asks for it. */
+  #sync: SyncCheck | null = null;
+
   constructor(env: WorkerEnvironment) {
     this.#env = env;
   }
@@ -228,7 +252,28 @@ export class CaptureWorker {
       case 'stop':
         void this.stop();
         break;
+      case 'sync-start':
+        this.startSync(message.id, message.rect);
+        break;
+      case 'sync-stop':
+        if (this.#sync?.id === message.id) {
+          this.#sync = null;
+        }
+        break;
     }
+  }
+
+  /**
+   * Measures the motion of every frame from the next one on inside `rect` (frame pixels; null for
+   * the whole frame) and sends it to the window as `sync-sample`s of check `id`, until `sync-stop`
+   * (docs/PLAN.md, T2.5). It replaces the check under way, if any.
+   */
+  startSync(id: number, rect: FramingRect | null): void {
+    const draw = this.#env.drawLuma;
+    this.#sync = {
+      id,
+      meter: new MotionMeter<FrameLike & MotionFrame>(rect, draw === undefined ? {} : { draw }),
+    };
   }
 
   /**
@@ -320,6 +365,7 @@ export class CaptureWorker {
     }
     this.#stopped = true;
     this.#recording = false;
+    this.#sync = null;
     this.#stopTicker?.();
     await this.#release();
     this.#buffer.clear();
@@ -351,6 +397,11 @@ export class CaptureWorker {
         const arrivalHostMs = this.#env.now();
         try {
           await this.#onFrame(frame, arrivalHostMs);
+          const sync = this.#sync;
+          if (sync !== null) {
+            // After the encoder has the frame: the motion never holds up the recording.
+            await this.#measureMotion(sync, frame, arrivalHostMs);
+          }
         } finally {
           frame.close();
         }
@@ -360,6 +411,40 @@ export class CaptureWorker {
       return;
     }
     await this.#videoEnded();
+  }
+
+  /**
+   * Sends the motion of `frame` for the sync check `sync`, unless it is the check's first frame; a
+   * frame whose pixels cannot be read ends the check, and the window hears why.
+   */
+  async #measureMotion(sync: SyncCheck, frame: FrameLike, arrivalHostMs: number): Promise<void> {
+    let energy: number | null;
+    let costMs: number;
+    try {
+      if (!isMotionFrame(frame)) {
+        throw new Error("The camera's frames cannot be read here.");
+      }
+      ({ energy, costMs } = await sync.meter.measure(frame));
+    } catch (error: unknown) {
+      if (this.#sync === sync) {
+        this.#sync = null;
+        this.#env.post({ type: 'sync-error', id: sync.id, message: describeError(error) });
+      }
+      return;
+    }
+    if (energy === null || this.#sync !== sync) {
+      return;
+    }
+    this.#env.post({
+      type: 'sync-sample',
+      id: sync.id,
+      sample: {
+        timestampUs: frame.timestamp,
+        arrivalHostMs,
+        energy: Math.round(energy * 1000) / 1000,
+        costMs: Math.round(costMs * 1000) / 1000,
+      },
+    });
   }
 
   async #onFrame(frame: FrameLike, arrivalHostMs: number): Promise<void> {
@@ -786,6 +871,8 @@ function globalFunction(name: string): unknown {
 // Node's tests import `CaptureWorker` without a DedicatedWorkerGlobalScope.
 if (globalFunction('DedicatedWorkerGlobalScope') !== undefined) {
   const scope = globalThis as unknown as WorkerScope;
+  // For the frames the motion meter cannot copy: drawn into a canvas, 160 pixels wide (T2.5).
+  const sampler = new LumaSampler<CanvasImageSource>(offscreenCanvas, MOTION_WIDTH);
   const worker = new CaptureWorker({
     VideoEncoder: globalFunction('VideoEncoder') as VideoEncoderClass | undefined,
     AudioEncoder: globalFunction('AudioEncoder') as AudioEncoderClass | undefined,
@@ -799,6 +886,8 @@ if (globalFunction('DedicatedWorkerGlobalScope') !== undefined) {
         clearInterval(timer);
       };
     },
+    // The frames here are the camera's `VideoFrame`s, which a canvas draws.
+    drawLuma: (frame, region) => sampler.sample(frame as unknown as VideoFrame, region),
   });
   scope.addEventListener('message', (event) => {
     const data = event.data;

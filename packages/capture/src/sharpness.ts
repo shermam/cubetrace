@@ -102,8 +102,8 @@ export type CanvasFactory<Source> = (width: number, height: number) => Canvas2D<
 
 /**
  * Draws a region of a frame (a playing `<video>`, a `VideoFrame`) into a small canvas,
- * {@link SHARPNESS_WIDTH} pixels wide, and reads its luma. The canvas is made once and made again only when the region's
- * proportions change.
+ * {@link SHARPNESS_WIDTH} pixels wide (or `width`), and reads its luma. The canvas is made once and
+ * made again only when the region's proportions change.
  */
 export class LumaSampler<Source> {
   private canvas: {
@@ -112,11 +112,14 @@ export class LumaSampler<Source> {
     readonly context: Canvas2D<Source>;
   } | null = null;
 
-  constructor(private readonly createCanvas: CanvasFactory<Source>) {}
+  constructor(
+    private readonly createCanvas: CanvasFactory<Source>,
+    private readonly width = SHARPNESS_WIDTH,
+  ) {}
 
   /** The luma of `region` (source pixels) of `source`, downscaled; null without a canvas. */
   sample(source: Source, region: FramingRect): LumaImage | null {
-    const { width, height } = sampleSize(region);
+    const { width, height } = sampleSize(region, this.width);
     let canvas = this.canvas;
     if (canvas === null || canvas.width !== width || canvas.height !== height) {
       const context = this.createCanvas(width, height);

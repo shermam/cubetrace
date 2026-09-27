@@ -16,6 +16,7 @@ import { CameraPreview } from './camera-preview';
 import { CameraService, LUMA_SAMPLER } from './camera-service';
 import { CAPTURE_STARTER, CLIP_TAIL_MS, ENCODER_SETTLE_MS } from './recording-service';
 import { FakeCaptureStarter, statsOf } from './recording-testing';
+import { SyncService } from './sync-service';
 
 /** A canvas whose pixels are squares of 20, dark and light: a sharp picture. */
 class CheckerCanvas implements Canvas2D<CanvasImageSource> {
@@ -200,6 +201,19 @@ describe('CameraPreview', () => {
     const recording = element('camera-status-recording');
     expect(recording?.getAttribute('data-status')).toBe('recording');
     expect(recording?.querySelector('.dot')).not.toBeNull();
+    // The sync check (T2.5) starts with the recording, under the status line; Later ends it, so
+    // that the turns below are the attempt's.
+    const status = element('camera-status');
+    const sync = element('sync-check');
+    expect(sync?.getAttribute('data-state')).toBe('running');
+    expect(
+      status !== null &&
+        sync !== null &&
+        (status.compareDocumentPosition(sync) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true);
+    TestBed.inject(SyncService).later();
+    await update();
+    expect(element('sync-check')).toBeNull();
 
     // The scramble's clip is saved a second after the scramble.
     turn(s, fake, 'R U F');

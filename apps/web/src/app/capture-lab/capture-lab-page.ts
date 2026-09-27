@@ -1,5 +1,6 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import {
+  SYNC_CHECK_MS,
   attemptPath,
   captureSupport,
   startCapture,
@@ -8,6 +9,8 @@ import {
 } from '@cubetrace/capture';
 import type { FramesJson, VideoClip } from '@cubetrace/core';
 
+import { SyncRun } from '../camera/sync-run';
+import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow, type BrowserGlobals } from '../device/browser-globals';
 import { errorMessage } from '../shared/error-message';
 import { summarizeCut, type CutSummary } from './cut-summary';
@@ -63,7 +66,10 @@ interface CameraOption {
  * as JSON (with the frame times docs/DEVICES.md measures `VideoFrame.timestamp` from). "Mux and
  * save" (T2.3) has the workers cut the last seconds, mux them into an MP4 and write it with its
  * frames.json into a scratch folder of the origin private file system, and plays it back from
- * there. Not in the navigation: it is reached by its address, like a tool.
+ * there. "Sync check" (T2.5) runs the Timer's sync check on this camera's whole frame with whatever
+ * cube is connected (a GAN cube, or the demo cube), without a session, and prints what it found
+ * and what measuring each frame cost the capture worker. Not in the navigation: it is reached by
+ * its address, like a tool.
  */
 @Component({
   selector: 'app-capture-lab-page',
@@ -72,6 +78,7 @@ interface CameraOption {
 })
 export class CaptureLabPage {
   private readonly globals = inject(BROWSER_GLOBALS);
+  private readonly cube = inject(CubeService);
   private handle: CaptureHandle | undefined;
   private stream: MediaStream | undefined;
   /** The video track's frame rate setting: the saved clip's `fpsNominal`. */
@@ -118,11 +125,68 @@ export class CaptureLabPage {
     );
   });
 
+  /** How long the sync check watches, in seconds (the Timer's: 20). */
+  protected readonly syncSeconds = signal(SYNC_CHECK_MS / 1000);
+  /** The sync check under way, or the last one. */
+  protected readonly syncRun = signal<SyncRun | null>(null);
+  protected readonly syncRunning = computed(() => this.syncRun()?.state() === 'running');
+  /** One line: what the check is doing, or what it found. */
+  protected readonly syncStatus = computed(() => syncStatusOf(this.syncRun()));
+  /** The check's outcome in full, with the cube it watched. */
+  protected readonly syncJson = computed(() => {
+    const outcome = this.syncRun()?.outcome() ?? null;
+    return outcome === null ? '' : JSON.stringify(outcome, null, 2);
+  });
+
   constructor() {
     inject(DestroyRef).onDestroy(() => {
+      this.syncRun()?.cancel();
       void this.release();
       this.setClipUrl(undefined);
     });
+  }
+
+  /**
+   * Runs a sync check on this page's camera, the whole frame, with the cube connected now (the
+   * moves of any cube, the demo cube's included), for as many seconds as the field says.
+   */
+  protected startSync(): void {
+    const handle = this.handle;
+    if (handle === undefined || this.syncRunning()) {
+      return;
+    }
+    const globals = this.globals;
+    this.syncRun.set(
+      new SyncRun({
+        watch: (rect, onSample, onError) => handle.watchMotion(rect, onSample, onError),
+        rect: null,
+        events$: this.cube.events$,
+        durationMs: this.syncSeconds() * 1000,
+        now: () => hostNow(globals),
+        setTimeout: (callback, ms) =>
+          globals.setTimeout === undefined
+            ? window.setTimeout(callback, ms)
+            : globals.setTimeout(callback, ms),
+        clearTimeout: (timer) => {
+          if (globals.clearTimeout === undefined) {
+            window.clearTimeout(timer);
+          } else {
+            globals.clearTimeout(timer);
+          }
+        },
+      }),
+    );
+  }
+
+  protected stopSync(): void {
+    this.syncRun()?.cancel();
+  }
+
+  protected setSyncSeconds(text: string): void {
+    const value = Number(text);
+    if (Number.isFinite(value) && value >= 1) {
+      this.syncSeconds.set(Math.min(Math.round(value), 60));
+    }
   }
 
   protected start(): void {
@@ -335,8 +399,9 @@ export class CaptureLabPage {
     }
   }
 
-  /** Stops the pipeline and the camera. */
+  /** Stops the pipeline and the camera (and a sync check on them). */
   private async release(): Promise<void> {
+    this.syncRun()?.interrupt('the capture stopped');
     const handle = this.handle;
     const stream = this.stream;
     this.handle = undefined;
@@ -347,6 +412,41 @@ export class CaptureLabPage {
       track.stop();
     }
   }
+}
+
+/** What the lab's sync check is doing, or what it found, in one line. */
+function syncStatusOf(run: SyncRun | null): string {
+  if (run === null) {
+    return 'Not run yet: start the camera, connect a cube (the cube button at the top), then Sync check.';
+  }
+  switch (run.state()) {
+    case 'running':
+      return (
+        `Watching: ${String(run.secondsLeft())} s left; ${String(run.moves())} turns, ` +
+        `${String(run.onsets())} motion onsets, ${String(run.frames())} frames measured.`
+      );
+    case 'cancelled':
+      return 'Stopped.';
+    case 'done':
+      break;
+  }
+  const outcome = run.outcome();
+  if (outcome === null) {
+    return '';
+  }
+  const cost =
+    outcome.cost === null
+      ? ''
+      : ` Measuring a frame took the capture worker ${String(outcome.cost.medianMs)} ms ` +
+        `(95th percentile ${String(outcome.cost.p95Ms)} ms).`;
+  if (!outcome.ok) {
+    return `Sync check failed: ${outcome.message}.${cost}`;
+  }
+  return (
+    `The camera lags the cube by ${String(outcome.offsetMs)} ms (spread ` +
+    `${String(outcome.clapperboardResidualMs)} ms over ${String(outcome.clapperboardSamples)} ` +
+    `turns).${cost}`
+  );
 }
 
 /** The latest counters as the table's rows; dashes before the first second. */

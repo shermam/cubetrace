@@ -7,6 +7,7 @@ import { SettingsService } from '../settings/settings-service';
 import { fpsText, sharpnessText } from './camera-format';
 import { CameraService } from './camera-service';
 import { RecordingService } from './recording-service';
+import { SyncCheck } from './sync-check';
 import { showStream } from './video';
 
 /** What the recording is doing, as the preview's status line says it. */
@@ -20,10 +21,13 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
  * moved and resized in Camera settings), and under it one line: the frame rate measured, the
  * sharpness (green when good, amber when soft), what the recording is doing and how full storage
  * is. It measures the frames for `CameraService` (`watchPreview`), holding the sharpness meter while
- * an attempt is armed or solving, so that drawing a frame never delays a move of the solve.
+ * an attempt is armed or solving, so that drawing a frame never delays a move of the solve. Under
+ * them, the sync check (T2.5, `SyncCheck`): its countdown and its result are where the solver looks
+ * while turning the cube in front of the camera.
  */
 @Component({
   selector: 'app-camera-preview',
+  imports: [SyncCheck],
   host: { '[class.shown]': 'shown()' },
   template: `
     @if (shown()) {
@@ -83,6 +87,7 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
           }
         </p>
       }
+      <app-sync-check />
     }
   `,
   styles: `
