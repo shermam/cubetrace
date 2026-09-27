@@ -124,6 +124,11 @@ button {
     --status-colour: var(--ok);
   }
 
+  /* The last attempt to connect failed; the title says why. */
+  &[data-error] {
+    --status-colour: var(--danger);
+  }
+
   .dot {
     flex: none;
     width: 0.5rem;

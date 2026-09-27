@@ -17,27 +17,30 @@ Open **https://shermam.github.io/cubetrace/** in Chrome on Android, macOS or Win
 to the app over Web Bluetooth, which Safari, Firefox and Chrome on iPhone and iPad lack; Chrome on
 Linux has it behind `chrome://flags/#enable-experimental-web-platform-features`.
 
-**Connect a cube.** Turn the cube on, click the cube pill in the header ("No cube") or "Connect a
-cube" on the Timer page, then "Connect cube", and choose the cube in Chrome's list of Bluetooth
-devices. The GAN driver also needs the cube's MAC address:
+**Connect a cube.** Turn the cube on, click "Connect a cube" on the Timer page or the cube pill in
+the header ("Connect cube"), and choose the cube in Chrome's list of Bluetooth devices, which opens
+at once. The GAN driver also needs the cube's MAC address:
 
 - With `chrome://flags/#enable-web-bluetooth-new-permissions-backend` enabled, Chrome reads it by
-  itself. The connect dialog names this flag and has a Copy button: paste it in the address bar, set
-  the flag to Enabled, relaunch Chrome.
-- Without the flag, the dialog asks for the address: six hex bytes such as `AB:12:CD:34:EF:56`
-  (`chrome://bluetooth-internals` lists nearby devices with their addresses). With "Remember it for
-  this cube" on, Settings keeps it, and the next connection does not ask.
+  itself, and choosing the cube is all it takes. To enable it, paste that address in Chrome's
+  address bar, set the flag to Enabled and relaunch Chrome.
+- Without the flag, a dialog asks for the address once the cube is chosen: six hex bytes such as
+  `AB:12:CD:34:EF:56` (`chrome://bluetooth-internals` lists nearby devices with their addresses).
+  The flag's steps are folded under it, with a Copy button. With "Remember it for this cube" on,
+  Settings keeps it, and the next connection does not ask.
 
-Once the cube is connected, the pill shows its model and battery. Scramble the cube as the Timer
-page shows: the progress counts the moves, and a wrong turn brings up the moves that undo it. The
-time starts with the first turn after the scramble and stops when the cube is solved. `N` skips the
-scramble, `Esc` marks a DNF, `Delete` removes the last attempt.
+Once the cube is connected, no dialog is left open: the pill shows the cube's model and battery
+(click it for the cube's details and Disconnect). If connecting fails, the reason appears under the
+button, with a Details link. Scramble the cube as the Timer page shows: the progress counts the
+moves, and a wrong turn brings up the moves that undo it. The time starts with the first turn after
+the scramble and stops when the cube is solved. `N` skips the scramble, `Esc` marks a DNF, `Delete`
+removes the last attempt.
 
 **Demo mode.** Without a cube, https://shermam.github.io/cubetrace/?demo=0&speed=20 connects a fake
 cube that replays recorded solve 0 (of 30, `?demo=0` to `?demo=29`) at 20 times its speed: the
-scramble, the solve, the time and the breakdown. "Demo cube" in the connect dialog replays a random
-one at the speed set in Settings. The demo solves are downloaded when a demo starts, so demo mode
-needs the network.
+scramble, the solve, the time and the breakdown. "Try the demo", next to "Connect a cube" on the
+Timer page, replays a random one at the speed set in Settings. The demo solves are downloaded when a
+demo starts, so demo mode needs the network.
 
 **Install it** from Chrome's menu (Install app, or Add to Home screen on Android) or with the
 install button in the address bar on a laptop. The installed app opens offline, and Chrome grants it
@@ -58,11 +61,11 @@ the CFOP breakdown and the solve list.
 ![The Timer page on a laptop: a scramble with its picture on the left, the time 14.99 under it with "#2 · Saved" and "Attempt 3", and on the right the CFOP breakdown of the last solve and of the session average, and the solve list with its statistics](docs/screenshots/timer-laptop.png)
 
 The same on a phone in portrait, 390 px wide, and the connect dialog in Chrome without the MAC
-address flag:
+address flag, once the cube is chosen:
 
 <p>
   <img src="docs/screenshots/timer-phone.png" width="260" alt="The Timer page on a phone: scramble, picture, time, breakdown and solves stacked in one column">
-  <img src="docs/screenshots/connect-dialog.png" width="400" alt="The connect dialog: the Bluetooth hint, the flag's address with a Copy button, the three steps to enable it, and the Connect cube and Demo cube buttons">
+  <img src="docs/screenshots/connect-dialog.png" width="400" alt="The connect dialog asking for the cube's MAC address, with an address typed, Connect and Cancel, and under it, unfolded, the flag that lets Chrome read the address: its address with a Copy button and the three steps to enable it">
 </p>
 
 The Sessions page, with Export and Delete for each session:

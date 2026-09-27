@@ -13,6 +13,18 @@ versions follow [Semantic Versioning](https://semver.org/).
   the solve starts. The demo cube now makes a scramble's half turns as two quarter turns, as a real
   cube does, so the yellow shows in demo mode too (T1.13).
 
+### Changed
+
+- Connecting a cube takes one click (T1.12). "Connect a cube" on the Timer page (and in its Cube
+  section) and the cube pill in the header, which now reads "Connect cube" or "Reconnect", open
+  Chrome's list of Bluetooth devices at once; once the cube is connected, no dialog is left open.
+  While it connects, the button says so, with Cancel next to it. The connect dialog opens only when
+  it is needed: when the cube's MAC address has to be typed (the Chrome flag that makes it
+  unnecessary is folded under the prompt), in a browser without Web Bluetooth, for the Details of a
+  failed connection, and for a connected cube's details from the pill. A failure is written under
+  the button and in the pill's tooltip, whose dot turns red. "Try the demo", next to "Connect a
+  cube", starts the demo cube.
+
 ### Fixed
 
 - A page reloaded or closed during a save no longer leaves an empty `session.json` or `attempt.json`

@@ -2,6 +2,7 @@
   #dialog
   aria-labelledby="connect-dialog-title"
   data-testid="connect-dialog"
+  [attr.data-reason]="dialogs.reason()"
   (close)="onClosed()"
 >
   <div class="head">
@@ -89,6 +90,15 @@
             <button type="button" (click)="cancelMac()">Cancel</button>
           </div>
         </form>
+        @if (flagUrl; as url) {
+          <details class="flag" data-testid="flag-details">
+            <summary>Let Chrome read the address by itself</summary>
+            <div data-testid="flag-steps">
+              <p>Turn on this flag, and no cube needs its address typed:</p>
+              <app-flag-steps [url]="url" />
+            </div>
+          </details>
+        }
       } @else {
         <p class="state" role="status" data-testid="connect-state">
           <span class="spinner" aria-hidden="true"></span>Connecting…
@@ -112,23 +122,10 @@
         <p class="state" data-testid="connect-state">Last connection: {{ reason }}</p>
       }
       <p class="hint" data-testid="bluetooth-hint">{{ support.hint }}</p>
-      @if (support.flagUrl; as flagUrl) {
+      @if (flagUrl; as url) {
         <div class="flag" data-testid="flag-steps">
           <p>To let Chrome read the address by itself, turn on this flag:</p>
-          <p class="flag-url">
-            <code data-testid="flag-url">{{ flagUrl }}</code>
-            <button type="button" aria-label="Copy the flag address" (click)="copyFlag(flagUrl)">
-              Copy
-            </button>
-          </p>
-          @if (copyNotice(); as notice) {
-            <p class="note" role="status" data-testid="copy-notice">{{ notice }}</p>
-          }
-          <ol>
-            <li>Paste it in Chrome’s address bar and press Enter.</li>
-            <li>Set the highlighted flag, {{ flagName }}, to Enabled.</li>
-            <li>Relaunch Chrome.</li>
-          </ol>
+          <app-flag-steps [url]="url" />
         </div>
       }
       <div class="actions">

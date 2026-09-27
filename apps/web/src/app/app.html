@@ -31,12 +31,11 @@
       <button
         type="button"
         class="cube-pill"
-        aria-haspopup="dialog"
         data-testid="cube-status"
         data-status="disconnected"
-        (click)="openConnectDialog()"
+        (click)="requestConnect()"
       >
-        <span class="dot" aria-hidden="true"></span><span class="label">No cube</span>
+        <span class="dot" aria-hidden="true"></span><span class="label">Connect cube</span>
       </button>
     }
   </div>

@@ -1,4 +1,9 @@
-import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import {
+  type ComponentFixture,
+  DeferBlockBehavior,
+  DeferBlockState,
+  TestBed,
+} from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 
 import { APP_BUILD } from '../environments/version';
@@ -92,15 +97,16 @@ describe('App', () => {
     expect(query(fixture, '[data-testid="support-banner"]')).toBeNull();
   });
 
-  it('shows the cube status in the header; the pill opens the connect dialog', async () => {
+  it('shows the cube status in the header: "Connect cube"; where Bluetooth cannot connect, a click opens the dialog', async () => {
     polyfillDialog();
+    // chrome()'s `navigator.bluetooth` is a stand-in without `requestDevice`: no Web Bluetooth.
     const fixture = await render(chrome());
     // The pill and the dialog are deferred: their code loads right after the first render.
     await settle();
     await fixture.whenStable();
 
     const pill = query(fixture, '[data-testid="cube-status"]');
-    expect(pill?.textContent.trim()).toBe('No cube');
+    expect(pill?.textContent.trim()).toBe('Connect cube');
     expect(query(fixture, 'app-cube-status-pill')).not.toBeNull();
     expect(query(fixture, 'dialog')?.hasAttribute('open')).toBe(false);
 
@@ -108,5 +114,31 @@ describe('App', () => {
     await settle();
     await fixture.whenStable();
     expect(query(fixture, 'dialog')?.hasAttribute('open')).toBe(true);
+    expect(query(fixture, 'dialog')?.dataset['reason']).toBe('support');
+  });
+
+  it("the pill's placeholder says the same, and the pill acts on a click made on it", async () => {
+    polyfillDialog();
+    TestBed.configureTestingModule({
+      imports: [App],
+      providers: [provideRouter(routes), { provide: BROWSER_GLOBALS, useValue: chrome() }],
+      deferBlockBehavior: DeferBlockBehavior.Manual,
+    });
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+
+    const placeholder = query(fixture, '[data-testid="cube-status"]');
+    expect(query(fixture, 'app-cube-status-pill')).toBeNull();
+    expect(placeholder?.textContent.trim()).toBe('Connect cube');
+    placeholder?.click();
+    for (const block of await fixture.getDeferBlocks()) {
+      await block.render(DeferBlockState.Complete);
+    }
+    await settle();
+    await fixture.whenStable();
+
+    expect(query(fixture, 'app-cube-status-pill')).not.toBeNull();
+    // Without Web Bluetooth, the pill's click opens the dialog that says so.
+    expect(query(fixture, 'dialog')?.dataset['reason']).toBe('support');
   });
 });

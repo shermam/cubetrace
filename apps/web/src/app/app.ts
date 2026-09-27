@@ -37,9 +37,9 @@ export class App {
   );
   protected readonly bannerDismissed = signal(false);
 
-  /** The pill's placeholder: the dialog opens as soon as it has loaded. */
-  protected openConnectDialog(): void {
-    this.connectDialog.open();
+  /** The pill's placeholder: the pill connects as soon as it has loaded (as its own click does). */
+  protected requestConnect(): void {
+    this.connectDialog.requestConnect();
   }
 }
 

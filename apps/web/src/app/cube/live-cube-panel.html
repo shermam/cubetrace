@@ -16,9 +16,9 @@
       Disconnected: this was the cube's last state.
     }
   </p>
-  <button type="button" class="primary" data-testid="open-connect" (click)="dialogs.open()">
-    Connect a cube
-  </button>
+}
+@if (cube.status() !== 'connected') {
+  <app-cube-connect testId="open-connect" />
 }
 
 @if (cube.facelets(); as facelets) {

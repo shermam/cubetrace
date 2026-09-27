@@ -82,6 +82,8 @@ dialog {
 .mac-form {
   display: grid;
   gap: var(--space-2);
+  // As far below the heading as the other views' first paragraph.
+  margin-top: var(--space-4);
 
   p {
     margin: 0;
@@ -94,15 +96,13 @@ dialog {
   align-items: center;
 }
 
-.flag-url {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
+// Under the MAC prompt, the flag's steps are folded.
+details.flag {
+  margin-top: var(--space-4);
 
-  code {
-    min-width: 0;
-    overflow-wrap: anywhere;
+  summary {
+    color: var(--accent);
+    cursor: pointer;
   }
 }
 
