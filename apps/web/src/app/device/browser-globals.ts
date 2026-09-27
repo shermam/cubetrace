@@ -1,5 +1,12 @@
 import { DOCUMENT, InjectionToken, inject } from '@angular/core';
 
+/** The page's visibility: `document.visibilityState` and its `visibilitychange` event. */
+export interface PageVisibility {
+  readonly visibilityState: DocumentVisibilityState;
+  addEventListener(type: 'visibilitychange', listener: () => void): void;
+  removeEventListener(type: 'visibilitychange', listener: () => void): void;
+}
+
 /**
  * The parts of the browser's global object that the device services read. Every API is
  * optional because the app also runs, with a warning, on browsers that lack them.
@@ -18,6 +25,11 @@ export interface BrowserGlobals {
   readonly cancelAnimationFrame?: (handle: number) => void;
   /** Object URLs, for the files the app hands the user (a session export). */
   readonly URL?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>;
+  /** Whether the tab is visible, for the cube connection (`document`). */
+  readonly document?: PageVisibility;
+  /** Timers on the host clock, such as the cube's idle disconnection; the unit tests fake them. */
+  readonly setTimeout?: (callback: () => void, ms: number) => number;
+  readonly clearTimeout?: (handle: number) => void;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { MemorySessionStore, SOLVED, applyMoves, parseMoves } from '@cubetrace/core';
-import { FakeCube, type CubeEvent } from '@cubetrace/gan';
+import { FakeCube, type CubeConnection, type CubeEvent } from '@cubetrace/gan';
 import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 import { Subject } from 'rxjs';
 
@@ -376,6 +376,135 @@ describe('SessionService', () => {
     expect(s.service.attempt()?.events.scrambleDone).toBe(s.perf.hostMs);
   });
 
+  describe('Mark as solved', () => {
+    it('during the scramble: the attempt begins again with its scramble and number, and nothing is recorded', async () => {
+      const s = setup();
+      const fake = await ready(s);
+      turn(s, fake, 'R U');
+      expect(s.service.attempt()?.progress).toMatchObject({ matched: 2, total: 3 });
+
+      s.perf.advance(1000);
+      await s.cube.resetToSolved();
+      const restarted = s.perf.hostMs;
+      expect(s.service.phase()).toBe('scrambling');
+      expect(s.service.attempt()).toMatchObject({
+        index: 1,
+        scramble: 'R U F',
+        state: 'scrambling',
+        progress: { matched: 0, total: 3 },
+        events: { scrambleShown: restarted, scrambleStart: null },
+      });
+      expect(s.service.scramble()).toBe('R U F');
+      expect(s.service.attempts()).toEqual([]);
+
+      // It goes on from the solved cube, and only its own moves are recorded.
+      turn(s, fake, 'R U F');
+      expect(s.service.phase()).toBe('armed');
+      turn(s, fake, inverse('R U F'));
+      await s.service.whenSaved();
+      const [record] = await s.store.loadAttempts(s.service.session()?.id ?? '');
+      expect(record).toMatchObject({
+        index: 1,
+        scramble: 'R U F',
+        events: { scrambleShown: restarted },
+        result: { status: 'solved', replayOk: true, scrambleCorrected: false },
+      });
+      expect(record.moves.map((m) => m.m)).toEqual(['R', 'U', 'F', "F'", "U'", "R'"]);
+    });
+
+    it('during a solve: no record, the time goes back to 0, and the attempt begins again', async () => {
+      const s = setup();
+      const fake = await ready(s);
+      turn(s, fake, 'R U F');
+      turn(s, fake, "F'", 1000);
+      s.perf.advance(700);
+      s.frames.frame();
+      expect(s.service.phase()).toBe('solving');
+      expect(s.service.display().text).toBe('0.70');
+
+      await s.cube.resetToSolved();
+      expect(s.service.attempt()).toMatchObject({
+        index: 1,
+        scramble: 'R U F',
+        state: 'scrambling',
+      });
+      expect(s.service.display().text).toBe('0.00');
+      expect(s.frames.waiting).toBe(0);
+      expect(s.service.lastResult()).toBeNull();
+      expect(s.service.attempts()).toEqual([]);
+
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 500);
+      expect(s.service.attempts()).toHaveLength(1);
+      expect(s.service.lastResult()?.result).toMatchObject({ status: 'solved', timeMs: 1000 });
+    });
+
+    it('leaves an attempt that has ended alone', async () => {
+      const s = setup();
+      s.settings.setAutoAdvance(false);
+      const fake = await ready(s);
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'));
+      await settle();
+      const last = s.service.lastResult();
+      expect(s.service.phase()).toBe('next');
+
+      await s.cube.resetToSolved();
+      expect(s.service.phase()).toBe('next');
+      expect(s.service.attempt()).toMatchObject({ index: 1, state: 'solved' });
+      expect(s.service.lastResult()).toBe(last);
+      expect(s.service.attempts()).toHaveLength(1);
+    });
+
+    it('begins the attempt that waited for a solved cube', async () => {
+      const s = setup();
+      await ready(s, applyMoves(SOLVED, parseMoves('B')));
+      expect(s.service.phase()).toBe('solve-first');
+
+      await s.cube.resetToSolved();
+      expect(s.service.attempt()).toMatchObject({
+        index: 1,
+        scramble: 'R U F',
+        state: 'scrambling',
+      });
+    });
+  });
+
+  it('asks the cube for its state when the tab is back, and catches up with turns it missed', async () => {
+    const s = setup();
+    await s.service.whenReady();
+    s.service.prepare();
+    await settle();
+    const fake = new FakeCube({ now: () => s.perf.hostMs });
+    const { connection, emit } = scripted(fake);
+    // The cube's answer: the scramble's end, while the app saw R only.
+    const turned = applyMoves(SOLVED, parseMoves('R U F'));
+    const asked: CubeConnection = {
+      kind: 'gan',
+      events$: connection.events$,
+      get facelets() {
+        return connection.facelets;
+      },
+      requestFacelets: () => {
+        emit({ type: 'facelets', facelets: turned, hostMs: s.perf.hostMs });
+        return Promise.resolve();
+      },
+      requestBattery: () => connection.requestBattery(),
+      resetToSolved: () => connection.resetToSolved(),
+      disconnect: () => connection.disconnect(),
+    };
+    await connect(s, asked);
+    turn(s, fake, 'R');
+
+    s.page.setVisibility('hidden');
+    s.perf.advance(20_000);
+    expect(s.service.attempt()?.state).toBe('scrambling');
+    s.page.setVisibility('visible');
+    expect(s.cube.facelets()).toBe(turned);
+    expect(s.service.attempt()).toMatchObject({ state: 'armed' });
+    expect(s.service.attempt()?.events.scrambleDone).toBe(s.perf.hostMs);
+  });
+
   it('pauses the time when the cube disconnects, and goes on when it is back', async () => {
     const s = setup();
     const fake = await ready(s);
@@ -488,6 +617,7 @@ describe('SessionService', () => {
       facelets: SOLVED,
       requestFacelets: () => Promise.resolve(),
       requestBattery: () => Promise.resolve(),
+      resetToSolved: () => Promise.resolve(),
       disconnect: () => Promise.resolve(),
     });
     await connecting;

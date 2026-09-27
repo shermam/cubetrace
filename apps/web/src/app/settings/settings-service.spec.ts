@@ -39,6 +39,7 @@ describe('SettingsService', () => {
     expect(settings.demoSpeed()).toBe(1);
     expect(settings.inspection()).toBe(false);
     expect(settings.autoAdvance()).toBe(true);
+    expect(settings.idleDisconnectMinutes()).toBe(5);
     expect(settings.saveError()).toBeNull();
     expect(storage.length).toBe(0);
   });
@@ -50,6 +51,7 @@ describe('SettingsService', () => {
     expect(settings.setDemoSpeed(20)).toBe(true);
     settings.setInspection(true);
     settings.setAutoAdvance(false);
+    expect(settings.setIdleDisconnectMinutes(12)).toBe(true);
 
     expect(stored()).toEqual({
       version: 1,
@@ -58,6 +60,7 @@ describe('SettingsService', () => {
       demoSpeed: 20,
       inspection: true,
       autoAdvance: false,
+      idleDisconnectMinutes: 12,
     });
     const reloaded = load();
     expect(reloaded.hostLabel()).toBe('office-mbp');
@@ -65,6 +68,7 @@ describe('SettingsService', () => {
     expect(reloaded.demoSpeed()).toBe(20);
     expect(reloaded.inspection()).toBe(true);
     expect(reloaded.autoAdvance()).toBe(false);
+    expect(reloaded.idleDisconnectMinutes()).toBe(12);
   });
 
   it('stores MAC addresses normalized, sorted by name, and refuses what is not one', () => {
@@ -126,6 +130,19 @@ describe('SettingsService', () => {
     expect(settings.demoSpeed()).toBe(0.5);
   });
 
+  it('takes a whole number of idle minutes from 0 (never) to 60', () => {
+    const settings = load();
+
+    for (const minutes of [-1, 61, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(settings.setIdleDisconnectMinutes(minutes)).toBe(false);
+    }
+    expect(settings.idleDisconnectMinutes()).toBe(5);
+    expect(settings.setIdleDisconnectMinutes(0)).toBe(true);
+    expect(settings.idleDisconnectMinutes()).toBe(0);
+    expect(settings.setIdleDisconnectMinutes(60)).toBe(true);
+    expect(load().idleDisconnectMinutes()).toBe(60);
+  });
+
   it('keeps the valid stored values and drops the others one by one', () => {
     storage.setItem(
       SETTINGS_STORAGE_KEY,
@@ -140,6 +157,7 @@ describe('SettingsService', () => {
         demoSpeed: 0,
         inspection: 'yes',
         autoAdvance: false,
+        idleDisconnectMinutes: 90,
       }),
     );
     const settings = load();
@@ -149,6 +167,7 @@ describe('SettingsService', () => {
     expect(settings.demoSpeed()).toBe(1);
     expect(settings.inspection()).toBe(false);
     expect(settings.autoAdvance()).toBe(false);
+    expect(settings.idleDisconnectMinutes()).toBe(5);
   });
 
   it('starts from the defaults when the stored text is not JSON', () => {

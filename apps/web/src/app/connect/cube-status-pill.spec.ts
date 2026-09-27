@@ -1,7 +1,7 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { FakeCube } from '@cubetrace/gan';
 
-import { CubeService, GAN_CONNECTOR } from '../cube/cube-service';
+import { CubeService } from '../cube/cube-service';
 import { FakeGanConnector, asGanCube, bluetoothNavigator } from '../cube/cube-testing';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { FakeLocalStorage, settle } from '../device/fake-browser';
@@ -22,7 +22,7 @@ describe('CubeStatusPill', () => {
           provide: BROWSER_GLOBALS,
           useValue: { navigator, localStorage: new FakeLocalStorage() },
         },
-        { provide: GAN_CONNECTOR, useValue: connector.connect },
+        ...connector.providers,
       ],
     });
     cube = TestBed.inject(CubeService);
