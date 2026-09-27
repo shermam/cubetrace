@@ -309,3 +309,435 @@ export function settle(): Promise<void> {
     setTimeout(resolve, 0);
   });
 }
+
+/** A camera of {@link FakeMediaDevices}: what its track reports. */
+export interface FakeCamera {
+  readonly deviceId: string;
+  readonly label: string;
+  /** `getSettings()`; `deviceId` is added. Image Capture keys such as `exposureMode` included. */
+  readonly settings: Readonly<Record<string, unknown>>;
+  /** `getCapabilities()`: ranges as `{min, max, step}`, modes as lists. */
+  readonly capabilities: Readonly<Record<string, unknown>>;
+}
+
+/** A camera like Chrome's fake one (`--use-fake-device-for-media-stream`), 20 fps, manual exposure and focus. */
+export const FAKE_WEBCAM: FakeCamera = {
+  deviceId: 'fake-webcam',
+  label: 'fake_device_0',
+  settings: {
+    width: 1920,
+    height: 1080,
+    frameRate: 20,
+    aspectRatio: 1920 / 1080,
+    resizeMode: 'none',
+    exposureMode: 'manual',
+    exposureTime: 50,
+    focusMode: 'manual',
+    focusDistance: 50,
+  },
+  capabilities: {
+    width: { min: 1, max: 3840 },
+    height: { min: 1, max: 2160 },
+    frameRate: { min: 0, max: 20 },
+    facingMode: [],
+    resizeMode: ['none', 'crop-and-scale'],
+    exposureMode: ['manual', 'continuous'],
+    exposureTime: { min: 10, max: 100, step: 5 },
+    focusMode: ['manual', 'continuous'],
+    focusDistance: { min: 10, max: 100, step: 5 },
+  },
+};
+
+/** A laptop camera without any control (the MacBook's FaceTime camera, docs/devices/). */
+export const FAKE_FACETIME: FakeCamera = {
+  deviceId: 'facetime',
+  label: 'FaceTime HD Camera (3A71:F4B5)',
+  settings: { width: 1920, height: 1080, frameRate: 30, aspectRatio: 1920 / 1080 },
+  capabilities: {
+    width: { min: 1, max: 1920 },
+    height: { min: 1, max: 1920 },
+    frameRate: { min: 0, max: 30 },
+    facingMode: [],
+  },
+};
+
+/** The ThinkPhone's rear camera, as probed (docs/devices/): every control and a torch. */
+export const FAKE_PHONE_REAR: FakeCamera = {
+  deviceId: 'phone-rear',
+  label: 'camera 0, facing back',
+  settings: {
+    width: 1080,
+    height: 1920,
+    frameRate: 60,
+    facingMode: 'environment',
+    exposureMode: 'continuous',
+    exposureTime: 48.77393,
+    iso: 100,
+    focusMode: 'continuous',
+    focusDistance: 0.1,
+    whiteBalanceMode: 'continuous',
+    colorTemperature: 0,
+    zoom: 1,
+    torch: false,
+  },
+  capabilities: {
+    width: { min: 1, max: 4096 },
+    height: { min: 1, max: 3072 },
+    frameRate: { min: 0, max: 60 },
+    facingMode: ['environment'],
+    exposureMode: ['continuous', 'manual'],
+    exposureTime: { min: 0.832, max: 2880, step: 0.1 },
+    iso: { min: 100, max: 1594, step: 1 },
+    focusMode: ['manual', 'single-shot', 'continuous'],
+    focusDistance: { min: 0.1, max: 8.156, step: 0.01 },
+    whiteBalanceMode: ['continuous', 'manual'],
+    colorTemperature: { min: 2850, max: 7000, step: 50 },
+    zoom: { min: 1, max: 8, step: 0.1 },
+    torch: true,
+  },
+};
+
+/** The ThinkPhone's front camera: its focus lists only "manual" (docs/devices/). */
+export const FAKE_PHONE_FRONT: FakeCamera = {
+  deviceId: 'phone-front',
+  label: 'camera 1, facing front',
+  settings: {
+    width: 1920,
+    height: 1080,
+    frameRate: 60,
+    facingMode: 'user',
+    exposureMode: 'continuous',
+    exposureTime: 309.245,
+    iso: 100,
+    focusMode: 'continuous',
+    focusDistance: 0.331,
+    whiteBalanceMode: 'continuous',
+    colorTemperature: 0,
+    zoom: 1,
+  },
+  capabilities: {
+    width: { min: 1, max: 3264 },
+    height: { min: 1, max: 2448 },
+    frameRate: { min: 0, max: 60 },
+    facingMode: ['user'],
+    exposureMode: ['continuous', 'manual'],
+    exposureTime: { min: 0.5, max: 2501.6, step: 0.1 },
+    iso: { min: 100, max: 1594, step: 1 },
+    focusMode: ['manual'],
+    focusDistance: { min: 0, max: 3.19, step: 0.01 },
+    whiteBalanceMode: ['continuous', 'manual'],
+    colorTemperature: { min: 2850, max: 7000, step: 50 },
+    zoom: { min: 1, max: 8, step: 0.1 },
+  },
+};
+
+let fakeTrackCount = 0;
+
+/**
+ * A camera's video track. Its settings start as the camera's; `applyConstraints` applies each
+ * advanced set it can satisfy (modes the camera lists, numbers in range, the torch where there is
+ * one), skipping the others as Chrome does, and records the constraints; `refuseWith` makes it
+ * reject. `end()` is the camera going away: `readyState` ended and an `ended` event.
+ */
+export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
+  contentHint = '';
+  enabled = true;
+  readonly id = `fake-track-${String(++fakeTrackCount)}`;
+  readonly kind = 'video';
+  readonly label: string;
+  readonly muted = false;
+  onended: MediaStreamTrack['onended'] = null;
+  onmute: MediaStreamTrack['onmute'] = null;
+  onunmute: MediaStreamTrack['onunmute'] = null;
+  readyState: MediaStreamTrackState = 'live';
+  readonly applied: MediaTrackConstraints[] = [];
+  refuseWith: Error | null = null;
+  /** Modes the camera does not go back to by a constraint, as `focusMode: continuous` on some. */
+  sticky: readonly string[] = [];
+  private settings: Record<string, unknown>;
+  private constraints: MediaTrackConstraints;
+
+  constructor(
+    readonly camera: FakeCamera,
+    constraints: MediaTrackConstraints = {},
+  ) {
+    super();
+    this.label = camera.label;
+    this.settings = { ...camera.settings, deviceId: camera.deviceId };
+    this.constraints = constraints;
+  }
+
+  applyConstraints(constraints: MediaTrackConstraints = {}): Promise<void> {
+    this.applied.push(constraints);
+    if (this.refuseWith) {
+      return Promise.reject(this.refuseWith);
+    }
+    this.constraints = constraints;
+    for (const set of constraints.advanced ?? []) {
+      const entries = Object.entries(set) as [string, unknown][];
+      if (entries.every(([key, value]) => this.satisfies(key, value))) {
+        Object.assign(this.settings, Object.fromEntries(entries));
+      }
+    }
+    return Promise.resolve();
+  }
+
+  clone(): MediaStreamTrack {
+    return new FakeVideoTrack(this.camera, this.constraints);
+  }
+
+  getCapabilities(): MediaTrackCapabilities {
+    return structuredClone(this.camera.capabilities);
+  }
+
+  getConstraints(): MediaTrackConstraints {
+    return this.constraints;
+  }
+
+  getSettings(): MediaTrackSettings {
+    return { ...this.settings };
+  }
+
+  stop(): void {
+    this.readyState = 'ended';
+  }
+
+  /** The camera goes away (unplugged, or taken by another app). */
+  end(): void {
+    this.readyState = 'ended';
+    this.dispatchEvent(new Event('ended'));
+  }
+
+  private satisfies(key: string, value: unknown): boolean {
+    const capability = this.camera.capabilities[key];
+    if (key === 'torch') {
+      return capability === true && typeof value === 'boolean';
+    }
+    if (Array.isArray(capability)) {
+      return (capability as unknown[]).includes(value) && !this.sticky.includes(String(value));
+    }
+    const min = (capability as { min?: unknown } | undefined)?.min;
+    const max = (capability as { max?: unknown } | undefined)?.max;
+    return (
+      typeof value === 'number' &&
+      typeof min === 'number' &&
+      typeof max === 'number' &&
+      value >= min &&
+      value <= max
+    );
+  }
+}
+
+/** A `MediaStream` of fake tracks. */
+export class FakeMediaStream extends EventTarget implements MediaStream {
+  readonly id = `fake-stream-${String(++fakeTrackCount)}`;
+  onaddtrack: MediaStream['onaddtrack'] = null;
+  onremovetrack: MediaStream['onremovetrack'] = null;
+  private readonly tracks: MediaStreamTrack[];
+
+  constructor(tracks: readonly MediaStreamTrack[]) {
+    super();
+    this.tracks = [...tracks];
+  }
+
+  get active(): boolean {
+    return this.tracks.some((track) => track.readyState === 'live');
+  }
+
+  addTrack(track: MediaStreamTrack): void {
+    this.tracks.push(track);
+  }
+
+  clone(): MediaStream {
+    return new FakeMediaStream(this.tracks.map((track) => track.clone()));
+  }
+
+  getAudioTracks(): MediaStreamTrack[] {
+    return this.tracks.filter((track) => track.kind === 'audio');
+  }
+
+  getTrackById(trackId: string): MediaStreamTrack | null {
+    return this.tracks.find((track) => track.id === trackId) ?? null;
+  }
+
+  getTracks(): MediaStreamTrack[] {
+    return [...this.tracks];
+  }
+
+  getVideoTracks(): MediaStreamTrack[] {
+    return this.tracks.filter((track) => track.kind === 'video');
+  }
+
+  removeTrack(track: MediaStreamTrack): void {
+    const index = this.tracks.indexOf(track);
+    if (index >= 0) {
+      this.tracks.splice(index, 1);
+    }
+  }
+}
+
+/** An error as `getUserMedia` rejects with: a DOMException `name`, and the constraint at fault. */
+export function mediaError(name: string, message = '', constraint?: string): DOMException {
+  const error = new DOMException(message, name);
+  if (constraint !== undefined) {
+    Object.defineProperty(error, 'constraint', { value: constraint });
+  }
+  return error;
+}
+
+/**
+ * `navigator.mediaDevices` over a list of fake cameras. Until a `getUserMedia` succeeds (or while
+ * `granted` is false), `enumerateDevices` hides the cameras' ids and labels, as Chrome does before
+ * the permission. `getUserMedia` fails with the errors queued in `failures` first, one per call; then
+ * it opens the camera that `deviceId: {exact}` names (an unknown id: an OverconstrainedError on
+ * deviceId) or the first, refusing `frameRate: {exact}` above the camera's rate (an
+ * OverconstrainedError on frameRate). `hold` makes it wait (a permission prompt) until `release()`.
+ */
+export class FakeMediaDevices extends EventTarget implements MediaDevices {
+  ondevicechange: MediaDevices['ondevicechange'] = null;
+  granted = false;
+  readonly failures: unknown[] = [];
+  readonly requests: MediaStreamConstraints[] = [];
+  readonly tracks: FakeVideoTrack[] = [];
+  private held: (() => void)[] | null = null;
+
+  constructor(public cameras: readonly FakeCamera[]) {
+    super();
+  }
+
+  enumerateDevices(): Promise<MediaDeviceInfo[]> {
+    const hidden = !this.granted;
+    return Promise.resolve(
+      (hidden ? this.cameras.slice(0, 1) : this.cameras).map((camera) => ({
+        deviceId: hidden ? '' : camera.deviceId,
+        groupId: '',
+        kind: 'videoinput' as const,
+        label: hidden ? '' : camera.label,
+        toJSON(): unknown {
+          return { ...this };
+        },
+      })),
+    );
+  }
+
+  getDisplayMedia(): Promise<MediaStream> {
+    return Promise.reject(mediaError('NotSupportedError'));
+  }
+
+  getSupportedConstraints(): MediaTrackSupportedConstraints {
+    return {};
+  }
+
+  async getUserMedia(constraints: MediaStreamConstraints = {}): Promise<MediaStream> {
+    this.requests.push(constraints);
+    if (this.held !== null) {
+      await new Promise<void>((resolve) => {
+        this.held?.push(resolve);
+      });
+    }
+    if (this.failures.length > 0) {
+      throw this.failures.shift();
+    }
+    const video = typeof constraints.video === 'object' ? constraints.video : {};
+    const wanted = video.deviceId;
+    const exactId = typeof wanted === 'object' && !Array.isArray(wanted) ? wanted.exact : undefined;
+    const camera =
+      exactId === undefined
+        ? this.cameras.at(0)
+        : this.cameras.find((candidate) => candidate.deviceId === exactId);
+    if (camera === undefined) {
+      throw exactId === undefined
+        ? mediaError('NotFoundError', 'Requested device not found')
+        : mediaError('OverconstrainedError', '', 'deviceId');
+    }
+    const rate = video.frameRate;
+    const exactRate = typeof rate === 'object' ? rate.exact : undefined;
+    const maxRate = (camera.capabilities['frameRate'] as { max?: number } | undefined)?.max;
+    if (exactRate !== undefined && maxRate !== undefined && exactRate > maxRate) {
+      throw mediaError('OverconstrainedError', '', 'frameRate');
+    }
+    this.granted = true;
+    const track = new FakeVideoTrack(camera, video);
+    this.tracks.push(track);
+    return new FakeMediaStream([track]);
+  }
+
+  /** Makes `getUserMedia` wait, as for a permission prompt, until `release()`. */
+  hold(): void {
+    this.held ??= [];
+  }
+
+  release(): void {
+    const waiting = this.held ?? [];
+    this.held = null;
+    for (const resolve of waiting) {
+      resolve();
+    }
+  }
+
+  /** Plugs in or unplugs cameras: `devicechange`. */
+  setCameras(cameras: readonly FakeCamera[]): void {
+    this.cameras = cameras;
+    this.dispatchEvent(new Event('devicechange'));
+  }
+
+  /** The tracks that are still live. */
+  liveTracks(): FakeVideoTrack[] {
+    return this.tracks.filter((track) => track.readyState === 'live');
+  }
+}
+
+/**
+ * The `<video>`'s `requestVideoFrameCallback` for tests: `present()` runs the callbacks waiting
+ * for the next frame with its metadata. Install it on a `<video>` with `install()`.
+ */
+export class FakeVideoFrames {
+  private next = 1;
+  private readonly pending = new Map<number, VideoFrameRequestCallback>();
+  private presented = 0;
+
+  readonly requestVideoFrameCallback = (callback: VideoFrameRequestCallback): number => {
+    const handle = this.next++;
+    this.pending.set(handle, callback);
+    return handle;
+  };
+
+  readonly cancelVideoFrameCallback = (handle: number): void => {
+    this.pending.delete(handle);
+  };
+
+  /** How many callbacks wait for the next frame. */
+  get waiting(): number {
+    return this.pending.size;
+  }
+
+  /** Gives `video` this requestVideoFrameCallback, and a frame size. */
+  install(video: HTMLVideoElement, width = 1920, height = 1080): void {
+    Object.assign(video, {
+      requestVideoFrameCallback: this.requestVideoFrameCallback,
+      cancelVideoFrameCallback: this.cancelVideoFrameCallback,
+    });
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: width });
+    Object.defineProperty(video, 'videoHeight', { configurable: true, value: height });
+  }
+
+  /** Presents `count` frames `intervalMs` apart on the camera's clock, `width` × `height`. */
+  present(count = 1, intervalMs = 50, width = 1920, height = 1080): void {
+    for (let i = 0; i < count; i++) {
+      this.presented++;
+      const metadata: VideoFrameCallbackMetadata = {
+        mediaTime: (this.presented * intervalMs) / 1000,
+        presentedFrames: this.presented,
+        width,
+        height,
+        expectedDisplayTime: 0,
+        presentationTime: 0,
+      };
+      const callbacks = [...this.pending.values()];
+      this.pending.clear();
+      for (const callback of callbacks) {
+        callback(this.presented * intervalMs, metadata);
+      }
+    }
+  }
+}
