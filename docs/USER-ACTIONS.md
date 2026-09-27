@@ -25,14 +25,20 @@ adds items; the owner ticks them when done (date and any detail that others need
 
 ## Needed for phase 2
 
-- [ ] **Manual round 2 (v0.2.0)**, now that recording is on Pages (T2.6): open
-  https://shermam.github.io/cubetrace/ on the MacBook Pro 2021 and on the ThinkPhone and go through
-  the "Round 2 (v0.2.0)" block at the top of `docs/MANUAL-TESTS.md` (T2.1, T2.4, T2.5, T2.7, then
-  T2.3) with the GAN 12 ui FreePlay, on the MacBook's camera and on both of the phone's: fill in its
-  table, attach to one issue each device's session export, one attempt's downloaded clips per
-  device, the console lines and the screenshots it lists, write its numbers into `docs/DEVICES.md`
-  (or into that issue), and open an issue for every failure. The coordinator then asks for the
-  `v0.2.0` release.
+- [ ] **Manual round 2 (v0.2.0)** — released on 2026-09-27 at night, once the fixes from the
+  first real recordings were on Pages (T2.8 sync check, T2.9 clips and audio, T2.10 video quality;
+  issues #32–#34): open https://shermam.github.io/cubetrace/ on the MacBook Pro 2021 and on the
+  ThinkPhone and go through the "Round 2 (v0.2.0)" block at the top of `docs/MANUAL-TESTS.md`
+  (T2.1, T2.4, T2.5, T2.7, T2.10, then T2.3) with the GAN 12 ui FreePlay (and the 356 i3), on the
+  MacBook's camera and on both of the phone's: fill in its table, attach to one issue each device's
+  session export, one attempt's downloaded clips per device, the console lines and the screenshots
+  it lists, write its numbers into `docs/DEVICES.md` (or into that issue), and open an issue for
+  every failure. Three things to look at in particular: the sync check wants a framing rectangle
+  around the cube (it asks for one; if it still fails, attach its "Download check data" JSON and the
+  console's `cubetrace: sync check …` line); the recording panel's codec line now names the audio
+  state (say what it shows, and whether a downloaded clip has sound: the viewer starts muted); and a
+  clip that begins late is saved and marked, no longer lost. The coordinator then asks for the
+  `v0.2.0` release (from the GitHub UI: the session cannot push tags).
 
 ## Needed for phase 3 (Firebase)
 
