@@ -33,9 +33,9 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | T1.6b | `web`: timer page, breakdown chart, solve list, sessions page, OPFS store, `SessionService` | T1.4, T1.6a | ✅ #10 |
 | T1.7 | `web`: PWA (manifest, service worker), wake lock, storage persistence, responsive layouts, version display | T1.0 | ✅ #3 |
 | T1.8 | `web`: device probe page (`/probe`) | T1.0 | ✅ #4 |
-| T1.9 | end-to-end suite with the fake cube; JSON Schema validation of exports | T1.6 | 🟨 #14 |
-| T1.10 | docs, CHANGELOG, `v0.1.0`, manual test round with the owner | T1.7, T1.8, T1.9 | 🟨 #11 |
-| T1.11 | `storage`: atomic OPFS writes and tolerant reads (issue #12) | T1.6b | 🟨 #15 |
+| T1.9 | end-to-end suite with the fake cube; JSON Schema validation of exports | T1.6 | ✅ #14 |
+| T1.10 | docs, CHANGELOG, `v0.1.0`, manual test round with the owner | T1.7, T1.8, T1.9 | ✅ #11 (tag `v0.1.0` after the owner's round) |
+| T1.11 | `storage`: atomic OPFS writes and tolerant reads (issue #12) | T1.6b | ✅ #15 |
 
 Waves for parallel work: T1.0 → {T1.1, T1.7, T1.8} → {T1.2, T1.3, T1.5} → {T1.4, T1.6a} → T1.6b →
 {T1.9, T1.10}. T1.6 was split into T1.6a and T1.6b on 2026-09-27 so that the owner can test the
