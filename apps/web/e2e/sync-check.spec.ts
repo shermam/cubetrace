@@ -76,6 +76,24 @@ test('the Timer: the check starts with a recording session and pauses the timer,
   );
   await expect(scramble).toHaveText(scrambleText);
   await expect(attempt).toHaveText('Attempt 2');
+  // Under the camera's preview, beside the time, where the solver looks while turning; on a phone
+  // too, within the screen's width.
+  const previewBox = await page.getByTestId('camera-preview').boundingBox();
+  const panelBox = await panel.boundingBox();
+  expect(previewBox).not.toBeNull();
+  expect(panelBox).not.toBeNull();
+  if (previewBox !== null && panelBox !== null) {
+    expect(panelBox.y).toBeGreaterThanOrEqual(previewBox.y + previewBox.height);
+    expect(Math.abs(panelBox.x - previewBox.x)).toBeLessThan(2);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(panel).toBeVisible();
+  const widths = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(widths.scrollWidth).toBeLessThanOrEqual(widths.innerWidth);
+  await page.setViewportSize({ width: 1280, height: 720 });
   // The capture worker measures the motion of the frames and the panel counts them.
   const count = page.getByTestId('sync-count');
   await expect

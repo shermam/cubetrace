@@ -321,21 +321,22 @@ training pipeline to subtract. While it runs, the timer tracks no attempt, so it
 record.
 
 - [ ] Camera on, framing rectangle around the cube and the hands, cube connected and solved, a new
-  session (Sessions → New session, or the day's first attempt): once the Recording part says
-  "Recording", before the scramble's first turn, the Camera section shows "Sync check" with "Turn
-  one face, pause, turn it back; repeat five times", a countdown from 20 s, and the turns and motion
-  onsets it has seen; the timer's status line says "Sync check: …" and the scramble waits. Turn one
+  session (Sessions → New session, or the day's first attempt): once the line under the camera's
+  picture says "recording", before the scramble's first turn, "Sync check" appears under that line
+  (beside the time on the laptop, under it on the phone) with "Turn one face, pause, turn it back;
+  repeat five times", a countdown from 20 s, and the turns and motion onsets it has seen; the
+  timer's status line says "Sync check: …" and the scramble waits. Turn one
   face a quarter turn, hold the cube and the hands still for about a second, turn it back, hold
   still again, five times over: about a second after the tenth turn it says "Camera lags the cube
   by X ms (±Y)". Write down X and Y. The cube is solved again, and the timer is back on the same
   scramble and attempt number, which the next turns scramble as usual.
-- [ ] The offset is stable: "Sync check" (the line under the Recording part), the same turns: it
+- [ ] The offset is stable: "Sync check" (the line under the picture), the same turns: it
   says "…; was X ms". The two offsets are within 10 ms of each other and both spreads under 40 ms.
   Write down both checks.
 - [ ] A failure says why and offers Retry: 20 s without turning ("the cube did not move"); the turns
   with the lens covered ("no motion seen in the framing rectangle"); the turns made quickly, without
   pauses ("fewer than 4 matches …"). Retry runs it again; Later ends it and hides it, and the line
-  under the Recording part then says "this camera has no check in this session". After each, the
+  under the picture then says "this camera has no check in this session". After each, the
   timer is back on its scramble once the cube is solved (turn the face back if it is not).
 - [ ] "Sync check" is not offered once a scramble has begun, nor during the solve (its title says
   why): it is again at the next attempt, before the scramble's first turn.

@@ -16,7 +16,7 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
 };
 
 /**
- * The sync check's part of the Camera section (docs/PLAN.md, T2.5): while a check runs, what to do
+ * The sync check under the camera's preview (docs/PLAN.md, T2.5): while a check runs, what to do
  * (one face turned and turned back, five times, with pauses), a countdown and how many turns and
  * motion onsets it has seen; then the camera's lag behind the cube, or why the check failed, with
  * Retry; "Later" hides it.
