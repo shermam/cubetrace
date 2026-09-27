@@ -44,3 +44,6 @@ export {
   f2lSlotsComplete,
   ocllComplete,
 } from './phases';
+// T1.4 — attempts, sessions, clock, stats, store
+export type { CubeClockParams } from './clock';
+export { CLOCK_FIT_WINDOW, CubeClockFit } from './clock';
