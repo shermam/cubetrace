@@ -6,6 +6,11 @@ const port = 4200;
 // The production build under the GitHub Pages path, for pwa.spec.ts (which has this URL too).
 const pagesPort = 4300;
 const inCi = Boolean(process.env['CI']);
+// The specs that record Chrome's fake camera, encoding 1080p30 in software in the capture worker:
+// one at a time, in a project of their own. Two encoders at once on four CPUs cost the camera frames
+// and hold back the demo cube's timers, which recording.spec.ts and capture.spec.ts measure (lost
+// frames, the timing with the camera on and off). The other specs run beside them.
+const encoding = /\/(capture|recording|session-clips|sync-check)\.spec\.ts$/;
 
 export default defineConfig({
   testDir: '.',
@@ -19,7 +24,11 @@ export default defineConfig({
     baseURL: `http://localhost:${String(port)}`,
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    // First, so that the next of its specs starts as soon as one ends.
+    { name: 'encoding', testMatch: encoding, workers: 1, use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', testIgnore: encoding, use: { ...devices['Desktop Chrome'] } },
+  ],
   webServer: [
     {
       // The Angular dev server; a server already running on the port is reused outside CI.

@@ -168,3 +168,18 @@ highest with the rest of the suite running beside it): its luma copied out of th
 luma levels from one frame to the next, and by about 15 times that every 14 to 16 frames, so some of
 those jumps come after half a second of stillness: onsets that a check there cannot match, since the
 demo cube's turns come close together, not as single turns (`docs/TOOLCHAIN.md`).
+
+## Manual round 2 (v0.2.0)
+
+What the owner's second round measures on each camera (`docs/MANUAL-TESTS.md`, "Round 2"), to fill
+in after it: the frame rate measured in Camera settings; the sharpness of the framing rectangle with
+the cube in it, in focus, moving and covered, and the threshold between them (20 by default, set on
+Chrome's test camera); the codecs Chrome chose; the sizes of one attempt's clips; and, on the phone
+on its stand, 20 minutes of solves with the camera on. The sync check's numbers go into "Camera lag"
+above, and the capture lab's frame timestamps under "VideoFrame.timestamp".
+
+| Camera | Date, Chrome | Measured fps | Sharpness: in focus / moving / covered; threshold | Codecs | One attempt's clips: scramble / solve | 20 minutes: warmth, battery, dropped frames, storage used |
+|---|---|---|---|---|---|---|
+| MacBook Pro 2021, FaceTime HD | | | | | | |
+| ThinkPhone, front camera | | | | | | |
+| ThinkPhone, rear camera | | | | | | |

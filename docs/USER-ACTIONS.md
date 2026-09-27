@@ -23,6 +23,17 @@ adds items; the owner ticks them when done (date and any detail that others need
   (or whatever flag the app's connect screen names) enabled so the cube's MAC address can
   be read automatically; otherwise enter the MAC once per cube in Settings.
 
+## Needed for phase 2
+
+- [ ] **Manual round 2 (v0.2.0)**, now that recording is on Pages (T2.6): open
+  https://shermam.github.io/cubetrace/ on the MacBook Pro 2021 and on the ThinkPhone and go through
+  the "Round 2 (v0.2.0)" block at the top of `docs/MANUAL-TESTS.md` (T2.1, T2.4, T2.5, T2.7, then
+  T2.3) with the GAN 12 ui FreePlay, on the MacBook's camera and on both of the phone's: fill in its
+  table, attach to one issue each device's session export, one attempt's downloaded clips per
+  device, the console lines and the screenshots it lists, write its numbers into `docs/DEVICES.md`
+  (or into that issue), and open an issue for every failure. The coordinator then asks for the
+  `v0.2.0` release.
+
 ## Needed for phase 3 (Firebase)
 
 - [x] 2026-09-27 — Firebase project created: `cubetrace-cacd9`

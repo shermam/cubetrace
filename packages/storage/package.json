@@ -1,6 +1,6 @@
 {
   "name": "@cubetrace/storage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Where sessions are kept: the session store over the origin private file system (OPFS), later the upload queue. Plain TypeScript; never imports Angular.",
   "license": "MIT",

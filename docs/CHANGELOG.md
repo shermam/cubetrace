@@ -5,86 +5,66 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.0 — 2026-09-27
+
+Phase 2 of `docs/PLAN.md`: the device's own camera records every attempt, in sync with the cube.
+Deployed at https://shermam.github.io/cubetrace/.
+
 ### Added
 
-- The Camera section of the Timer page, below the Cube section (T2.1): the device's cameras to
-  choose from ("Front camera" and "Rear camera" on a phone), Turn on and Turn off (the camera stays
-  as it was left across reloads), a preview (mirrored like a mirror for a front camera), what the
-  camera claims next to the frame rate and frame size measured on the preview (a phone may claim
-  60 fps and deliver 30), a sharpness meter of the framing rectangle ("good" or "soft"), and the
-  framing rectangle itself, the part of the picture the model will learn from, dragged and resized by
-  mouse, finger or arrow keys and kept per camera. The manual controls a camera has appear, and only
-  those: exposure (Auto or Manual, the exposure time and ISO), focus, white balance, zoom and the
-  torch, kept per camera, with "Reset to auto". Why a camera did not open is said in plain words
-  (permission, no camera, in use by another app), and so is a camera that opened otherwise than asked
-  (no 60 fps mode, the chosen camera gone). Settings has the resolution (1920×1080 or 1280×720), the
-  frame rate (the camera's best, exactly 60 fps, or 30 fps) and the sharpness threshold.
-- The capture pipeline (T2.2, `packages/capture`): the camera is encoded without pause in a
-  worker (H.264 where Chrome has an encoder for it, else VP9; AAC or Opus audio; a keyframe every
-  second) into the last 90 s kept in memory, at most 160 MB, from which any interval can be cut
-  without re-encoding, with every frame's time on the host clock. Nothing records with it yet (the
-  timer will, from T2.4); `/capture-lab`, a page outside the navigation, runs it on its own with its
-  counters and cuts, for testing on a device.
-- Clips (T2.3, `packages/capture`): the capture worker turns any interval of the last 90 s into an
-  MP4 file, without re-encoding (with mediabunny: the camera's H.264 or VP9 and the microphone's AAC
-  or Opus as they were encoded, the file's index first so that it plays at once), and writes it with
-  the time of each of its frames (`<camera>.<segment>.frames.json`) into the attempt's folder of the
-  browser's storage, each file written whole, so that a page closed in the middle leaves no half
-  file. The timer does not record yet (T2.4); `/capture-lab` has "Mux and save the last … s", which
-  saves a clip into a scratch folder, lists its files and plays it back.
-- Recording in the timer (T2.4). With the camera on and a session under way, every attempt gets two
-  clips in its folder, cut from the last 90 s kept in memory about a second after their end: its
-  scramble, from 2 s before the first turn to 1 s after the cube matches it, and its solve, from 3 s
-  before the first turn to 1 s after the cube is solved or the DNF. Each is listed in the attempt's
-  record (`video`) with the framing rectangle as its `crop`; the attempt's timing never waits for
-  them. The session lists the camera (`cameras`). The microphone's sound comes with the video unless
-  Settings → Camera → Record audio is off. The solve list has a clip badge on each attempt, which
-  opens a viewer: the clip plays next to the attempt's moves by time, the one on screen highlighted,
-  and Download saves both clips, their frame times and `attempt.json`. A storage meter in the Camera
-  section and on the Sessions page (which also gives each session's clips and their size) warns from
-  80% of the browser's quota, and from 95% the camera stops recording while the timer goes on. A clip
-  that could not be saved is said once and written in the session's notes.
-- The sync check (T2.5): how far the camera's frames lag the cube, for the training to subtract. When
-  a session records with the camera on, before the scramble's first turn, a panel under the camera's
-  picture (beside the time) asks to turn one face, pause, turn it back, five times over, counts down 20 s with the turns and the motion
-  onsets it has seen in the framing rectangle, and says "Camera lags the cube by X ms (±Y)", or why
-  it could not tell, with Retry. Meanwhile the timer tracks no attempt, so the check's turns are in
-  no record: the attempt waiting for its scramble begins again afterwards, with the same scramble and
-  number, once the cube is solved. The lag is kept in the session (`clock.cameras`, with the turns
-  matched), and every later clip of that camera carries it (`syncResidualMs`). "Sync check" runs it
-  again outside a scramble or a solve (the message then gives the lag before) and "Later" hides it.
-  `/capture-lab` has a Sync check section that runs it with any cube, the demo cube included,
-  without a session, and says what measuring the frames cost.
+- Camera settings, a section of the Timer page (T2.1, T2.7): the camera to use ("Front camera" and
+  "Rear camera" on a phone), Turn on and Turn off (kept across reloads), the frame rate and frame size
+  measured next to what the camera claims, the manual controls it has (exposure and ISO, focus, white
+  balance, zoom, torch) with Reset to auto, the framing rectangle (Framing → Edit, kept per camera) and
+  a sharpness meter (good or soft); in Settings, the resolution, the frame rate, the sharpness
+  threshold and Record audio.
+- The camera's picture beside the time (under it on a phone), mirrored for a front camera, with the
+  framing rectangle drawn on it and one line under it: the frame rate, the sharpness, what the
+  recording does and how full storage is (T2.7).
+- Recording (T2.2, T2.3, T2.4): with the camera on and a session under way, the camera and the
+  microphone are encoded into the last 90 s kept in memory (H.264 and AAC where Chrome has encoders
+  for them, VP9 and Opus otherwise), and every attempt gets two MP4 clips cut from it without
+  re-encoding: its scramble, from 2 s before its first turn to 1 s after the cube matches it, and its
+  solve, from 3 s before its first turn to 1 s after the cube is solved or the DNF. They are saved
+  with the time of every frame into the attempt's folder and listed in its record; the attempt's
+  timing never waits for them.
+- Clip badges on the solve lists, which open the clip viewer (T2.4): the clip plays next to the
+  attempt's moves by time, the one on screen highlighted; Download saves both clips, their frame
+  times and `attempt.json`.
+- The storage meter, in Camera settings and on the Sessions page, whose rows also give each session's
+  clips and their size: a warning from 80% of the browser's quota, and from 95% the camera stops
+  recording while the timer goes on (T2.4).
+- A clip that could not be saved is said once, written in the session's notes and logged in the
+  console as `cubetrace: clip failed: …` (T2.4).
+- The sync check (T2.5): when a session starts recording, one face turned and turned back five times
+  gives "Camera lags the cube by X ms (±Y)", kept in the session (`clock.cameras`) and in every later
+  clip of that camera (`syncResidualMs`); the timer tracks no attempt meanwhile; Retry, Later, and
+  "Sync check" under the camera's picture to run it again between attempts.
+- The session's page, `/sessions/<id>` (T2.7): its date, device, cube and cameras, its statistics with
+  ao100, the storage its clips take, every attempt with the clip viewer and its downloads, Export and
+  Delete; opened by "See all" under the Timer's solves and by each date on the Sessions page.
+- `/capture-lab`, a page outside the navigation for trying a device: the capture pipeline with its
+  counters and cuts, "Mux and save" and a sync check with any cube (T2.2, T2.3, T2.5).
+- Development: `packages/capture` (the camera, the encoder pipeline and its ring buffer in a worker,
+  the cuts, MP4 muxing with mediabunny and clip writing in a second worker, the motion measurement
+  and the clapperboard), and end-to-end tests of the recording with Chrome's fake camera (T2.1–T2.7).
 
 ### Changed
 
-- The Timer page keeps the camera in view (T2.7). On a laptop, the camera's picture sits beside the
-  time, under the scramble (whose picture is now beside its moves), so that the scramble, the time and
-  the cube in frame are seen together, with one line under the picture: the frame rate, the sharpness
-  (green when good, amber when soft), what the recording does (idle, recording, saving) and how full
-  storage is. On a phone the picture is under the time, the width of the screen, and the page is
-  tighter so that the three fit. The camera's controls, with the resolution, frame rate and Record
-  audio of Settings, are in Camera settings, a disclosure below the Cube section that opens by itself
-  the first time the camera is on and then stays as it was left; the framing rectangle is moved there,
-  over a larger picture (Framing → Edit). The Timer page lists the last 12 solves, with "N solves in
-  this session · See all", which opens the session's page (`/sessions/<id>`, also from each date on the
-  Sessions page): its date, device, cube and cameras, its statistics with ao100, the storage its clips
-  take, every attempt with the clip viewer and its downloads, Export and Delete; the current session's
-  page follows its attempts as they come. The sharpness meter measures at most twice a second, on the
-  framing rectangle drawn 160 pixels wide (320 before), and not while an attempt is armed or solving,
-  so that drawing a frame never holds back a move of the solve.
-- Clips are muxed and written by a second worker (T2.4), so that saving one never holds up the
-  camera's frames in the capture worker, which only cuts; the camera's frames and the microphone's
-  sound wait up to a third and half a second for a busy worker instead of being dropped.
+- The Timer page (T2.7): the last 12 solves, with "N solves in this session · See all"; the scramble's
+  picture beside its moves, and the result on the line of the attempt's number; wider on a laptop and
+  tighter on a phone, so that the scramble, the time and the camera's picture are in view together.
+- The records are schema version 2 (T2.0, `docs/DATA-MODEL.md`): `attempt.json` gains `clock` and
+  lists its clips in `video`, `session.json` lists its `cameras` and their `clock.cameras`, and every
+  clip has a `frames.json`; sessions recorded by 0.1.0 are still read, resumed and exported, as
+  version 2, and their files are not rewritten.
 
-- The records are schema version 2 (T2.0, `docs/DATA-MODEL.md`). Every `attempt.json` keeps the
-  cube clock fit of its own moves (`clock`), which places each move on the host clock without the
-  Bluetooth jitter: the cube's clock runs 0.7% slow while it is turned, and across the pauses
-  between attempts it does not, so the fit of a whole session drifts (`docs/DEVICES.md`).
-  `attempt.json`'s `video`, `session.json`'s `cameras` and `clock.cameras`, and the new
-  `<camera>.<segment>.frames.json` are defined for the recordings of phase 2. Sessions recorded
-  before are still read, resumed and exported, as version 2 records without a clock fit; their
-  files are not rewritten. JSON Schemas of both versions are in `packages/core/schema/`.
+### Fixed
+
+- The cube clock fit of a session drifted by 0.7% of every pause between its attempts (the cube's
+  clock runs slow only while it is turned), so it placed the moves of a long session hundreds of
+  milliseconds off: every `attempt.json` now keeps the fit of its own moves (`clock`), and
+  `session.json`'s `clock.cube` is only a coarse summary (issue #22, T2.0).
 
 ## 0.1.0 — 2026-09-27
 
