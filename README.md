@@ -4,11 +4,13 @@ cubetrace is a Chrome web app that times speedcube solves on a GAN Bluetooth cub
 Cubeast: it shows a scramble, follows the cube while you scramble it, starts the time with your
 first turn, stops it when the cube is solved, and breaks each solve into its CFOP phases. Its side
 effect is a dataset: every attempt is kept with its scramble, every move on the device's clock and
-on the cube's, and its phases. The later phases of the [plan](docs/PLAN.md) add video: the device's
-own camera first, then phones as extra cameras, each recording the solves in sync with the moves.
+on the cube's, its phases and, with the device's camera on, two video clips of it in sync with the
+moves. The later phases of the [plan](docs/PLAN.md) add cloud storage, so that every device's
+sessions end up in one dataset, and phones as extra cameras.
 
-**Status:** version 0.1.0, phase 1 (the timer), before the owner's first test round on the real
-cubes and phones ([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md)). What it does is listed in
+**Status:** version 0.2.0: phase 2 (the device's own camera) on top of phase 1 (the timer), before
+the owner's second test round on the real cubes, cameras and phones
+([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), Round 2). What each version does is listed in
 [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 ## Use it
@@ -49,36 +51,88 @@ scramble, the solve, the time and the breakdown. "Try the demo", next to "Connec
 Timer page, replays a random one at the speed set in Settings. The demo solves are downloaded when a
 demo starts, so demo mode needs the network.
 
-**Recording.** Turn the camera on in Camera settings on the Timer page (below the Cube section;
-choose the camera, frame the cube with the rectangle under Framing → Edit, and check the sharpness
-meter). Its picture then stays beside the time (under it on a phone), with the frame rate, the
-sharpness, the recording and the storage in one line under it, so that the cube can be kept in frame
-while scrambling and solving. While the camera is on and a session is under way, the app keeps the
-last 90 s of the camera and the microphone in memory,
-and every attempt gets two clips: its scramble, from 2 s before the first turn to 1 s after the cube
-matches the scramble, and its solve, from 3 s before the first turn to 1 s after the cube is solved
-(a clip begins at a keyframe, up to a second earlier). They are MP4 files, saved about a second after
-their end into the attempt's folder with the time of each frame, and listed in the attempt's record;
-the timing of the attempt never waits for them. The Timer page lists the session's last 12 solves;
-"See all" under them, or a session's date on the Sessions page, opens the session's page, with all its
-attempts, its statistics (ao100 too) and the storage its clips take. Each list shows a badge on each
-attempt with clips, which opens a viewer: the clip plays next to the attempt's moves by time, the one
-on screen highlighted, and Download saves both clips, their frame times and `attempt.json`. Camera
-settings and the Sessions page show how much of the browser's storage is used: from 80% they warn,
-and from 95% the camera stops recording (the timer goes on) until sessions are exported or deleted.
-Record audio, in Camera settings and in Settings → Camera, turns the microphone off. A clip that
-could not be saved is said once and written in the session's notes.
-
 **Install it** from Chrome's menu (Install app, or Add to Home screen on Android) or with the
 install button in the address bar on a laptop. The installed app opens offline, and Chrome grants it
 persistent storage more readily (Settings → Keep my data).
 
 **Your data** stays in the browser, in the site's origin private file system (OPFS): a folder per
 session with its `session.json` and a folder per attempt with its `attempt.json` and its clips
-([`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)). Nothing is uploaded. The Sessions page exports a
-session's records as one JSON file, or deletes the session with its clips; clearing the site's data
-in Chrome deletes all of them.
-Phase 3 adds cloud storage, so that the sessions of every device end up in one dataset.
+([`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)). Nothing is uploaded. The Sessions page, and each
+session's page, export a session's records as one JSON file, without the video, or delete the
+session with its clips; an attempt's clips are downloaded from its clip badge (Recording, below).
+Clearing the site's data in Chrome deletes all of them. Phase 3 adds cloud storage, so that the
+sessions of every device end up in one dataset.
+
+## Recording
+
+**Turn the camera on** in Camera settings, below the Cube section of the Timer page: choose the
+camera ("Front camera" or "Rear camera" on a phone) and click Turn on. Chrome asks for the camera
+once, and for the microphone when recording starts (Record audio, in Camera settings and in Settings
+→ Camera, leaves the sound out). The camera stays on across reloads until Turn off. Its picture then
+stays beside the time (under it on a phone), mirrored for a front camera, so that the cube can be
+kept in frame while scrambling and solving, with one line under it: the frame rate measured, the
+sharpness (green when good, amber when soft), what the recording does (idle, recording, saving) and
+how full storage is. Camera settings also show what the camera claims next to what it delivers (a
+phone may claim 60 fps and deliver 30), and the manual controls it has: exposure and ISO, focus,
+white balance, zoom and torch, with Reset to auto. Settings → Camera has the resolution (1920×1080
+or 1280×720), the frame rate asked for and the sharpness meter's threshold.
+
+**The framing rectangle** is the part of the picture the model will learn from, drawn on the
+camera's picture. Framing → Edit, in Camera settings, shows a larger picture on which it is dragged
+and resized with the mouse, a finger or the arrow keys (with Shift for its size); Full frame resets
+it. It is kept per camera and frame size, the sharpness meter measures inside it, and every clip
+records it as its `crop`; the video itself keeps the whole frame. Keep the cube and the hands inside
+it.
+
+**What is recorded.** While the camera is on and a session is under way, the camera and the
+microphone are encoded without pause into the last 90 s kept in memory (at most 160 MB): H.264 where
+Chrome has an encoder for it, else VP9, and AAC, else Opus, for the sound, with a keyframe every
+second. Nothing of it is stored but the attempts' clips: each attempt gets two, cut from memory
+without re-encoding about a second after their end.
+
+| Clip | From | To |
+|---|---|---|
+| scramble | 2 s before the scramble's first turn | 1 s after the cube matches the scramble |
+| solve | 3 s before the solve's first turn | 1 s after the cube is solved, or the DNF |
+
+A clip begins at the keyframe at or before its start, so up to a second earlier. A DNF before the
+solve's first turn has the scramble clip only, and an attempt that goes (Delete last, Mark as
+solved) takes its clips with it. Each clip is an MP4 file named after the camera's label (`laptop`,
+or `phone-front` and `phone-rear` on a phone) and the segment, such as `laptop.solve.mp4`, with the
+time of each of its frames on the device's clock (`laptop.solve.frames.json`), and is listed in the
+attempt's `attempt.json` (`video`); the attempt's timing never waits for them. A clip that could not
+be saved is said once in Camera settings, in Chrome's console (`cubetrace: clip failed: …`) and in
+the session's `notes`. The first scramble after the camera is turned on needs its 2 s in memory:
+turn the camera on a few seconds before scrambling.
+
+**The sync check** measures how far the camera's frames lag the cube. When the camera records in a
+session that has no check of it yet, with a cube connected, the check starts by itself before the
+next scramble's first turn: a panel under the camera's picture asks to turn one face, pause about a
+second, turn it back, and so five times, with the cube in the framing rectangle. Meanwhile the timer
+tracks no attempt, so the check's turns are in no record; once it ends and the cube is solved, the
+attempt begins again with its scramble and number. Within 20 s the panel says "Camera lags the cube
+by X ms (±Y)": X is how much later a turn shows in the camera's frames than the cube's report of it
+arrives over Bluetooth (the median over the turns matched), and Y the spread of those lags (95th
+minus 5th percentile). A frame at host time t thus shows the cube as the move log has it at t − X.
+The lag is kept in the session (`clock.cameras`) and in every later clip of that camera
+(`syncResidualMs`), for the training to subtract. A check that fails says why (the cube did not
+move, no motion in the framing rectangle, fewer than 4 matches, a spread over 40 ms), with Retry;
+Later hides it, and "Sync check", under the camera's picture, runs it again between attempts.
+
+**Storage.** Camera settings and the Sessions page have a storage meter: how much of the browser's
+quota the site uses (about 10 GB on the owner's laptop and phone, `docs/DEVICES.md`). From 80% it
+warns; from 95% the camera stops recording, while the timer goes on, until sessions are exported and
+deleted. Each clip badge, each row of the Sessions page and each session's page say how much its
+clips take.
+
+**Where the files are.** In the site's origin private file system, next to the records:
+`sessions/<session id>/attempts/0001/` holds `attempt.json` and the attempt's four clip files. The
+Timer page lists the session's last 12 solves; "See all" under them, or a session's date on the
+Sessions page, opens the session's page, with all its attempts, its statistics (ao100 too) and the
+storage its clips take. Each list shows a badge on each attempt with clips ("2 clips, 1.6 MB"),
+which opens the clip viewer: the clip plays next to the attempt's moves by time, the one on screen
+highlighted (a click on a move goes to it), and Download saves the five files: both MP4s, both
+frames files and `attempt.json` (Chrome may ask once to allow multiple downloads).
 
 ## Screenshots
 
@@ -100,6 +154,11 @@ address flag, once the cube is chosen:
 The Sessions page, with Export and Delete for each session:
 
 ![The Sessions page: two sessions with their date, device label, cube, number of attempts and mean, each with Export and Delete buttons](docs/screenshots/sessions.png)
+
+A session's page, opened from "See all" under the Timer's solves or from its date on the Sessions
+page: its facts and statistics, the storage its clips take, and every attempt with its clip badge:
+
+![A session's page: its date, marked current, its device (office laptop), cube (Fake cube), camera (laptop, fake_device_0) and clips (6 clips, 14.7 MB), its statistics (3 attempts, no DNF, mean 18.62, best 14.99; ao5, ao12 and ao100 not yet), Export and Delete, and its three solves, newest first, each with its time, its phases as a bar and a badge such as "2 clips, 4.3 MB"](docs/screenshots/session-page.png)
 
 ## Development
 
@@ -133,8 +192,14 @@ apps/web/          the Angular app (standalone components, signals, SCSS, PWA); 
 packages/core/     @cubetrace/core: notation, cube simulator, scrambles, CFOP phases, attempt state machine, records, statistics, JSON Schemas
 packages/gan/      @cubetrace/gan: GAN Bluetooth driver wrapper, Bluetooth support check, fake cube
 packages/storage/  @cubetrace/storage: the session store over the origin private file system
-fixtures/          real solves and cube identities, the tests' reference data (read-only)
-docs/              plan, architecture, data model, toolchain, manual tests, owner's actions, changelog, screenshots
+packages/capture/  @cubetrace/capture: the camera and the recording
+  src/camera.ts, sharpness.ts, framing.ts   constraints, manual controls, snapshots; the sharpness meter; the framing rectangle
+  src/pipeline.ts, protocol.ts              startCapture(): the window's side of the capture, and its messages to the workers
+  src/capture-worker.ts, ring-buffer.ts, cut.ts   the capture worker: the encoders, the last 90 s in memory, the cuts
+  src/clip-worker.ts, mux.ts, clip-writer.ts      the clip worker: MP4 muxing with mediabunny, the files written into OPFS
+  src/motion.ts, clapperboard.ts            the sync check: the motion in the framing rectangle, and the lag it gives
+fixtures/          real solves and cube identities, the tests' reference data (read-only); fixtures/media/: an encoded second of video
+docs/              plan, architecture, data model, toolchain, manual tests, devices, owner's actions, changelog, screenshots
 ```
 
 The packages are plain TypeScript, tested in Node, and never import Angular.
@@ -154,10 +219,22 @@ The packages are plain TypeScript, tested in Node, and never import Angular.
 
 - **Records.** An attempt is an `attempt.json`: its scramble and the scrambled state, its events
   (scramble shown, started and done, pickup, solve start and end), every move with its host and cube
-  time, the result and the eight CFOP phases. A session is a `session.json`: the device, the cube,
-  the settings, the fit of the cube's clock to the device's, and a summary. Both are specified in
-  [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) (schema version 1) and as JSON Schemas (draft 2020-12)
+  time, the result, the eight CFOP phases and its clips. A session is a `session.json`: the device,
+  the cube, the cameras, the settings, the clock fits, and a summary. Both are specified in
+  [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) (schema version 2) and as JSON Schemas (draft 2020-12)
   in [`packages/core/schema/`](packages/core/schema/), which the tests check records against.
+- **Schema 2** (0.2.0). Every `attempt.json` has `clock`, the fit of the host time on the cube time
+  over its own moves, which places each move on the device's clock without the Bluetooth jitter (the
+  cube's clock runs about 0.7% slow while it is turned, so one fit per session drifts across the
+  pauses), and `video[]`, its clips: camera and segment, the MP4 file and its size, the codecs, the
+  frame size, the framing rectangle (`crop`), the number of frames, the host time of the first one,
+  the frames file and the camera's lag from the sync check (`syncResidualMs`). `session.json` lists
+  the cameras (`cameras`: label, facing, the browser's settings, capabilities and constraints, the
+  framing) and their sync checks (`clock.cameras`). Each clip's `<camera>.<segment>.frames.json`
+  gives the host time of its first frame (`t0HostMs`) and the interval before each of the others
+  (`dtMs`, from the frames' own timestamps), and its keyframes. Records of version 1 (written by
+  0.1.0) are read as version 2 and never rewritten; [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) has
+  every field.
 - **Fixtures.** `fixtures/solves.json` holds 300 real solves from the owner's Cubeast export: the
   scramble, the scrambled state, the raw move stream on the cube's clock, and Cubeast's results and
   phase times. `fixtures/identities.json` holds reference cube states for the simulator's tests. A
