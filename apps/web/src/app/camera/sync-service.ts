@@ -32,12 +32,13 @@ export interface SyncCheckResult {
 
 /**
  * The sync check of the Timer page (docs/PLAN.md, T2.5): how far the camera's frames lag the cube.
- * When a session is under way with the camera recording and no check of this camera in the
- * session's `clock.cameras`, the check starts by itself, once per session and camera (not while a
- * solve is about to start or under way), and the panel shows it; "Sync check" starts one again at
- * any time, and "Later" hides the panel, ending a check under way. A check (`SyncRun`) watches up
- * to 20 s of the camera's motion in the framing rectangle, measured by the capture worker, and the
- * cube's moves, and the clapperboard gives the lag. On success the lag goes into the session's
+ * When a session is under way with the camera recording, a cube connected and no check of this
+ * camera in the session's `clock.cameras`, the check starts by itself, once per session and camera
+ * (not while a solve is about to start, under way or paused), and the panel shows it; "Sync check"
+ * starts one again whenever one could start by itself (`blocked` says why not), and "Later" hides
+ * the panel, ending a check under way. A check (`SyncRun`) watches up to 20 s of the camera's
+ * motion in the framing rectangle, measured by the capture worker, and the cube's moves, and the
+ * clapperboard gives the lag. On success the lag goes into the session's
  * `clock.cameras[label]` (`rttMs` and `driftPpm` 0: the camera is this device's; the matched pairs
  * kept), replacing an earlier check's, and the camera's later clips carry it as their
  * `syncResidualMs` (`SessionService.attachClip`). A check ends as failed when the recording stops.
