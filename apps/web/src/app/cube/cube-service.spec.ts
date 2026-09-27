@@ -383,6 +383,44 @@ describe('CubeService', () => {
       expect(fetch.requests).toEqual([]);
     });
 
+    it("starts the solution after the page has rendered the scramble's end", async () => {
+      // Real timers: fake ones give a zero-delay timer set during a timer's callback 1 ms more than
+      // one set right after it, which is not the order a browser keeps.
+      const { cube } = setup();
+      const [solve] = parseDemoSolves(DEMO_FILE);
+      const order: string[] = [];
+      let moves = 0;
+      const replayed = new Promise<void>((resolve) => {
+        cube.events$.subscribe((event) => {
+          if (event.type !== 'move') {
+            return;
+          }
+          moves++;
+          const move = formatMove(event.m);
+          order.push(move);
+          // As Angular does when a move changes a signal: a render on a zero-delay timer, and work
+          // that the render schedules in turn (a frame).
+          setTimeout(() => {
+            order.push(`render ${move}`);
+            setTimeout(() => order.push(`frame ${move}`), 0);
+          }, 0);
+          if (moves === 4) {
+            resolve();
+          }
+        });
+      });
+
+      cube.connectDemo(solve, 20);
+      await replayed;
+      // Demo solve 0 is R U, then U' R': the scramble's last move, its render and the frame that
+      // follows, and only then the solution's first move.
+      const at = ['U', 'render U', 'frame U', "U'"].map((entry) => order.indexOf(entry));
+      expect(
+        at.every((index, i) => index >= 0 && (i === 0 || index > at[i - 1])),
+        order.join(' '),
+      ).toBe(true);
+    });
+
     it('a mis-scramble: a wrong turn after scramble move k, undone after a pause', async () => {
       vi.useFakeTimers();
       const { cube } = setup();

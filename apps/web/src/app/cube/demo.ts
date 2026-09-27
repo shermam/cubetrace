@@ -171,7 +171,8 @@ export function misscrambleMove(scramble: readonly Move[], after: number): Move 
 
 /**
  * One part of a demo replay: moves for one `FakeCube.play()`, started `pauseMs` after the previous
- * part has ended (in ms of the replay's own clock, divided by the speed like every gap).
+ * part has ended (in ms of the replay's own clock, divided by the speed like every gap; 0 is a timer
+ * too, see {@link demoParts}).
  */
 export interface DemoPart {
   readonly pauseMs: number;
@@ -185,12 +186,14 @@ export interface DemoPart {
  * {@link DEMO_MISSCRAMBLE_PAUSE_MS} after that its inverse, then the rest of the scramble. k must be
  * from 1 to one less than the number of scramble moves; any other value is ignored.
  *
- * The wrong turn ends a part, and its inverse starts the next one on a timer set once the wrong
- * turn has been emitted: after the app took it in and scheduled the page's update (Angular schedules
+ * Each part after the first starts on a timer set once the previous part has ended, that is once
+ * its last move has reached the app, which has then scheduled the page's update (Angular schedules
  * change detection on a zero-delay timer, or the next animation frame, when a signal changes). So
- * the page shows the undo guidance before the inverse arrives, however fast the replay and however
- * late its timers fire. The end-to-end suite relies on it, and on the same order for the armed
- * attempt, which the solution, a part of its own, follows.
+ * the page renders what that move led to before the next part begins, however fast the replay and
+ * however late its timers fire: the undo guidance before the wrong turn's inverse, the armed attempt
+ * before the solution's first move. The end-to-end suite relies on both. And the next part's
+ * schedule counts from after that render, so the render does not delay its first move against the
+ * others: the solve's time on the host clock stays the recorded one divided by the speed.
  */
 export function demoParts(solve: DemoSolve, misscramble: number | null = null): DemoPart[] {
   const scramble = parseMoves(solve.scramble);

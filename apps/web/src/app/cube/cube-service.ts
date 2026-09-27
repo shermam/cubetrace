@@ -358,14 +358,16 @@ export class CubeService {
   }
 
   /**
-   * Plays the demo's parts on `cube` one after the other, each `pauseMs / speed` after the previous
-   * one has ended, until the last one or until the cube is no longer the connection (replaced or
-   * disconnected). Never rejects: a failure sets `lastError` while the cube is still connected.
+   * Plays the demo's parts on `cube` one after the other, until the last one or until the cube is no
+   * longer the connection (replaced or disconnected). Each part after the first starts on a timer of
+   * `pauseMs / speed` (0 included) set once the previous part has ended, so its schedule counts from
+   * after the page has taken that part's last move in (`demoParts`). Never rejects: a failure sets
+   * `lastError` while the cube is still connected.
    */
   private async replay(cube: FakeCube, parts: readonly DemoPart[], speed: number): Promise<void> {
     try {
-      for (const part of parts) {
-        if (part.pauseMs > 0) {
+      for (const [i, part] of parts.entries()) {
+        if (i > 0) {
           await new Promise<void>((resolve) => {
             setTimeout(resolve, part.pauseMs / speed);
           });
