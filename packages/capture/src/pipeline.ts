@@ -1,7 +1,10 @@
 // The window's side of the capture pipeline (docs/PLAN.md, T2.2). Chrome has
 // MediaStreamTrackProcessor on the window only (docs/DEVICES.md), so the window turns the camera's
-// tracks into streams of frames and audio, moves the streams to the capture worker, and relays cuts
-// and counters; it never touches a frame. Plain TypeScript: no Angular.
+// tracks into streams of frames and audio, moves the streams to the capture worker, and relays
+// cuts, clips (T2.3) and counters; it never touches a frame or an MP4. Plain TypeScript: no
+// Angular.
+import type { VideoClip } from '@cubetrace/core';
+
 import type { Cut } from './cut';
 import {
   isWorkerToWindow,
@@ -10,6 +13,7 @@ import {
   type CaptureConfig,
   type CaptureError,
   type CaptureStats,
+  type SaveClipParams,
   type WorkerToWindow,
 } from './protocol';
 import type { MediaStreamTrackProcessorConstructor } from './webcodecs';
@@ -23,6 +27,17 @@ export interface CaptureHandle {
    * when the worker does not answer within `CUT_TIMEOUT_MS`.
    */
   cut(startHostMs: number, endHostMs: number): Promise<Cut>;
+  /**
+   * Saves a clip (docs/PLAN.md, T2.3): the worker cuts `[params.startHostMs, params.endHostMs]`
+   * (host ms, as `cut` takes them), muxes it into an MP4 and writes it with its frames.json into
+   * `sessions/<sessionId>/attempts/<index>/` of the origin private file system, then resolves with
+   * the clip's `video[]` entry (docs/DATA-MODEL.md §7; `crop` and `syncResidualMs` null, for the
+   * caller to fill). Clips are saved one at a time, in the order asked. Rejects with the worker's
+   * reason (nothing buffered there, the start older than the buffer, a missing session folder, a
+   * full disk, ...), once the capture has stopped, or when the worker does not answer within
+   * `SAVE_CLIP_TIMEOUT_MS`.
+   */
+  saveClip(params: SaveClipParams): Promise<VideoClip>;
   /** `listener` gets the counters once per second; call the returned function to stop. */
   onStats(listener: (stats: CaptureStats) => void): () => void;
   /**
@@ -30,7 +45,10 @@ export interface CaptureHandle {
    * track ended; the buffer stays, cuts still work) or loses its audio (not `fatal`).
    */
   onError(listener: (error: CaptureError) => void): () => void;
-  /** Stops recording and frees the buffer and the worker; the stream's tracks keep running. */
+  /**
+   * Stops recording and frees the buffer and the worker, once the clips being saved are written;
+   * the stream's tracks keep running.
+   */
   stop(): Promise<void>;
 }
 
@@ -42,6 +60,12 @@ export interface CaptureSupport {
 
 /** How long a cut may take before `cut()` gives up on the worker. */
 export const CUT_TIMEOUT_MS = 10_000;
+
+/**
+ * How long `saveClip()` waits for the worker: muxing and writing take a fraction of a second for
+ * a solve's clip, and the clips asked for before it come first.
+ */
+export const SAVE_CLIP_TIMEOUT_MS = 30_000;
 
 /** How long `stop()` waits for the worker to close its encoders before terminating it. */
 export const STOP_TIMEOUT_MS = 2000;
@@ -108,15 +132,19 @@ export function createCaptureWorker(): Worker {
   return new Worker(new URL('./capture-worker.ts', import.meta.url), { type: 'module' });
 }
 
-interface PendingCut {
-  readonly resolve: (cut: Cut) => void;
+/** A request waiting for the worker's answer. */
+interface Pending<T> {
+  readonly resolve: (value: T) => void;
   readonly reject: (error: Error) => void;
   readonly timer: ReturnType<typeof setTimeout>;
 }
 
 class Capture implements CaptureHandle {
   readonly #worker: Worker;
-  readonly #cuts = new Map<number, PendingCut>();
+  readonly #cuts = new Map<number, Pending<Cut>>();
+  readonly #clips = new Map<number, Pending<VideoClip>>();
+  /** The clips being saved, settled either way: `stop()` waits for them. */
+  readonly #saving = new Set<Promise<void>>();
   readonly #statsListeners = new Set<(stats: CaptureStats) => void>();
   readonly #errorListeners = new Set<(error: CaptureError) => void>();
   #nextId = 1;
@@ -135,13 +163,53 @@ class Capture implements CaptureHandle {
     }
     const id = this.#nextId;
     this.#nextId += 1;
-    return new Promise<Cut>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#cuts.delete(id);
-        reject(new Error(`The capture worker did not answer within ${String(CUT_TIMEOUT_MS)} ms.`));
-      }, CUT_TIMEOUT_MS);
-      this.#cuts.set(id, { resolve, reject, timer });
+    return this.#request(this.#cuts, id, CUT_TIMEOUT_MS, () => {
       post(this.#worker, { type: 'cut', id, startHostMs, endHostMs });
+    });
+  }
+
+  saveClip(params: SaveClipParams): Promise<VideoClip> {
+    if (this.#stopping !== undefined) {
+      return Promise.reject(new Error('The capture has stopped.'));
+    }
+    const id = this.#nextId;
+    this.#nextId += 1;
+    const answer = this.#request(this.#clips, id, SAVE_CLIP_TIMEOUT_MS, () => {
+      post(this.#worker, {
+        type: 'mux-and-write',
+        id,
+        startHostMs: params.startHostMs,
+        endHostMs: params.endHostMs,
+        sessionId: params.sessionId,
+        index: params.index,
+        camera: params.camera,
+        segment: params.segment,
+        fpsNominal: params.fpsNominal,
+      });
+    });
+    const settled = answer.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#saving.add(settled);
+    void settled.then(() => this.#saving.delete(settled));
+    return answer;
+  }
+
+  /** Sends a request with `send` and waits for its answer, at most `timeoutMs`. */
+  #request<T>(
+    pending: Map<number, Pending<T>>,
+    id: number,
+    timeoutMs: number,
+    send: () => void,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`The capture worker did not answer within ${String(timeoutMs)} ms.`));
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
+      send();
     });
   }
 
@@ -165,6 +233,10 @@ class Capture implements CaptureHandle {
   }
 
   async #stop(): Promise<void> {
+    // The clips being saved are written first (each within its own timeout).
+    if (this.#saving.size > 0) {
+      await Promise.all(this.#saving);
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stopped = new Promise<void>((resolve) => {
       this.#stopped = resolve;
@@ -176,10 +248,12 @@ class Capture implements CaptureHandle {
     this.#worker.removeEventListener('message', this.#onMessage);
     this.#worker.removeEventListener('error', this.#onWorkerError);
     this.#worker.terminate();
-    for (const [id, pending] of this.#cuts) {
-      this.#cuts.delete(id);
-      clearTimeout(pending.timer);
-      pending.reject(new Error('The capture has stopped.'));
+    for (const requests of [this.#cuts, this.#clips]) {
+      for (const [id, pending] of requests) {
+        requests.delete(id);
+        clearTimeout(pending.timer);
+        pending.reject(new Error('The capture has stopped.'));
+      }
     }
     this.#statsListeners.clear();
     this.#errorListeners.clear();
@@ -206,10 +280,16 @@ class Capture implements CaptureHandle {
         }
         break;
       case 'cut-done':
-        this.#settle(message.id)?.resolve(message.cut);
+        settle(this.#cuts, message.id)?.resolve(message.cut);
         break;
       case 'cut-failed':
-        this.#settle(message.id)?.reject(new Error(message.message));
+        settle(this.#cuts, message.id)?.reject(new Error(message.message));
+        break;
+      case 'mux-and-write-done':
+        settle(this.#clips, message.id)?.resolve(message.clip);
+        break;
+      case 'mux-and-write-failed':
+        settle(this.#clips, message.id)?.reject(new Error(message.message));
         break;
       case 'error':
         this.#emitError({ message: message.message, fatal: message.fatal });
@@ -220,20 +300,23 @@ class Capture implements CaptureHandle {
     }
   }
 
-  #settle(id: number): PendingCut | undefined {
-    const pending = this.#cuts.get(id);
-    if (pending !== undefined) {
-      this.#cuts.delete(id);
-      clearTimeout(pending.timer);
-    }
-    return pending;
-  }
-
   #emitError(error: CaptureError): void {
     for (const listener of this.#errorListeners) {
       listener(error);
     }
   }
+}
+
+/**
+ * The request `id` of `requests`, forgotten and its timer cleared; undefined if it is not there.
+ */
+function settle<T>(requests: Map<number, Pending<T>>, id: number): Pending<T> | undefined {
+  const pending = requests.get(id);
+  if (pending !== undefined) {
+    requests.delete(id);
+    clearTimeout(pending.timer);
+  }
+  return pending;
 }
 
 function member(target: object, key: string): unknown {

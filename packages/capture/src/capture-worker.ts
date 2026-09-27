@@ -1,17 +1,24 @@
 // The capture worker (docs/PLAN.md, T2.2): it reads the camera's frames and the microphone's audio
 // from the streams the window transfers, encodes them with WebCodecs into the ring buffer, sends
-// the counters once per second and answers cuts. Angular's builder emits it as a chunk of its own
+// the counters once per second and answers cuts; since T2.3 it also saves clips: it cuts, muxes
+// (mux.ts, mediabunny) and writes them into the origin private file system (clip-writer.ts), so
+// that the MP4s never cross to the window. Angular's builder emits it as a chunk of its own
 // (docs/TOOLCHAIN.md, "The capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain
-// TypeScript: no Angular. The encoders, the clock and the timer come in through
+// TypeScript: no Angular. The encoders, the clock, the timer and the file system come in through
 // `WorkerEnvironment`, so the logic also runs in Node's tests with fakes; the last lines wire it to
 // the worker's global scope.
-import { cut } from './cut';
+import type { OpfsDirectoryHandle } from '@cubetrace/storage';
+
+import { writeClip } from './clip-writer';
+import { cut, type Cut } from './cut';
+import { muxClip } from './mux';
 import {
   isWindowToWorker,
   post,
   type CaptureStats,
   type CutRequest,
   type MessageTarget,
+  type MuxAndWriteRequest,
   type ResolvedCaptureConfig,
   type WindowToWorker,
   type WorkerToWindow,
@@ -141,6 +148,8 @@ export interface WorkerEnvironment {
   post(message: WorkerToWindow): void;
   /** Calls `callback` every `ms` until the returned function is called. */
   every(ms: number, callback: () => void): () => void;
+  /** The origin private file system's root (`navigator.storage.getDirectory()`), for the clips. */
+  opfsRoot(): Promise<OpfsDirectoryHandle>;
 }
 
 /** An audio input's timestamp and arrival, kept until the chunks that start in it are out. */
@@ -190,6 +199,9 @@ export class CaptureWorker {
   #encodedInWindow = 0;
   #windowStartHostMs = 0;
 
+  /** The end of the last clip queued: clips are muxed and written one at a time. */
+  #saving: Promise<void> = Promise.resolve();
+
   constructor(env: WorkerEnvironment) {
     this.#env = env;
   }
@@ -207,6 +219,9 @@ export class CaptureWorker {
         break;
       case 'cut':
         this.cut(message);
+        break;
+      case 'mux-and-write':
+        void this.muxAndWrite(message);
         break;
       case 'stop':
         void this.stop();
@@ -258,7 +273,32 @@ export class CaptureWorker {
     }
   }
 
-  /** Stops reading, closes the encoders, empties the buffer, then says `stopped`. */
+  /**
+   * Saves a clip (docs/PLAN.md, T2.3): cuts `[startHostMs, endHostMs]` now, then, after the clips
+   * asked for before it, muxes the cut into an MP4 and writes it with its frames.json into the
+   * attempt's folder, and answers with the clip's `video[]` entry, or why there is none. The cut
+   * shares the buffer's bytes (nothing is copied or sent), which later evictions do not touch.
+   * Resolves once the answer is sent; never rejects.
+   */
+  muxAndWrite(request: MuxAndWriteRequest): Promise<void> {
+    let source: Cut;
+    try {
+      source = cut(this.#buffer, request.startHostMs, request.endHostMs, { copy: false });
+    } catch (error: unknown) {
+      this.#answer({ type: 'mux-and-write-failed', id: request.id, message: describe(error) });
+      return Promise.resolve();
+    }
+    // Only an answer that cannot be sent at all rejects: the window's timeout then speaks for it,
+    // and the clips queued after this one are saved all the same.
+    const job = this.#saving.then(() => this.#save(request, source)).catch(() => undefined);
+    this.#saving = job;
+    return job;
+  }
+
+  /**
+   * Stops reading, closes the encoders, empties the buffer, finishes the clips queued, then says
+   * `stopped`.
+   */
   async stop(): Promise<void> {
     if (this.#stopped) {
       return;
@@ -268,7 +308,40 @@ export class CaptureWorker {
     this.#stopTicker?.();
     await this.#release();
     this.#buffer.clear();
+    await this.#saving;
     this.#env.post({ type: 'stopped' });
+  }
+
+  /** Muxes and writes one clip and answers; rejects only when no answer can be sent. */
+  async #save(request: MuxAndWriteRequest, source: Cut): Promise<void> {
+    const { id, sessionId, index, camera, segment, fpsNominal } = request;
+    try {
+      const { mp4, frames, info } = await muxClip(source, { camera, segment });
+      const root = await this.#env.opfsRoot();
+      const clip = await writeClip(root, sessionId, index, camera, segment, mp4, frames, {
+        codec: info.codec,
+        audio: info.audio,
+        width: info.width,
+        height: info.height,
+        fpsNominal,
+      });
+      this.#answer({ type: 'mux-and-write-done', id, clip });
+    } catch (error: unknown) {
+      this.#answer({ type: 'mux-and-write-failed', id, message: describe(error) });
+    }
+  }
+
+  /** Sends an answer to a clip request; a failure to send becomes a failed answer. */
+  #answer(answer: WorkerToWindow & { readonly id: number }): void {
+    try {
+      this.#env.post(answer);
+    } catch (error: unknown) {
+      this.#env.post({
+        type: 'mux-and-write-failed',
+        id: answer.id,
+        message: `The answer could not be sent: ${describe(error)}`,
+      });
+    }
   }
 
   /**
@@ -745,6 +818,13 @@ if (globalFunction('DedicatedWorkerGlobalScope') !== undefined) {
       return () => {
         clearInterval(timer);
       };
+    },
+    opfsRoot: () => {
+      // Read as optional: TypeScript's DOM types say every navigator has one.
+      const storage = (globalThis.navigator as Partial<Navigator> | undefined)?.storage;
+      return typeof storage?.getDirectory === 'function'
+        ? storage.getDirectory()
+        : Promise.reject(new Error('This browser has no origin private file system in workers.'));
     },
   });
   scope.addEventListener('message', (event) => {

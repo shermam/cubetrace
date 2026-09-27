@@ -1,6 +1,8 @@
 // The messages between the window (pipeline.ts) and the capture worker (capture-worker.ts), and the
-// settings and counters both sides share (docs/PLAN.md, T2.2). Plain TypeScript: nothing here
-// touches a browser API.
+// settings and counters both sides share (docs/PLAN.md, T2.2; the clips of T2.3). Plain
+// TypeScript: nothing here touches a browser API.
+import type { VideoClip, VideoSegment } from '@cubetrace/core';
+
 import { cutBuffers, type Cut } from './cut';
 import { DEFAULT_BOUNDS } from './ring-buffer';
 
@@ -68,11 +70,38 @@ export interface CutRequest {
   readonly endHostMs: number;
 }
 
+/**
+ * A clip to save (docs/PLAN.md, T2.3): the interval to cut, host ms (as `cut` takes it), and where
+ * the clip goes and what its `video[]` entry says (docs/DATA-MODEL.md §5 and §7).
+ */
+export interface SaveClipParams {
+  readonly startHostMs: number;
+  readonly endHostMs: number;
+  /** The session's id: its folder, which must exist (`createSession`). */
+  readonly sessionId: string;
+  /** The attempt's 1-based index: its folder, `0001`, made if needed. */
+  readonly index: number;
+  /** The camera's label in the session (`laptop`, `phone-front`): the files' first name. */
+  readonly camera: string;
+  readonly segment: VideoSegment;
+  /** The frame rate the camera's track reports, for the entry's `fpsNominal`. */
+  readonly fpsNominal: number;
+}
+
+/**
+ * The worker cuts `[startHostMs, endHostMs]`, muxes it into an MP4 and writes it with its
+ * frames.json into the attempt's folder; the MP4 never crosses to the window.
+ */
+export interface MuxAndWriteRequest extends SaveClipParams {
+  readonly type: 'mux-and-write';
+  readonly id: number;
+}
+
 export interface StopMessage {
   readonly type: 'stop';
 }
 
-export type WindowToWorker = StartMessage | CutRequest | StopMessage;
+export type WindowToWorker = StartMessage | CutRequest | MuxAndWriteRequest | StopMessage;
 
 export interface StatsMessage {
   readonly type: 'stats';
@@ -92,6 +121,19 @@ export interface CutFailed {
   readonly message: string;
 }
 
+/** The answer to the `mux-and-write` request with the same id: the clip's `video[]` entry. */
+export interface MuxAndWriteDone {
+  readonly type: 'mux-and-write-done';
+  readonly id: number;
+  readonly clip: VideoClip;
+}
+
+export interface MuxAndWriteFailed {
+  readonly type: 'mux-and-write-failed';
+  readonly id: number;
+  readonly message: string;
+}
+
 export interface ErrorMessage extends CaptureError {
   readonly type: 'error';
 }
@@ -101,7 +143,14 @@ export interface StoppedMessage {
   readonly type: 'stopped';
 }
 
-export type WorkerToWindow = StatsMessage | CutDone | CutFailed | ErrorMessage | StoppedMessage;
+export type WorkerToWindow =
+  | StatsMessage
+  | CutDone
+  | CutFailed
+  | MuxAndWriteDone
+  | MuxAndWriteFailed
+  | ErrorMessage
+  | StoppedMessage;
 
 export type CaptureMessage = WindowToWorker | WorkerToWindow;
 
@@ -133,12 +182,15 @@ export function transferList(message: CaptureMessage): Transferable[] {
 const WINDOW_TYPES: ReadonlySet<unknown> = new Set<WindowToWorker['type']>([
   'start',
   'cut',
+  'mux-and-write',
   'stop',
 ]);
 const WORKER_TYPES: ReadonlySet<unknown> = new Set<WorkerToWindow['type']>([
   'stats',
   'cut-done',
   'cut-failed',
+  'mux-and-write-done',
+  'mux-and-write-failed',
   'error',
   'stopped',
 ]);
