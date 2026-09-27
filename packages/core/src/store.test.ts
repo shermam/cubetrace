@@ -104,6 +104,21 @@ describe('MemorySessionStore', () => {
     expect(await store.loadAttempts(B)).toHaveLength(1);
   });
 
+  it('deletes one attempt of a session; an unknown index is already gone', async () => {
+    const store = await storeWith(session(A, 1000), session(B, 2000));
+    await store.saveAttempt(attempt(A, 1));
+    await store.saveAttempt(attempt(A, 2, true));
+    await store.saveAttempt(attempt(B, 2));
+    await store.deleteAttempt(A, 2);
+    await store.deleteAttempt(A, 7);
+    expect(await store.loadAttempts(A)).toEqual([attempt(A, 1)]);
+    expect(await store.loadAttempts(B)).toEqual([attempt(B, 2)]);
+    await expect(store.deleteAttempt(C, 1)).rejects.toThrow(/No session/);
+    // The index is free again: "Delete last" reuses the number.
+    await store.saveAttempt(attempt(A, 2));
+    expect((await store.loadAttempts(A)).map((a) => a.index)).toEqual([1, 2]);
+  });
+
   it('exports a session with its attempts sorted by index', async () => {
     const s = session(A, 1000);
     const store = await storeWith(s);

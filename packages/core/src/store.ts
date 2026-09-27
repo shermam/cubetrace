@@ -21,6 +21,11 @@ export interface SessionStore {
   loadAttempts(sessionId: string): Promise<AttemptRecord[]>;
   /** Removes a session and all its attempts; does nothing if the session is unknown. */
   deleteSession(sessionId: string): Promise<void>;
+  /**
+   * Removes one attempt of a session (the timer's "Delete last"); does nothing if the session has
+   * no attempt with that index; rejects if the session is unknown.
+   */
+  deleteAttempt(sessionId: string, index: number): Promise<void>;
   /** A session with its attempts sorted by index, as one export file holds them; rejects if unknown. */
   exportSession(sessionId: string): Promise<{ session: SessionRecord; attempts: AttemptRecord[] }>;
 }
@@ -71,6 +76,12 @@ export class MemorySessionStore implements SessionStore {
   deleteSession(sessionId: string): Promise<void> {
     return settle(() => {
       this.#sessions.delete(sessionId);
+    });
+  }
+
+  deleteAttempt(sessionId: string, index: number): Promise<void> {
+    return settle(() => {
+      this.#get(sessionId).attempts.delete(index);
     });
   }
 
