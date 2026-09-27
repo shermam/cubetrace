@@ -6,8 +6,6 @@ test('the app loads and shows its title', async ({ page }) => {
   await expect(page).toHaveTitle(/cubetrace/);
   await expect(page.getByRole('link', { name: 'cubetrace' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Timer' })).toBeVisible();
-  // The Timer page calls @cubetrace/core, resolved from packages/core/src by the Angular build.
-  await expect(page.getByTestId('core-version')).toHaveText(/^@cubetrace\/core \d+\.\d+\.\d+$/);
 });
 
 test('the top navigation reaches the four pages', async ({ page }) => {

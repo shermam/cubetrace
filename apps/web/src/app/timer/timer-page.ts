@@ -1,6 +1,5 @@
 import { Component, inject } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
-import { coreVersion } from '@cubetrace/core';
 
 import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { CubeService } from '../cube/cube-service';
@@ -45,7 +44,6 @@ import { TimerClock } from './timer-clock';
         </details>
       </section>
     </div>
-    <p class="version" data-testid="core-version">{{ coreVersion }}</p>
   `,
   styles: `
     @use '../../styles/layout';
@@ -106,15 +104,9 @@ import { TimerClock } from './timer-clock';
       margin-bottom: var(--space-3);
     }
 
-    .cube-state,
-    .version {
+    .cube-state {
       color: var(--text-muted);
       font-size: 0.875rem;
-    }
-
-    .version {
-      margin: var(--space-4) 0 0;
-      font-family: var(--font-mono);
     }
   `,
 })
@@ -122,7 +114,6 @@ export class TimerPage {
   protected readonly session = inject(SessionService);
   private readonly cube = inject(CubeService);
   private readonly dialogs = inject(ConnectDialogService);
-  protected readonly coreVersion = coreVersion();
 
   constructor() {
     this.session.prepare();
