@@ -3,6 +3,7 @@
 // TypeScript: no Angular, and no browser global is touched at import time.
 export type { OpfsDirectoryHandle, OpfsFileHandle, OpfsNavigator, OpfsWritable } from './opfs';
 export { isNotFound, opfsAvailable } from './opfs';
+export type { ProblemReporter, StorageProblem } from './opfs-session-store';
 export {
   ATTEMPTS_FOLDER,
   ATTEMPT_FILE,
@@ -10,5 +11,7 @@ export {
   SESSIONS_FOLDER,
   SESSION_FILE,
   attemptFolder,
+  describeProblem,
 } from './opfs-session-store';
+export type { FakeOpfsOptions } from './fake-opfs';
 export { FakeDirectoryHandle, FakeFileHandle } from './fake-opfs';

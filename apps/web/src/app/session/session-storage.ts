@@ -1,12 +1,16 @@
 import { InjectionToken, inject } from '@angular/core';
 import { MemorySessionStore, type SessionStore } from '@cubetrace/core';
-import { OpfsSessionStore, opfsAvailable } from '@cubetrace/storage';
+import { OpfsSessionStore, opfsAvailable, type ProblemReporter } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 
 /** Where the sessions are kept. */
 export interface SessionStorage {
-  readonly store: SessionStore;
+  /**
+   * The store. The OPFS one also lists the files it could not read (`listProblems`); the memory
+   * one has none.
+   */
+  readonly store: SessionStore & Partial<ProblemReporter>;
   /**
    * `opfs`: in the browser's origin private file system (docs/DATA-MODEL.md §5), kept across
    * reloads; `memory`: this browser has no OPFS, so sessions last until the page closes.

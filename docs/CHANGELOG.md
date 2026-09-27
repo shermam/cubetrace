@@ -5,6 +5,16 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Fixed
+
+- A page reloaded or closed during a save no longer leaves an empty `session.json` or `attempt.json`
+  behind: files are written under a temporary name and moved into place in one step. A file that
+  cannot be read (empty, not JSON, or not its session's) is set aside instead of breaking the Timer
+  page's resume and the whole Sessions page: the Sessions page still lists, exports and deletes the
+  other sessions, shows a broken session as its own row, with the file and what is wrong, and can
+  delete it, and names an attempt it left out; the Timer page starts a new session and says which
+  file it could not read (issue #12, T1.11).
+
 ## 0.1.0 — 2026-09-27
 
 The first release: phase 1 of `docs/PLAN.md`, a timer for a GAN Bluetooth cube in Chrome that keeps

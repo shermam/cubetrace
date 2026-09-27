@@ -1,13 +1,13 @@
 // The OPFS store's own behaviour, over the in-memory file system of fake-opfs.ts: the file layout of
-// docs/DATA-MODEL.md §5, the JSON it writes, the order of its operations and what it does with
-// files it did not write. The semantics it shares with MemorySessionStore are in
-// session-store-contract.test.ts.
+// docs/DATA-MODEL.md §5, the JSON it writes, the order of its operations, what a page that goes
+// away in the middle of a write leaves, and what it does with files it did not write or cannot
+// read. The semantics it shares with MemorySessionStore are in session-store-contract.test.ts.
 import { describe, expect, it } from 'vitest';
 
 import { FakeDirectoryHandle, FakeFileHandle } from './fake-opfs';
 import { opfsAvailable } from './opfs';
-import { OpfsSessionStore, attemptFolder } from './opfs-session-store';
-import { A, B, attempt, session } from './test-records';
+import { OpfsSessionStore, attemptFolder, describeProblem } from './opfs-session-store';
+import { A, B, C, attempt, session } from './test-records';
 
 function setup(): { root: FakeDirectoryHandle; store: OpfsSessionStore } {
   const root = new FakeDirectoryHandle();
@@ -23,17 +23,16 @@ function file(root: FakeDirectoryHandle, path: string): FakeFileHandle {
   return found;
 }
 
-/** Writes `text` to the file at `path` below `root`, making the folders on the way. */
-async function plant(root: FakeDirectoryHandle, path: string, text: string): Promise<void> {
-  const parts = path.split('/');
-  const name = parts.pop() ?? '';
-  let dir = root;
-  for (const part of parts) {
-    dir = await dir.getDirectoryHandle(part, { create: true });
-  }
-  const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
-  await writable.write(text);
-  await writable.close();
+/** The paths of the temporary files below `root`. */
+function temporaryFiles(root: FakeDirectoryHandle): string[] {
+  return [...root.files().keys()].filter((path) => path.endsWith('.tmp'));
+}
+
+/** Lets every pending promise of the fake settle: it never waits for a timer. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 describe('attemptFolder', () => {
@@ -159,51 +158,203 @@ describe('OpfsSessionStore', () => {
     expect([...root.files().keys()]).toEqual([`sessions/${A}/session.json`]);
   });
 
-  it('keeps the old content when a write fails, and closes the stream', async () => {
+  it('keeps the old content when a write fails, closes the stream and removes the temporary file', async () => {
     const { root, store } = setup();
     await store.createSession(session(A, 1000));
-    const sessionFile = file(root, `sessions/${A}/session.json`);
-    const before = sessionFile.text;
-    sessionFile.failWritesWith = new DOMException('The disk is full.', 'QuotaExceededError');
+    const before = file(root, `sessions/${A}/session.json`).text;
+    root.failWritesWith = new DOMException('The disk is full.', 'QuotaExceededError');
 
     await expect(store.saveSession({ ...session(A, 1000), notes: 'lost' })).rejects.toThrow(
       'The disk is full.',
     );
-    expect(sessionFile.text).toBe(before);
-    expect(sessionFile.openWritables).toBe(0);
+    // The fake refuses to remove a file whose stream is open: the stream was closed first.
+    expect([...root.files().keys()]).toEqual([`sessions/${A}/session.json`]);
+    expect(file(root, `sessions/${A}/session.json`).text).toBe(before);
+    expect(file(root, `sessions/${A}/session.json`).openWritables).toBe(0);
+  });
+
+  it('removes the temporary file when it cannot be moved into place', async () => {
+    const { root, store } = setup();
+    await store.createSession(session(A, 1000));
+    // A folder where attempt 1's file goes: Chrome refuses the move.
+    await root.plant(`sessions/${A}/attempts/0001/attempt.json/clip.mp4`, 'video');
+
+    await expect(store.saveAttempt(attempt(A, 1))).rejects.toMatchObject({
+      name: 'InvalidModificationError',
+    });
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('writes in place where file handles have no move() (Chrome before 111)', async () => {
+    const root = new FakeDirectoryHandle('', { move: false });
+    const store = new OpfsSessionStore(root);
+    const noted = { ...session(A, 1000), notes: 'saved again' };
+    await store.createSession(session(A, 1000));
+    await store.saveSession(noted);
+    await store.saveAttempt(attempt(A, 1));
+
+    expect([...root.files().keys()].sort()).toEqual([
+      `sessions/${A}/attempts/0001/attempt.json`,
+      `sessions/${A}/session.json`,
+    ]);
+    expect(await store.exportSession(A)).toEqual({ session: noted, attempts: [attempt(A, 1)] });
   });
 
   it('ignores folders and files that are not records, and starts a session over a leftover folder', async () => {
     const { root, store } = setup();
     await store.createSession(session(A, 1000));
-    await plant(root, 'sessions/notes.txt', 'not a session');
-    await plant(root, `sessions/${B}/attempts/0001/attempt.json`, JSON.stringify(attempt(B, 1)));
-    await plant(root, `sessions/${A}/attempts/0002/clip.mp4`, 'video without attempt.json');
-    await plant(root, `sessions/${A}/attempts/thumbs/x.json`, '{}');
+    await root.plant('sessions/notes.txt', 'not a session');
+    await root.plant(`sessions/${B}/attempts/0001/attempt.json`, JSON.stringify(attempt(B, 1)));
+    await root.plant(`sessions/${A}/attempts/0002/clip.mp4`, 'video without attempt.json');
+    await root.plant(`sessions/${A}/attempts/thumbs/x.json`, '{}');
 
     expect((await store.listSessions()).map((s) => s.id)).toEqual([A]);
     expect(await store.loadAttempts(A)).toEqual([]);
     // B's folder has no session.json: B is not a session, and a new B starts empty.
     await store.createSession(session(B, 2000));
     expect(await store.loadAttempts(B)).toEqual([]);
+    expect(await store.listProblems()).toEqual([]);
   });
 
-  it('rejects, naming the file, a record that is not JSON or not the one its path names', async () => {
+  it('ignores the temporary files that writes cut short leave, and removes them', async () => {
     const { root, store } = setup();
     await store.createSession(session(A, 1000));
     await store.saveAttempt(attempt(A, 1));
-
-    await plant(root, `sessions/${A}/attempts/0002/attempt.json`, JSON.stringify(attempt(A, 3)));
-    await expect(store.loadAttempts(A)).rejects.toThrow(
-      `sessions/${A}/attempts/0002/attempt.json is not the attempt.json of attempt 2 of session ${A}.`,
+    await root.plant(`sessions/${A}/session.json.k3v9x0qa.tmp`, '{"schema": 1, "id": "');
+    await root.plant(`sessions/${A}/attempts/0001/attempt.json.00000000.tmp`, '');
+    // Complete, but never moved into place: attempt 2 and session B were not saved.
+    await root.plant(
+      `sessions/${A}/attempts/0002/attempt.json.zz9zz9zz.tmp`,
+      JSON.stringify(attempt(A, 2)),
     );
+    await root.plant(`sessions/${B}/session.json.a0b1c2d3.tmp`, JSON.stringify(session(B, 2000)));
+    // Not a temporary file of a record: left alone.
+    await root.plant(`sessions/${A}/attempts/0001/notes.tmp`, 'kept');
 
-    await plant(root, `sessions/${B}/session.json`, '{"schema": 1, "id": "');
-    await expect(store.listSessions()).rejects.toThrow(`sessions/${B}/session.json is not JSON`);
-    await plant(root, `sessions/${B}/session.json`, JSON.stringify(session(A, 1000)));
-    await expect(store.listSessions()).rejects.toThrow(
-      `sessions/${B}/session.json is not the session.json of session ${B}.`,
-    );
+    expect(await store.listSessions()).toEqual([session(A, 1000)]);
+    expect(await store.loadAttempts(A)).toEqual([attempt(A, 1)]);
+    expect(await store.listProblems()).toEqual([]);
+    expect([...root.files().keys()].sort()).toEqual([
+      `sessions/${A}/attempts/0001/attempt.json`,
+      `sessions/${A}/attempts/0001/notes.tmp`,
+      `sessions/${A}/session.json`,
+    ]);
+  });
+
+  it('sets aside a session.json that is empty, not JSON or not its folder’s session, and lists the others', async () => {
+    const { root, store } = setup();
+    await store.createSession(session(A, 1000));
+    await store.saveAttempt(attempt(A, 1));
+    await root.plant(`sessions/${B}/session.json`, '');
+    await root.plant(`sessions/${C}/session.json`, '{"schema": 1, "id": "');
+    await root.plant('sessions/x/session.json', JSON.stringify(session(A, 1000)));
+    await root.plant('sessions/y/session.json/z', '{}');
+
+    expect(await store.listSessions()).toEqual([session(A, 1000)]);
+    const problems = await store.listProblems();
+    expect(problems).toEqual([
+      {
+        sessionId: C,
+        kind: 'session',
+        path: `sessions/${C}/session.json`,
+        reason: expect.stringMatching(/^not JSON \(.+\)$/) as unknown,
+      },
+      { sessionId: B, kind: 'session', path: `sessions/${B}/session.json`, reason: 'empty' },
+      {
+        sessionId: 'x',
+        kind: 'session',
+        path: 'sessions/x/session.json',
+        reason: 'not the session.json of session x',
+      },
+      { sessionId: 'y', kind: 'session', path: 'sessions/y/session.json', reason: 'not a file' },
+    ]);
+    expect(describeProblem(problems[1])).toBe(`sessions/${B}/session.json is empty.`);
+    // The readable session is untouched.
+    expect(await store.exportSession(A)).toEqual({
+      session: session(A, 1000),
+      attempts: [attempt(A, 1)],
+    });
+  });
+
+  it('rejects the operations on a session whose session.json is unreadable, naming the file; deleteSession removes it', async () => {
+    const { root, store } = setup();
+    await root.plant(`sessions/${B}/session.json`, '');
+    await root.plant(`sessions/${B}/attempts/0001/attempt.json`, JSON.stringify(attempt(B, 1)));
+    const unreadable = `sessions/${B}/session.json is empty.`;
+
+    await expect(store.exportSession(B)).rejects.toThrow(unreadable);
+    await expect(store.loadAttempts(B)).rejects.toThrow(unreadable);
+    await expect(store.saveSession(session(B, 2000))).rejects.toThrow(unreadable);
+    await expect(store.saveAttempt(attempt(B, 2))).rejects.toThrow(unreadable);
+    await expect(store.deleteAttempt(B, 1)).rejects.toThrow(unreadable);
+    await expect(store.createSession(session(B, 2000))).rejects.toThrow(/exists already/);
+    expect(await store.listSessions()).toEqual([]);
+    expect((await store.listProblems()).map((p) => p.path)).toEqual([`sessions/${B}/session.json`]);
+
+    await store.deleteSession(B);
+    expect(root.directories()).toEqual(['sessions']);
+    expect(await store.listProblems()).toEqual([]);
+    expect(await store.listSessions()).toEqual([]);
+  });
+
+  it('leaves an unreadable attempt.json out of loadAttempts and exportSession, and reports it', async () => {
+    const { root, store } = setup();
+    await store.createSession(session(A, 1000));
+    await store.saveAttempt(attempt(A, 1));
+    await root.plant(`sessions/${A}/attempts/0002/attempt.json`, '');
+    await root.plant(`sessions/${A}/attempts/0003/attempt.json`, JSON.stringify(attempt(A, 4)));
+    await store.saveAttempt(attempt(A, 5));
+
+    expect((await store.loadAttempts(A)).map((a) => a.index)).toEqual([1, 5]);
+    expect(await store.listProblems()).toEqual([
+      {
+        sessionId: A,
+        kind: 'attempt',
+        path: `sessions/${A}/attempts/0002/attempt.json`,
+        reason: 'empty',
+      },
+      {
+        sessionId: A,
+        kind: 'attempt',
+        path: `sessions/${A}/attempts/0003/attempt.json`,
+        reason: `not the attempt.json of attempt 3 of session ${A}`,
+      },
+    ]);
+    expect(await store.exportSession(A)).toEqual({
+      session: session(A, 1000),
+      attempts: [attempt(A, 1), attempt(A, 5)],
+    });
+
+    // Saved again, attempt 2 is readable: the next read of the attempts no longer reports it.
+    await store.saveAttempt(attempt(A, 2));
+    expect((await store.loadAttempts(A)).map((a) => a.index)).toEqual([1, 2, 5]);
+    expect((await store.listProblems()).map((p) => p.path)).toEqual([
+      `sessions/${A}/attempts/0003/attempt.json`,
+    ]);
+    // A deleted attempt takes its problem with it.
+    await store.deleteAttempt(A, 3);
+    expect(await store.listProblems()).toEqual([]);
+  });
+
+  it('lists the problems that the latest reads found', async () => {
+    const { root, store } = setup();
+    await store.createSession(session(A, 1000));
+    await root.plant(`sessions/${A}/attempts/0001/attempt.json`, '');
+    await root.plant(`sessions/${B}/session.json`, '');
+    expect(await store.listProblems()).toEqual([]);
+
+    await store.loadAttempts(A);
+    expect((await store.listProblems()).map((p) => p.sessionId)).toEqual([A]);
+    // A listing replaces the sessions' problems, and keeps those of the attempts of the sessions
+    // it lists.
+    await store.listSessions();
+    expect((await store.listProblems()).map((p) => p.sessionId)).toEqual([A, B]);
+    await root.plant(`sessions/${B}/session.json`, JSON.stringify(session(B, 2000)));
+    await store.listSessions();
+    expect((await store.listProblems()).map((p) => p.sessionId)).toEqual([A]);
+    // A session that is gone takes the problems of its attempts with it.
+    await store.deleteSession(A);
+    expect(await store.listProblems()).toEqual([]);
   });
 
   it('takes the root as a promise, and rejects every operation if it fails', async () => {
@@ -217,6 +368,115 @@ describe('OpfsSessionStore', () => {
     );
     await expect(refused.listSessions()).rejects.toThrow('Storage is blocked.');
     await expect(refused.createSession(session(A, 1000))).rejects.toThrow('Storage is blocked.');
+  });
+});
+
+describe('OpfsSessionStore, when the page goes away in the middle of a write', () => {
+  const noted = { ...session(A, 1000), notes: 'saved again' };
+
+  interface Case {
+    /** The files before the write, made by an earlier page. */
+    readonly before: (store: OpfsSessionStore) => Promise<void>;
+    readonly write: (store: OpfsSessionStore) => Promise<void>;
+    /** How the next page reads what the write changes. */
+    readonly read: (store: OpfsSessionStore) => Promise<unknown>;
+    readonly old: unknown;
+    readonly new: unknown;
+  }
+
+  const cases: [string, Case][] = [
+    [
+      'createSession',
+      {
+        before: () => Promise.resolve(),
+        write: (store) => store.createSession(session(A, 1000)),
+        read: (store) => store.listSessions(),
+        old: [],
+        new: [session(A, 1000)],
+      },
+    ],
+    [
+      'saveSession',
+      {
+        before: (store) => store.createSession(session(A, 1000)),
+        write: (store) => store.saveSession(noted),
+        read: (store) => store.listSessions(),
+        old: [session(A, 1000)],
+        new: [noted],
+      },
+    ],
+    [
+      'saveAttempt of a new attempt',
+      {
+        before: (store) => store.createSession(session(A, 1000)),
+        write: (store) => store.saveAttempt(attempt(A, 1)),
+        read: (store) => store.loadAttempts(A),
+        old: [],
+        new: [attempt(A, 1)],
+      },
+    ],
+    [
+      'saveAttempt of an attempt saved before',
+      {
+        before: async (store) => {
+          await store.createSession(session(A, 1000));
+          await store.saveAttempt(attempt(A, 1));
+        },
+        write: (store) => store.saveAttempt(attempt(A, 1, true)),
+        read: (store) => store.loadAttempts(A),
+        old: [attempt(A, 1)],
+        new: [attempt(A, 1, true)],
+      },
+    ],
+  ];
+
+  it.each(cases)(
+    '%s: cut off at any point, the next page reads the previous record; completed, the new one',
+    async (_name, c) => {
+      let cuts = 0;
+      for (let operations = 0; ; operations++) {
+        const root = new FakeDirectoryHandle();
+        await c.before(new OpfsSessionStore(root));
+        root.interruptAfter(operations);
+        // The page that writes: its operation never settles once the interruption has come.
+        void c.write(new OpfsSessionStore(root));
+        await flush();
+        const cut = root.interrupted;
+        root.resume();
+
+        // The next page.
+        const store = new OpfsSessionStore(root);
+        expect(await c.read(store)).toEqual(cut ? c.old : c.new);
+        expect(await store.listProblems()).toEqual([]);
+        expect(temporaryFiles(root)).toEqual([]);
+        if (!cut) {
+          break;
+        }
+        cuts++;
+      }
+      // Every point of the write was tried, the stream's close() that never completes among them.
+      expect(cuts).toBeGreaterThan(5);
+    },
+  );
+
+  it('written in place (no move()), a write cut off can leave an empty file, which the reads set aside (issue #12)', async () => {
+    const reasons: string[] = [];
+    for (let operations = 0; ; operations++) {
+      const root = new FakeDirectoryHandle('', { move: false });
+      root.interruptAfter(operations);
+      void new OpfsSessionStore(root).createSession(session(A, 1000));
+      await flush();
+      const cut = root.interrupted;
+      root.resume();
+
+      const store = new OpfsSessionStore(root);
+      expect(await store.listSessions()).toEqual(cut ? [] : [session(A, 1000)]);
+      reasons.push(...(await store.listProblems()).map((problem) => problem.reason));
+      if (!cut) {
+        break;
+      }
+    }
+    expect(reasons).toContain('empty');
   });
 });
 
@@ -259,5 +519,66 @@ describe('the OPFS fake', () => {
     await second.abort();
     expect(handle.text).toBe('one two');
     await expect(second.write('four')).rejects.toThrow(TypeError);
+  });
+
+  it('moves a file over another in one step, and the handle takes the new name', async () => {
+    const dir = new FakeDirectoryHandle();
+    await dir.plant('record', 'old');
+    const temporary = await dir.getFileHandle('record.x.tmp', { create: true });
+    const writable = await temporary.createWritable();
+    await writable.write('new');
+    const move = (name: string): Promise<void> =>
+      temporary.move?.(name) ?? Promise.reject(new Error('No move().'));
+
+    // Locked while its stream is open, as in Chrome.
+    await expect(move('record')).rejects.toMatchObject({ name: 'NoModificationAllowedError' });
+    await expect(dir.removeEntry('record.x.tmp')).rejects.toMatchObject({
+      name: 'NoModificationAllowedError',
+    });
+    await writable.close();
+    await move('record');
+    expect(temporary.name).toBe('record');
+    expect([...dir.files()].map(([path, f]) => [path, f.text])).toEqual([['record', 'new']]);
+
+    await dir.plant('folder/inside', '');
+    await expect(move('folder')).rejects.toMatchObject({ name: 'InvalidModificationError' });
+    await expect(move('a/b')).rejects.toThrow(TypeError);
+    await dir.removeEntry('record');
+    await expect(move('other')).rejects.toMatchObject({ name: 'NotFoundError' });
+    expect(
+      (await new FakeDirectoryHandle('', { move: false }).getFileHandle('f', { create: true }))
+        .move,
+    ).toBeUndefined();
+  });
+
+  it('cuts the page off after a number of operations, and resume() starts a new page', async () => {
+    const root = new FakeDirectoryHandle();
+    const handle = await root.getFileHandle('f', { create: true });
+    const writable = await handle.createWritable();
+    await writable.write('lost');
+    root.interruptAfter(1);
+    await root.getDirectoryHandle('made', { create: true });
+    let settled = false;
+    void writable.close().finally(() => {
+      settled = true;
+    });
+    void root.getDirectoryHandle('never', { create: true });
+    await flush();
+
+    expect(root.interrupted).toBe(true);
+    expect(settled).toBe(false);
+    expect(root.directories()).toEqual(['made']);
+    expect(handle.text).toBe('');
+    expect(handle.openWritables).toBe(1);
+
+    root.resume();
+    expect(root.interrupted).toBe(false);
+    // The old page's stream is gone, with its lock and without its content.
+    expect(handle.openWritables).toBe(0);
+    await root.removeEntry('f');
+    expect(settled).toBe(false);
+    expect(() => {
+      root.interruptAfter(-1);
+    }).toThrow(RangeError);
   });
 });

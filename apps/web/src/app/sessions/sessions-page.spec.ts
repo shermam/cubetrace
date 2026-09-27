@@ -1,5 +1,6 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { MemorySessionStore } from '@cubetrace/core';
+import { MemorySessionStore, type SessionStore } from '@cubetrace/core';
+import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { FakeLocalStorage, settle } from '../device/fake-browser';
@@ -9,7 +10,7 @@ import { SESSION_A, SESSION_B, testAttempt, testSession } from '../session/sessi
 import { SessionsPage } from './sessions-page';
 
 describe('SessionsPage', () => {
-  let store: MemorySessionStore;
+  let store: SessionStore;
   let blobs: Blob[];
   let fixture: ComponentFixture<SessionsPage>;
 
@@ -43,8 +44,22 @@ describe('SessionsPage', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
-  function rows(element: HTMLElement): HTMLElement[] {
-    return Array.from(element.querySelectorAll<HTMLElement>('[data-testid="session-row"]'));
+  function rows(element: HTMLElement, testId = 'session-row'): HTMLElement[] {
+    return Array.from(element.querySelectorAll<HTMLElement>(`[data-testid="${testId}"]`));
+  }
+
+  function text(element: HTMLElement, testId: string): string | undefined {
+    return element.querySelector(`[data-testid="${testId}"]`)?.textContent.trim();
+  }
+
+  /** Session A with attempt 1 in the fake OPFS, where a test plants files the store cannot read. */
+  async function opfsWithSessionA(): Promise<FakeDirectoryHandle> {
+    const root = new FakeDirectoryHandle();
+    const opfs = new OpfsSessionStore(root);
+    await opfs.createSession(testSession(SESSION_A, 1_790_000_000_000));
+    await opfs.saveAttempt(testAttempt(1, 10_000));
+    store = opfs;
+    return root;
   }
 
   function button(row: HTMLElement, name: string): HTMLButtonElement | undefined {
@@ -128,5 +143,93 @@ describe('SessionsPage', () => {
     expect(element.querySelector('[data-testid="no-sessions"]')?.textContent).toContain(
       'No sessions yet',
     );
+  });
+
+  it('lists a session whose session.json cannot be read apart, naming the file, and deletes it', async () => {
+    const root = await opfsWithSessionA();
+    // Session B, the current one, was cut short: its session.json is empty (issue #12).
+    await root.plant(`sessions/${SESSION_B}/session.json`, '');
+    const element = await render();
+
+    expect(rows(element).map((row) => row.getAttribute('data-session'))).toEqual([SESSION_A]);
+    const [broken] = rows(element, 'unreadable-row');
+    expect(rows(element, 'unreadable-row')).toHaveLength(1);
+    expect(broken.getAttribute('data-session')).toBe(SESSION_B);
+    expect(text(broken, 'unreadable-reason')).toBe(`sessions/${SESSION_B}/session.json is empty.`);
+    expect(text(element, 'sessions-error')).toBeUndefined();
+
+    button(broken, 'Delete…')?.click();
+    await fixture.whenStable();
+    expect(broken.textContent).toContain("Delete this session's folder, with everything in it?");
+    button(broken, 'Delete')?.click();
+    await settle();
+    await fixture.whenStable();
+
+    expect(rows(element, 'unreadable-row')).toEqual([]);
+    expect(rows(element).map((row) => row.getAttribute('data-session'))).toEqual([SESSION_A]);
+    expect(root.directories()).not.toContain(`sessions/${SESSION_B}`);
+    expect(text(element, 'sessions-notice')).toBe(`Deleted the unreadable session ${SESSION_B}.`);
+  });
+
+  it('names an unreadable attempt.json in its session’s row, and leaves it out of the count, the mean and the export', async () => {
+    const root = await opfsWithSessionA();
+    await root.plant(`sessions/${SESSION_A}/attempts/0002/attempt.json`, '');
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+    const element = await render();
+    const [row] = rows(element);
+
+    expect(text(row, 'session-attempts')).toBe('1 attempt');
+    expect(row.textContent).toContain('mean 10.00');
+    expect(text(row, 'session-left-out')).toBe(
+      `Left out: sessions/${SESSION_A}/attempts/0002/attempt.json is empty.`,
+    );
+    button(row, 'Export')?.click();
+    await settle();
+    await fixture.whenStable();
+    const exported = JSON.parse(await blobs[0].text()) as { attempts: { index: number }[] };
+    expect(exported.attempts.map((a) => a.index)).toEqual([1]);
+    click.mockRestore();
+  });
+
+  it('says so when the sessions cannot be listed, and only then', async () => {
+    const memory = new MemorySessionStore();
+    memory.listSessions = () => Promise.reject(new Error('Storage is blocked.'));
+    store = memory;
+    const element = await render();
+
+    expect(text(element, 'sessions-error')).toBe(
+      'The sessions could not be read: Storage is blocked.',
+    );
+    expect(rows(element)).toEqual([]);
+    expect(text(element, 'no-sessions')).toBeUndefined();
+  });
+
+  it('says in its row when a session cannot be exported or deleted', async () => {
+    store.exportSession = () => Promise.reject(new Error('The file is locked.'));
+    store.deleteSession = () => Promise.reject(new Error('The folder is locked.'));
+    const element = await render();
+    const oldest = rows(element)[1];
+
+    button(oldest, 'Export')?.click();
+    await settle();
+    await fixture.whenStable();
+    expect(text(oldest, 'row-error')).toBe(
+      'The session could not be exported: The file is locked.',
+    );
+    expect(text(rows(element)[0], 'row-error')).toBeUndefined();
+
+    button(oldest, 'Delete…')?.click();
+    await fixture.whenStable();
+    button(oldest, 'Delete')?.click();
+    await settle();
+    await fixture.whenStable();
+    const [, still] = rows(element);
+    expect(still.getAttribute('data-session')).toBe(SESSION_A);
+    expect(text(still, 'row-error')).toBe(
+      'The session could not be deleted: The folder is locked.',
+    );
+    expect(text(element, 'sessions-error')).toBeUndefined();
   });
 });
