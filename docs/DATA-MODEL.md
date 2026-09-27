@@ -118,7 +118,10 @@ sessions/<sessionId>/
 ```
 
 `sessionId` is a UUID v4; `<camera>` is a short label unique within the session
-(`laptop`, `phone-1`, `phone-2`).
+(`laptop`, `phone-1`, `phone-2`). A JSON file is written whole under a temporary name next to it,
+`<name>.<random>.tmp`, then moved over `<name>` in one step, so a file holds its previous content
+or the new one even when the page goes away mid-write; readers ignore such leftover `*.tmp` files
+and remove them.
 
 ## 6. `session.json`
 
