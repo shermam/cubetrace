@@ -50,9 +50,7 @@
       "max": 1920,
       "min": 0.0005208333333333333
     },
-    "backgroundBlur": [
-      false
-    ],
+    "backgroundBlur": [false],
     "deviceId": "redacted",
     "facingMode": [],
     "frameRate": {
@@ -64,10 +62,7 @@
       "max": 1920,
       "min": 1
     },
-    "resizeMode": [
-      "none",
-      "crop-and-scale"
-    ],
+    "resizeMode": ["none", "crop-and-scale"],
     "width": {
       "max": 1920,
       "min": 1
@@ -129,9 +124,7 @@
     },
     "callbackMissedFrames": 0,
     "droppedFramesEstimate": 0,
-    "frameSizes": [
-      "1920x1080"
-    ],
+    "frameSizes": ["1920x1080"],
     "playbackQuality": {
       "totalVideoFrames": 301,
       "droppedVideoFrames": 0

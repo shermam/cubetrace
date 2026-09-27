@@ -66,28 +66,19 @@
       "min": -4,
       "step": 0.1666666716337204
     },
-    "exposureMode": [
-      "continuous",
-      "manual"
-    ],
+    "exposureMode": ["continuous", "manual"],
     "exposureTime": {
       "max": 2880,
       "min": 0.832,
       "step": 0.1
     },
-    "facingMode": [
-      "environment"
-    ],
+    "facingMode": ["environment"],
     "focusDistance": {
       "max": 8.156450271606445,
       "min": 0.10000000149011612,
       "step": 0.009999999776482582
     },
-    "focusMode": [
-      "manual",
-      "single-shot",
-      "continuous"
-    ],
+    "focusMode": ["manual", "single-shot", "continuous"],
     "frameRate": {
       "max": 60,
       "min": 0
@@ -102,15 +93,9 @@
       "min": 100,
       "step": 1
     },
-    "resizeMode": [
-      "none",
-      "crop-and-scale"
-    ],
+    "resizeMode": ["none", "crop-and-scale"],
     "torch": true,
-    "whiteBalanceMode": [
-      "continuous",
-      "manual"
-    ],
+    "whiteBalanceMode": ["continuous", "manual"],
     "width": {
       "max": 4096,
       "min": 1
@@ -187,9 +172,7 @@
     },
     "callbackMissedFrames": 0,
     "droppedFramesEstimate": 0,
-    "frameSizes": [
-      "1080x1920"
-    ],
+    "frameSizes": ["1080x1920"],
     "playbackQuality": {
       "totalVideoFrames": 300,
       "droppedVideoFrames": 0
