@@ -22,3 +22,7 @@ versions follow [Semantic Versioning](https://semver.org/).
   version and the commit of the build.
 - A banner on browsers that lack Web Bluetooth, the origin private file system or WebCodecs,
   naming what is missing.
+- Device probe page (T1.8): `/probe` lists the cameras, opens the chosen one at 1920×1080 and
+  ideally 60 fps, measures its frame timing with `requestVideoFrameCallback`, checks H.264
+  encoder support, worker APIs, storage and Web Bluetooth, and gives a JSON report to copy or
+  download for `docs/DEVICES.md`.

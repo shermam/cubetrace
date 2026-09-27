@@ -1,0 +1,145 @@
+@use '../../styles/layout';
+
+// Buttons, headings and the page container come from styles.scss; sections are cards as on
+// the Settings page.
+
+.lead {
+  max-width: 45rem;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  max-width: 32rem;
+
+  @include layout.from(layout.$header-one-row) {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+}
+
+input,
+select {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.status,
+.notice {
+  margin: var(--space-3) 0 0;
+}
+
+.preview {
+  margin: var(--space-4) 0 0;
+
+  video {
+    display: block;
+    width: 16rem;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius);
+    background: #000;
+  }
+
+  figcaption {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+  }
+}
+
+section {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+h2 {
+  margin: 0;
+}
+
+.about {
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+th,
+td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+th[scope='row'] {
+  width: 40%;
+  font-weight: 500;
+}
+
+td {
+  font-family: var(--font-mono);
+}
+
+.absent {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+// Short values that break only at hyphens, so codecs and headers stay whole on a phone; the
+// wrapper scrolls, rather than the page, on a screen narrower still.
+.scroll {
+  overflow-x: auto;
+}
+
+.encoders {
+  font-size: 0.8125rem;
+
+  :is(th, td) {
+    padding-inline: var(--space-1);
+    overflow-wrap: normal;
+  }
+
+  @include layout.from(layout.$header-one-row) {
+    font-size: 0.875rem;
+
+    :is(th, td) {
+      padding-inline: var(--space-2);
+    }
+  }
+}
+
+details {
+  margin-top: var(--space-4);
+}
+
+pre {
+  max-height: 30rem;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}

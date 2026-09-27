@@ -1,0 +1,100 @@
+<h1>Device probe</h1>
+<p class="lead">
+  What this browser can do with its cameras, video encoders, storage and Bluetooth, as one JSON
+  report for <code>docs/DEVICES.md</code>. Nothing is recorded or uploaded. Type a label for this
+  device and camera, allow the camera, choose one, run the probe, and keep this tab in front during
+  the {{ seconds }} s timing measurement.
+</p>
+
+<div class="fields">
+  <label for="probe-label">Device label</label>
+  <input
+    id="probe-label"
+    #labelInput
+    type="text"
+    autocomplete="off"
+    placeholder="e.g. thinkphone-rear"
+    [value]="label()"
+    (input)="label.set(labelInput.value)"
+  />
+  <label for="probe-camera">Camera</label>
+  <select
+    id="probe-camera"
+    #cameraSelect
+    [disabled]="busy() || videoInputs().length === 0"
+    (change)="selectedDeviceId.set(cameraSelect.value)"
+  >
+    @for (input of videoInputs(); track $index) {
+      <option [value]="input.deviceId" [selected]="input.deviceId === selectedDeviceId()">
+        {{ input.label || 'Camera ' + ($index + 1) }}
+      </option>
+    } @empty {
+      <option value="">Allow the camera to list them</option>
+    }
+  </select>
+</div>
+
+<div class="actions">
+  <button type="button" [disabled]="busy()" (click)="allowCamera()">Allow camera</button>
+  <button type="button" class="primary" [disabled]="busy()" (click)="run()">Run probe</button>
+  <button type="button" [disabled]="!report()" (click)="copy()">Copy report</button>
+  <button type="button" [disabled]="!report()" (click)="download()">Download</button>
+</div>
+<p class="status" role="status" data-testid="probe-status">{{ status() }}</p>
+@if (notice()) {
+  <p class="notice" role="status">{{ notice() }}</p>
+}
+
+<figure class="preview">
+  <video #preview muted playsinline aria-label="Camera preview"></video>
+  <figcaption>Camera preview, live during the measurement.</figcaption>
+</figure>
+
+@for (view of views(); track view.key) {
+  <section [attr.aria-labelledby]="'probe-' + view.key">
+    <h2 [id]="'probe-' + view.key">{{ view.title }}</h2>
+    <p class="about">{{ view.about }}</p>
+    @if (view.encoders; as encoders) {
+      <div class="scroll">
+        <table class="encoders">
+          <thead>
+            <tr>
+              <th scope="col">Codec</th>
+              <th scope="col">fps</th>
+              <th scope="col">Acceleration</th>
+              <th scope="col">Supported</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (encoder of encoders; track $index) {
+              <tr>
+                <td>{{ encoder.codec }}</td>
+                <td>{{ encoder.framerate }}</td>
+                <td>{{ encoder.acceleration }}</td>
+                <td [class.absent]="encoder.absent">{{ encoder.supported }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <table>
+        <tbody>
+          @for (row of view.rows; track $index) {
+            <tr [class.absent]="row.absent">
+              <th scope="row">{{ row.key }}</th>
+              <td>{{ row.value }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
+  </section>
+}
+
+@if (report()) {
+  <details #details [open]="jsonOpen()" (toggle)="jsonOpen.set(details.open)">
+    <summary>Report JSON</summary>
+    <pre data-testid="report-json">{{ json() }}</pre>
+  </details>
+}
