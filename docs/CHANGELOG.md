@@ -32,3 +32,6 @@ versions follow [Semantic Versioning](https://semver.org/).
   solving, solved or DNF) that writes `attempt.json` with the CFOP phases, `session.json`, the cube
   clock fit, session statistics (mean, best, ao5, ao12, ao100, phase averages), the session store
   interface, and JSON Schemas of both files.
+- Cube connection (T1.6a): a cube pill and a connect dialog for GAN cubes, a live Cube panel on the
+  Timer page, a demo cube (`?demo=<n>&speed=<x>`), and settings for the host label, cube MAC
+  addresses, inspection, auto-advance and demo speed.

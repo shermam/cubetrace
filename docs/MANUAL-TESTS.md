@@ -6,24 +6,30 @@ and the result next to each item.
 
 ## T1.5 — cube connection
 
-Through the connect dialog (T1.6), in a current Chrome (the driver needs the Observable API). The
-flag below is `chrome://flags/#enable-web-bluetooth-new-permissions-backend`
-(`docs/TOOLCHAIN.md`, "GAN driver").
+Through the connect dialog (T1.6a: click the cube pill in the header, or "Connect a cube" on the
+Timer page), in a current Chrome (the driver needs the Observable API). The flag below is
+`chrome://flags/#enable-web-bluetooth-new-permissions-backend` (`docs/TOOLCHAIN.md`, "GAN driver");
+the dialog names it, with a Copy button. The moves are read in the Timer page's Cube panel, whose
+move log lists the last 20 moves, newest first: the move, its cube ms, the gap to the move before on
+the cube's clock ("Gap") and on this device's clock ("Host"), and ■ on the last move of each
+Bluetooth packet.
 
 - [ ] Connect the GAN 12 ui FreePlay on a laptop (Chrome, macOS or Windows) with the flag on:
   the picker lists the cube, no MAC address is asked for, and model, firmware and battery appear
   within 5 s. Write down the model string the cube reports.
 - [ ] Same with the flag off: the dialog names the flag and asks for the MAC address; typing it
   connects (`AB:12:CD:34:EF:56`, `ab-12-cd-34-ef-56` and `ab12cd34ef56` are all accepted). A
-  wrong address fails within 5 s with a message about the MAC address.
+  wrong address fails within 5 s with a message that names the address. With "Remember it for
+  this cube" on, the next connection does not ask (Settings → Cube MAC addresses lists it).
 - [ ] Same on the ThinkPhone (Chrome for Android).
 - [ ] Same with the GAN 356 i3.
 - [ ] Scramble the cube, then connect: the state shown right after connecting is the cube's.
 - [ ] Turn faces slowly and fast: every move appears in the move log in order, with
-  `cubeMs` increasing; slices appear as two moves a few ms apart. In fast bursts, moves that
-  arrived in one Bluetooth packet share `hostMs` and only the last has `packetLast`.
+  `cubeMs` increasing; slices appear as two moves a few ms apart (Gap). In fast bursts, moves that
+  arrived in one Bluetooth packet share `hostMs` (Host 0) and only the last has `packetLast` (■).
 - [ ] Walk away 30 s, turn: the connection is still alive (or reconnects and says so).
-- [ ] Turn the cube off and on: the app shows disconnected, then reconnects on request.
+- [ ] Turn the cube off and on: the pill says "No cube" and the dialog gives the reason, then
+  Reconnect connects it again.
 - [ ] Disconnect from the app, then connect again without reloading the page.
 
 ## T1.6 — timer
