@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import { exportSession } from './helpers/export';
 import { fixtureSolve } from './helpers/fixtures';
-import { demoPath, parseTime, solveRows, textOf } from './helpers/timer';
+import { demoPath, solveRows, textOf } from './helpers/timer';
 
 // The timer (docs/PLAN.md, T1.6b) end to end with the demo cube: an attempt from the scramble to
 // solved, its time and breakdown, the solve list, the session kept in the origin private file
@@ -11,33 +11,19 @@ import { demoPath, parseTime, solveRows, textOf } from './helpers/timer';
 
 const SCRAMBLE = /^([UDRLFB][2']? ?){15,30}$/;
 
-interface DemoFile {
-  solves: { scramble: string; moves: { m: string; ms: number }[]; time_ms: number }[];
-}
-
 test('a demo solve is timed, broken down and listed; the session survives a reload and exports', async ({
   page,
-  request,
 }) => {
-  const file = (await (await request.get('/demo/solves.json')).json()) as DemoFile;
-  const solve = file.solves[0];
-  const speed = 20;
-  // The solve's duration on the cube's clock, divided by the replay speed.
-  const expectedMs = ((solve.moves.at(-1)?.ms ?? 0) - (solve.moves[0]?.ms ?? 0)) / speed;
-
-  await page.goto(`/?demo=0&speed=${String(speed)}`);
+  const solve = fixtureSolve(0);
+  await page.goto(demoPath(0, 20));
   const rows = page.getByTestId('solve-row');
   await expect(rows).toHaveCount(1, { timeout: 30_000 });
   await expect(page.getByTestId('save-status')).toHaveText('Saved');
 
-  // The time, frozen at the result, within 5% of the recorded duration / 20.
+  // The time, frozen at the result and in the list. How close it is to the recording is checked by
+  // attempt.spec.ts, on a replay that does not run while the page is still loading (which can hold
+  // the demo cube's timers back by tens of milliseconds on a busy machine).
   await expect(page.getByTestId('timer')).toHaveAttribute('data-kind', 'solved');
-  const shownMs = parseTime(await textOf(page, 'timer'));
-  test.info().annotations.push({
-    type: 'time',
-    description: `shown ${String(shownMs)} ms, expected ${expectedMs.toFixed(1)} ms`,
-  });
-  expect(Math.abs(shownMs - expectedMs)).toBeLessThanOrEqual(0.05 * expectedMs);
   await expect(rows.first().getByTestId('solve-time')).toHaveText(await textOf(page, 'timer'));
   await expect(rows.first()).toHaveAttribute('data-index', '1');
   await expect(rows.first()).toHaveAttribute('data-status', 'solved');

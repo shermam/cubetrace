@@ -49,3 +49,17 @@ export async function expectSolves(page: Page, count: number): Promise<void> {
 export function currentSessionId(page: Page): Promise<string | null> {
   return page.evaluate(() => localStorage.getItem('cubetrace.currentSession'));
 }
+
+/**
+ * Replays the demo again from the connect dialog (Disconnect, then Demo cube, which takes the solve
+ * and speed of the page's address): the same solve from the start, as the next attempt.
+ */
+export async function replayDemo(page: Page): Promise<void> {
+  await page.getByTestId('cube-status').first().click();
+  const dialog = page.getByRole('dialog', { name: 'Cube' });
+  await dialog.getByRole('button', { name: 'Disconnect' }).click();
+  await dialog.getByRole('button', { name: 'Demo cube' }).click();
+  await expect(dialog.getByTestId('connect-state')).toHaveText('Connected to the demo cube.');
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeHidden();
+}
