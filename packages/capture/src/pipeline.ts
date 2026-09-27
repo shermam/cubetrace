@@ -17,6 +17,7 @@ import {
   type CaptureError,
   type CaptureStats,
   type DeleteClipParams,
+  type MotionMeterInfo,
   type MotionSample,
   type SaveClipParams,
   type WorkerToWindow,
@@ -55,13 +56,16 @@ export interface CaptureHandle {
    * Measures, for a sync check (docs/PLAN.md, T2.5), the motion of every frame from the next one on
    * inside `rect` (frame pixels, as the framing rectangle; null for the whole frame): `onSample` gets
    * each frame's motion (`MotionSample`) until the returned function is called; `onError` hears once
-   * why the frames cannot be measured, which ends it. One watch at a time: a new one ends the one
-   * before, and so does `stop()`.
+   * why the frames cannot be measured, which ends it; `onMeter` hears how the frames are read (their
+   * pixel format, copied or drawn, the region and the plane it is measured on) with the first frame
+   * and whenever that changes (T2.8). One watch at a time: a new one ends the one before, and so does
+   * `stop()`.
    */
   watchMotion(
     rect: FramingRect | null,
     onSample: (sample: MotionSample) => void,
     onError?: (message: string) => void,
+    onMeter?: (meter: MotionMeterInfo) => void,
   ): () => void;
   /** `listener` gets the counters once per second; call the returned function to stop. */
   onStats(listener: (stats: CaptureStats) => void): () => void;
@@ -215,6 +219,7 @@ class Capture implements CaptureHandle {
         readonly id: number;
         readonly onSample: (sample: MotionSample) => void;
         readonly onError: ((message: string) => void) | undefined;
+        readonly onMeter: ((meter: MotionMeterInfo) => void) | undefined;
       }
     | undefined;
 
@@ -327,6 +332,7 @@ class Capture implements CaptureHandle {
     rect: FramingRect | null,
     onSample: (sample: MotionSample) => void,
     onError?: (message: string) => void,
+    onMeter?: (meter: MotionMeterInfo) => void,
   ): () => void {
     if (this.#stopping !== undefined) {
       onError?.('The capture has stopped.');
@@ -334,7 +340,7 @@ class Capture implements CaptureHandle {
     }
     const id = this.#nextId;
     this.#nextId += 1;
-    this.#motion = { id, onSample, onError };
+    this.#motion = { id, onSample, onError, onMeter };
     post(this.#worker, { type: 'sync-start', id, rect });
     return () => {
       if (this.#motion?.id === id) {
@@ -458,6 +464,11 @@ class Capture implements CaptureHandle {
       case 'sync-sample':
         if (this.#motion?.id === message.id) {
           this.#motion.onSample(message.sample);
+        }
+        break;
+      case 'sync-meter':
+        if (this.#motion?.id === message.id) {
+          this.#motion.onMeter?.(message.meter);
         }
         break;
       case 'sync-error': {

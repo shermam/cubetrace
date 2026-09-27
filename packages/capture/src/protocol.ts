@@ -226,10 +226,10 @@ export interface ErrorMessage extends CaptureError {
 }
 
 /**
- * One frame's motion during a sync check (docs/PLAN.md, T2.5): its own timestamp and its arrival in
- * the capture worker, which place it on the host clock as the clips' frames are placed
+ * One frame's motion during a sync check (docs/PLAN.md, T2.5 and T2.8): its own timestamp and its
+ * arrival in the capture worker, which place it on the host clock as the clips' frames are placed
  * (docs/DATA-MODEL.md §9), and how much the picture in the rectangle changed since the frame before
- * (motion.ts).
+ * (motion.ts), in two measures.
  */
 export interface MotionSample {
   /** The frame's `VideoFrame.timestamp`, µs. */
@@ -237,7 +237,12 @@ export interface MotionSample {
   /** Host ms when the frame reached the capture worker. */
   readonly arrivalHostMs: number;
   /** The mean absolute difference of its luma from the previous frame's, in luma levels. */
-  readonly energy: number;
+  readonly mean: number;
+  /**
+   * The share of the region's pixels (of its downscale) whose luma changed by more than 12 levels
+   * since the previous frame, 0 to 1: the clapperboard's energy (T2.8).
+   */
+  readonly changed: number;
   /** The capture worker's time on it, ms: the copy of the frame's pixels and the arithmetic. */
   readonly costMs: number;
 }
@@ -247,6 +252,38 @@ export interface SyncSampleMessage {
   readonly type: 'sync-sample';
   readonly id: number;
   readonly sample: MotionSample;
+}
+
+/**
+ * How the capture worker measures a sync check's frames (motion.ts): what it reads of them and where
+ * (docs/PLAN.md, T2.8), for the check's diagnostics and the capture lab.
+ */
+export interface MotionMeterInfo {
+  /** The frames' pixel format, `VideoFrame.format`; null when the browser gives none. */
+  readonly format: string | null;
+  /**
+   * How the region's luma is read: `copy`, out of the frame's own planes with `VideoFrame.copyTo`;
+   * `draw`, drawn into a canvas (a pixel format the meter does not read, or a frame to be shown
+   * turned or mirrored).
+   */
+  readonly path: 'copy' | 'draw';
+  /** The frames' size as shown, pixels. */
+  readonly frameWidth: number;
+  readonly frameHeight: number;
+  /** The region measured, in those pixels: the framing rectangle clamped to the frame. */
+  readonly region: FramingRect;
+  /** The luma plane the region is downscaled to: 320 pixels wide for a wide region, else 160. */
+  readonly planeWidth: number;
+  readonly planeHeight: number;
+  /** A pixel of that plane counts as changed when its luma moved by more than this. */
+  readonly changeLevels: number;
+}
+
+/** How the frames of the sync check of the same id are measured: sent first, and when it changes. */
+export interface SyncMeterMessage {
+  readonly type: 'sync-meter';
+  readonly id: number;
+  readonly meter: MotionMeterInfo;
 }
 
 /** The frames' motion cannot be measured (their pixels cannot be read): the check ends. */
@@ -271,6 +308,7 @@ export type WorkerToWindow =
   | DeleteClipFailed
   | ErrorMessage
   | SyncSampleMessage
+  | SyncMeterMessage
   | SyncErrorMessage
   | StoppedMessage;
 
@@ -329,6 +367,7 @@ const WORKER_TYPES: ReadonlySet<unknown> = new Set<WorkerToWindow['type']>([
   'delete-clip-failed',
   'error',
   'sync-sample',
+  'sync-meter',
   'sync-error',
   'stopped',
 ]);

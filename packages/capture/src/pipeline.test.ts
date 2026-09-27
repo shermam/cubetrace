@@ -16,6 +16,7 @@ import type {
   CaptureStats,
   ConnectMessage,
   DeleteClipParams,
+  MotionMeterInfo,
   MotionSample,
   SaveClipParams,
   StartMessage,
@@ -292,11 +293,23 @@ describe('CaptureHandle', () => {
     const capture = start();
     const samples: MotionSample[] = [];
     const errors: string[] = [];
+    const meters: MotionMeterInfo[] = [];
     const sample: MotionSample = {
       timestampUs: 5_305_665_091,
       arrivalHostMs: 1_790_516_343_600.5,
-      energy: 3.25,
+      mean: 3.25,
+      changed: 0.0125,
       costMs: 0.8,
+    };
+    const meter: MotionMeterInfo = {
+      format: 'NV12',
+      path: 'copy',
+      frameWidth: 1920,
+      frameHeight: 1080,
+      region: { x: 480, y: 120, w: 960, h: 840 },
+      planeWidth: 160,
+      planeHeight: 140,
+      changeLevels: 12,
     };
     const rect = { x: 480, y: 120, w: 960, h: 840 };
 
@@ -304,17 +317,21 @@ describe('CaptureHandle', () => {
       rect,
       (value) => samples.push(value),
       (message) => errors.push(message),
+      (value) => meters.push(value),
     );
     expect(worker.messages().at(-1)).toEqual({ type: 'sync-start', id: 1, rect });
+    worker.reply({ type: 'sync-meter', id: 1, meter });
     worker.reply({ type: 'sync-sample', id: 1, sample });
     // A sample of another check (one that ended) is not this watch's.
-    worker.reply({ type: 'sync-sample', id: 9, sample: { ...sample, energy: 99 } });
+    worker.reply({ type: 'sync-sample', id: 9, sample: { ...sample, mean: 99 } });
+    worker.reply({ type: 'sync-meter', id: 9, meter: { ...meter, format: 'I420' } });
     stop();
     expect(worker.messages().at(-1)).toEqual({ type: 'sync-stop', id: 1 });
     worker.reply({ type: 'sync-sample', id: 1, sample });
     stop();
 
     expect(samples).toEqual([sample]);
+    expect(meters).toEqual([meter]);
     expect(errors).toEqual([]);
     expect(
       worker.messages().filter((message) => (message as { type: string }).type === 'sync-stop'),

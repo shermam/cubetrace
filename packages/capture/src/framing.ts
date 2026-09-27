@@ -44,6 +44,27 @@ export function isFullFrame(rect: FramingRect, size: FrameSize): boolean {
   return rect.x === 0 && rect.y === 0 && rect.w === size.width && rect.h === size.height;
 }
 
+/**
+ * A framing rectangle over more than this share of the frame's area is wide (docs/PLAN.md, T2.8):
+ * the sync check asks for a tighter one around the cube first, and measures a wide one's motion at
+ * twice the resolution.
+ */
+export const WIDE_FRAMING_FRACTION = 0.6;
+
+/**
+ * Whether `rect` covers more than `WIDE_FRAMING_FRACTION` of the area of frames of `size` (the part
+ * of it inside them); true for the whole frame, and for a null rectangle or size (the whole frame,
+ * or not known yet).
+ */
+export function isWideFraming(rect: FramingRect | null, size: FrameSize | null): boolean {
+  if (rect === null || size === null || size.width <= 0 || size.height <= 0) {
+    return true;
+  }
+  const w = Math.max(0, Math.min(size.width, rect.x + rect.w) - Math.max(0, rect.x));
+  const h = Math.max(0, Math.min(size.height, rect.y + rect.h) - Math.max(0, rect.y));
+  return (w * h) / (size.width * size.height) > WIDE_FRAMING_FRACTION;
+}
+
 /** The smallest width and height of the rectangle in frames of `size`: at least 1 pixel. */
 export function minFramingSide(size: FrameSize): number {
   const side = Math.round(Math.min(size.width, size.height) * FRAMING_MIN_FRACTION);
