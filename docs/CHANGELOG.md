@@ -5,6 +5,17 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+
+- The records are schema version 2 (T2.0, `docs/DATA-MODEL.md`). Every `attempt.json` keeps the
+  cube clock fit of its own moves (`clock`), which places each move on the host clock without the
+  Bluetooth jitter: the cube's clock runs 0.7% slow while it is turned, and across the pauses
+  between attempts it does not, so the fit of a whole session drifts (`docs/DEVICES.md`).
+  `attempt.json`'s `video`, `session.json`'s `cameras` and `clock.cameras`, and the new
+  `<camera>.<segment>.frames.json` are defined for the recordings of phase 2. Sessions recorded
+  before are still read, resumed and exported, as version 2 records without a clock fit; their
+  files are not rewritten. JSON Schemas of both versions are in `packages/core/schema/`.
+
 ## 0.1.0 — 2026-09-27
 
 The first release: phase 1 of `docs/PLAN.md`, a timer for a GAN Bluetooth cube in Chrome that keeps
