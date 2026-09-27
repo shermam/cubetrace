@@ -29,14 +29,16 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | T1.3 | `core`: colour-neutral CFOP phase detector, validated against the fixtures | T1.1 | ⬜ |
 | T1.4 | `core`: attempt state machine, records, cube clock fit, statistics, JSON Schemas, store interface | T1.2, T1.3 | ⬜ |
 | T1.5 | `gan`: driver wrapper (Web Bluetooth), MAC provider, support check, fake cube | T1.1 | 🟨 #6 |
-| T1.6 | `web`: timer UI (scramble, timer, breakdown chart, solve list), connect dialog, settings, sessions page, OPFS store | T1.4, T1.5 | ⬜ |
+| T1.6a | `web`: cube connection: connect dialog, `CubeService`, status pill, live cube panel (net, move log), settings, demo mode | T1.5 | ⬜ |
+| T1.6b | `web`: timer page, breakdown chart, solve list, sessions page, OPFS store, `SessionService` | T1.4, T1.6a | ⬜ |
 | T1.7 | `web`: PWA (manifest, service worker), wake lock, storage persistence, responsive layouts, version display | T1.0 | 🟨 #3 |
 | T1.8 | `web`: device probe page (`/probe`) | T1.0 | 🟨 #4 |
 | T1.9 | end-to-end suite with the fake cube; JSON Schema validation of exports | T1.6 | ⬜ |
 | T1.10 | docs, CHANGELOG, `v0.1.0`, manual test round with the owner | T1.7, T1.8, T1.9 | ⬜ |
 
-Waves for parallel work: T1.0 → {T1.1, T1.7, T1.8} → {T1.2, T1.3, T1.5} → T1.4 → T1.6 →
-{T1.9, T1.10}.
+Waves for parallel work: T1.0 → {T1.1, T1.7, T1.8} → {T1.2, T1.3, T1.5} → {T1.4, T1.6a} → T1.6b →
+{T1.9, T1.10}. T1.6 was split into T1.6a and T1.6b on 2026-09-27 so that the owner can test the
+driver on the real cubes while T1.4 is built.
 
 **Definition of done for phase 1:** every task merged; CI green on `main`; the app deployed
 on GitHub Pages; the owner's manual test round (`docs/MANUAL-TESTS.md`, T1.5–T1.7 sections)
@@ -439,40 +441,113 @@ samples (no Bluetooth in tests).
 
 ---
 
-## T1.6 — `web`: the timer
+## T1.6a — `web`: cube connection, live cube panel, settings, demo mode
 
-**Goal.** The Cubeast feel: scramble at the top with its picture, a big timer, the solve list,
-the CFOP breakdown chart, driven by the cube (real or fake), persisting every attempt.
+**Goal.** The app talks to a cube, real or fake, before the timer exists: connect, see the
+cube's state and moves live, and store the settings the timer will need. Split from T1.6 on
+2026-09-27 so that the owner can run the T1.5 manual tests on the real cubes while T1.4 is built.
 
-**Scope.** `apps/web/src/app/{timer,connect,settings,sessions,shared}/…`, a `SessionService`
-(Angular, signals) wrapping `AttemptMachine`, `packages/storage` with `OpfsSessionStore`
-(browser only) implementing `SessionStore`, one Playwright flow.
+**Scope.** `apps/web/src/app/cube/{cube-service,demo,…}.ts`, `apps/web/src/app/connect/…`,
+`apps/web/src/app/settings/…` (extended), a live cube panel on the timer page, the status pill
+in the header, `apps/web/e2e/cube.spec.ts`, the wording of `docs/MANUAL-TESTS.md` T1.5, a
+CHANGELOG line.
 
 **Behaviour.**
-- **Connect dialog**: support check → "Connect cube" (Web Bluetooth) or "Demo cube" (FakeCube
-  with a random fixture; also selectable by fixture index for tests via a query parameter
-  `?demo=<index>&speed=<n>`); MAC entry when needed; shows model, firmware, battery.
+- **`CubeService`** (Angular, signals, `providedIn: 'root'`): owns at most one `CubeConnection`
+  from `@cubetrace/gan`. `connect()` calls `connectGanCube` with a `MacProvider` that answers
+  from the stored MACs (by device name) first and, on the fallback call, asks the user through
+  the dialog; `connectDemo(solve, speed)` uses a `FakeCube`; `disconnect()`. Signals: `status`
+  (`'disconnected' | 'connecting' | 'connected'`), `kind`, `hardware`, `battery`, `facelets`
+  (updated on every move and facelets event), `solved` (computed with `isSolved`), `moves` (the
+  last 200 `CubeMoveEvent`s), `lastError`. It exposes the current connection's `events$` (an
+  Observable that follows the connection) for T1.6b's `SessionService`. On a `disconnected`
+  event the status goes back to `'disconnected'` with the reason; no automatic reconnection (Web
+  Bluetooth needs a user gesture): a "Reconnect" action instead.
+- **Connect dialog** (a native `<dialog>`, opened from the status pill and from the timer page):
+  the result of `checkBluetoothSupport` (its `hint`; when `flagUrl` is set, the flag's name, a
+  copy button, since `chrome://` URLs cannot be links, and the three steps: paste it in the
+  address bar, set Enabled, relaunch); "Connect cube" (disabled when `available` is false) and
+  "Demo cube" (a random demo solve at speed 1, or the URL's `?demo=<index>&speed=<n>`); the MAC
+  prompt when the driver asks (device name shown, input validated with `normalizeMac`, a
+  "remember for this cube" switch that stores it in Settings); while connecting, a spinner;
+  connected: model, hardware, firmware, battery, gyro, and "Disconnect"; errors in plain words
+  (the first-facelets timeout → "The cube did not send its state: is it on and nearby?"; a MAC
+  error names the address).
+- **Status pill** in the header (`app.html`, next to the wake-lock status): "No cube" /
+  "Connecting…" / "<model> · <battery>%" with a dot; clicking it opens the dialog.
+- **Live cube panel** on the timer page (in the "solves" region for now; T1.6b moves it into a
+  collapsible "Cube" section): a 2D net of the 54 facelets in the six colours (U white, R red,
+  F green, D yellow, L orange, B blue) updated live; "Solved" / "Not solved"; the move log: the
+  last 20 moves, newest first, each with the move, its `cubeMs`, the gap to the previous move
+  in ms and a marker on `packetLast`. The manual tests of `docs/MANUAL-TESTS.md` T1.5 read
+  this log.
+- **Demo mode** (`demo.ts`): `?demo=<index>&speed=<n>` on the timer route connects a `FakeCube`
+  on load and replays demo solve `<index>`: its scramble moves 100 ms apart, then its solution
+  moves with their cube timings, both divided by `speed` (the fake cube's `speed` option).
+  `DemoSolve = { index, scramble, scrambledFacelets, moves }` is exposed for T1.6b, which sets
+  the attempt's scramble from it. The demo solves are a slim copy of `fixtures/solves.json`:
+  the first 30 solves, only `scramble`, `scrambled_facelets`, `moves` and `time_ms`, under
+  100 kB, written by a script wired like `apps/web/scripts/write-version.mts`, loaded only when
+  a demo starts (a lazy chunk or a fetch from `public/`), never in the initial bundle and not
+  prefetched by the service worker.
+- **Settings** (`SettingsService`: signals plus `localStorage` through `BROWSER_GLOBALS`, so the
+  tests use `fake-browser.ts`): host label (default a short name from the platform, such as
+  "macOS laptop" or "Android phone"; editable), cube MACs by device name (add, edit, remove;
+  validated), demo speed (default 1), inspection 15 s (off), auto-advance (on). The Settings
+  page shows them under the T1.7 sections (screen, storage), which stay. T1.6b reads
+  `SettingsService`.
+
+**Tests.** Unit: `CubeService` with a `FakeCube` (connect → hardware, battery, facelets; moves
+logged in order; disconnect → status and reason), the MAC provider (a stored MAC wins; the
+fallback asks), `SettingsService` round trip with the fake browser, `demo.ts` (query parsing,
+defaults, bad values), the dialog's states. Playwright (`cube.spec.ts`): (1) `/?demo=0&speed=20`:
+the pill shows "Fake cube · 100%", the log fills with moves in cube order with increasing
+`cubeMs`, and at the end the panel says Solved; (2) without `?demo`: the dialog opens, "Connect
+cube" is disabled with the support hint (headless Chromium has no Web Bluetooth), "Demo cube"
+connects; (3) Settings: a MAC entered survives a reload, an invalid one is refused.
+
+**Acceptance.**
+- [ ] `/?demo=0&speed=20` on the Pages deploy shows a live net and a move log without a cube.
+- [ ] `docs/MANUAL-TESTS.md` T1.5 can be run with this build (the coordinator asks the owner after the merge).
+- [ ] No business logic in components: cube state comes from `@cubetrace/core` and `@cubetrace/gan`.
+- [ ] The initial bundle grows only by the pill and the dialog; the demo data loads only in demo mode.
+
+---
+
+## T1.6b — `web`: the timer
+
+**Goal.** The Cubeast feel: scramble at the top with its picture, a big timer, the solve list,
+the CFOP breakdown chart, driven by the cube (real or fake) through T1.6a's `CubeService`,
+persisting every attempt.
+
+**Scope.** `apps/web/src/app/{timer,sessions,shared}/…`, a `SessionService` (Angular, signals)
+wrapping `AttemptMachine` and consuming `CubeService.events$`, `packages/storage` with
+`OpfsSessionStore` (browser only) implementing `SessionStore`, one Playwright flow.
+
+**Behaviour.**
 - **Timer page**: scramble text (large, monospace) and `<twisty-player>` (2D or 3D, small,
-  `experimental-setup-alg` = scramble, no controls); status pill (connected / battery /
-  state); scramble progress `k / n` with the undo guidance list when diverged (inverse moves
-  greyed out as done); the timer display `m:ss.cc` (10 ms resolution) running from
-  `solveStart` to `solveEnd`; optional inspection counter (15 s WCA style; setting) from
+  `experimental-setup-alg` = scramble, no controls); the status pill's state (connected /
+  battery / attempt state); scramble progress `k / n` with the undo guidance list when diverged
+  (inverse moves greyed out as done); the timer display `m:ss.cc` (10 ms resolution) running
+  from `solveStart` to `solveEnd`; optional inspection counter (15 s WCA style; setting) from
   `armed` or `pickup`; on solved: the time, the phase chart, auto-advance to the next
   scramble (pre-generated during the solve so it appears instantly); buttons: Skip
   scramble, DNF, Delete last, New session. Keyboard: `Esc` DNF, `Delete` delete last, `N`
-  skip.
+  skip. T1.6a's live cube panel becomes a collapsible "Cube" section. If the cube is not
+  solved when a scramble is due, the page says "Solve the cube first" and the attempt starts
+  when it is (the machine is constructed from a solved cube).
+- **Demo mode**: with `?demo=<index>`, the attempt's scramble is the demo solve's scramble
+  (T1.6a's `DemoSolve`), so the replay arms and solves it.
 - **Breakdown chart**: hand-written SVG stacked horizontal bar, eight segments in fixed
   colours with a legend; last solve and session average; hover/tap shows ms and moves.
 - **Solve list**: index, time, the eight phase times as a mini bar, flags (DNF, corrected);
   session stats: count, mean, best, ao5, ao12.
-- **Settings page**: inspection 15 s (off), auto-advance (on), host label (device name; set
-  once, stored), cube MACs by name, fixture speed for demo, "persist storage" button and
-  its status.
 - **Sessions page**: sessions from the store (date, host, attempts, mean); export one
   session as a single JSON file (`{session, attempts}`); delete.
 - **Persistence**: `OpfsSessionStore` writes `sessions/<id>/session.json` and
   `attempts/<index>/attempt.json` as in `docs/DATA-MODEL.md` §5; the current session id in
-  `localStorage`; reload resumes the session (attempts listed, next index correct).
+  `localStorage`; reload resumes the session (attempts listed, next index correct). The wake
+  lock is requested while a session is active.
 - **Clock**: `hostMs` from `performance.timeOrigin + performance.now()`; cube fit via
   `CubeClockFit`, its params saved into `session.json` on every attempt.
 
