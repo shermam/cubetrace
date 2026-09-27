@@ -914,9 +914,11 @@ versions 0.2.0, `docs/DEVICES.md` updated from the round; the coordinator tags a
 
 ## Phase 3 task board — cloud
 
-Prerequisites, all done on 2026-09-27: the Firebase project `cubetrace-cacd9` (Blaze, Google
-sign-in, Firestore in `nam5`, a web app registered) and the decision for Cloudflare R2, with GCS
-kept as a configuration (`docs/USER-ACTIONS.md`). The coordinator deploys with a service-account
+Prerequisites, all done on 2026-09-27: the Firebase project `cubetrace-cacd9` (Blaze on a Google
+Cloud free-trial billing account with R$ 1,761 of credit until 2026-12-27, Google sign-in, Firestore
+in `nam5`, a web app registered, `shermam.github.io` authorized) and the bucket decision: **Google
+Cloud Storage during the trial, Cloudflare R2 as the later option**, both by configuration
+(`docs/USER-ACTIONS.md`). The coordinator deploys with a service-account
 key held only by the coordinator session; a GitHub Actions workflow deploys on merge with a
 second key. Phase 3 starts after T2.4, because it changes the same `SessionService`.
 
@@ -965,8 +967,8 @@ the user's daily quota (`users/{uid}.quota`, bytes and files), records the inten
 document and returns `[{path, url, headers, expiresAt}]` with presigned `PUT` URLs (15 minutes):
 provider `r2` through the S3 SigV4 presigner (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`
 against `https://<account>.r2.cloudflarestorage.com`), provider `gcs` through
-`@google-cloud/storage` v4 signed URLs; `BUCKET_PROVIDER`, bucket name and account id as
-parameters, the R2 keys as secrets (`defineSecret`); object keys `users/{uid}/sessions/{id}/attempts/{index}/<file>`;
+`@google-cloud/storage` v4 signed URLs; `BUCKET_PROVIDER` (`gcs` first), bucket name and account id as
+parameters, the R2 keys as secrets (`defineSecret`) only when the provider is `r2`; object keys `users/{uid}/sessions/{id}/attempts/{index}/<file>`;
 `confirmUpload({sessionId, attemptIndex, files})` verifies each object's size with the SDK and
 marks the attempt `upload.state = 'done'`. `bucket/cors.json` for R2 (PUT and GET from
 `https://shermam.github.io` and `http://localhost:4200`); a `functions/README.md` for deploying; the

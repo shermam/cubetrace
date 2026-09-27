@@ -50,18 +50,31 @@ adds items; the owner ticks them when done (date and any detail that others need
       deploy without anyone's machine.
     Delete the downloaded files afterwards. Neither key is ever committed, printed in a PR or
     handed to an agent; `CLAUDE.md` will say so. Browser only, no Codespace, no local CLI.
-- [x] 2026-09-27 — **Bucket decided: Cloudflare R2.** To do when the coordinator asks (phase 3):
-  in the Cloudflare dashboard, R2 → Create bucket `cubetrace` (location hint: Eastern North
-  America, so it sits near `nam5`); R2 → Manage API tokens → Create API token with
-  **Object Read & Write** on that bucket only; keep the Access Key ID, the Secret Access Key
-  and the account id (the S3 endpoint is `https://<account-id>.r2.cloudflarestorage.com`).
-  They go into GitHub Actions secrets (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
-  `R2_ACCOUNT_ID`), from which the deploy workflow stores them as Firebase secrets; they are
-  never committed. The bucket's CORS rule (PUT and GET from `https://shermam.github.io` and,
-  later, the Firebase Hosting domain) comes from the repo as a file you paste in the
-  bucket's Settings → CORS policy.
-- [x] 2026-09-27 — Bucket provider decided: R2 (see above). GCS stays supported by
-  configuration for anyone else deploying the app.
+- [x] 2026-09-27 — **Bucket decided: Google Cloud Storage first, Cloudflare R2 later.** The
+  Firebase project's billing account is a Google Cloud free trial (R$ 1,761.10 of credit, until
+  2026-12-27) and the credit applies to Cloud Storage's storage *and* internet egress as well as to
+  Firestore and Cloud Functions, so the solo phase (one solver, phases 2–3) runs on GCS at no
+  cost: at the design's cadence one camera is roughly 100–130 GB a month, i.e. a few dollars of
+  storage and about US$ 0.12 per GiB when the dataset is downloaded to the training machine,
+  all inside the credit. The function serves both providers by configuration; `BUCKET_PROVIDER`
+  starts as `gcs`. **Before 2026-12-27**, decide: stay on GCS (paid: ~US$ 0.02/GB-month plus
+  egress) or copy the bucket to R2 while the credit still pays the egress (`rclone`), for the
+  community version. To do when phase 3 asks: in the Google Cloud console of `cubetrace-cacd9`,
+  create the bucket `cubetrace-data` in `us-central1`, Standard class, uniform bucket-level access,
+  public access prevented; the CORS policy comes from the repo (`bucket/cors.json`) and is applied
+  with `gcloud storage buckets update --cors-file` by the coordinator; the function's service
+  account needs Storage Object Admin on that bucket and the Service Account Token Creator role on
+  itself to sign URLs.
+  - Note on the card: Google charges the card only after the trial account is *activated* to a
+    full account (Billing → the "Activate" banner); until then usage beyond the credit is refused
+    and, when the trial ends, the project drops to the Spark plan and the paid pieces (Functions,
+    the bucket) stop. Either way the R$ 100 budget alert only warns; the blocked virtual card is
+    the actual stop, and a failed payment suspends the billing account rather than charging.
+  - The R2 steps, for later: a Cloudflare account, R2 → Create bucket `cubetrace` (location hint
+    Eastern North America), an API token with Object Read & Write on that bucket, and the three
+    values (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`) as GitHub Actions
+    secrets, never committed; the bucket's CORS rule is pasted from the repo.
+- [x] 2026-09-27 — Bucket provider decided: GCS during the free trial, R2 as the later option (see above); both stay supported by configuration.
 - [ ] Run `python ferramentas/banda.py` (private repo) at home and at the office and record
   the upstream in `docs/DEVICES.md`; it sets the upload queue's expectations.
 
