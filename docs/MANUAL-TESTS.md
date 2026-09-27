@@ -73,6 +73,13 @@ time says so when a browser has none).
 - [ ] Mis-scramble on purpose (one wrong turn): the undo list shows the inverse move, greys it out
   when made and clears; the attempt arms afterwards, and its row in the solve list says Corrected.
   (Without a cube, `/?demo=0&speed=1&misscramble=5` shows the same with the demo cube.)
+- [ ] Scramble colours (T1.13), as on Cubeast: each move of the scramble text gets a green box once
+  made; a half turn (`R2`) gets a yellow box after its first quarter turn and turns green after the
+  second, turned either way. A wrong turn puts a red box on the move where the cube left the
+  scramble, with the undo list as above; undoing it removes the red. Once the scramble is complete
+  every move is green until the first turn of the solve, then the text is plain. Nothing in the text
+  shifts when a box appears. Write down whether the colours keep up with fast turning.
+  (Without a cube: `/?demo=0&speed=1&misscramble=5`.)
 - [ ] CFOP breakdown looks right for a solve you narrate (cross, four pairs, two-look OLL, PLL): the
   last solve's bar has its eight phases in order; hovering (or tapping) a segment gives its ms and
   moves; "Numbers" lists them next to the session average.
