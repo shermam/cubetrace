@@ -31,7 +31,7 @@ export {
   opposite,
 } from './pieces';
 // T1.2 — scrambles
-export type { ScrambleProgress } from './scramble';
+export type { ScrambleMoveState, ScrambleProgress } from './scramble';
 export { ScrambleTracker, generateScramble, scrambleTarget } from './scramble';
 // T1.3 — CFOP phases
 export type { DetectPhasesOptions, PhaseName, PhaseRecord, PhaseReport, TimedMove } from './phases';

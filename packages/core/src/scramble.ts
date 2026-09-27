@@ -76,6 +76,12 @@ export function scrambleTarget(scramble: string): Facelets {
   return applyMoves(SOLVED, parseMoves(scramble));
 }
 
+/**
+ * How far the cube has made one scramble move: `done`; `partial`, a half turn made halfway (one of
+ * its two quarter turns, in either direction); or `pending`, not begun.
+ */
+export type ScrambleMoveState = 'done' | 'partial' | 'pending';
+
 /** Where the cube is on its way through a scramble, after the moves seen so far. */
 export interface ScrambleProgress {
   /** Scramble moves reached so far (0..n). A half turn made halfway is not reached yet. */
@@ -101,6 +107,16 @@ export interface ScrambleProgress {
    * mistakes and their corrections: one wrong quarter turn undone costs 2.
    */
   extraMoves: number;
+  /**
+   * How far each scramble move is, one entry per move in the scramble's order, for a display that
+   * marks the moves as they are made. The moves before `matched` are `done`. While the cube is in
+   * flight after the last matched state (see {@link ScrambleTracker}), the next two moves say how
+   * far they are: `moves[matched]` is `partial` while it is a half turn made halfway and `done` once
+   * it is whole, and `moves[matched + 1]`, when it is on the opposite face and was begun first, the
+   * same. Every other move is `pending`, and so is every move from `matched` on while `diverged`.
+   * All are `done` when `done`.
+   */
+  moves: readonly ScrambleMoveState[];
 }
 
 /**
@@ -132,6 +148,14 @@ interface Stage {
 
 const NOT_STARTED: Stage = { turn: null, covered: 0, whole: false };
 
+/** A stage as {@link ScrambleProgress.moves} gives it. */
+function stageState(stage: Stage): ScrambleMoveState {
+  if (stage.whole) {
+    return 'done';
+  }
+  return stage.turn === null ? 'pending' : 'partial';
+}
+
 /** Not started, halfway through a half turn (in either direction), or whole. */
 function stagesOf(m: Move): Stage[] {
   const whole: Stage = { turn: m, covered: quarterTurns([m]), whole: true };
@@ -144,6 +168,23 @@ function stagesOf(m: Move): Stage[] {
     { turn: { face: m.face, turns: 3 }, covered: 1, whole: false },
     whole,
   ];
+}
+
+/**
+ * A state strictly between `expected[k]` and the next expected states ("in flight", see
+ * {@link ScrambleTracker}): how much of the path it covers and how far the two moves after
+ * `expected[k]` are.
+ */
+interface InFlight {
+  /** Quarter turns of scramble path covered. */
+  readonly covered: number;
+  /** How far scramble move `k + 1` (`moves[k]` of the progress) is. */
+  readonly first: ScrambleMoveState;
+  /**
+   * How far move `k + 2` is. It can be begun before move `k + 1` is whole only when it turns the
+   * opposite face; otherwise it is `pending`.
+   */
+  readonly second: ScrambleMoveState;
 }
 
 /**
@@ -165,8 +206,10 @@ export class ScrambleTracker {
   readonly #pathQuarters: readonly number[];
   #current: Facelets;
   #matched = 0;
-  /** The in-flight states after `expected[#matched]`, with the quarter turns of path they cover. */
-  #inFlight: ReadonlyMap<Facelets, number>;
+  /** The in-flight states after `expected[#matched]`. */
+  #inFlight: ReadonlyMap<Facelets, InFlight>;
+  /** The in-flight state the cube is in; null when it is on an expected state or off the path. */
+  #flight: InFlight | null = null;
   /**
    * Moves made since the cube was last on the scramble path, same-face neighbours merged (see
    * {@link appendMerged}); empty while on it.
@@ -225,15 +268,17 @@ export class ScrambleTracker {
         this.#matched = k;
         this.#inFlight = this.#inFlightAfter(k);
       }
+      this.#flight = null;
       this.#sincePath = [];
       this.#lost = false;
       this.#pathCovered = this.#pathQuarters[k];
     } else {
-      const covered = this.#inFlight.get(this.#current);
-      if (covered !== undefined) {
+      const flight = this.#inFlight.get(this.#current);
+      this.#flight = flight ?? null;
+      if (flight !== undefined) {
         this.#sincePath = [];
         this.#lost = false;
-        this.#pathCovered = covered;
+        this.#pathCovered = flight.covered;
       } else if (!this.#lost) {
         appendMerged(this.#sincePath, m);
       }
@@ -265,13 +310,15 @@ export class ScrambleTracker {
         this.#matched = k;
         this.#inFlight = this.#inFlightAfter(k);
       }
+      this.#flight = null;
       this.#lost = false;
       this.#pathCovered = this.#pathQuarters[k];
     } else {
-      const covered = this.#inFlight.get(state);
-      this.#lost = covered === undefined;
-      if (covered !== undefined) {
-        this.#pathCovered = covered;
+      const flight = this.#inFlight.get(state);
+      this.#flight = flight ?? null;
+      this.#lost = flight === undefined;
+      if (flight !== undefined) {
+        this.#pathCovered = flight.covered;
       }
     }
     // The unseen moves count as path, so that extraMoves stays what it was.
@@ -299,13 +346,13 @@ export class ScrambleTracker {
   }
 
   /**
-   * The states strictly between `expected[k]` and the next expected states, keyed to the quarter
-   * turns of path they cover: move `k + 1` half made (a half turn done halfway), and, when move
-   * `k + 2` is on the opposite face (the two commute), every combination of the stages of both
-   * except the expected states themselves.
+   * The states strictly between `expected[k]` and the next expected states, with the quarter turns
+   * of path they cover and the stages of the two moves: move `k + 1` half made (a half turn done
+   * halfway), and, when move `k + 2` is on the opposite face (the two commute), every combination of
+   * the stages of both except the expected states themselves.
    */
-  #inFlightAfter(k: number): Map<Facelets, number> {
-    const states = new Map<Facelets, number>();
+  #inFlightAfter(k: number): Map<Facelets, InFlight> {
+    const states = new Map<Facelets, InFlight>();
     const first = this.#moves.at(k);
     if (first === undefined) {
       return states;
@@ -325,10 +372,11 @@ export class ScrambleTracker {
           continue;
         }
         const turns = [a.turn, b.turn].filter((t): t is Move => t !== null);
-        states.set(
-          applyMoves(this.#expected[k], turns),
-          this.#pathQuarters[k] + a.covered + b.covered,
-        );
+        states.set(applyMoves(this.#expected[k], turns), {
+          covered: this.#pathQuarters[k] + a.covered + b.covered,
+          first: stageState(a),
+          second: stageState(b),
+        });
       }
     }
     return states;
@@ -336,13 +384,32 @@ export class ScrambleTracker {
 
   #snapshot(): ScrambleProgress {
     const diverged = this.#lost || this.#sincePath.length > 0;
+    const done = this.#current === this.#expected[this.#moves.length];
     return {
       matched: this.#matched,
       total: this.#moves.length,
-      done: this.#current === this.#expected[this.#moves.length],
+      done,
       diverged,
       undo: diverged ? inverseSequence(this.#sincePath) : [],
       extraMoves: Math.max(0, this.#madeQuarters - this.#pathCovered),
+      moves: this.#moveStates(done),
     };
+  }
+
+  /** {@link ScrambleProgress.moves} now. */
+  #moveStates(done: boolean): ScrambleMoveState[] {
+    const matched = this.#matched;
+    const states = this.#moves.map((_, i): ScrambleMoveState =>
+      done || i < matched ? 'done' : 'pending',
+    );
+    // In flight means on the path short of the target: neither diverged nor done.
+    const flight = this.#flight;
+    if (flight !== null) {
+      states[matched] = flight.first;
+      if (matched + 1 < states.length) {
+        states[matched + 1] = flight.second;
+      }
+    }
+    return states;
   }
 }
