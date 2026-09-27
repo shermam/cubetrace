@@ -401,5 +401,6 @@ export), without its time check, which flow 1 makes on a settled page (below). T
   download. The DNF flows run at speed 5 (solves of 4.3 and 6.9 s), which leaves seconds to press Esc
   after the solve starts although assertions poll up to 1 s apart.
 
-The whole suite (34 tests, two workers) took 44 s in CI (the `npm run e2e` step, servers included;
-T1.6b's suite took 40 s), and 58 to 60 s locally on four CPUs in three runs in a row on 2026-09-27.
+The whole suite (34 tests, two workers) took 44 s and 59 s in CI in the pull request's first two
+runs (the `npm run e2e` step, servers included; T1.6b's suite took 40 s), and 58 to 60 s locally on
+four CPUs in three runs in a row on 2026-09-27.
