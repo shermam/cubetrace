@@ -2,6 +2,7 @@
 // leads to, and a tracker that follows the cube through a scramble with "you are here" and "undo
 // this" guidance (docs/DATA-MODEL.md §3: scramble_start, scramble_done, scramble_extra_moves).
 import { randomScrambleForEvent } from 'cubing/scramble';
+import { setSearchDebug } from 'cubing/search';
 
 import type { Facelets } from './cube';
 import { SOLVED, applyMove, applyMoves, assertFacelets } from './cube';
@@ -17,8 +18,28 @@ import { opposite } from './pieces';
  * token outside our notation (see {@link normalizeScramble}).
  */
 export async function generateScramble(): Promise<string> {
+  configureCubing();
   const alg = await randomScrambleForEvent('333');
   return normalizeScramble(alg.toString());
+}
+
+let cubingConfigured = false;
+
+/**
+ * Settings of cubing.js's search, applied once before the first scramble (not at import time, so
+ * that importing the package has no side effects; docs/TOOLCHAIN.md, "cubing.js"):
+ * - Start the worker from the chunk the bundler emitted for its entry ("the esbuild workaround")
+ *   before trying `import.meta.resolve("./search-worker-entry.js")`, cubing.js's default first
+ *   attempt: Angular's esbuild build and Vite's dependency optimizer (`ng serve`) emit no such
+ *   file, so the first scramble of every page began with a failed worker and a 404. In Node, where
+ *   nothing is bundled, the workaround finds the same file.
+ * - No console warning with the duration of every scramble search.
+ */
+function configureCubing(): void {
+  if (!cubingConfigured) {
+    setSearchDebug({ prioritizeEsbuildWorkaroundForWorkerInstantiation: true, logPerf: false });
+    cubingConfigured = true;
+  }
 }
 
 /**
