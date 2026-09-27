@@ -1,0 +1,72 @@
+section {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+
+  > input {
+    width: min(100%, 20rem);
+  }
+}
+
+h2 {
+  margin-top: 0;
+}
+
+.switch {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.status,
+.hint,
+.error {
+  margin: 0;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.macs {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+  }
+}
+
+.mac-name {
+  font-weight: 600;
+}
+
+.row-actions,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mac-form {
+  display: grid;
+  gap: var(--space-2);
+  width: min(100%, 20rem);
+}

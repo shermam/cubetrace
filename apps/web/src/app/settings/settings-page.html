@@ -1,0 +1,179 @@
+<h1>Settings</h1>
+
+<section aria-labelledby="screen-heading">
+  <h2 id="screen-heading">Screen</h2>
+  <label class="switch">
+    <input
+      #keepAwake
+      type="checkbox"
+      [checked]="wakeLock.wanted()"
+      [disabled]="wakeLock.status() === 'unsupported'"
+      (change)="setKeepAwake(keepAwake.checked)"
+    />
+    Keep the screen on
+  </label>
+  <p class="status" data-testid="wake-lock-detail">
+    {{ wakeLockText().detail }}
+    @if (wakeLock.error(); as error) {
+      ({{ error }})
+    }
+  </p>
+  <p class="hint">The timer will also turn it on by itself during a session (T1.6).</p>
+</section>
+
+<section aria-labelledby="storage-heading">
+  <h2 id="storage-heading">Storage</h2>
+  <p class="status" data-testid="storage-persistence">
+    {{ persistenceText[storage.persistence()] }}
+  </p>
+  @if (storage.usage(); as usage) {
+    <p class="status" data-testid="storage-usage">
+      Using {{ bytes(usage.usage) }} of the {{ bytes(usage.quota) }} this browser allows.
+    </p>
+  }
+  <button type="button" class="primary" [disabled]="!canPersist()" (click)="keepData()">
+    Keep my data
+  </button>
+  <p class="hint">The timer will also ask when the first session starts (T1.6).</p>
+  @if (storage.refused()) {
+    <p class="hint" data-testid="storage-refused">
+      The browser said no. Chrome grants it to installed apps and to sites used often: install
+      cubetrace (Install app, or Add to Home screen) and try again.
+    </p>
+  }
+</section>
+
+<section aria-labelledby="device-heading">
+  <h2 id="device-heading">This device</h2>
+  <label for="host-label">Host label</label>
+  <input
+    #hostInput
+    id="host-label"
+    type="text"
+    autocomplete="off"
+    data-testid="host-label"
+    [value]="settings.customHostLabel() ?? ''"
+    [placeholder]="settings.defaultHostLabel"
+    (change)="settings.setHostLabel(hostInput.value)"
+  />
+  <p class="hint">
+    Sessions recorded here are labelled “{{ settings.hostLabel() }}”, to tell your devices apart.
+    Leave it empty for the default, “{{ settings.defaultHostLabel }}”.
+  </p>
+</section>
+
+<section aria-labelledby="macs-heading">
+  <h2 id="macs-heading">Cube MAC addresses</h2>
+  <p class="hint">
+    A GAN cube needs its MAC address to connect. Chrome reads it by itself when the flag named in
+    the connect dialog is on; otherwise the dialog asks for it, and it can be kept here. The name is
+    the one in Chrome's list of devices, such as GAN12ui_AB12.
+  </p>
+  <ul class="macs" data-testid="cube-macs">
+    @for (entry of settings.cubeMacs(); track entry.name) {
+      <li>
+        <span class="mac-name">{{ entry.name }}</span>
+        <code>{{ entry.mac }}</code>
+        <span class="row-actions">
+          <button type="button" [attr.aria-label]="'Edit ' + entry.name" (click)="editMac(entry)">
+            Edit
+          </button>
+          <button
+            type="button"
+            [attr.aria-label]="'Remove ' + entry.name"
+            (click)="removeMac(entry.name)"
+          >
+            Remove
+          </button>
+        </span>
+      </li>
+    } @empty {
+      <li class="hint">None stored.</li>
+    }
+  </ul>
+  <form #macForm class="mac-form" (submit)="saveMac($event)">
+    <label for="mac-name">Cube name</label>
+    <input
+      #macNameInput
+      id="mac-name"
+      type="text"
+      autocomplete="off"
+      spellcheck="false"
+      [value]="macName()"
+      (input)="macName.set(macNameInput.value)"
+    />
+    <label for="mac-address">MAC address</label>
+    <input
+      #macAddressInput
+      id="mac-address"
+      type="text"
+      autocomplete="off"
+      autocapitalize="characters"
+      spellcheck="false"
+      placeholder="AB:12:CD:34:EF:56"
+      [value]="macAddress()"
+      [attr.aria-invalid]="macError() !== null"
+      (input)="macAddress.set(macAddressInput.value)"
+    />
+    <div class="actions">
+      <button type="submit" class="primary">{{ editing() === null ? 'Add' : 'Save' }}</button>
+      @if (editing() !== null) {
+        <button type="button" (click)="cancelEdit()">Cancel</button>
+      }
+    </div>
+  </form>
+  @if (macError(); as error) {
+    <p class="error" role="alert" data-testid="mac-error">{{ error }}</p>
+  }
+</section>
+
+<section aria-labelledby="timer-heading">
+  <h2 id="timer-heading">Timer</h2>
+  <label class="switch">
+    <input
+      #inspectionBox
+      type="checkbox"
+      [checked]="settings.inspection()"
+      (change)="settings.setInspection(inspectionBox.checked)"
+    />
+    15-second inspection (WCA)
+  </label>
+  <label class="switch">
+    <input
+      #autoAdvanceBox
+      type="checkbox"
+      [checked]="settings.autoAdvance()"
+      (change)="settings.setAutoAdvance(autoAdvanceBox.checked)"
+    />
+    Next scramble right after a solve
+  </label>
+  <p class="hint">The timer that uses them arrives with T1.6b.</p>
+</section>
+
+<section aria-labelledby="demo-heading">
+  <h2 id="demo-heading">Demo cube</h2>
+  <label for="demo-speed">Replay speed</label>
+  <input
+    #speedInput
+    id="demo-speed"
+    type="number"
+    min="0.1"
+    max="100"
+    step="any"
+    data-testid="demo-speed"
+    [value]="settings.demoSpeed()"
+    [attr.aria-invalid]="speedError() !== null"
+    (change)="setDemoSpeed(speedInput.value)"
+  />
+  @if (speedError(); as error) {
+    <p class="error" role="alert">{{ error }}</p>
+  }
+  <p class="hint">
+    The demo cube replays a recorded solve; 1 is real time. The address can ask for one:
+    <code>?demo=3&amp;speed=20</code> on the Timer page.
+  </p>
+</section>
+
+@if (settings.saveError(); as error) {
+  <p class="error" role="alert" data-testid="settings-save-error">{{ error }}</p>
+}
