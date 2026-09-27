@@ -28,6 +28,83 @@ ThinkPhone (Chrome for Android), with both cubes. The coordinator tags `v0.1.0` 
 | 2026-09-27 | ThinkPhone, Android 16 | 155.0.8059.16 | GAN 12 ui FreePlay: `uiFp 138`, 0.5, 8.62 | 0.1.0 · 25d22c7 | no issue found; 3 solves; MAC typed once (flag off); export in issue #20 and `fixtures/hardware/` |
 | | ThinkPhone, Android: | | GAN 356 i3: | | pending (the cube was flat) |
 
+## Round 2 (v0.2.0)
+
+The second release's round (`docs/PLAN.md`, T2.6): the device's own camera, on
+https://shermam.github.io/cubetrace/ once its footer reads `cubetrace 0.2.0 · <commit>`, on the
+MacBook Pro 2021 (Chrome, its FaceTime camera) and on the ThinkPhone (Chrome for Android: the front
+camera, the phone on its stand as the owner solves, then the rear camera), with the GAN 12 ui
+FreePlay (and the GAN 356 i3, once charged, for its rows of Round 1). The coordinator asks the owner
+to create the `v0.2.0` release from GitHub after it.
+
+1. Before starting, fill in one row of the table per device and camera. Chrome's version is the
+   first line of `chrome://version`; the cube's strings are in its details (click the cube pill once
+   it is connected); the camera is the one chosen in Camera settings; the app's version and commit
+   are in the page footer.
+2. Go through the sections below in this order: **T2.1** (camera panel), **T2.4** (recording),
+   **T2.5** (sync check), **T2.7** (layout), then **T2.3** (clips, in the capture lab). Since T2.7,
+   the "Camera section" of the T2.1 and T2.4 items is Camera settings, a disclosure below the Cube
+   section, and the framing rectangle is moved after Framing → Edit. Tick an item when it passes on
+   every row. When it fails or does something unexpected on a row, write the row (such as
+   "ThinkPhone, rear") and what happened next to it.
+3. Every failure becomes a GitHub issue with the row's device, Chrome version, camera and cube, the
+   steps, what happened and what was expected (a screenshot, or the console line, when it shows it).
+   The known limitations below are expected: report one only if it behaves otherwise than said.
+4. At the end, attach to one issue (zip the files if GitHub refuses them):
+   - one session export per device, of a session recorded with the camera on (Sessions → Export, or
+     Export on the session's page): the records, with the clips' `video` entries and the sync
+     check's `clock.cameras`;
+   - the clips of one attempt per device: its clip badge, then Download (both MP4s, both frames files
+     and `attempt.json`);
+   - every console line that starts with `cubetrace:` (Ctrl+Shift+J, or ⌥⌘J on a Mac; for the phone,
+     `chrome://inspect` on the laptop, as in T1.5): `cubetrace: clip failed: …` for a clip that could
+     not be saved, `cubetrace: the cube disconnected …` for a disconnection. The sync check prints no
+     console line: copy its result instead ("Camera lags the cube by X ms (±Y)", or "Sync check
+     failed: …"), and, when a check fails for no clear reason, the capture lab's "What it found
+     (JSON)";
+   - screenshots of the Timer page during a session with the camera on: on the MacBook at the size
+     Chrome's window opens with, and on the phone in portrait, in Chrome and in the installed app.
+5. Write into `docs/DEVICES.md`, "Manual round 2", or paste into the round's issue for the
+   coordinator: per camera, the frame rate measured (Camera settings, Measured) and the sharpness
+   with the cube in its rectangle, in focus, moving and covered, with the threshold that would
+   separate them; per camera, the sync check's lag and spread, twice (its "Camera lag" table); after
+   20 minutes of solves with the camera on, the phone on its stand, how warm it got, how much battery
+   it used, the frames dropped (Camera settings, Recording) and how much the storage meter went up;
+   the sizes of one attempt's clips per camera (scramble and solve, in MB) and the codecs Chrome
+   chose; and the capture lab's `clock` values of its "VideoFrame.timestamp" section.
+
+| Date | Device, OS | Chrome | Cube: model, hardware, firmware | Camera | App (footer) | Result |
+|---|---|---|---|---|---|---|
+| | MacBook Pro 2021, macOS: | | GAN 12 ui FreePlay: | FaceTime HD | | |
+| | ThinkPhone, Android: | | GAN 12 ui FreePlay: | front | | |
+| | ThinkPhone, Android: | | GAN 12 ui FreePlay: | rear | | |
+
+**Known limitations** (from the phase 2 pull requests), not to be reported as surprises:
+
+- H.264 and AAC are untested in CI: Playwright's Chromium has neither encoder, so every automated
+  test records VP9 and Opus, and the round's clips are the first H.264 ones. The codecs are in Camera
+  settings (Recording, "Codecs") and in each clip's `video` entry. Where Chrome has no AAC encoder the
+  sound is Opus, which is fine: write it down.
+- The sync check waits for a clean attempt start: it starts by itself only before a scramble's first
+  turn, with a cube connected and the camera recording, once per session and camera, so a camera
+  turned on mid-scramble or mid-solve gets its check at the next attempt. It matches single turns
+  only: a turn with another move less than half a second before or after it does not count, so pause
+  about a second after each turn.
+- The first scramble after the camera is turned on needs 2 s of recording before its first turn: a
+  scramble begun sooner loses its clip ("A clip could not be saved…"), which a T2.4 item uses on
+  purpose.
+- Demo mode needs the network: its solves are downloaded when a demo starts.
+- A clip begins at the keyframe at or before its margin: 2 to 3 s before the scramble's first turn,
+  3 to 4 s before the solve's.
+- The sharpness threshold, 20, was set on Chrome's test camera only; this round sets it per camera.
+- The clip viewer places each move at the time its Bluetooth packet arrived, without the camera's
+  lag: the highlighted move can lead the picture by the sync check's X ms.
+- From 95% of the storage quota the camera stops recording while the timer goes on. Exporting frees
+  nothing (the export is the JSON records only): delete sessions, after downloading the clips to
+  keep.
+- Turning the phone while it records restarts the recording at the new frame size: the attempt under
+  way can lose its clips.
+
 ## T1.5 — cube connection
 
 In a current Chrome (the driver needs the Observable API). Connecting takes one click (T1.12):
