@@ -28,3 +28,7 @@ versions follow [Semantic Versioning](https://semver.org/).
   download for `docs/DEVICES.md`.
 - Scrambles (T1.2): the Timer page shows a WCA random-state scramble generated in the browser by
   cubing.js, offline too once the app is installed.
+- Attempts and sessions in `@cubetrace/core` (T1.4): the attempt state machine (scrambling, armed,
+  solving, solved or DNF) that writes `attempt.json` with the CFOP phases, `session.json`, the cube
+  clock fit, session statistics (mean, best, ao5, ao12, ao100, phase averages), the session store
+  interface, and JSON Schemas of both files.

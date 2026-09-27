@@ -44,3 +44,26 @@ export {
   f2lSlotsComplete,
   ocllComplete,
 } from './phases';
+// T1.4 — attempts, sessions, clock, stats, store
+export type {
+  AttemptEvents,
+  AttemptMove,
+  AttemptOptions,
+  AttemptPhase,
+  AttemptRecord,
+  AttemptResult,
+  AttemptState,
+  CubeMoveInput,
+  MovePhase,
+} from './attempt';
+export { AttemptMachine } from './attempt';
+export type { CubeInfo, HostInfo, SessionRecord, SessionSettings, SessionSummary } from './session';
+export { createSession, summarize } from './session';
+export type { CubeClockParams } from './clock';
+export { CLOCK_FIT_WINDOW, CubeClockFit } from './clock';
+export type { PhaseAverage } from './stats';
+export { DNF, aoN, attemptTimes, best, mean, phaseAverages } from './stats';
+export type { SessionStore } from './store';
+export { MemorySessionStore } from './store';
+export type { JsonSchema } from './schemas';
+export { ATTEMPT_SCHEMA, SESSION_SCHEMA } from './schemas';

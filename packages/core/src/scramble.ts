@@ -83,7 +83,9 @@ export interface ScrambleProgress {
    * Moves to make, in order, to get back to the last state on the scramble path: the inverse of
    * the moves made since the cube left it, consecutive turns of one face merged, so that it gets
    * shorter as it is followed (making its first move removes it; a half turn made as two quarter
-   * turns becomes a quarter turn first). Empty when not diverged.
+   * turns becomes a quarter turn first). Empty when not diverged, and also after
+   * {@link ScrambleTracker.setState} left the cube off the path, until a move brings it back: the
+   * moves that led there are unknown.
    */
   undo: Move[];
   /**
@@ -146,6 +148,7 @@ function stagesOf(m: Move): Stage[] {
  * way to `expected[matched + 2]` are also on the path ("in flight"): not diverged, `matched`
  * unchanged. Any other state is off the path: `diverged`, and `undo` is the inverse of the moves
  * made since the cube was last on it. The target, once reached by whatever path, is `done`.
+ * {@link setState} adopts a state the cube reports when moves were missed (a resync).
  */
 export class ScrambleTracker {
   readonly #moves: readonly Move[];
@@ -162,6 +165,11 @@ export class ScrambleTracker {
    * {@link appendMerged}); empty while on it.
    */
   #sincePath: Move[] = [];
+  /**
+   * The cube is off the path through a state adopted by setState, reached by unseen moves: there
+   * is no undo until a move brings it back on the path.
+   */
+  #lost = false;
   /** Quarter turns of every move made. */
   #madeQuarters = 0;
   /** Quarter turns of scramble path covered by the last state on the path. */
@@ -211,16 +219,56 @@ export class ScrambleTracker {
         this.#inFlight = this.#inFlightAfter(k);
       }
       this.#sincePath = [];
+      this.#lost = false;
       this.#pathCovered = this.#pathQuarters[k];
     } else {
       const covered = this.#inFlight.get(this.#current);
       if (covered !== undefined) {
         this.#sincePath = [];
+        this.#lost = false;
         this.#pathCovered = covered;
-      } else {
+      } else if (!this.#lost) {
         appendMerged(this.#sincePath, m);
       }
     }
+    this.#progress = this.#snapshot();
+    return this.#progress;
+  }
+
+  /**
+   * Adopts `state` as the cube's current state, for a resync with the state the cube reports when
+   * moves went unseen, and returns the progress there (also {@link progress}). If it is on the path
+   * at or after the last matched state, `expected[k]` for some `k >= matched` (searched to the end
+   * of the path, the largest first) or in flight after `expected[matched]`, the cube is on the path
+   * there; otherwise it is `diverged` with an empty `undo`, since the moves that led there are
+   * unknown. `extraMoves` is unchanged: the unseen moves are not counted. Throws if `state` is not a
+   * cube state.
+   */
+  setState(state: Facelets): ScrambleProgress {
+    assertFacelets(state);
+    const extraMoves = this.#progress.extraMoves;
+    this.#current = state;
+    this.#sincePath = [];
+    let k = this.#moves.length;
+    while (k >= this.#matched && this.#expected[k] !== state) {
+      k--;
+    }
+    if (k >= this.#matched) {
+      if (k !== this.#matched) {
+        this.#matched = k;
+        this.#inFlight = this.#inFlightAfter(k);
+      }
+      this.#lost = false;
+      this.#pathCovered = this.#pathQuarters[k];
+    } else {
+      const covered = this.#inFlight.get(state);
+      this.#lost = covered === undefined;
+      if (covered !== undefined) {
+        this.#pathCovered = covered;
+      }
+    }
+    // The unseen moves count as path, so that extraMoves stays what it was.
+    this.#madeQuarters = this.#pathCovered + extraMoves;
     this.#progress = this.#snapshot();
     return this.#progress;
   }
@@ -280,7 +328,7 @@ export class ScrambleTracker {
   }
 
   #snapshot(): ScrambleProgress {
-    const diverged = this.#sincePath.length > 0;
+    const diverged = this.#lost || this.#sincePath.length > 0;
     return {
       matched: this.#matched,
       total: this.#moves.length,
