@@ -23,7 +23,7 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | rxjs, tslib | 7.8.2, 2.8.1 | `apps/web/package.json`; rxjs also `packages/gan/package.json` | Angular runtime dependencies; rxjs is also the type of `CubeConnection.events$` |
 | gan-web-bluetooth (the owner's fork) | 3.0.2 plus 3 commits: git `52417a1` | `packages/gan/package.json` | GAN cube driver, a git dependency pinned to that commit; see "GAN driver" below |
 | `@angular/service-worker` | 22.2.0 | `apps/web/package.json` | added by `ng add @angular/pwa@22.2.0` (T1.7); `@angular/pwa` itself is only the schematic and is not installed |
-| cubing | not installed yet | — | T1.2 adds it; the latest release on 2026-09-27 is 0.63.7 |
+| cubing (cubing.js) | 0.63.7 | `packages/core/package.json` | added by T1.2 for scrambles (the cube picture comes with T1.6); MPL-2.0 or GPL-3.0; needs Node 22.3 or later; see "cubing.js" below |
 
 ## Commands
 
@@ -223,3 +223,43 @@ adding the `WebBluetoothNewPermissionsBackend` feature exposes both. The support
 flag (the one `docs/USER-ACTIONS.md` names) and uses `navigator.bluetooth.getDevices` to detect
 `watchAdvertisements`, which lives on devices, not on `navigator`. On Linux, Web Bluetooth itself
 needs `#enable-experimental-web-platform-features`.
+
+## cubing.js
+
+Added by T1.2 on 2026-09-27. Version 0.63.7, a dependency of `@cubetrace/core` (its own dependencies,
+such as `three` and `type-fest`, come through the lock file). `packages/core/src/scramble.ts`
+imports two of its ES module entry points, `cubing/scramble` (`randomScrambleForEvent`) and
+`cubing/search` (`setSearchDebug`); their types resolve with the base `tsconfig` as it is
+(`moduleResolution: bundler`, `"types": []`). cubing.js searches in a module worker: a Web Worker
+in the browser, a `node:worker_threads` worker in Node (found through
+`process.getBuiltinModule`, hence its Node 22.3 minimum), unreferenced so that it never keeps Node
+alive.
+
+- *Vitest and Node:* nothing to configure. The package tests generate 20 scrambles in a worker
+  thread in about 0.6 s, worker start included, well within Vitest's default 5 s timeout; the app's
+  tests (jsdom) run it the same way when they render the Timer page.
+- *Angular build:* nothing to configure either. The application builder (and Vite's dependency
+  optimizer under `ng serve`) emits cubing.js's worker entry as a chunk of its own, which cubing.js
+  reaches with what it calls its esbuild workaround (`await import("./search-worker-entry.js")`,
+  then that chunk's `import.meta.url`). Its default first attempt,
+  `import.meta.resolve("./search-worker-entry.js")`, names a file that neither build emits, so every
+  first scramble of a page began with a failed worker and a 404 (and, under `ng serve`, Vite's
+  warning "The file does not exist at .../vite/deps/search-worker-entry.js") before the fallback
+  worked. `generateScramble()` therefore calls, once, before its first scramble,
+  `setSearchDebug({ prioritizeEsbuildWorkaroundForWorkerInstantiation: true, logPerf: false })`:
+  the flag is cubing.js's own switch for this case (its source: "This can prevent a request to
+  `search-worker-entry.js` when it doesn't exist, if the library semantics have been mangled by
+  `esbuild`"); `logPerf: false` drops the console warning it otherwise prints with the duration of
+  every scramble search. Not at import time: the package declares `"sideEffects": false`.
+- *Output:* cubing.js is only in lazy chunks and adds nothing to the initial bundle (checked with
+  `ng build --stats-json`: no cubing.js module in any initial chunk). The build emits about 1.2 MB
+  of it in 24 chunks (335 kB gzipped); a 3x3x3 scramble loads about 110 kB of that (the worker
+  entry, the worker's own chunk, the 3x3x3 search and shared chunks). The rest is cubing.js's code
+  for other puzzles and searches, which the timer never loads; the largest is its WebAssembly
+  search, `twips` (671 kB). Every JavaScript file of the build is in the `app` asset group of
+  `dist/web/browser/ngsw.json` (all 31 on 2026-09-27), so the service worker prefetches all of
+  cubing.js, the unused chunks too; a lazy asset group for those would save that download if
+  install size ever matters.
+- *Checked end to end:* `apps/web/e2e/scramble.spec.ts` expects a scramble on the Timer page, and
+  a worker, on the dev server, on the production build under `/cubetrace/`, and on that build
+  offline after the service worker has cached it.

@@ -31,3 +31,6 @@ export {
   edgeAt,
   opposite,
 } from './pieces';
+// T1.2 — scrambles
+export type { ScrambleProgress } from './scramble';
+export { ScrambleTracker, generateScramble, scrambleTarget } from './scramble';
