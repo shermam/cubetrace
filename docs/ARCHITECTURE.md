@@ -67,8 +67,9 @@ measures the frame rate and the sharpness of the framing rectangle, at most twic
 during a solve. The camera's and the microphone's `MediaStreamTrackProcessor` streams (Chrome has
 them on the main thread only) are transferred to the **capture worker**, which encodes without
 pause: H.264 High, else Main, hardware first, else VP9 (Chromium without proprietary codecs, as in
-CI); AAC, else Opus, else no sound; a keyframe every second; frames dropped and counted when more
-than 8 wait in the encoder. The chunks, each with its frame's own timestamp and its arrival on the
+CI), at the bitrate of the video quality chosen in Settings (4 Mbps at 1080p30 by default); AAC, else
+Opus, else no sound; a keyframe every second; frames dropped and counted when more than 8 wait in the
+encoder. The chunks, each with its frame's own timestamp and its arrival on the
 host clock, fill a ring buffer bounded by 90 s and 160 MB and evicted by whole GOPs, so that it
 always starts at a keyframe. When the timer's milestones say a segment of an attempt is over, the
 recording asks for its cut 1.25 s after its end: the scramble from 2 s before its first turn to 1 s

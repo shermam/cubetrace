@@ -42,7 +42,8 @@ to create the `v0.2.0` release from GitHub after it.
    it is connected); the camera is the one chosen in Camera settings; the app's version and commit
    are in the page footer.
 2. Go through the sections below in this order: **T2.1** (camera panel), **T2.4** (recording),
-   **T2.5** (sync check), **T2.7** (layout), then **T2.3** (clips, in the capture lab). Since T2.7,
+   **T2.10** (video quality), **T2.5** (sync check), **T2.7** (layout), then **T2.3** (clips, in the
+   capture lab). Since T2.7,
    the "Camera section" of the T2.1 and T2.4 items is Camera settings, a disclosure below the Cube
    section, and the framing rectangle is moved after Framing → Edit. Tick an item when it passes on
    every row. When it fails or does something unexpected on a row, write the row (such as
@@ -103,7 +104,8 @@ to create the `v0.2.0` release from GitHub after it.
   nothing (the export is the JSON records only): delete sessions, after downloading the clips to
   keep.
 - Turning the phone while it records restarts the recording at the new frame size: the attempt under
-  way can lose its clips.
+  way can lose its clips. So does a change of Video quality or Record audio: change them between
+  attempts.
 
 ## T1.5 — cube connection
 
@@ -322,7 +324,8 @@ clips of the timer.
   `mp4a.40.2` expected). Chrome asks once for the microphone; with Settings → Camera → Record audio
   off, it does not, and the codecs say "no audio".
 - [ ] Three solves: each row of the solve list gets a badge "2 clips, … MB" about a second after the
-  solve (write down the sizes of one: the design expects about 4.4 MB per attempt at 1080p30).
+  solve (write down the sizes of one: about 20 MB per attempt at 1080p30 and the Standard video
+  quality, T2.10).
 - [ ] The badge opens the viewer: the solve's clip plays, upright, with sound; the moves on the right
   follow the video (the one the video shows is highlighted), and a click on a move goes to it. The
   scramble's clip plays too. Write down whether the highlighted move matches the cube in the picture
@@ -431,3 +434,15 @@ record.
   reason, copy "What it found (JSON)" into an issue.
 - [ ] Fill in the "Camera lag" table of `docs/DEVICES.md` from the numbers above (or paste them into
   the round's issue for the coordinator).
+
+## T2.10 — video quality
+
+On https://shermam.github.io/cubetrace/, Timer page, on the MacBook's FaceTime camera with the GAN 12
+ui FreePlay. Next to the item, write Chrome's version and the numbers asked for. The first recordings
+(`docs/DEVICES.md`) were at 8 Mbps, High since T2.10: 20–25 MB per solve clip.
+
+- [ ] Standard quality, the default (Settings → Camera → Video quality says "Standard (4 Mbps, ≈ 20 MB
+  per attempt)"): Camera settings' Recording part says the codecs at 4 Mbps ("avc1.640028 at 4 Mbps,
+  mp4a.40.2" expected). After a solve, its "Last clip" line gives the solve clip's frames and size: a
+  20 s solve clip (600 frames) is about 10 MB, half of the first recordings'; the row's badge ("2
+  clips, … MB") about 20 MB for the attempt. Write down the frames and sizes of one attempt.

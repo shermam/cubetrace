@@ -685,6 +685,7 @@ pipeline, §9 the data model).
 | T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | ✅ #29 |
 | T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | 🟨 #31 |
 | T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | ✅ #30 |
+| T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ⬜ |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6. Rules for every phase 2 task: nothing of
 the capture code in the initial bundle (lazy chunks; check `ng build`); the worker code is plain
@@ -950,6 +951,49 @@ no horizontal overflow and the preview sits under the clock. Screenshots in the 
 sharpness meter, exposure controls on the phone, 30 minutes of recording: heat, battery, dropped
 frames, storage growth, clips play, the sync check twice); README (recording), CHANGELOG 0.2.0,
 versions 0.2.0, `docs/DEVICES.md` updated from the round; the coordinator tags after the round.
+
+### T2.10 — `capture`+`web`: video quality setting, 4 Mbps by default
+
+**Goal.** Clips that a laptop's or a phone's storage can hold. The first recordings on the MacBook
+(`docs/DEVICES.md`, "First recordings") used all of the 8 Mbps asked for at 1080p30: 35–42 MB per
+attempt, 4.5–5.5 GB a day at the owner's cadence, so the ~10 GB local quota fills in two days (CI's
+fake camera compresses to about 1.2 Mbps, which hid it). 4 Mbps at 1080p30 is plenty for the hands and
+the cube; the rest becomes a setting (issue #33, its bitrate half; the clips' missing audio track is
+T2.9).
+
+**Scope.** `packages/capture/src/{bitrate,protocol,capture-worker}.ts` (the rule, the start config's
+quality, the counters' bitrate), `apps/web/src/app/settings/*` (the setting),
+`apps/web/src/app/camera/*` (the choices' texts, Camera settings, the restart, the recording panel),
+the capture lab's counters, e2e, README, `docs/DEVICES.md`, `docs/MANUAL-TESTS.md`, CHANGELOG.
+
+**Behaviour.**
+- **Setting** `videoQuality`: `standard` (the default), `high` or `maximum`, kept with the other
+  settings; settings stored without it read `standard`. In Settings → Camera and in the Timer's Camera
+  settings, next to the resolution and the frame rate; each choice says its bitrate at the resolution
+  and frame rate asked for ("Best" counts 30 fps) and about what an attempt's clips take at it (40 s of
+  clips): "Standard (4 Mbps, ≈ 20 MB per attempt)", High 8 Mbps and ≈ 40 MB, Maximum 12 and ≈ 60.
+- **Bitrate**, `videoBitrate(width, height, fps, quality)` in the capture package: 4, 8 and 12 Mbps at
+  1080p30, in proportion to the pixels at other sizes (1280×720: 0.44×), 1.5× above 45 fps. High is
+  the rule of the first recordings: 8 Mbps at 1080p30, 12 at 1080p60.
+- **Plumbing.** The pipeline's start config carries the quality; the worker configures its encoder
+  with it, again when the frames change size; its `stats` carry the configured `bitrate`. A change of
+  the setting starts the recording again, as a change of Record audio does: the clips waiting for
+  their time are saved first with what the buffer has, and the new buffer starts empty.
+- **Recording panel.** The codecs line gives the bitrate ("avc1.640028 at 4 Mbps, mp4a.40.2"); under
+  the storage meter, "≈ 20 MB per attempt at this quality", at the bitrate recording, else at the one
+  Settings give.
+
+**Tests.** Unit: the rule (the three qualities at 1080p30, a phone's portrait frames, 1280×720, 60 fps,
+High equal to the former rule), the worker's encoder configs and counters at a quality and after a
+resize, the start config's default, the setting's default, persistence and validation (a stored record
+without it reads Standard), the restart, the choices' texts, the panel's lines. Playwright (`encoding`
+project): High in Settings, then the Timer with the fake camera recording says "8 Mbps"; Standard in
+Camera settings says "4 Mbps", also after a reload; no sideways scroll at 320 px.
+
+**Acceptance.**
+- [ ] CI green; the recording's counters say the bitrate of the quality chosen.
+- [ ] Settings stored before this change read Standard.
+- [ ] Owner: clip sizes at Standard on the MacBook (round 2): a 20 s solve clip about 10 MB, and "4 Mbps" in Camera settings.
 
 ## Phase 3 task board — cloud
 

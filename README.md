@@ -75,7 +75,7 @@ sharpness (green when good, amber when soft), what the recording does (idle, rec
 how full storage is. Camera settings also show what the camera claims next to what it delivers (a
 phone may claim 60 fps and deliver 30), and the manual controls it has: exposure and ISO, focus,
 white balance, zoom and torch, with Reset to auto. Settings → Camera has the resolution (1920×1080
-or 1280×720), the frame rate asked for and the sharpness meter's threshold.
+or 1280×720), the frame rate asked for, the video quality (below) and the sharpness meter's threshold.
 
 **The framing rectangle** is the part of the picture the model will learn from, drawn on the
 camera's picture. Framing → Edit, in Camera settings, shows a larger picture on which it is dragged
@@ -118,6 +118,17 @@ The lag is kept in the session (`clock.cameras`) and in every later clip of that
 (`syncResidualMs`), for the training to subtract. A check that fails says why (the cube did not
 move, no motion in the framing rectangle, fewer than 4 matches, a spread over 40 ms), with Retry;
 Later hides it, and "Sync check", under the camera's picture, runs it again between attempts.
+
+**Video quality**, in Camera settings and in Settings → Camera, sets the video's bitrate, and so
+what the clips take: Standard, the default, 4 Mbps at 1920×1080 and 30 fps, about 20 MB per attempt
+(its two clips last about 40 s); High, 8 Mbps, about 40 MB; Maximum, 12 Mbps, about 60 MB. 1280×720
+takes 0.44 times as much, and 60 fps 1.5 times as much; each choice says its bitrate and size at the
+resolution and frame rate chosen. Standard is plenty for the hands and the cube: the first recordings
+on a MacBook, at the 8 Mbps then asked for, took 35–42 MB per attempt, which would fill the browser's
+10 GB in two days of the owner's solves (`docs/DEVICES.md`). Camera settings give the bitrate in use
+next to the codecs ("avc1.640028 at 4 Mbps, mp4a.40.2") and, under the storage meter, what an attempt
+takes at it. A change starts the recording again, as one of Record audio does: make it between
+attempts.
 
 **Storage.** Camera settings and the Sessions page have a storage meter: how much of the browser's
 quota the site uses (about 10 GB on the owner's laptop and phone, `docs/DEVICES.md`). From 80% it
