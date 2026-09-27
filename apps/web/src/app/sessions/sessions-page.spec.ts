@@ -121,6 +121,7 @@ describe('SessionsPage', () => {
       firstFrameHostMs: 1_790_000_000_000,
       framesFile: `laptop.${segment}.frames.json`,
       syncResidualMs: null,
+      truncatedStart: false,
     });
     await store.saveAttempt({
       ...testAttempt(2, 12_000, { session: SESSION_B }),

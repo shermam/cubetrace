@@ -5,8 +5,6 @@
 // the capture worker encodes and cuts, and the clip worker muxes and writes the clips, which reach
 // it from the capture worker through a channel of their own (docs/TOOLCHAIN.md, "Two workers").
 // Plain TypeScript: no Angular.
-import type { VideoClip } from '@cubetrace/core';
-
 import type { Cut } from './cut';
 import type { FramingRect } from './framing';
 import {
@@ -20,6 +18,7 @@ import {
   type MotionMeterInfo,
   type MotionSample,
   type SaveClipParams,
+  type SavedClip,
   type WorkerToWindow,
 } from './protocol';
 import type { MediaStreamTrackProcessorConstructor } from './webcodecs';
@@ -38,13 +37,15 @@ export interface CaptureHandle {
    * (host ms, as `cut` takes them), muxes it into an MP4 and writes it with its frames.json into
    * `sessions/<sessionId>/attempts/<index>/` of the origin private file system, then resolves with
    * the clip's `video[]` entry (docs/DATA-MODEL.md §7; `crop` and `syncResidualMs` null, for the
-   * caller to fill). The capture worker only cuts; the clip worker muxes and writes, so the frames
-   * keep coming meanwhile (T2.4). Clips are saved one at a time, in the order asked. Rejects with
-   * the workers' reason (nothing buffered there, the start older than the buffer, a missing session
-   * folder, a full disk, ...), once the capture has stopped, or when no answer comes within
-   * `SAVE_CLIP_TIMEOUT_MS`.
+   * caller to fill) and its report: how late it begins when its start was older than the buffer
+   * (then it begins at the buffer's first keyframe, T2.9), why it has no sound, if audio was asked
+   * for, and whether its audio was moved onto the frames' clock. The capture worker only cuts; the
+   * clip worker muxes and writes, so the frames keep coming meanwhile (T2.4). Clips are saved one at
+   * a time, in the order asked. Rejects with the workers' reason (nothing buffered at or before the
+   * end, a missing session folder, a full disk, ...), once the capture has stopped, or when no answer
+   * comes within `SAVE_CLIP_TIMEOUT_MS`.
    */
-  saveClip(params: SaveClipParams): Promise<VideoClip>;
+  saveClip(params: SaveClipParams): Promise<SavedClip>;
   /**
    * Removes a clip that `saveClip` saved for an attempt that is gone (docs/PLAN.md, T2.4): its MP4,
    * its frames file and their temporary files, only while they are still that clip's (the frames
@@ -202,7 +203,7 @@ class Capture implements CaptureHandle {
   readonly #worker: Worker;
   readonly #clipWorker: Worker;
   readonly #cuts = new Map<number, Pending<Cut>>();
-  readonly #clips = new Map<number, Pending<VideoClip>>();
+  readonly #clips = new Map<number, Pending<SavedClip>>();
   readonly #deletions = new Map<number, Pending<boolean>>();
   /** The clips being saved or removed, settled either way: `stop()` waits for them. */
   readonly #saving = new Set<Promise<void>>();
@@ -243,7 +244,7 @@ class Capture implements CaptureHandle {
     });
   }
 
-  saveClip(params: SaveClipParams): Promise<VideoClip> {
+  saveClip(params: SaveClipParams): Promise<SavedClip> {
     const refused = this.#refusal();
     if (refused !== undefined) {
       return Promise.reject(refused);
@@ -447,7 +448,7 @@ class Capture implements CaptureHandle {
         settle(this.#cuts, message.id)?.reject(new Error(message.message));
         break;
       case 'mux-and-write-done':
-        settle(this.#clips, message.id)?.resolve(message.clip);
+        settle(this.#clips, message.id)?.resolve({ clip: message.clip, report: message.report });
         break;
       case 'mux-and-write-failed':
         settle(this.#clips, message.id)?.reject(new Error(message.message));

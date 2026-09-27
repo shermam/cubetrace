@@ -14,6 +14,7 @@ import {
   SESSION_SCHEMA_V1,
   parseAttempt,
   parseSession,
+  type AttemptRecord,
 } from './index';
 import {
   asVersion1Attempt,
@@ -191,6 +192,21 @@ describe('parseAttempt and parseSession', () => {
     expect(read.video[0].crop).not.toBe(attempt.video[0].crop);
   });
 
+  it('read a clip written before truncatedStart as one that began where asked', () => {
+    const attempt = attemptWithVideo();
+    expect(attempt.video.map((clip) => clip.truncatedStart)).toEqual([true, false]);
+    const older = changed(
+      changed(attempt, ['video', 0, 'truncatedStart'], undefined),
+      ['video', 1, 'truncatedStart'],
+      undefined,
+    );
+    expect(VALIDATE.attempt[2](older)).toBe(true);
+    const read = parseAttempt(older);
+    expect(read.video.map((clip) => clip.truncatedStart)).toEqual([false, false]);
+    // In the order of the schema's fields, as the next save writes it.
+    expect(Object.keys(read.video[0])).toEqual(Object.keys(attempt.video[0]));
+  });
+
   it('upgrade a record of version 1 in memory: no clock, no clip, no camera', () => {
     for (const record of [solvedAttempt(), dnfAttempt(), untouchedAttempt()]) {
       const v1 = asVersion1Attempt(record);
@@ -246,7 +262,12 @@ describe('parseAttempt and parseSession', () => {
         const at = `${file} attempts[${String(k)}]`;
         expect(VALIDATE.attempt[2](attempt), JSON.stringify(VALIDATE.attempt[2].errors)).toBe(true);
         const a = parseAttempt(attempt);
-        expect(a, at).toEqual(attempt);
+        // Written before truncatedStart existed (T2.9), its clips read as begun where asked.
+        const raw = attempt as AttemptRecord;
+        expect(a, at).toEqual({
+          ...raw,
+          video: raw.video.map((clip) => ({ ...clip, truncatedStart: false })),
+        });
         expect(a.session, at).toBe(s.id);
         expect(a.clock, at).not.toBeNull();
         expect(

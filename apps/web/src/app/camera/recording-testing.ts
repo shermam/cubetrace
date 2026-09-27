@@ -7,12 +7,14 @@ import type {
   CaptureHandle,
   CaptureStats,
   CaptureSupport,
+  ClipReport,
   Cut,
   DeleteClipParams,
   FramingRect,
   MotionMeterInfo,
   MotionSample,
   SaveClipParams,
+  SavedClip,
 } from '@cubetrace/capture';
 import type { VideoClip } from '@cubetrace/core';
 
@@ -21,9 +23,17 @@ import type { CaptureStarter } from './recording-service';
 /** A clip `saveClip` was asked for, waiting for the test to answer it. */
 export interface PendingSave {
   readonly params: SaveClipParams;
-  resolve(clip: VideoClip): void;
+  resolve(saved: SavedClip): void;
   reject(error: Error): void;
 }
+
+/** The report of a clip saved as asked, with its sound, from a buffer of 90 s. */
+export const CLIP_AS_ASKED: ClipReport = {
+  lateMs: 0,
+  bufferSeconds: 90,
+  audioMissing: null,
+  audioRebasedMs: 0,
+};
 
 /** The counters of a pipeline that has buffered `seconds`. */
 export function statsOf(seconds: number, changes: Partial<CaptureStats> = {}): CaptureStats {
@@ -37,6 +47,8 @@ export function statsOf(seconds: number, changes: Partial<CaptureStats> = {}): C
     codec: 'vp09.00.40.08',
     bitrate: 4_000_000,
     audioCodec: 'opus',
+    audioChunks: Math.round(seconds * 50),
+    audioState: 'encoding',
     ...changes,
   };
 }
@@ -62,6 +74,7 @@ export function clipFor(params: SaveClipParams): VideoClip {
     firstFrameHostMs,
     framesFile: `${params.camera}.${params.segment}.frames.json`,
     syncResidualMs: null,
+    truncatedStart: false,
   };
 }
 
@@ -96,7 +109,7 @@ export class FakeCapture implements CaptureHandle {
     return Promise.reject(new Error('The recording does not cut.'));
   }
 
-  saveClip(params: SaveClipParams): Promise<VideoClip> {
+  saveClip(params: SaveClipParams): Promise<SavedClip> {
     if (this.stopped) {
       return Promise.reject(new Error('The capture has stopped.'));
     }
@@ -154,14 +167,17 @@ export class FakeCapture implements CaptureHandle {
     }
   }
 
-  /** Saves the oldest clip asked for (as `clipFor` says, with `changes`); returns it. */
-  saveNext(changes: Partial<VideoClip> = {}): VideoClip {
+  /**
+   * Saves the oldest clip asked for (as `clipFor` says, with `changes`), with its report (as asked,
+   * with `report`'s changes); returns the clip.
+   */
+  saveNext(changes: Partial<VideoClip> = {}, report: Partial<ClipReport> = {}): VideoClip {
     const pending = this.saves.shift();
     if (pending === undefined) {
       throw new Error('No clip was asked for.');
     }
     const clip = { ...clipFor(pending.params), ...changes };
-    pending.resolve(clip);
+    pending.resolve({ clip, report: { ...CLIP_AS_ASKED, ...report } });
     return clip;
   }
 

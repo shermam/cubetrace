@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { NO_AUDIO_DATA } from '@cubetrace/capture';
 import type { AttemptRecord } from '@cubetrace/core';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
@@ -17,6 +18,7 @@ import {
   CLIP_TAIL_MS,
   ENCODER_SETTLE_MS,
   RecordingService,
+  SCRAMBLE_CLIP_MAX_MS,
   SCRAMBLE_LEAD_MS,
   SOLVE_LEAD_MS,
   STORAGE_FULL,
@@ -176,11 +178,32 @@ describe('RecordingService', () => {
     await sync(r);
     expect(r.starter.started).toHaveLength(2);
     expect(r.starter.last.audio).toBeNull();
-    expect(r.recording.notice()).toBe(
-      'Recording without audio: the microphone was not allowed (Chrome asks once; the site settings can change it).',
-    );
+    const refused =
+      'Recording without audio: the microphone was not allowed (Chrome asks once; the site settings can change it).';
+    expect(r.recording.notices()).toEqual([refused]);
+    // A notice after it does not hide it (issue #33): both stay, and the session notes both, once.
     r.starter.last.emitError({ message: 'The audio encoder failed.', fatal: false });
-    expect(r.recording.notice()).toBe('The audio encoder failed.');
+    r.starter.last.emitError({ message: 'The audio encoder failed.', fatal: false });
+    expect(r.recording.notices()).toEqual([refused, 'The audio encoder failed.']);
+    await r.s.service.whenSaved();
+    expect(r.s.service.session()?.notes).toBe(
+      `notice: ${refused}\nnotice: The audio encoder failed.`,
+    );
+  });
+
+  it('says that the microphone sends nothing until its sound comes, and notes it', async () => {
+    const r = rig();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { capture } = await recording(r);
+
+    capture.emitError({ message: NO_AUDIO_DATA, fatal: false });
+    capture.emitStats(statsOf(6, { audioState: 'waiting', audioChunks: 0, audioCodec: null }));
+    expect(r.recording.notices()).toEqual([NO_AUDIO_DATA]);
+    // The microphone was only late: its sound is recorded now, and the notice goes (the note stays).
+    capture.emitStats(statsOf(7));
+    expect(r.recording.notices()).toEqual([]);
+    await r.s.service.whenSaved();
+    expect(r.s.service.session()?.notes).toBe(`notice: ${NO_AUDIO_DATA}`);
   });
 
   it('starts again at the video quality Settings says, once the clips waiting for their time are saved', async () => {
@@ -278,6 +301,86 @@ describe('RecordingService', () => {
     expect(withoutVideo(stored)).toEqual(withoutVideo(record));
     expect(r.s.service.attempts()[0]).toEqual(stored);
     expect(r.s.service.lastResult()).toEqual(stored);
+  });
+
+  it('asks for at most the last 60 s of a scramble with a long pause in it', async () => {
+    const r = rig();
+    const { fake, capture } = await recording(r);
+
+    // A turn, 70 s without one, then the rest of the scramble.
+    turn(r.s, fake, 'R');
+    turn(r.s, fake, 'U F', 70_000);
+    const { scrambleStart, scrambleDone } = r.s.service.attempt()?.events ?? {};
+    if (scrambleStart == null || scrambleDone == null) {
+      throw new Error('The scramble is done.');
+    }
+    expect(scrambleDone - scrambleStart).toBeGreaterThan(SCRAMBLE_CLIP_MAX_MS);
+    await wait(r, SAVE_AFTER_MS);
+
+    expect(SCRAMBLE_CLIP_MAX_MS).toBe(60_000);
+    expect(capture.saves.map((save) => [save.params.startHostMs, save.params.endHostMs])).toEqual([
+      [scrambleDone - SCRAMBLE_CLIP_MAX_MS, scrambleDone + CLIP_TAIL_MS],
+    ]);
+  });
+
+  it('keeps a clip whose start was older than the buffer, says how late it begins and notes it', async () => {
+    const r = rig();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { fake, capture } = await recording(r);
+
+    turn(r.s, fake, 'R U F');
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext({ truncatedStart: true }, { lateMs: 434_100, bufferSeconds: 90 });
+    await settle();
+    const line =
+      'clip truncated: scramble of attempt 1 starts 434.1 s late (the buffer held 90.0 s)';
+    expect(r.recording.clipNotice()).toBe(
+      'Scramble clip of attempt 1 starts 434.1 s late: the buffer holds 90 s.',
+    );
+    expect(r.recording.failure()).toBeNull();
+    expect(warn).toHaveBeenCalledWith(`cubetrace: ${line}`);
+
+    turn(r.s, fake, "F' U' R'", 500);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    await settle();
+    await r.s.service.whenSaved();
+    const exported = await r.s.store.exportSession(sessionId(r));
+    expect(exported.session.notes).toBe(line);
+    // Saved as the attempt's clip, marked.
+    expect(exported.attempts[0].video.map((clip) => [clip.segment, clip.truncatedStart])).toEqual([
+      ['scramble', true],
+      ['solve', false],
+    ]);
+    r.recording.dismissClipNotice();
+    expect(r.recording.clipNotice()).toBeNull();
+  });
+
+  it("says why a clip has no sound, and notes each reason once while it records, as the audio's rebase", async () => {
+    const r = rig();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { fake, capture } = await recording(r);
+    const reason = 'no audio data: the microphone sent nothing (muted, or held by another app)';
+
+    turn(r.s, fake, 'R U F');
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext({ audio: null }, { audioMissing: reason });
+    await settle();
+    expect(r.recording.clipNotice()).toBe(`Scramble clip of attempt 1 has no sound: ${reason}.`);
+    turn(r.s, fake, "F' U' R'", 500);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext({ audio: null }, { audioMissing: reason, audioRebasedMs: 30_000_010.4 });
+    await settle();
+    await r.s.service.whenSaved();
+
+    expect(r.recording.clipNotice()).toBe(
+      `Solve clip of attempt 1 has no sound: ${reason}. ` +
+        'Solve clip of attempt 1: audio timestamps rebased by 30000010 ms.',
+    );
+    expect(r.s.service.session()?.notes).toBe(
+      `clip without audio: scramble of attempt 1: ${reason}\n` +
+        'clip audio rebased: solve of attempt 1: audio timestamps rebased by 30000010 ms',
+    );
   });
 
   it('says once that a clip failed and notes it in the session; the attempt is recorded as ever', async () => {

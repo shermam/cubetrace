@@ -17,7 +17,8 @@ import {
 } from 'mediabunny';
 
 import { clipFiles } from './clip-files';
-import type { Cut, CutAudio, CutVideo } from './cut';
+import type { Cut, CutVideo } from './cut';
+import type { AudioReport } from './protocol';
 import type { EncodedChunkRecord } from './ring-buffer';
 
 /** Which clip of an attempt a cut becomes (docs/DATA-MODEL.md §5). */
@@ -25,6 +26,11 @@ export interface ClipMeta {
   /** The camera's label (`laptop`, `phone-front`). */
   readonly camera: string;
   readonly segment: VideoSegment;
+  /**
+   * The capture's audio when the cut was made (the capture worker's report), so that a clip without
+   * sound says why; without it, a cut without an audio track is taken to have been asked for none.
+   */
+  readonly audio?: AudioReport;
 }
 
 /** What the MP4 holds, for the clip's `video[]` entry (docs/DATA-MODEL.md §7). */
@@ -40,6 +46,17 @@ export interface MuxedClipInfo {
   readonly frames: number;
   /** From the first frame to the end of the last one, ms: the video track's duration. */
   readonly durationMs: number;
+  /** The cut's start was older than the buffer: the clip begins at its first keyframe instead. */
+  readonly truncatedStart: boolean;
+  /** How much later than asked the clip begins, ms, to 0.1 ms: 0 unless `truncatedStart`. */
+  readonly lateMs: number;
+  /**
+   * Why the MP4 has no audio track although audio was recorded (see `ClipReport.audioMissing`); null
+   * when it has one, or none was asked for.
+   */
+  readonly audioMissing: string | null;
+  /** How far its audio was moved onto the frames' clock, ms (`CutAudio.rebaseMs`); 0 without. */
+  readonly audioRebasedMs: number;
 }
 
 export interface MuxedClip {
@@ -60,16 +77,19 @@ interface Placed {
  * The MP4 of `cut` and its frames.json. The video chunks go in as they are (no re-encoding) with
  * the encoder's decoder config (for H.264 its `description`, the avcC; VP9 needs its codec string
  * only), and so do the audio chunks. Times are rebased so that the clip starts at 0 at its first
- * frame (a keyframe); the audio keeps its place relative to the video by its own timestamps (same
- * capture clock, docs/DEVICES.md): the chunks that end before the first frame are left out, one
- * that overlaps it is kept, and the MP4's edit list trims its part before 0. Packets of both tracks
- * go in time order, so the file interleaves them. A frame without a duration (Chrome's fake camera
- * gives 0) lasts until the next one; the last such frame, the median interval.
+ * frame (a keyframe); the audio keeps its place relative to the video by its own timestamps, which
+ * count on the frames' clock on the devices measured (docs/DEVICES.md), or else by the cut's
+ * `rebaseMs` (issue #33): the chunks that end before the first frame are left out, one that overlaps
+ * it is kept, and the MP4's edit list trims its part before 0. Packets of both tracks go in time
+ * order, so the file interleaves them. A frame without a duration (Chrome's fake camera gives 0)
+ * lasts until the next one; the last such frame, the median interval.
  *
- * Rejects a cut without frames, one that does not begin at a keyframe or has no decoder config, and
- * one whose start is older than the buffer (`truncatedStart`): that clip would miss the beginning
- * asked for. A cut whose end is later than the newest frame (`truncatedEnd`) is muxed: it is short
- * by the encoder's latency when cut right after its end.
+ * A cut whose start is older than the buffer (`truncatedStart`) is muxed from its first keyframe,
+ * and `info` says how late it begins (T2.9: a clip is never lost for an old start); one whose end is
+ * later than the newest frame (`truncatedEnd`) is muxed too: it is short by the encoder's latency
+ * when cut right after its end. A clip without an audio track while the capture records audio says
+ * why in `info.audioMissing`. Rejects a cut without frames, one that does not begin at a keyframe,
+ * and one without the video's decoder config.
  */
 export async function muxClip(cut: Cut, meta: ClipMeta): Promise<MuxedClip> {
   clipFiles(meta.camera, meta.segment);
@@ -79,19 +99,12 @@ export async function muxClip(cut: Cut, meta: ClipMeta): Promise<MuxedClip> {
   if (first === undefined) {
     throw new Error('Cannot mux an empty cut: it has no video frames.');
   }
-  if (cut.truncatedStart) {
-    const lateMs = cut.frames.t0HostMs - cut.startHostMs;
-    throw new Error(
-      `Cannot mux a cut whose start is older than the buffer (truncatedStart): its first frame is ` +
-        `${lateMs.toFixed(1)} ms after the start asked for, which the buffer no longer holds.`,
-    );
-  }
   if (first.type !== 'key') {
     throw new Error('Cannot mux a cut that does not begin with a keyframe.');
   }
   const videoConfig = videoDecoderConfig(video);
   const originUs = first.timestampUs;
-  const audio = audioToKeep(cut.audio, originUs);
+  const { audio, missing } = audioToKeep(cut, originUs, meta.audio);
 
   const output = new Output({
     format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
@@ -108,7 +121,8 @@ export async function muxClip(cut: Cut, meta: ClipMeta): Promise<MuxedClip> {
   try {
     const placed = interleave(
       packets('video', chunks, originUs),
-      audio === null ? [] : packets('audio', audio.chunks, originUs),
+      // The audio's origin on its own clock: the first frame's timestamp less the rebase.
+      audio === null ? [] : packets('audio', audio.chunks, originUs - audio.rebaseUs),
     );
     let describedVideo = false;
     let describedAudio = false;
@@ -149,6 +163,12 @@ export async function muxClip(cut: Cut, meta: ClipMeta): Promise<MuxedClip> {
       height: video.height,
       frames: chunks.length,
       durationMs: (last.timestampUs + durationUs(chunks, chunks.length - 1) - originUs) / 1000,
+      truncatedStart: cut.truncatedStart,
+      lateMs: cut.truncatedStart
+        ? Math.max(0, Math.round((cut.frames.t0HostMs - cut.startHostMs) * 10) / 10)
+        : 0,
+      audioMissing: missing,
+      audioRebasedMs: audio === null ? 0 : audio.rebaseUs / 1000,
     },
   };
 }
@@ -169,21 +189,55 @@ function videoDecoderConfig(video: CutVideo): VideoDecoderConfig {
   };
 }
 
+/** The audio a clip keeps: its chunks, their decoder config, their shift to the frames' clock. */
+interface KeptAudio {
+  readonly config: AudioDecoderConfig;
+  readonly chunks: readonly EncodedChunkRecord[];
+  readonly rebaseUs: number;
+}
+
 /**
- * The audio chunks that do not end before the first frame, with their decoder config; null when
- * none is left or the encoder never described its output (then the clip has no audio track).
+ * The audio chunks that do not end before the first frame (placed on the frames' clock), with their
+ * decoder config; or none, and why when audio was recorded (`report`): no audio data from the
+ * microphone, the audio stopped (the encoder's error), no decoder config, no chunk in the clip's
+ * span (with how far the audio's timestamps are from the frames').
  */
 function audioToKeep(
-  audio: CutAudio | null,
+  cut: Cut,
   originUs: number,
-): { readonly config: AudioDecoderConfig; readonly chunks: readonly EncodedChunkRecord[] } | null {
-  if (audio === null || audio.decoderConfig === null) {
-    return null;
+  report: AudioReport | undefined,
+): { readonly audio: KeptAudio | null; readonly missing: string | null } {
+  const audio = cut.audio;
+  const rebaseUs = Math.round((audio?.rebaseMs ?? 0) * 1000);
+  const chunks =
+    audio?.chunks.filter((chunk) => {
+      const placedUs = chunk.timestampUs + rebaseUs;
+      return placedUs >= originUs || placedUs + chunk.durationUs > originUs;
+    }) ?? [];
+  if (audio !== null && audio.decoderConfig !== null && chunks.length > 0) {
+    return { audio: { config: audio.decoderConfig, chunks, rebaseUs }, missing: null };
   }
-  const chunks = audio.chunks.filter(
-    (chunk) => chunk.timestampUs >= originUs || chunk.timestampUs + chunk.durationUs > originUs,
-  );
-  return chunks.length === 0 ? null : { config: audio.decoderConfig, chunks };
+  if (report?.state === 'off' || (report === undefined && audio === null)) {
+    return { audio: null, missing: null };
+  }
+  const error = report?.error ?? null;
+  let missing: string;
+  if (report !== undefined && report.data === 0) {
+    missing = 'no audio data: the microphone sent nothing (muted, or held by another app)';
+  } else if (audio === null) {
+    missing = error !== null ? `the audio stopped (${error})` : 'the audio encoder had not started';
+  } else if (audio.decoderConfig === null) {
+    missing = 'no decoder config: the audio encoder never described its output';
+  } else if (error !== null) {
+    missing = `the audio stopped (${error})`;
+  } else {
+    const offset = audio.offsetFromVideoMs;
+    missing =
+      offset === null
+        ? "no audio chunk in the clip's span: none was in memory"
+        : `no audio chunk in the clip's span (the audio's timestamps are ${offset.toFixed(1)} ms from the video's)`;
+  }
+  return { audio: null, missing };
 }
 
 /** mediabunny's name for the codec family of a WebCodecs video codec string. */

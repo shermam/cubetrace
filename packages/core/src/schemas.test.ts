@@ -74,10 +74,14 @@ const SCHEMAS: [string, JsonSchema][] = [
 /** The objects that are not closed records: browser snapshots, and camera clocks by label. */
 const SNAPSHOTS = /\/\$defs\/camera\/properties\/(settings|capabilities|constraints)$/;
 const BY_LABEL = '#/properties/clock/properties/cameras';
-/** The only fields that may be absent: a phase's slot, a camera clock's samples. */
+/**
+ * The only fields that may be absent: a phase's slot, a camera clock's samples, and a clip's
+ * truncatedStart (the clips written before T2.9 have none).
+ */
 const OPTIONAL: Readonly<Record<string, string>> = {
   '#/$defs/phase': 'slot',
   '#/$defs/cameraClock': 'samples',
+  '#/$defs/clip': 'truncatedStart',
 };
 
 describe('the JSON Schemas of the records', () => {
@@ -111,7 +115,7 @@ describe('the JSON Schemas of the records', () => {
     ['attempt.json version 1', ATTEMPT_SCHEMA_V1, 5],
     ['frames.json', FRAMES_SCHEMA, 2],
   ] as [string, JsonSchema, number][])(
-    'the schema of %s closes every record and requires every field but a slot and samples',
+    'the schema of %s closes every record and requires every field but a slot, samples and truncatedStart',
     (_, schema, count) => {
       const objects = objectSchemas(schema);
       expect(objects).toHaveLength(count);
@@ -242,6 +246,8 @@ describe('version 2', () => {
     ['a first frame time that is text', 'firstFrameHostMs', '1790000000812.4'],
     ['a frames file that is not JSON', 'framesFile', 'laptop.solve.frames.txt'],
     ['a sync residual that is text', 'syncResidualMs', '41.5'],
+    ['a truncated start that is text', 'truncatedStart', 'true'],
+    ['a truncated start of null', 'truncatedStart', null],
     ['an unknown field', 'rotation', 90],
   ];
 
@@ -256,13 +262,15 @@ describe('version 2', () => {
     expect(validateAttempt(changed(attempt, ['video', 1, field], value))).toBe(false);
   });
 
-  it('accepts a clip without audio, crop or sync check, and one of a phone camera', () => {
+  it('accepts a clip without audio, crop or sync check, one of a phone camera, and one written before truncatedStart', () => {
     for (const [field, value] of [
       ['audio', null],
       ['crop', null],
       ['syncResidualMs', null],
       ['syncResidualMs', -3.5],
       ['camera', 'phone-2'],
+      ['truncatedStart', false],
+      ['truncatedStart', undefined],
     ] as [string, unknown][]) {
       expect(validateAttempt(changed(attempt, ['video', 0, field], value)), field).toBe(true);
     }

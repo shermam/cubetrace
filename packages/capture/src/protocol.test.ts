@@ -135,7 +135,15 @@ describe('transferList', () => {
       segment: 'solve',
       fpsNominal: 30,
     };
-    expect(transferList({ type: 'clip-job', request, cut: result })).toEqual(cutBuffers(result));
+    expect(
+      transferList({
+        type: 'clip-job',
+        request,
+        cut: result,
+        bufferSeconds: 90,
+        audio: { state: 'encoding', data: 9000, chunks: 4200, error: null },
+      }),
+    ).toEqual(cutBuffers(result));
   });
 
   it("moves each of a cut's chunk buffers once, and nothing of other messages", () => {

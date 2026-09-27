@@ -65,7 +65,7 @@ export class ClipWorker {
   async #save(job: ClipJob): Promise<void> {
     const { id, sessionId, index, camera, segment, fpsNominal } = job.request;
     try {
-      const { mp4, frames, info } = await muxClip(job.cut, { camera, segment });
+      const { mp4, frames, info } = await muxClip(job.cut, { camera, segment, audio: job.audio });
       const root = await this.#env.opfsRoot();
       const clip = await writeClip(root, sessionId, index, camera, segment, mp4, frames, {
         codec: info.codec,
@@ -73,8 +73,19 @@ export class ClipWorker {
         width: info.width,
         height: info.height,
         fpsNominal,
+        truncatedStart: info.truncatedStart,
       });
-      this.#answer({ type: 'mux-and-write-done', id, clip });
+      this.#answer({
+        type: 'mux-and-write-done',
+        id,
+        clip,
+        report: {
+          lateMs: info.lateMs,
+          bufferSeconds: job.bufferSeconds,
+          audioMissing: info.audioMissing,
+          audioRebasedMs: info.audioRebasedMs,
+        },
+      });
     } catch (error: unknown) {
       this.#answer({ type: 'mux-and-write-failed', id, message: describeError(error) });
     }

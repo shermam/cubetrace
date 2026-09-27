@@ -25,6 +25,7 @@ function clip(segment: 'scramble' | 'solve', firstFrameHostMs: number): VideoCli
     firstFrameHostMs,
     framesFile: `laptop.${segment}.frames.json`,
     syncResidualMs: null,
+    truncatedStart: false,
   };
 }
 
@@ -194,6 +195,27 @@ describe('ClipViewer', () => {
 
     fixture.destroy();
     expect(revoked).toEqual(['blob:0:video/mp4', 'blob:1:video/mp4']);
+  });
+
+  it('marks a clip that begins later than asked, its start older than the buffer', async () => {
+    const element = await render();
+    fixture.componentRef.setInput('attempt', {
+      ...ATTEMPT,
+      video: [{ ...clip('scramble', -2000), truncatedStart: true }, clip('solve', -1000)],
+    });
+    await update();
+    element.querySelector<HTMLButtonElement>('[data-segment="scramble"]')?.click();
+    await update();
+
+    expect(
+      Array.from(element.querySelectorAll('[data-testid="clip-segment"]'), (button) =>
+        button.textContent.replace(/\s+/g, ' ').trim(),
+      ),
+    ).toEqual(['Scramble · late', 'Solve']);
+    expect(element.querySelector('[data-testid="clip-facts"]')?.textContent.trim()).toBe(
+      'laptop.scramble.mp4: 1920×1080, 150 frames, 1.2 MB, vp09.00.40.08, opus. It begins later ' +
+        'than asked: its start was older than the 90 s kept in memory.',
+    );
   });
 
   it('downloads both clips, their frame times and attempt.json, named after the attempt', async () => {

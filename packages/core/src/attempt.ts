@@ -138,6 +138,12 @@ export interface VideoClip {
   framesFile: string;
   /** The camera's lag behind the cube when the clip was recorded; null before a sync check. */
   syncResidualMs: number | null;
+  /**
+   * The clip begins later than asked, at the oldest keyframe the capture still held: the start
+   * asked for was older than its buffer of the last 90 s (docs/PLAN.md T2.9). Optional in the
+   * files (those written before it existed have none); `parseAttempt` reads a missing one as false.
+   */
+  truncatedStart: boolean;
 }
 
 /**

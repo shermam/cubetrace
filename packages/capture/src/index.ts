@@ -9,16 +9,20 @@ export * from './sharpness';
 // T2.2 — capture pipeline: encoding in a worker, the ring buffer, cuts. capture-worker.ts is not
 // exported: it is the worker's own chunk (docs/TOOLCHAIN.md, "The capture pipeline").
 export type {
+  AudioReport,
+  AudioState,
   CaptureConfig,
   CaptureError,
   CaptureStats,
+  ClipReport,
   DeleteClipParams,
   MotionMeterInfo,
   MotionSample,
   ResolvedCaptureConfig,
   SaveClipParams,
+  SavedClip,
 } from './protocol';
-export { resolveCaptureConfig } from './protocol';
+export { AUDIO_SILENCE_MS, NO_AUDIO_DATA, resolveCaptureConfig } from './protocol';
 export type { CaptureHandle, CaptureSupport } from './pipeline';
 export {
   AUDIO_PROCESSOR_BUFFER,
@@ -39,7 +43,7 @@ export type {
   RingBufferBounds,
   VideoTrackInfo,
 } from './ring-buffer';
-export { DEFAULT_BOUNDS, RingBuffer } from './ring-buffer';
+export { AUDIO_REBASE_MS, DEFAULT_BOUNDS, RingBuffer } from './ring-buffer';
 
 // T2.3 — clips: `CaptureHandle.saveClip` (above) has a cut muxed into an MP4 (mux.ts, with
 // mediabunny) and written with its frames.json into the attempt's folder (clip-writer.ts); since

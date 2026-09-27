@@ -14,6 +14,8 @@ import {
 } from './capture-worker';
 import type { VideoQuality } from './bitrate';
 import {
+  AUDIO_SILENCE_MS,
+  NO_AUDIO_DATA,
   resolveCaptureConfig,
   transferList,
   type CaptureStats,
@@ -161,6 +163,8 @@ class FakeAudioEncoder {
   static supported = new Set<string>();
   static instances: FakeAudioEncoder[] = [];
   static frameUs = 21_333;
+  /** Whether the first chunk comes with its decoder config, as WebCodecs says it does. */
+  static describe = true;
 
   static isConfigSupported(config: AudioEncoderConfig): Promise<{ supported: boolean }> {
     return Promise.resolve({ supported: FakeAudioEncoder.supported.has(config.codec) });
@@ -191,7 +195,10 @@ class FakeAudioEncoder {
     while ((this.#sent + 1) * frameUs <= this.#receivedUs) {
       const chunk = new FakeChunk('key', this.#firstUs + this.#sent * frameUs, frameUs, 6);
       const config = this.configs[0];
-      this.#init.output(chunk, this.#sent === 0 ? { decoderConfig: config } : undefined);
+      this.#init.output(
+        chunk,
+        this.#sent === 0 && FakeAudioEncoder.describe ? { decoderConfig: config } : undefined,
+      );
       this.#sent += 1;
     }
   }
@@ -360,6 +367,7 @@ beforeEach(() => {
   FakeAudioEncoder.supported = new Set(['opus']);
   FakeAudioEncoder.instances = [];
   FakeAudioEncoder.frameUs = 21_333;
+  FakeAudioEncoder.describe = true;
 });
 
 describe('the encoder settings', () => {
@@ -557,6 +565,8 @@ describe('CaptureWorker', () => {
       codec: 'vp09.00.40.08',
       bitrate: 4_000_000,
       audioCodec: null,
+      audioChunks: 0,
+      audioState: 'off',
     });
     await capture.feed(30, 59);
     expect(capture.stats(arrivalOf(0) - 1 + 2000)).toMatchObject({ fps: 30, encodedFps: 30 });
@@ -588,6 +598,99 @@ describe('CaptureWorker', () => {
     expect(inputs.every((data) => data.closed)).toBe(true);
   });
 
+  it('says how the audio goes in the counters: off, waiting, encoding and the chunks, stopped', async () => {
+    const off = harness();
+    await off.feed(0, 29);
+    expect(off.stats(arrivalOf(30))).toMatchObject({ audioState: 'off', audioChunks: 0 });
+
+    const capture = harness({ audio: true });
+    await capture.feed(0, 29);
+    expect(capture.stats(arrivalOf(30))).toMatchObject({ audioState: 'waiting', audioChunks: 0 });
+    for (let index = 0; index < 20; index += 1) {
+      capture.audio.push(new FakeAudio(T0 + index * 10_000));
+      await settle();
+    }
+    expect(capture.stats(arrivalOf(31))).toMatchObject({
+      audioState: 'encoding',
+      audioChunks: 9,
+      audioCodec: 'opus',
+    });
+    capture.audio.end();
+    await settle();
+    expect(capture.stats(arrivalOf(32))).toMatchObject({
+      audioState: 'stopped',
+      audioChunks: 9,
+      audioCodec: null,
+    });
+    expect(capture.errors()).toEqual([
+      {
+        type: 'error',
+        fatal: false,
+        message: 'The microphone stopped sending audio (its track ended).',
+      },
+    ]);
+  });
+
+  it('says once that the microphone sends nothing, 3 s after the first frame, and records on', async () => {
+    const capture = harness({ audio: true });
+    const lastQuiet = Math.round((AUDIO_SILENCE_MS * 30) / 1000) - 1;
+    await capture.feed(0, lastQuiet);
+    expect(capture.errors()).toEqual([]);
+
+    await capture.feed(lastQuiet + 1, lastQuiet + 40);
+
+    expect(capture.errors()).toEqual([{ type: 'error', fatal: false, message: NO_AUDIO_DATA }]);
+    expect(NO_AUDIO_DATA).toBe(
+      'Recording without audio: the microphone sends no audio (muted, or held by another app).',
+    );
+    expect(capture.stats(arrivalOf(lastQuiet + 41)).audioState).toBe('waiting');
+    // Audio that comes late is recorded all the same.
+    for (let index = 0; index < 5; index += 1) {
+      capture.audio.push(new FakeAudio(timestampOf(lastQuiet + 41) + index * 10_000));
+      await settle();
+    }
+    expect(capture.worker.buffer.audio.length).toBeGreaterThan(0);
+    expect(capture.errors()).toHaveLength(1);
+
+    // Not said when the audio came in time, nor when none was asked for.
+    for (const options of [{ audio: true }, {}]) {
+      const other = harness(options);
+      if (options.audio === true) {
+        other.audio.push(new FakeAudio(T0));
+        await settle();
+      }
+      await other.feed(0, lastQuiet + 40);
+      expect(other.errors()).toEqual([]);
+    }
+  });
+
+  it.each([
+    ['mp4a.40.2', '11 88'],
+    ['opus', 'none'],
+  ])(
+    "makes the audio's decoder config from the encoder's when its first chunk has none (%s)",
+    async (codec, description) => {
+      FakeAudioEncoder.supported = new Set([codec]);
+      FakeAudioEncoder.describe = false;
+      const capture = harness({ audio: true });
+      for (let index = 0; index < 5; index += 1) {
+        capture.audio.push(new FakeAudio(T0 + index * 10_000));
+        await settle();
+      }
+
+      const config = capture.worker.buffer.audioTrack?.decoderConfig;
+      const bytes = config?.description;
+      expect(config).toMatchObject({ codec, sampleRate: 48_000, numberOfChannels: 1 });
+      expect(
+        bytes === undefined
+          ? 'none'
+          : Array.from(new Uint8Array(bytes as ArrayBuffer), (byte) =>
+              byte.toString(16).padStart(2, '0'),
+            ).join(' '),
+      ).toBe(description);
+    },
+  );
+
   it('records video only when no audio encoder takes the audio, and says so once', async () => {
     FakeAudioEncoder.supported = new Set();
     const capture = harness({ audio: true });
@@ -607,7 +710,7 @@ describe('CaptureWorker', () => {
     expect(data.closed).toBe(true);
     expect(capture.audio.cancelled).toBe(true);
     expect(capture.encoder().encoded.length).toBeGreaterThan(0);
-    expect(capture.stats(arrivalOf(21)).audioCodec).toBeNull();
+    expect(capture.stats(arrivalOf(21))).toMatchObject({ audioCodec: null, audioState: 'stopped' });
   });
 
   it('answers a cut with its chunks, and says why when there is nothing to cut', async () => {
@@ -818,6 +921,9 @@ describe('CaptureWorker saving clips', () => {
     const [job] = jobs;
     expect(job.type).toBe('clip-job');
     expect(job.request).toEqual(request(1, { segment: 'scramble' }));
+    // What the clip's report needs: the seconds in the buffer, and the audio (none asked for here).
+    expect(job.bufferSeconds).toBeCloseTo(worker.buffer.bufferSeconds, 3);
+    expect(job.audio).toEqual({ state: 'off', data: 0, chunks: 0, error: null });
     expect(job.cut.video.chunks).toHaveLength(sample.video.chunks.length);
     expect(job.cut.frames.t0HostMs).toBe(sample.frames.t0HostMs);
     // The job moves its own copies of the bytes; the buffer keeps its own.

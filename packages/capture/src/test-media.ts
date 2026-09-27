@@ -17,6 +17,9 @@ interface StoredTrack<Config> {
   readonly chunks: readonly StoredChunk[];
 }
 
+/** The audio's placement on the frames' clock (T2.9), which the sample predates. */
+type Placement = 'offsetFromVideoMs' | 'rebaseMs';
+
 interface StoredSample {
   readonly about: string;
   readonly recorded: { readonly date: string; readonly userAgent: string; readonly flags: string };
@@ -24,7 +27,8 @@ interface StoredSample {
     readonly video: Omit<Cut['video'], 'decoderConfig' | 'chunks'> &
       StoredTrack<VideoDecoderConfig>;
     readonly audio:
-      | (Omit<NonNullable<Cut['audio']>, 'decoderConfig' | 'chunks'> &
+      | (Omit<NonNullable<Cut['audio']>, 'decoderConfig' | 'chunks' | Placement> &
+          Partial<Pick<NonNullable<Cut['audio']>, Placement>> &
           StoredTrack<AudioDecoderConfig>)
       | null;
   };
@@ -35,7 +39,9 @@ export const MEDIA_SAMPLE = 'fake-camera-vp9-1s.json';
 
 /**
  * The cut stored in `fixtures/media/<name>`, with its bytes decoded: every call gives a new cut
- * with buffers of its own, which a test may change or transfer.
+ * with buffers of its own, which a test may change or transfer. A sample recorded before the cut
+ * said where its audio goes on the frames' clock (T2.9) gets it from its arrival fits: its audio
+ * counts on the frames' clock, as Chrome's fake devices' does (docs/DEVICES.md).
  */
 export function readMediaSample(name = MEDIA_SAMPLE): Cut {
   const text = readFileSync(new URL(`../../../fixtures/media/${name}`, import.meta.url), 'utf8');
@@ -48,7 +54,18 @@ export function readMediaSample(name = MEDIA_SAMPLE): Cut {
     audio:
       audio === null
         ? null
-        : { ...audio, decoderConfig: config(audio.decoderConfig), chunks: chunks(audio.chunks) },
+        : {
+            ...audio,
+            decoderConfig: config(audio.decoderConfig),
+            chunks: chunks(audio.chunks),
+            offsetFromVideoMs:
+              audio.offsetFromVideoMs ??
+              (audio.arrival === null
+                ? null
+                : Math.round((audio.arrival.offsetMs - stored.frames.arrival.offsetMs) * 100) /
+                  100),
+            rebaseMs: audio.rebaseMs ?? 0,
+          },
   };
 }
 

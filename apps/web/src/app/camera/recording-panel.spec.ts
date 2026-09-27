@@ -92,6 +92,54 @@ describe('RecordingPanel', () => {
     expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 8 Mbps, no audio');
   });
 
+  it('says where the audio is when it is not encoded, and what a clip saved short lacks until dismissed', async () => {
+    const { s, starter, element, update, camera } = await render();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await camera.start();
+    const fake = await ready(s);
+    await update();
+    const audio = async (changes: Parameters<typeof statsOf>[1]): Promise<string | undefined> => {
+      starter.last.emitStats(statsOf(5, changes));
+      await update();
+      return text(element, 'recording-codecs');
+    };
+
+    expect(await audio({ audioState: 'waiting', audioChunks: 0, audioCodec: null })).toBe(
+      'vp09.00.40.08 at 4 Mbps, no audio yet (waiting for the microphone)',
+    );
+    expect(await audio({ audioState: 'stopped', audioCodec: null })).toBe(
+      'vp09.00.40.08 at 4 Mbps, audio stopped',
+    );
+    expect(await audio({ audioState: 'off', audioChunks: 0, audioCodec: null })).toBe(
+      'vp09.00.40.08 at 4 Mbps, no audio',
+    );
+    expect(await audio({})).toBe('vp09.00.40.08 at 4 Mbps, opus');
+
+    // Two notices: both shown.
+    starter.last.emitError({ message: 'Recording without audio: first.', fatal: false });
+    starter.last.emitError({ message: 'The audio encoder failed.', fatal: false });
+    await update();
+    expect(
+      Array.from(element.querySelectorAll('[data-testid="recording-notice"]'), (p) =>
+        p.textContent.trim(),
+      ),
+    ).toEqual(['Recording without audio: first.', 'The audio encoder failed.']);
+
+    turn(s, fake, 'R U F');
+    s.timers.advance(CLIP_TAIL_MS + ENCODER_SETTLE_MS);
+    await update();
+    starter.last.saveNext({ truncatedStart: true }, { lateMs: 12_345, bufferSeconds: 89.7 });
+    await update();
+    expect(text(element, 'recording-clip-notice')).toBe(
+      "Scramble clip of attempt 1 starts 12.3 s late: the buffer holds 90 s. The session's notes say so. Dismiss",
+    );
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="recording-clip-notice"] button')
+      ?.click();
+    await update();
+    expect(element.querySelector('[data-testid="recording-clip-notice"]')).toBeNull();
+  });
+
   it('shows the last clip, a clip that failed until dismissed, and why recording stopped', async () => {
     const { s, starter, element, update, camera } = await render();
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);

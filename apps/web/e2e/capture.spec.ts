@@ -7,8 +7,10 @@ import { ALL_FORMATS, BufferSource, Input } from 'mediabunny';
 // The capture pipeline (docs/PLAN.md, T2.2) on Chrome's fake camera, through the capture lab
 // (/capture-lab), and its clips (T2.3): muxed into MP4 and written into the origin private file
 // system by the worker. The fake camera runs at 20 fps unless told otherwise; `fps=30` gives the
-// 1080p30 of the owner's cameras (docs/DEVICES.md). The fake microphone comes with it, and the
-// camera prompt is answered "Allow". Launch options force a browser of their own for this file.
+// 1080p30 of the owner's cameras (docs/DEVICES.md). The fake microphone comes with it, a tone that
+// Chromium encodes as Opus, so every clip here has sound (T2.9: a clip without it now says why, and
+// CI would otherwise pass with no audio at all); the prompts are answered "Allow". Launch options
+// force a browser of their own for this file.
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],
@@ -25,6 +27,8 @@ interface Stats {
   readonly bufferBytes: number;
   readonly codec: string | null;
   readonly audioCodec: string | null;
+  readonly audioChunks: number;
+  readonly audioState: 'off' | 'waiting' | 'encoding' | 'stopped';
 }
 
 /** The parts of the lab's cut summary (apps/web/src/app/capture-lab/cut-summary.ts) used here. */
@@ -69,6 +73,12 @@ interface CutSummary {
 /** The lab's summary of the clip it saved (apps/web/src/app/capture-lab/capture-lab-page.ts). */
 interface SavedClip {
   readonly clip: VideoClip;
+  readonly report: {
+    readonly lateMs: number;
+    readonly bufferSeconds: number;
+    readonly audioMissing: string | null;
+    readonly audioRebasedMs: number;
+  };
   readonly folder: string;
   readonly files: { name: string; bytes: number }[];
   readonly frames: { count: number; t0HostMs: number; durationMs: number; keyframes: number[] };
@@ -118,10 +128,19 @@ async function record(page: Page, seconds: number): Promise<void> {
 
 /** Mux and save of the last 3 s, and the lab's summary of the clip once it is saved. */
 async function saveLast3s(page: Page): Promise<SavedClip> {
-  await page.getByRole('button', { name: 'Mux and save the last 3 s' }).click();
+  return saveLast(page, 3);
+}
+
+/** Mux and save of the last `seconds`, and the lab's summary of the clip once it is saved. */
+async function saveLast(page: Page, seconds: number): Promise<SavedClip> {
+  await page.getByLabel('Cut length (s)').fill(String(seconds));
+  await page.getByRole('button', { name: `Mux and save the last ${String(seconds)} s` }).click();
   await expect(page.getByTestId('lab-status')).toHaveText(/^Saved lab\.solve\.mp4: \d+ frames/, {
     timeout: 20_000,
   });
+  await expect
+    .poll(async () => (await readJson<SavedClip | null>(page, 'lab-clip-json'))?.clip.frames ?? 0)
+    .toBeGreaterThan(0);
   return readJson<SavedClip>(page, 'lab-clip-json');
 }
 
@@ -186,10 +205,12 @@ test('10 s of the fake camera at 1080p30 encode without drops, and the last 3 s 
   expect(Math.abs(coveredMs - 3000)).toBeLessThanOrEqual(300);
   expect(three.video).toMatchObject({ codec: last.codec, width: 1920, height: 1080 });
   expect(three.frames.dtMs).toHaveLength(three.video.chunks);
-  if (last.audioCodec !== null) {
-    expect(three.audio?.codec).toBe(last.audioCodec);
-    expect(three.audio?.chunks).toBeGreaterThan(0);
-  }
+  // The fake microphone is encoded (Opus in Playwright's Chromium): the cut has its sound.
+  expect(last.audioCodec).toMatch(/^(mp4a\.40\.2|opus)$/);
+  expect(last.audioState).toBe('encoding');
+  expect(last.audioChunks).toBeGreaterThan(0);
+  expect(three.audio?.codec).toBe(last.audioCodec);
+  expect(three.audio?.chunks).toBeGreaterThan(0);
 
   // The last 10 s: the encoded frame rate and bitrate over 10 s, and what the frames' timestamps
   // are (docs/DEVICES.md, "VideoFrame.timestamp").
@@ -204,11 +225,10 @@ test('10 s of the fake camera at 1080p30 encode without drops, and the last 3 s 
   expect(encodedFps).toBeLessThanOrEqual(33);
   const offsets = timestamps.map((timestampUs, index) => arrivals[index] - timestampUs / 1000);
   const offsetMedian = median(offsets);
-  if (ten.clock.audioMinusVideoOffsetMs !== null) {
-    // Audio and video timestamps share one clock: their arrival offsets differ by the pipelines'
-    // latencies only, milliseconds (the cut takes the audio by timestamps).
-    expect(Math.abs(ten.clock.audioMinusVideoOffsetMs)).toBeLessThan(100);
-  }
+  // Audio and video timestamps share one clock: their arrival offsets differ by the pipelines'
+  // latencies only, milliseconds (the cut takes the audio by its timestamps, not rebased).
+  expect(ten.clock.audioMinusVideoOffsetMs).not.toBeNull();
+  expect(Math.abs(ten.clock.audioMinusVideoOffsetMs ?? Infinity)).toBeLessThan(100);
 
   const report = {
     codec: last.codec,
@@ -286,7 +306,11 @@ test('the last 3 s muxed and saved: an MP4 and its frames.json in OPFS, which pl
     fpsNominal: 30,
     crop: null,
     syncResidualMs: null,
+    truncatedStart: false,
   });
+  // With its sound, as asked: nothing to report.
+  expect(saved.clip.audio).toMatch(/^(mp4a\.40\.2|opus)$/);
+  expect(saved.report).toMatchObject({ lateMs: 0, audioMissing: null, audioRebasedMs: 0 });
 
   // frames.json, read back from OPFS: valid, one entry per frame of the clip.
   const frames = JSON.parse(
@@ -326,9 +350,17 @@ test('the last 3 s muxed and saved: an MP4 and its frames.json in OPFS, which pl
     await element.play();
     await ended;
     const quality = element.getVideoPlaybackQuality();
-    return { ended: element.ended, frames: quality.totalVideoFrames, error: element.error?.code };
+    return {
+      ended: element.ended,
+      frames: quality.totalVideoFrames,
+      error: element.error?.code,
+      // Chrome's count of the audio it decoded while playing: the clip's sound plays (T2.9).
+      audioBytes: (element as HTMLVideoElement & { webkitAudioDecodedByteCount?: number })
+        .webkitAudioDecodedByteCount,
+    };
   });
   expect(played).toMatchObject({ ended: true, error: undefined });
+  expect(played.audioBytes).toBeGreaterThan(0);
 
   // The MP4 read back from OPFS and demuxed: as many frames as frames.json, the codecs of the
   // entry.
@@ -340,9 +372,10 @@ test('the last 3 s muxed and saved: an MP4 and its frames.json in OPFS, which pl
   const packets = (await videoTrack?.computePacketStats())?.packetCount;
   expect(packets).toBe(frames.dtMs.length);
   expect((await videoTrack?.getCodecParameterString())?.startsWith(saved.clip.codec)).toBe(true);
-  expect(audioTrack === null ? null : await audioTrack.getCodecParameterString()).toBe(
-    saved.clip.audio,
-  );
+  // An audio track, of the entry's codec, with its packets, which Chrome can decode.
+  expect(audioTrack).not.toBeNull();
+  expect(await audioTrack?.getCodecParameterString()).toBe(saved.clip.audio);
+  expect((await audioTrack?.computePacketStats())?.packetCount).toBeGreaterThan(100);
   const fileDurationMs = (await input.computeDuration()) * 1000;
   expect(Math.abs(fileDurationMs - saved.frames.durationMs)).toBeLessThanOrEqual(
     0.1 * saved.frames.durationMs,
@@ -362,11 +395,48 @@ test('the last 3 s muxed and saved: an MP4 and its frames.json in OPFS, which pl
     codec: saved.clip.codec,
     audio: saved.clip.audio,
     audioPackets: audioTrack === null ? null : (await audioTrack.computePacketStats()).packetCount,
+    audioDecodedBytes: played.audioBytes,
     audioFromMs: audioTrack === null ? null : round((await audioTrack.getFirstTimestamp()) * 1000),
     audioToMs: audioTrack === null ? null : round((await audioTrack.computeDuration()) * 1000),
   };
   console.log(`clip: ${JSON.stringify(report, null, 2)}`);
   test.info().annotations.push({ type: 'clip', description: JSON.stringify(report) });
+
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(page.getByTestId('lab-status')).toHaveText('Stopped.');
+});
+
+test('a clip asked from before the buffer began is saved from its first keyframe, flagged, with its sound', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.goto('/capture-lab');
+  await record(page, 4);
+
+  // 30 s asked for, about 4 s held: the clip begins at the buffer's first keyframe, about 26 s late
+  // (T2.9: it used to be refused, issue #34).
+  const saved = await saveLast(page, 30);
+  const buffer = saved.report.bufferSeconds;
+  expect(saved.clip.truncatedStart).toBe(true);
+  expect(saved.report.lateMs).toBeGreaterThan(30_000 - (buffer + 2) * 1000);
+  expect(saved.report.lateMs).toBeLessThan(30_000 - (buffer - 2) * 1000);
+  expect(saved.frames.keyframes[0]).toBe(0);
+  expect(saved.frames.durationMs).toBeGreaterThan((buffer - 1.5) * 1000);
+  expect(saved.clip.audio).toMatch(/^(mp4a\.40\.2|opus)$/);
+  expect(saved.report.audioMissing).toBeNull();
+  const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
+  ajv.addSchema(ATTEMPT_SCHEMA);
+  const isClip = ajv.getSchema(`${String(ATTEMPT_SCHEMA['$id'])}#/$defs/clip`);
+  expect(isClip?.(saved.clip), ajv.errorsText(isClip?.errors)).toBe(true);
+  // It plays.
+  await expect(page.getByTestId('lab-clip-metadata')).toHaveText(/^The video element reads/);
+  const durationS = await page
+    .getByTestId('lab-clip-video')
+    .evaluate((element: HTMLVideoElement) => element.duration);
+  expect(Math.abs(durationS * 1000 - saved.frames.durationMs)).toBeLessThanOrEqual(
+    0.1 * saved.frames.durationMs,
+  );
+  console.log(`truncated clip: ${JSON.stringify({ ...saved.report, frames: saved.clip.frames })}`);
 
   await page.getByRole('button', { name: 'Stop' }).click();
   await expect(page.getByTestId('lab-status')).toHaveText('Stopped.');

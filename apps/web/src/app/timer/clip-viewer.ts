@@ -94,6 +94,9 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
             (click)="choose(clip)"
           >
             {{ clip.segment === 'solve' ? 'Solve' : 'Scramble' }}
+            @if (clip.truncatedStart) {
+              <span class="late" data-testid="clip-segment-late">· late</span>
+            }
           </button>
         }
       </div>
@@ -274,6 +277,10 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
     .error {
       color: var(--danger);
     }
+
+    .late {
+      color: var(--warn);
+    }
   `,
 })
 export class ClipViewer {
@@ -321,9 +328,12 @@ export class ClipViewer {
       return null;
     }
     const audio = clip.audio === null ? 'no audio' : clip.audio;
+    const late = clip.truncatedStart
+      ? ' It begins later than asked: its start was older than the 90 s kept in memory.'
+      : '';
     return (
       `${clip.file}: ${String(clip.width)}×${String(clip.height)}, ${String(clip.frames)} frames, ` +
-      `${formatBytes(clip.bytes)}, ${clip.codec}, ${audio}.`
+      `${formatBytes(clip.bytes)}, ${clip.codec}, ${audio}.${late}`
     );
   });
   protected readonly downloading = signal(false);
