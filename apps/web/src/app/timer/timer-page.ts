@@ -1,11 +1,11 @@
-import { Component } from '@angular/core';
-import { coreVersion } from '@cubetrace/core';
+import { Component, signal } from '@angular/core';
+import { coreVersion, generateScramble } from '@cubetrace/core';
 
 /**
  * `/`: the timer. Placeholder until T1.6, which fills the three regions of its responsive
  * layout: stacked on a phone (scramble, time, breakdown and solves); on wider screens the
  * scramble and the time on the left and the breakdown and solves on the right. It also shows
- * the core library's version string.
+ * the core library's version string, and a scramble from cubing.js as text (T1.2).
  */
 @Component({
   selector: 'app-timer-page',
@@ -13,7 +13,14 @@ import { coreVersion } from '@cubetrace/core';
     <h1>Timer</h1>
     <div class="timer-layout">
       <section class="scramble" aria-label="Scramble">
-        <p class="placeholder">The scramble and its picture arrive with T1.6.</p>
+        @if (scramble(); as moves) {
+          <p class="moves" data-testid="scramble">{{ moves }}</p>
+        } @else if (scrambleError(); as message) {
+          <p class="error" role="alert">No scramble: {{ message }}</p>
+        } @else {
+          <p class="placeholder">Generating a scramble…</p>
+        }
+        <p class="placeholder">Its picture arrives with T1.6.</p>
       </section>
       <section class="clock" aria-label="Time">
         <p class="time">0.00</p>
@@ -51,6 +58,18 @@ import { coreVersion } from '@cubetrace/core';
       grid-area: scramble;
     }
 
+    .moves {
+      margin: 0 0 var(--space-2);
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      word-spacing: 0.25em;
+    }
+
+    .error {
+      margin: 0 0 var(--space-2);
+      color: var(--danger);
+    }
+
     .solves {
       grid-area: solves;
     }
@@ -85,4 +104,17 @@ import { coreVersion } from '@cubetrace/core';
 })
 export class TimerPage {
   protected readonly coreVersion = coreVersion();
+  protected readonly scramble = signal<string | null>(null);
+  protected readonly scrambleError = signal<string | null>(null);
+
+  constructor() {
+    generateScramble().then(
+      (scramble) => {
+        this.scramble.set(scramble);
+      },
+      (error: unknown) => {
+        this.scrambleError.set(error instanceof Error ? error.message : String(error));
+      },
+    );
+  }
 }
