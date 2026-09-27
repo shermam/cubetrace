@@ -83,6 +83,7 @@ describe('SolveList', () => {
       firstFrameHostMs: 1_790_000_000_000,
       framesFile: `laptop.${segment}.frames.json`,
       syncResidualMs: null,
+      truncatedStart: false,
     });
     const element = await render([
       { ...testAttempt(1, 12_340), video: [clip('scramble', 800_000), clip('solve', 3_450_000)] },
@@ -100,6 +101,50 @@ describe('SolveList', () => {
     expect(badges[1].getAttribute('aria-label')).toBe('The clips of attempt 1: 2 clips, 4.3 MB');
     badges[1].click();
     expect(TestBed.inject(ClipViewing).index()).toBe(1);
+  });
+
+  it('marks the badge of an attempt whose clip begins later than asked', async () => {
+    const clip = (segment: 'scramble' | 'solve', truncatedStart: boolean) => ({
+      camera: 'laptop',
+      segment,
+      file: `laptop.${segment}.mp4`,
+      bytes: 1_000_000,
+      codec: 'avc1.640028',
+      audio: null,
+      width: 1920,
+      height: 1080,
+      crop: null,
+      fpsNominal: 30,
+      frames: 90,
+      firstFrameHostMs: 1_790_000_000_000,
+      framesFile: `laptop.${segment}.frames.json`,
+      syncResidualMs: null,
+      truncatedStart,
+    });
+    const element = await render([
+      { ...testAttempt(1, 12_340), video: [clip('scramble', true), clip('solve', false)] },
+      { ...testAttempt(2, 10_000), video: [clip('scramble', false), clip('solve', false)] },
+      { ...testAttempt(3, 11_000), video: [clip('scramble', true), clip('solve', true)] },
+    ]);
+    const badges = Array.from(
+      element.querySelectorAll<HTMLButtonElement>('[data-testid="clip-badge"]'),
+    );
+
+    expect(badges.map((badge) => badge.textContent.replace(/\s+/g, ' ').trim())).toEqual([
+      '2 clips, 2.0 MB · late',
+      '2 clips, 2.0 MB',
+      '2 clips, 2.0 MB · late',
+    ]);
+    expect(badges[2].getAttribute('title')).toBe(
+      'The scramble clip begins later than asked: its start was older than the 90 s kept in memory.',
+    );
+    expect(badges[2].getAttribute('aria-label')).toBe(
+      'The clips of attempt 1: 2 clips, 2.0 MB. The scramble clip begins later than asked: its start was older than the 90 s kept in memory.',
+    );
+    expect(badges[0].getAttribute('title')).toBe(
+      'Both clips begin later than asked: their starts were older than the 90 s kept in memory.',
+    );
+    expect(badges[1].getAttribute('title')).toBeNull();
   });
 
   it('has no rows before the first attempt', async () => {

@@ -4,11 +4,13 @@
 // moves, with its request, to the clip worker (clip-worker.ts), which muxes and writes it, so that
 // saving a clip never holds up the frames here (docs/TOOLCHAIN.md, "Two workers"). While the window
 // runs a sync check (T2.5), it also measures the motion of every frame in the framing rectangle
-// (motion.ts) and sends it. Angular's builder emits it as a chunk of its own (docs/TOOLCHAIN.md, "The
+// (motion.ts) and sends it. Since T2.9 it follows its audio closely enough for a clip without sound to
+// say why (issue #33). Angular's builder emits it as a chunk of its own (docs/TOOLCHAIN.md, "The
 // capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain TypeScript: no Angular. The
 // encoders, the clock and the timer come in through `WorkerEnvironment`, so the logic also runs in
 // Node's tests with fakes; the last lines wire it to the worker's global scope.
 // It encodes the video at the bitrate of the start's quality (bitrate.ts, T2.10).
+import { audioDecoderConfigFor, isAudioDecoderConfigComplete } from './audio-config';
 import { videoBitrate, type VideoQuality } from './bitrate';
 import { cut } from './cut';
 import type { FramingRect } from './framing';
@@ -20,9 +22,13 @@ import {
   type PlaneSize,
 } from './motion';
 import {
+  AUDIO_SILENCE_MS,
+  NO_AUDIO_DATA,
   describeError,
   isWindowToWorker,
   post,
+  type AudioReport,
+  type AudioState,
   type CaptureStats,
   type ClipJob,
   type CutRequest,
@@ -214,9 +220,22 @@ export class CaptureWorker {
   readonly #frameArrivals = new Map<number, number>();
 
   #audioEncoder: AudioEncoderLike | undefined;
+  #audioConfig: AudioEncoderConfig | undefined;
   #audioOff = false;
   #audioCodec: string | null = null;
   #audioArrivals: AudioArrival[] = [];
+  /** Whether the window gave an audio stream to record. */
+  #audioAsked = false;
+  /** `AudioData` read from the microphone, and chunks out of its encoder, since the start. */
+  #audioData = 0;
+  #audioChunks = 0;
+  /** Why the audio stopped, as the window heard it; null while it has not. */
+  #audioError: string | null = null;
+  /** Whether the audio's decoder config was made or completed here (`AudioReport.configMade`). */
+  #audioConfigMade = false;
+  /** The first frame's arrival: the microphone has `AUDIO_SILENCE_MS` from there to send audio. */
+  #firstFrameHostMs: number | undefined;
+  #silenceSaid = false;
 
   #dropped = 0;
   #arrivedInWindow = 0;
@@ -302,6 +321,7 @@ export class CaptureWorker {
     this.#recording = true;
     this.#clips = clips;
     this.#quality = config.quality;
+    this.#audioAsked = audio !== null;
     this.#buffer = new RingBuffer({
       maxSeconds: config.bufferSeconds,
       maxBytes: config.bufferBytes,
@@ -352,6 +372,8 @@ export class CaptureWorker {
         type: 'clip-job',
         request,
         cut: cut(this.#buffer, request.startHostMs, request.endHostMs),
+        bufferSeconds: Math.round(this.#buffer.bufferSeconds * 1000) / 1000,
+        audio: this.#audioReport(),
       };
     } catch (error: unknown) {
       this.#refuseClip(request, describeError(error));
@@ -472,6 +494,7 @@ export class CaptureWorker {
     }
     this.#arrivedInWindow += 1;
     this.#noteTimestamp(frame.timestamp);
+    this.#checkSilence(arrivalHostMs);
     if (this.#videoEncoder === undefined) {
       this.#warmupStartHostMs ??= arrivalHostMs;
       if (arrivalHostMs - this.#warmupStartHostMs < WARMUP_MS) {
@@ -660,6 +683,25 @@ export class CaptureWorker {
     this.#fail('The camera stopped sending frames (its track ended or the stream was closed).');
   }
 
+  /**
+   * Says once, `AUDIO_SILENCE_MS` after the first frame, that the microphone sends nothing, when
+   * audio was asked for and none has come (issue #33): a muted track, or one another app holds.
+   * Recording goes on; so does the wait for audio, which is encoded if it comes.
+   */
+  #checkSilence(arrivalHostMs: number): void {
+    this.#firstFrameHostMs ??= arrivalHostMs;
+    if (
+      this.#audioAsked &&
+      this.#audioData === 0 &&
+      !this.#audioOff &&
+      !this.#silenceSaid &&
+      arrivalHostMs - this.#firstFrameHostMs >= AUDIO_SILENCE_MS
+    ) {
+      this.#silenceSaid = true;
+      this.#env.post({ type: 'error', message: NO_AUDIO_DATA, fatal: false });
+    }
+  }
+
   async #readAudio(stream: ReadableStream<AudioLike>): Promise<void> {
     try {
       const reader = stream.getReader();
@@ -669,6 +711,7 @@ export class CaptureWorker {
         if (done) {
           break;
         }
+        this.#audioData += 1;
         const arrivalHostMs = this.#env.now();
         try {
           await this.#onAudio(data, arrivalHostMs);
@@ -736,6 +779,7 @@ export class CaptureWorker {
       });
       encoder.configure(config);
       this.#audioEncoder = encoder;
+      this.#audioConfig = config;
       this.#audioCodec = codec;
       this.#buffer.setAudioTrack({ codec, sampleRate, numberOfChannels });
       return true;
@@ -748,10 +792,8 @@ export class CaptureWorker {
   }
 
   #onAudioChunk(chunk: ChunkLike, metadata: EncodedAudioChunkMetadata | undefined): void {
-    const decoderConfig = metadata?.decoderConfig;
-    if (decoderConfig !== undefined) {
-      this.#buffer.setAudioDecoderConfig(copyDecoderConfig(decoderConfig));
-    }
+    this.#describeAudio(metadata?.decoderConfig);
+    this.#audioChunks += 1;
     this.#buffer.push({
       kind: 'audio',
       type: chunk.type,
@@ -761,6 +803,33 @@ export class CaptureWorker {
       arrivalHostMs: this.#audioArrival(chunk.timestamp),
       data: copyOut(chunk),
     });
+  }
+
+  /**
+   * Keeps the decoder config of the audio's chunks with the buffer: the encoder's, completed from its
+   * config where it lacks a field the muxer needs, or, when the encoder gave none with its first
+   * chunk, made from its config (T2.9, issue #33: without one the clips would have no audio track).
+   */
+  #describeAudio(given: AudioDecoderConfig | undefined): void {
+    if (given === undefined && this.#buffer.audioTrack?.decoderConfig !== null) {
+      // Described by an earlier chunk.
+      return;
+    }
+    const copied = given === undefined ? undefined : copyDecoderConfig(given);
+    let described = copied;
+    const config = this.#audioConfig;
+    if (config !== undefined && !isAudioDecoderConfigComplete(copied)) {
+      try {
+        described = audioDecoderConfigFor(config, copied);
+        this.#audioConfigMade = true;
+      } catch {
+        // No AudioSpecificConfig for this rate or channel count: the encoder's config as it came, if
+        // any; else none, and the clips say so.
+      }
+    }
+    if (described !== undefined) {
+      this.#buffer.setAudioDecoderConfig(described);
+    }
   }
 
   /**
@@ -789,6 +858,7 @@ export class CaptureWorker {
     }
     this.#audioOff = true;
     this.#audioCodec = null;
+    this.#audioError = message;
     const encoder = this.#audioEncoder;
     if (encoder !== undefined && encoder.state !== 'closed') {
       encoder.close();
@@ -829,11 +899,34 @@ export class CaptureWorker {
       codec: this.#buffer.videoTrack?.codec ?? null,
       bitrate: this.#videoConfig?.bitrate ?? null,
       audioCodec: this.#audioCodec,
+      audioChunks: this.#audioChunks,
+      audioState: this.#audioState(),
     };
     this.#arrivedInWindow = 0;
     this.#encodedInWindow = 0;
     this.#windowStartHostMs = now;
     this.#env.post({ type: 'stats', stats });
+  }
+
+  #audioState(): AudioState {
+    if (!this.#audioAsked) {
+      return 'off';
+    }
+    if (this.#audioOff) {
+      return 'stopped';
+    }
+    return this.#audioChunks > 0 ? 'encoding' : 'waiting';
+  }
+
+  /** The audio as a clip's report needs it (T2.9). */
+  #audioReport(): AudioReport {
+    return {
+      state: this.#audioState(),
+      data: this.#audioData,
+      chunks: this.#audioChunks,
+      error: this.#audioError,
+      configMade: this.#audioConfigMade,
+    };
   }
 }
 

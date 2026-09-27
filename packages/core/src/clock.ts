@@ -3,6 +3,8 @@
 // `clock` in attempt.json, a connection's for the coarse `clock.cube` of session.json. A Bluetooth
 // packet carries up to seven moves that all get the packet's arrival time, although the older ones
 // happened earlier, so only the newest move of each packet (`packetLast`) is a sample of the line.
+// When the cube's clock starts again (it reconnected, or its count of a long pause ran out), the fit
+// starts again with it (T2.9).
 
 /**
  * The fit as the records store it: `clock` in attempt.json (docs/DATA-MODEL.md §7) and
@@ -18,12 +20,30 @@ export interface CubeClockParams {
    * most recent samples (the fit's `window`); 0 before two samples.
    */
   residualP95Ms: number;
-  /** The samples in the fit: the `packetLast` moves added so far. */
+  /**
+   * The samples in the fit: the `packetLast` moves added since the cube's clock last started again
+   * (all of them when it did not).
+   */
   samples: number;
 }
 
 /** How many of the most recent samples `residualP95Ms` is computed over, by default. */
 export const CLOCK_FIT_WINDOW = 2000;
+
+/**
+ * How far the cube's time may fall behind the host's between two samples of the fit, in ms, beyond
+ * {@link CLOCK_RESTART_DRIFT} of the host time between them, before the fit takes the cube's clock
+ * for a new one and starts again (docs/DATA-MODEL.md §7). While the cube's clock runs, its time
+ * advances as the host's does, to the Bluetooth jitter (tens of ms) and to its drift (the cubes
+ * measured run 0.1 to 0.7% slow, docs/DEVICES.md). It falls behind by far more when the clock starts
+ * again: the cube reconnected (its count restarts at 0: the GAN 356 i3's went from 561,080 ms back to
+ * 10,977 after 434 s, the 12 ui's from 51,434 back to 51,142 after 3 hours), or a pause between two
+ * moves outlasted the cube's 16-bit count of it (the i3 reports 65,535 ms for 80 s).
+ */
+export const CLOCK_RESTART_MS = 1000;
+
+/** The share of the host time between two samples that the cube's clock may lose by drifting. */
+export const CLOCK_RESTART_DRIFT = 0.01;
 
 interface Sample {
   cubeMs: number;
@@ -36,6 +56,12 @@ interface Sample {
  * than two samples in the fit (or all at one cube time) there is no line: {@link toHost} adds the
  * cube time elapsed since the last sample (`a = 1`) to that sample's host time, and with no sample
  * at all it is the identity.
+ *
+ * A sample whose cube time, counted from the fit's previous sample, falls more than
+ * {@link CLOCK_RESTART_MS} plus {@link CLOCK_RESTART_DRIFT} of the host time between them behind its
+ * host time comes from a new cube clock: the fit drops the samples before it and starts again from
+ * it, so that the line is that of the cube's current clock (`samples` counts from there). A cube
+ * time that goes back more than a second always does; the Bluetooth jitter and the drift never do.
  *
  * The sums are kept as Welford's running means and co-moments of each sample's offset from the
  * first one, so that host times of about 1.7e12 ms (`performance.timeOrigin` is a wall clock) lose
@@ -61,6 +87,8 @@ export class CubeClockFit {
   #lastAny: Sample | null = null;
   /** The parameters, computed on demand after the last sample. */
   #params: CubeClockParams | null = null;
+  /** How many times the fit started again with a new cube clock. */
+  #restarts = 0;
 
   /**
    * @param opts.window how many of the most recent samples `residualP95Ms` covers (default
@@ -78,7 +106,8 @@ export class CubeClockFit {
 
   /**
    * Adds a move's two times. Only the newest move of its Bluetooth packet (`packetLast`) enters the
-   * fit: the older moves of a packet share its host time. Throws on a time that is not finite.
+   * fit: the older moves of a packet share its host time. A `packetLast` sample of a new cube clock
+   * (see the class comment) starts the fit again. Throws on a time that is not finite.
    */
   addSample(cubeMs: number, hostMs: number, packetLast: boolean): void {
     if (!Number.isFinite(cubeMs) || !Number.isFinite(hostMs)) {
@@ -91,6 +120,9 @@ export class CubeClockFit {
     this.#params = null;
     if (!packetLast) {
       return;
+    }
+    if (this.#lastFit !== null && clockRestarted(this.#lastFit, sample)) {
+      this.#restart();
     }
     this.#origin ??= sample;
     const x = cubeMs - this.#origin.cubeMs;
@@ -131,6 +163,23 @@ export class CubeClockFit {
     return this.#line() !== null;
   }
 
+  /** How many times the fit started again because the cube's clock did. */
+  get restarts(): number {
+    return this.#restarts;
+  }
+
+  /** Forgets the samples of the fit: the next one is the origin of a new line. */
+  #restart(): void {
+    this.#origin = null;
+    this.#n = 0;
+    this.#meanX = 0;
+    this.#meanY = 0;
+    this.#sxx = 0;
+    this.#sxy = 0;
+    this.#lastFit = null;
+    this.#restarts += 1;
+  }
+
   /**
    * The line in offsets from the origin, `y = a·x + offset`, or null without two samples at
    * different cube times.
@@ -168,4 +217,15 @@ export class CubeClockFit {
       samples: this.#n,
     };
   }
+}
+
+/**
+ * Whether `next` comes from another cube clock than `previous`: its cube time is further behind its
+ * host time, counted from `previous`, than the jitter and the drift allow ({@link CLOCK_RESTART_MS},
+ * {@link CLOCK_RESTART_DRIFT}).
+ */
+function clockRestarted(previous: Sample, next: Sample): boolean {
+  const hostElapsed = next.hostMs - previous.hostMs;
+  const behind = hostElapsed - (next.cubeMs - previous.cubeMs);
+  return behind > CLOCK_RESTART_MS + CLOCK_RESTART_DRIFT * Math.max(0, hostElapsed);
 }

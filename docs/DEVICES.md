@@ -71,11 +71,23 @@ its `hostMs` anyway, and the session-level `clock.cube` of schema 1 stays as a c
 
 **The GAN 356 i3 (issue #32, 2026-09-27, MacBook Pro 2021, a schema 2 export with clips):** model
 string `GANi3I1w`, hardware `0.1`, firmware `7.76`, gyroscope present. Five solves; per-attempt
-clock slopes 1.0010–1.0017 (this cube's clock runs about 0.1% slow, against the 12 ui's 0.7%:
-the rate is a property of the cube), residual p95 18–22 ms (a little more jitter than the 12 ui's
-13–15 ms), a pickup on every attempt. Every move of the five attempts ended its Bluetooth packet
-(one move per notification, 556 of 556), so the recorded fits have every move as a sample and
-`clock-hardware.test.ts` reproduces them exactly by replaying the export.
+clock slopes 1.0010–1.0017 (this cube's clock runs about 0.1% slow, against the 12 ui's 0.7%: the
+rate is a property of the cube), residual p95 18–22 ms (a little more jitter than the 12 ui's 13–15
+ms), a pickup on every attempt. Every move of the five attempts ended its Bluetooth packet (one move
+per notification, 556 of 556), so the recorded fits have every move as a sample and
+`clock-hardware.test.ts` reproduces them exactly by replaying the export. The export was taken again
+after a sixth attempt (the fixture now holds six), which spans a reconnection of the cube: the
+attempt began right after a failed sync check, whose next turn and turn back became its first two
+scramble moves; the cube idle-disconnected during the 434 s that followed and its count restarted
+when it reconnected (`cubeMs` 561,080 at the second move, 10,977 at the third). The fit recorded on
+the day took all 114 moves as one line: a slope of −0.81, residuals of 48 s. Since T2.9 the fit
+starts again with the cube's clock (`docs/DATA-MODEL.md` §7): the 112 moves after the reconnection
+fit a slope of 1.00086, residual p95 32.6 ms (six late packets of 33 to 50 ms), the fit the app kept
+for that connection in `clock.cube`. The i3's clock also falls behind the host's across a long pause
+between two moves: the driver adds up the cube's 16-bit move-to-move intervals
+(`docs/TOOLCHAIN.md`), and the i3 reported 65,535 ms for the 80.1 s between attempts 3 and 4, where
+the 12 ui's clock kept pace with the host's across its pauses of 131 and 291 s; the fit starts again
+there too.
 
 ## First recordings (2026-09-27, MacBook Pro 2021, FaceTime camera)
 
@@ -97,8 +109,17 @@ Two consequences:
   makes these attempts 17–21 MB, 2.2–2.7 GB a day, four days of the quota; High is the 8 Mbps
   measured here, and Maximum 12. Crop-at-source must still arrive earlier than planned, and phase
   3's upload becomes urgent.
-- **No audio track** in any clip (`audio: null`), although "Record audio" defaults to on: the
-  microphone stream or the AAC/Opus encoder was not there. Under investigation (issue #33).
+- **No audio track** in any clip (`audio: null`), although Chrome asked for the microphone and got
+  it, "Record audio" was on and no notice said "Recording without audio" (issue #33). The causes the
+  code allowed were all silent: no `AudioData` from the microphone's track (muted, or held by
+  another app), an encoder whose first chunk carried no decoder config (the muxer then left the
+  audio out), or audio timestamps on another clock than the frames' (the buffer then dropped it at
+  once, or kept it for ever, and no chunk overlapped a clip). CI's clips, from Chromium's fake
+  microphone, do have their Opus track (checked in T2.9, and asserted since). Since T2.9 each cause
+  is said: the Recording part's Codecs line gives the audio's state, a notice comes 3 s after the
+  first frame when the microphone sends nothing, and a clip without sound says why in the session's
+  notes; the second and the third are fixed (a decoder config made from the encoder's settings; the
+  audio placed by the arrival times). Round 2 tells which it was on the MacBook.
 
 ## VideoFrame.timestamp
 

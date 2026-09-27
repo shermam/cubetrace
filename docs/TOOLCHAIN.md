@@ -669,16 +669,19 @@ seconds from the first frame's timestamp, so that the clip starts at 0 at its ke
 keep and Node does not have). The first packet of each track carries the encoder's decoder config:
 for H.264 its `description`, the avcC of `avc: {format: 'avc'}`; for VP9 mediabunny writes the vpcC
 from the codec string and the colour space (`vp09.00.40.08.01.06.06.06.00` on the fake camera); for
-Opus the dOps from the OpusHead description, its pre-skip included. The packets of both tracks go in
-by time, so the file interleaves them in half-second chunks. The audio keeps its place by its own
-timestamps (the capture clock is shared, `docs/DEVICES.md`): chunks that end before the first frame
-are left out, and the one that overlaps it starts before 0, which mediabunny writes as an edit list.
-The video's time scale is mediabunny's default, 57,600 per second, with no frame rate set, so the
-frames keep their measured intervals to 17 µs (the exact times are in frames.json). A frame whose
-chunk has no duration lasts until the next frame, and the last one the median interval. Muxing takes
-2 ms for 1 s of the fake camera, 20 ms for 30 s (5 MB) and 50 ms for 90 s (15 MB) in Node on the
-agents' containers (medians of the committed sample repeated); the bytes are the encoder's, never
-decoded.
+Opus the dOps from the OpusHead description, its pre-skip included; for AAC the esds from its
+AudioSpecificConfig, which the capture worker makes itself from the encoder's settings when the
+encoder's first chunk has no decoder config (T2.9). The packets of both tracks go in by time, so the
+file interleaves them in half-second chunks. The audio keeps its place by its own timestamps (the
+capture clock is shared, `docs/DEVICES.md`), or, when its arrival offset is more than 100 ms from
+the frames' (a clock of its own), by the cut's `rebaseMs` (T2.9): chunks that end before the first
+frame are left out, and the one that overlaps it starts before 0, which mediabunny writes as an edit
+list. The video's time scale is mediabunny's default, 57,600 per second, with no frame rate set, so
+the frames keep their measured intervals to 17 µs (the exact times are in frames.json). A frame
+whose chunk has no duration lasts until the next frame, and the last one the median interval. Muxing
+takes 2 ms for 1 s of the fake camera, 20 ms for 30 s (5 MB) and 50 ms for 90 s (15 MB) in Node on
+the agents' containers (medians of the committed sample repeated); the bytes are the encoder's,
+never decoded.
 
 **Chrome's chunks of frames without a duration say 0, not null.** The fake camera's frames have no
 `duration`, and the VP9 encoder's chunks then have `duration` 0: the recorded sample showed it, and
@@ -783,15 +786,16 @@ first attempt of a new session begins with the connection, and its scramble clip
 seconds before it in memory), and the storage is under 95% of the quota. A new stream (another
 camera, another resolution) or a new "Record audio" or "Video quality" starts it again; the camera
 off, no session and no cube, or storage from 95% stop it. The microphone comes from its own
-`getUserMedia({audio: true})`; a refusal records the video alone and says so. `SessionService`
-emits `milestones$` (an attempt `armed`, `ended` with its record and its end, or `dropped` without a
-record); the service saves the scramble clip `[scrambleStart − 2 s, scrambleDone + 1 s]` and the solve
-clip `[solveStart − 3 s, end + 1 s]` a second and a quarter after their end, the quarter second for
-the last frames to come out of the encoder (tens of milliseconds, more on a busy machine), so that
-the cut is whole. `SessionService.attachClip` keeps a clip for the record of an attempt under way,
-or saves the record again with the clip (its timing untouched); a clip of an attempt that went is
-removed. The unit tests (`recording-service.spec.ts`) drive a real `SessionService` with the fake
-cube on a fake clock (`session-harness.ts`) and a fake pipeline (`recording-testing.ts`).
+`getUserMedia({audio: true})`; a refusal records the video alone and says so. `SessionService` emits
+`milestones$` (an attempt `armed`, `ended` with its record and its end, or `dropped` without a
+record); the service saves the scramble clip `[max(scrambleStart − 2 s, scrambleDone − 60 s),
+scrambleDone + 1 s]` (T2.9) and the solve clip `[solveStart − 3 s, end + 1 s]` a second and a
+quarter after their end, the quarter second for the last frames to come out of the encoder (tens of
+milliseconds, more on a busy machine), so that the cut is whole. `SessionService.attachClip` keeps a
+clip for the record of an attempt under way, or saves the record again with the clip (its timing
+untouched); a clip of an attempt that went is removed. The unit tests (`recording-service.spec.ts`)
+drive a real `SessionService` with the fake cube on a fake clock (`session-harness.ts`) and a fake
+pipeline (`recording-testing.ts`).
 
 **Timing with the camera on.** One replay of a demo solve at speed 20 varies by a few milliseconds
 either way, from the fake cube's timers: its time is when the last move's timer fired minus when the

@@ -20,6 +20,21 @@ interface SolveRow {
   readonly flags: readonly string[];
   /** Its clips (T2.4): "2 clips, 5.3 MB"; null without one. */
   readonly clips: string | null;
+  /**
+   * Which of its clips begin later than asked, their start older than the capture's buffer (T2.9):
+   * "The scramble clip begins late: …"; null when none does.
+   */
+  readonly late: string | null;
+}
+
+/** What the mark of a clip that begins late says (T2.9). */
+export function lateText(segments: readonly string[]): string | null {
+  if (segments.length === 0) {
+    return null;
+  }
+  return segments.length === 1
+    ? `The ${segments[0]} clip begins later than asked: its start was older than the 90 s kept in memory.`
+    : 'Both clips begin later than asked: their starts were older than the 90 s kept in memory.';
 }
 
 function solveRow(attempt: AttemptRecord): SolveRow {
@@ -48,6 +63,7 @@ function solveRow(attempt: AttemptRecord): SolveRow {
       count === 0
         ? null
         : `${String(count)} ${count === 1 ? 'clip' : 'clips'}, ${formatBytes(bytes)}`,
+    late: lateText(attempt.video.filter((clip) => clip.truncatedStart).map((clip) => clip.segment)),
   };
 }
 
@@ -111,10 +127,20 @@ function solveRow(attempt: AttemptRecord): SolveRow {
                   type="button"
                   class="clips"
                   data-testid="clip-badge"
-                  [attr.aria-label]="'The clips of attempt ' + row.index + ': ' + clips"
+                  [attr.aria-label]="
+                    'The clips of attempt ' +
+                    row.index +
+                    ': ' +
+                    clips +
+                    (row.late ? '. ' + row.late : '')
+                  "
+                  [attr.title]="row.late"
                   (click)="viewer.open(row.index)"
                 >
                   {{ clips }}
+                  @if (row.late) {
+                    <span class="late" data-testid="clip-late" aria-hidden="true">· late</span>
+                  }
                 </button>
               }
             </span>
@@ -223,6 +249,10 @@ function solveRow(attempt: AttemptRecord): SolveRow {
       color: var(--accent);
       font-size: 0.6875rem;
       white-space: nowrap;
+    }
+
+    .late {
+      color: var(--warn);
     }
   `,
 })

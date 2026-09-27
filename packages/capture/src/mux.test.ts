@@ -10,8 +10,10 @@ import {
 } from 'mediabunny';
 import { describe, expect, it } from 'vitest';
 
+import { audioDecoderConfigFor } from './audio-config';
 import type { Cut } from './cut';
 import { muxClip, type MuxedClip } from './mux';
+import type { AudioReport } from './protocol';
 import type { EncodedChunkRecord } from './ring-buffer';
 import { readMediaSample } from './test-media';
 
@@ -96,6 +98,10 @@ describe('muxClip on the recorded sample', () => {
       height: 1080,
       frames: cut.video.chunks.length,
       durationMs: expect.any(Number) as unknown,
+      truncatedStart: false,
+      lateMs: 0,
+      audioMissing: null,
+      audioRebasedMs: 0,
     });
     expect(mp4.video?.codec).toBe('vp9');
     // The codec string of the vpcC box: the decoder config's, with the colour fields spelled out.
@@ -248,6 +254,141 @@ describe('muxClip on the recorded sample', () => {
   });
 });
 
+describe('muxClip on a cut older than the buffer, and on audio of another clock (T2.9)', () => {
+  it('muxes a cut whose start is older than the buffer from its first keyframe, and says how late it begins', async () => {
+    const cut = readMediaSample();
+    const truncated: Cut = {
+      ...cut,
+      startHostMs: cut.frames.t0HostMs - 434_123.44,
+      truncatedStart: true,
+    };
+    const muxed = await muxClip(truncated, META);
+    const mp4 = await readBack(muxed.mp4);
+
+    expect(muxed.info).toMatchObject({ truncatedStart: true, lateMs: 434_123.4 });
+    expect(mp4.video?.packets).toHaveLength(cut.video.chunks.length);
+    expect(mp4.video?.packets[0].type).toBe('key');
+    expect(muxed.frames.t0HostMs).toBe(cut.frames.t0HostMs);
+    // Not truncated: begun where asked, however far before its first frame that was.
+    const asked = await muxClip({ ...cut, startHostMs: cut.frames.t0HostMs - 900 }, META);
+    expect(asked.info).toMatchObject({ truncatedStart: false, lateMs: 0 });
+  });
+
+  it("places audio of another clock by the cut's rebase, exactly where the same audio of one clock goes", async () => {
+    const cut = readMediaSample();
+    const audio = cut.audio;
+    if (audio === null) {
+      throw new Error('The sample has audio.');
+    }
+    // The same chunks with timestamps 30,000 s smaller, as audio of a clock of its own would have.
+    const clockUs = 30_000_000_000;
+    const moved: NonNullable<Cut['audio']> = {
+      ...audio,
+      chunks: audio.chunks.map((chunk) => ({ ...chunk, timestampUs: chunk.timestampUs - clockUs })),
+      offsetFromVideoMs: clockUs / 1000,
+      rebaseMs: clockUs / 1000,
+    };
+    const other: Cut = { ...cut, audio: moved };
+    const muxed = await muxClip(other, META);
+    const same = await muxClip(readMediaSample(), META);
+    const packets = (await readBack(muxed.mp4)).audio?.packets ?? [];
+    const expected = (await readBack(same.mp4)).audio?.packets ?? [];
+
+    expect(muxed.info).toMatchObject({
+      audio: 'opus',
+      audioMissing: null,
+      audioRebasedMs: 30_000_000,
+    });
+    expect(packets.map((packet) => packet.timestamp)).toEqual(
+      expected.map((packet) => packet.timestamp),
+    );
+    // Not rebased, the same chunks would lie 30,000 s before the clip: no audio at all.
+    const lost = await muxClip({ ...other, audio: { ...moved, rebaseMs: 0 } }, META);
+    expect(lost.info.audio).toBeNull();
+    expect(lost.info.audioMissing).toBe(
+      "no audio chunk in the clip's span (the audio's timestamps are 30000000.0 ms from the video's)",
+    );
+  });
+
+  describe('says why a clip has no sound while the capture records audio', () => {
+    const ENCODING: AudioReport = {
+      state: 'encoding',
+      data: 400,
+      chunks: 200,
+      error: null,
+      configMade: false,
+    };
+
+    it.each([
+      [
+        'no audio data',
+        { state: 'waiting', data: 0, chunks: 0, error: null, configMade: false },
+        (cut: Cut): Cut => ({ ...cut, audio: null }),
+        'no audio data: the microphone sent nothing (muted, or held by another app)',
+      ],
+      [
+        'no encoder for it',
+        {
+          state: 'stopped',
+          data: 1,
+          chunks: 0,
+          error:
+            'No audio encoder takes 48000 Hz, 3 channel(s) (tried mp4a.40.2, opus): recording video only.',
+          configMade: false,
+        },
+        (cut: Cut): Cut => ({ ...cut, audio: null }),
+        'the audio stopped (No audio encoder takes 48000 Hz, 3 channel(s) (tried mp4a.40.2, opus): recording video only.)',
+      ],
+      [
+        'an encoder not started yet',
+        { state: 'waiting', data: 3, chunks: 0, error: null, configMade: false },
+        (cut: Cut): Cut => ({ ...cut, audio: null }),
+        'the audio encoder had not started',
+      ],
+      [
+        'no decoder config',
+        ENCODING,
+        (cut: Cut): Cut => ({ ...cut, audio: cut.audio && { ...cut.audio, decoderConfig: null } }),
+        'no decoder config: the audio encoder never described its output',
+      ],
+      [
+        'the encoder failed before the clip',
+        {
+          state: 'stopped',
+          data: 900,
+          chunks: 400,
+          error: 'The audio encoder failed: EncodingError: the encoder crashed',
+          configMade: false,
+        },
+        (cut: Cut): Cut => ({ ...cut, audio: cut.audio && { ...cut.audio, chunks: [] } }),
+        'the audio stopped (The audio encoder failed: EncodingError: the encoder crashed)',
+      ],
+      [
+        'no chunk in its span',
+        ENCODING,
+        (cut: Cut): Cut => ({ ...cut, audio: cut.audio && { ...cut.audio, chunks: [] } }),
+        "no audio chunk in the clip's span (the audio's timestamps are -0.6 ms from the video's)",
+      ],
+    ] as [string, AudioReport, (cut: Cut) => Cut, string][])(
+      '%s',
+      async (_, report, change, reason) => {
+        const muxed = await muxClip(change(readMediaSample()), { ...META, audio: report });
+        expect(muxed.info.audio).toBeNull();
+        expect(muxed.info.audioMissing).toBe(reason);
+        expect((await readBack(muxed.mp4)).tracks).toBe(1);
+      },
+    );
+
+    it('says nothing when no audio was asked for, or the clip has its sound', async () => {
+      const off: AudioReport = { state: 'off', data: 0, chunks: 0, error: null, configMade: false };
+      const silent = await muxClip({ ...readMediaSample(), audio: null }, { ...META, audio: off });
+      expect(silent.info).toMatchObject({ audio: null, audioMissing: null });
+      const heard = await muxClip(readMediaSample(), { ...META, audio: ENCODING });
+      expect(heard.info).toMatchObject({ audio: 'opus', audioMissing: null });
+    });
+  });
+});
+
 describe('muxClip with H.264 and AAC', () => {
   // What the real devices encode, which CI's Chromium cannot (docs/TOOLCHAIN.md): the sample's
   // chunks and times, described as H.264 High 4.0 (an avcC with a parameter set of each kind) and
@@ -311,6 +452,29 @@ describe('muxClip with H.264 and AAC', () => {
       expect(Math.abs(packet.timestamp * 1000 - times[index])).toBeLessThan(0.1);
     });
   });
+
+  it('writes an AAC track that reads back as one from the decoder config the capture makes when the encoder gives none', async () => {
+    const cut = readMediaSample();
+    const audio = cut.audio;
+    if (audio === null) {
+      throw new Error('The sample has audio.');
+    }
+    const made = audioDecoderConfigFor({
+      codec: 'mp4a.40.2',
+      sampleRate: 48_000,
+      numberOfChannels: 1,
+      bitrate: 128_000,
+    });
+    const muxed = await muxClip({ ...cut, audio: { ...audio, decoderConfig: made } }, META);
+    const input = new Input({ source: new BufferSource(muxed.mp4), formats: ALL_FORMATS });
+    const track = await input.getPrimaryAudioTrack();
+    const config = await track?.getDecoderConfig();
+
+    expect(muxed.info.audio).toBe('mp4a.40.2');
+    expect(config).toMatchObject({ codec: 'mp4a.40.2', sampleRate: 48_000, numberOfChannels: 1 });
+    expect(new Uint8Array(config?.description as ArrayBuffer)).toEqual(AUDIO_SPECIFIC_CONFIG);
+    expect((await track?.computePacketStats())?.packetCount).toBe(audio.chunks.length);
+  });
 });
 
 describe('muxClip refuses', () => {
@@ -318,19 +482,6 @@ describe('muxClip refuses', () => {
     const cut = readMediaSample();
     await expect(muxClip(withVideoChunks(cut, []), META)).rejects.toThrow(
       'Cannot mux an empty cut: it has no video frames.',
-    );
-  });
-
-  it('a cut whose start is older than the buffer, saying how late it begins', async () => {
-    const cut = readMediaSample();
-    const truncated: Cut = {
-      ...cut,
-      startHostMs: cut.frames.t0HostMs - 1234.5,
-      truncatedStart: true,
-    };
-    await expect(muxClip(truncated, META)).rejects.toThrow(
-      'Cannot mux a cut whose start is older than the buffer (truncatedStart): its first frame is ' +
-        '1234.5 ms after the start asked for, which the buffer no longer holds.',
     );
   });
 

@@ -25,6 +25,8 @@ export interface ClipDetails {
   readonly height: number;
   /** The frame rate the camera's track reported. */
   readonly fpsNominal: number;
+  /** The clip begins later than asked (its start was older than the buffer): the muxer's `info`. */
+  readonly truncatedStart: boolean;
 }
 
 /**
@@ -97,6 +99,7 @@ export async function writeClip(
     firstFrameHostMs: frames.t0HostMs,
     framesFile: names.framesFile,
     syncResidualMs: null,
+    truncatedStart: details.truncatedStart,
   };
 }
 

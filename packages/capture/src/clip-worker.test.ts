@@ -10,7 +10,9 @@ import { cut, type Cut } from './cut';
 import {
   resolveCaptureConfig,
   transferList,
+  type AudioReport,
   type ClipJob,
+  type ClipReport,
   type DeleteClipRequest,
   type MuxAndWriteRequest,
   type WorkerToWindow,
@@ -66,8 +68,28 @@ function request(id: number, changes: Partial<MuxAndWriteRequest> = {}): MuxAndW
   };
 }
 
-function job(id: number, changes: Partial<MuxAndWriteRequest> = {}, source?: Cut): ClipJob {
-  return { type: 'clip-job', request: request(id, changes), cut: source ?? readMediaSample() };
+/** The capture's audio while it encodes the fake microphone. */
+const ENCODING: AudioReport = {
+  state: 'encoding',
+  data: 400,
+  chunks: 200,
+  error: null,
+  configMade: false,
+};
+
+function job(
+  id: number,
+  changes: Partial<MuxAndWriteRequest> = {},
+  source?: Cut,
+  audio: AudioReport = ENCODING,
+): ClipJob {
+  return {
+    type: 'clip-job',
+    request: request(id, changes),
+    cut: source ?? readMediaSample(),
+    bufferSeconds: 90,
+    audio,
+  };
 }
 
 function clipOf(message: WorkerToWindow | undefined): VideoClip {
@@ -75,6 +97,13 @@ function clipOf(message: WorkerToWindow | undefined): VideoClip {
     throw new Error(`expected a clip, got ${JSON.stringify(message)}`);
   }
   return message.clip;
+}
+
+function reportOf(message: WorkerToWindow | undefined): ClipReport {
+  if (message?.type !== 'mux-and-write-done') {
+    throw new Error(`expected a clip, got ${JSON.stringify(message)}`);
+  }
+  return message.report;
 }
 
 function deletion(id: number, firstFrameHostMs: number): DeleteClipRequest {
@@ -116,6 +145,14 @@ describe('ClipWorker', () => {
       framesFile: 'laptop.solve.frames.json',
       crop: null,
       syncResidualMs: null,
+      truncatedStart: false,
+    });
+    expect(reportOf(posted.at(-1))).toEqual({
+      lateMs: 0,
+      bufferSeconds: 90,
+      audioMissing: null,
+      audioRebasedMs: 0,
+      audioConfigMade: false,
     });
     const mp4 = root.files().get(`${FOLDER}/laptop.solve.mp4`)?.bytes;
     expect(mp4?.length).toBe(clip.bytes);
@@ -130,22 +167,67 @@ describe('ClipWorker', () => {
     ).toMatchObject({ camera: 'laptop', segment: 'solve', dtMs: sample.frames.dtMs });
   });
 
-  it('says why when there is no clip: the start older than the buffer, no session folder, a bad label', async () => {
-    const { worker, posted } = await clipWorker();
-    const truncated = { ...readMediaSample(), truncatedStart: true };
+  it('saves a clip whose start was older than the buffer, from its first keyframe, and reports how late it begins', async () => {
+    const { worker, posted, root } = await clipWorker();
+    const sample = readMediaSample();
+    // Asked from 434.1 s before its first frame, as attempt 6 of the i3's scramble was (issue #34).
+    const truncated: Cut = {
+      ...sample,
+      startHostMs: sample.frames.t0HostMs - 434_100,
+      truncatedStart: true,
+    };
 
-    await worker.handle(job(2, {}, truncated));
+    await worker.handle(job(2, { segment: 'scramble' }, truncated));
+
+    const clip = clipOf(posted.at(-1));
+    expect(clip).toMatchObject({
+      segment: 'scramble',
+      truncatedStart: true,
+      frames: sample.video.chunks.length,
+      firstFrameHostMs: sample.frames.t0HostMs,
+    });
+    expect(reportOf(posted.at(-1))).toEqual({
+      lateMs: 434_100,
+      bufferSeconds: 90,
+      audioMissing: null,
+      audioRebasedMs: 0,
+      audioConfigMade: false,
+    });
+    expect(root.files().get(`${FOLDER}/laptop.scramble.mp4`)?.bytes.length).toBe(clip.bytes);
+  });
+
+  it('reports why a clip has no sound while the capture records audio', async () => {
+    const { worker, posted } = await clipWorker();
+    const silent: Cut = { ...readMediaSample(), audio: null };
+
+    await worker.handle(
+      job(5, {}, silent, { state: 'waiting', data: 0, chunks: 0, error: null, configMade: false }),
+    );
+
+    expect(clipOf(posted.at(-1)).audio).toBeNull();
+    expect(reportOf(posted.at(-1)).audioMissing).toBe(
+      'no audio data: the microphone sent nothing (muted, or held by another app)',
+    );
+  });
+
+  it('reports that the capture made the audio decoder config of a clip with sound', async () => {
+    const { worker, posted } = await clipWorker();
+
+    await worker.handle(job(6, {}, undefined, { ...ENCODING, configMade: true }));
+    await worker.handle(
+      job(7, {}, { ...readMediaSample(), audio: null }, { ...ENCODING, configMade: true }),
+    );
+
+    expect(posted.map((message) => reportOf(message).audioConfigMade)).toEqual([true, false]);
+  });
+
+  it('says why when there is no clip: no session folder, a bad label', async () => {
+    const { worker, posted } = await clipWorker();
+
     await worker.handle(job(3, { sessionId: 'gone' }));
     await worker.handle(job(4, { camera: 'Laptop' }));
 
     expect(posted).toEqual([
-      {
-        type: 'mux-and-write-failed',
-        id: 2,
-        message: expect.stringMatching(
-          /^Error: Cannot mux a cut whose start is older than the buffer \(truncatedStart\)/,
-        ) as unknown,
-      },
       {
         type: 'mux-and-write-failed',
         id: 3,

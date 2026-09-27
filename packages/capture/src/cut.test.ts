@@ -34,12 +34,15 @@ function frame(index: number): EncodedChunkRecord {
   };
 }
 
-/** 20 ms of audio from `timestampUs`, arriving 10 ms after its first sample plus jitter. */
-function audio(index: number, timestampUs: number): EncodedChunkRecord {
+/**
+ * 20 ms of audio from `timestampUs`, arriving 10 ms after its first sample plus jitter; on a clock
+ * `clockUs` behind the frames' (its timestamps that much smaller for the same moment).
+ */
+function audio(index: number, timestampUs: number, clockUs = 0): EncodedChunkRecord {
   return {
     kind: 'audio',
     type: 'key',
-    timestampUs,
+    timestampUs: timestampUs - clockUs,
     durationUs: 20_000,
     byteLength: 4,
     arrivalHostMs: timestampUs / 1000 + OFFSET_MS + 10 + jitter(index) / 2,
@@ -47,8 +50,15 @@ function audio(index: number, timestampUs: number): EncodedChunkRecord {
   };
 }
 
-/** `seconds` of video and audio; the audio starts 105 ms before the first frame. */
-function recording(seconds: number, bounds?: { maxSeconds: number; maxBytes: number }) {
+/**
+ * `seconds` of video and audio; the audio starts 105 ms before the first frame, its timestamps on a
+ * clock `clockUs` behind the frames'.
+ */
+function recording(
+  seconds: number,
+  bounds?: { maxSeconds: number; maxBytes: number },
+  clockUs = 0,
+) {
   const buffer = new RingBuffer(bounds);
   buffer.setVideoTrack({ codec: 'avc1.640028', width: 1920, height: 1080 });
   buffer.setVideoDecoderConfig({
@@ -61,7 +71,7 @@ function recording(seconds: number, bounds?: { maxSeconds: number; maxBytes: num
   let audioIndex = 0;
   const pushAudioUntil = (untilUs: number): void => {
     while (T0 - 105_000 + audioIndex * 20_000 < untilUs) {
-      buffer.push(audio(audioIndex, T0 - 105_000 + audioIndex * 20_000));
+      buffer.push(audio(audioIndex, T0 - 105_000 + audioIndex * 20_000, clockUs));
       audioIndex += 1;
     }
   };
@@ -137,6 +147,41 @@ describe('cut', () => {
     expect(last.timestampUs + 20_000).toBeGreaterThanOrEqual(spanEnd);
     expect(chunks).toHaveLength(Math.round((last.timestampUs - first.timestampUs) / 20_000) + 1);
     expect(result.audio).toMatchObject({ codec: 'mp4a.40.2', sampleRate: 48_000 });
+  });
+
+  it('takes the audio of a clock of its own by the arrival offsets, keeping its timestamps', () => {
+    // The audio's timestamps 30,000 s smaller than the frames' for the same moment (issue #33).
+    const clockUs = 30_000_000_000;
+    const buffer = recording(10, undefined, clockUs);
+    const result = cut(buffer, hostOf(buffer, 45), hostOf(buffer, 100));
+    const oneClock = cut(recording(10), hostOf(buffer, 45), hostOf(buffer, 100));
+    const audio = result.audio;
+    if (audio === null) {
+      throw new Error('The cut has audio.');
+    }
+
+    // Placed by the offsets: 10 ms late, the audio's latency, which its arrival offset includes.
+    expect(audio.offsetFromVideoMs ?? 0).toBeCloseTo(clockUs / 1000 + 10, -1);
+    expect(audio.rebaseMs).toBeCloseTo(audio.offsetFromVideoMs ?? 0, 1);
+    expect(Math.abs(audio.rebaseMs - (clockUs / 1000 + 10))).toBeLessThan(3);
+    expect(
+      Math.abs(audio.chunks.length - (oneClock.audio?.chunks.length ?? 0)),
+    ).toBeLessThanOrEqual(1);
+    const spanStart = timestampOf(30);
+    const spanEnd = timestampOf(101);
+    for (const chunk of audio.chunks) {
+      const placedUs = chunk.timestampUs + audio.rebaseMs * 1000;
+      expect(placedUs).toBeLessThan(spanEnd);
+      expect(placedUs + chunk.durationUs).toBeGreaterThan(spanStart);
+    }
+    // Their own fit, on their own timestamps, says how far apart the clocks are.
+    expect((audio.arrival?.offsetMs ?? 0) - result.frames.arrival.offsetMs).toBeCloseTo(
+      clockUs / 1000 + 10,
+      -1,
+    );
+    // On one clock nothing moves.
+    expect(oneClock.audio?.rebaseMs).toBe(0);
+    expect(oneClock.audio?.offsetFromVideoMs ?? 0).toBeCloseTo(10, 0);
   });
 
   it('gives the frame intervals at 0.1 ms, and the keyframes by index', () => {

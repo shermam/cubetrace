@@ -27,17 +27,38 @@ export interface CutVideo extends VideoTrackInfo {
 }
 
 export interface CutAudio extends AudioTrackInfo {
-  /** Every audio chunk that overlaps the video's span (same capture clock, docs/DEVICES.md). */
+  /**
+   * Every audio chunk that overlaps the video's span once placed on the frames' clock (`rebaseMs`),
+   * with its timestamp as the encoder gave it.
+   */
   readonly chunks: readonly EncodedChunkRecord[];
-  /** The audio's own arrival fit; its offset matches the video's when both share the clock. */
+  /**
+   * The audio's own arrival fit over these chunks, on their own timestamps; its offset matches the
+   * video's when both share the clock (docs/DEVICES.md). Null without chunks.
+   */
   readonly arrival: ArrivalFit | null;
+  /**
+   * The audio's arrival offset minus the video's, over the buffer's newest chunks of each kind
+   * (`RingBuffer.audioOffsetFromVideoMs`), ms: a few ms when both count on one clock; null when the
+   * buffer held no audio chunk.
+   */
+  readonly offsetFromVideoMs: number | null;
+  /**
+   * What goes onto the audio's timestamps to put them on the frames' clock, ms: 0 when both count on
+   * one clock, else `offsetFromVideoMs` (more than 100 ms: a clock of its own, issue #33). The chunks
+   * are chosen with it, and the muxer places them with it.
+   */
+  readonly rebaseMs: number;
 }
 
 export interface Cut {
   /** The interval asked for, host ms. */
   readonly startHostMs: number;
   readonly endHostMs: number;
-  /** The start is older than the buffer: the cut begins at the buffer's first keyframe instead. */
+  /**
+   * The start is older than the buffer: the cut begins at the buffer's first keyframe instead, later
+   * than asked by `frames.t0HostMs − startHostMs`.
+   */
   readonly truncatedStart: boolean;
   /** The end is later than the newest frame in the buffer (the camera or the encoder is behind). */
   readonly truncatedEnd: boolean;
@@ -63,8 +84,9 @@ export interface CutOptions {
  * start to the last frame at or before the end, and the audio chunks that overlap that span, each
  * with a copy of its bytes (the buffer keeps its own, so overlapping cuts work; the copies move to
  * the window without another copy, see `cutBuffers`) unless `options.copy` is false. Frame times on
- * the host clock are the frames' timestamps plus the buffer's arrival offset. Throws a RangeError
- * when the interval is empty or inverted, or nothing is buffered at or before its end.
+ * the host clock are the frames' timestamps plus the buffer's arrival offset. A start older than the
+ * buffer gives the cut from the buffer's first keyframe, `truncatedStart`. Throws a RangeError when
+ * the interval is empty or inverted, nothing is buffered at or before its end, or no keyframe is.
  */
 export function cut(
   buffer: RingBuffer,
@@ -96,6 +118,15 @@ export function cut(
   let first = truncatedStart ? 0 : lastAtOrBefore(video, startHostMs, hostMs);
   while (first > 0 && video[first].type !== 'key') {
     first -= 1;
+  }
+  // The buffer begins at a keyframe; were it not to, the cut would begin at the first one it holds.
+  while (first <= last && video[first].type !== 'key') {
+    first += 1;
+  }
+  if (first > last) {
+    throw new RangeError(
+      `No keyframe is buffered at or before ${String(endHostMs)}: nothing there can be decoded.`,
+    );
   }
   const newest = video[video.length - 1];
   const chunks = video.slice(first, last + 1).map(take);
@@ -158,6 +189,10 @@ export function frameIntervals(chunks: readonly EncodedChunkRecord[]): number[] 
   });
 }
 
+/**
+ * The audio chunks that overlap the video span `[spanStartUs, spanEndUs)` (the frames'
+ * timestamps), compared on the frames' clock: each chunk's timestamp plus the buffer's rebase.
+ */
 function cutAudio(
   buffer: RingBuffer,
   spanStartUs: number,
@@ -168,13 +203,22 @@ function cutAudio(
   if (track === null) {
     return null;
   }
+  const rebaseUs = buffer.audioRebaseUs;
   const chunks = buffer.audio
     .filter(
       (chunk) =>
-        chunk.timestampUs < spanEndUs && chunk.timestampUs + chunk.durationUs > spanStartUs,
+        chunk.timestampUs + rebaseUs < spanEndUs &&
+        chunk.timestampUs + rebaseUs + chunk.durationUs > spanStartUs,
     )
     .map(take);
-  return { ...track, chunks, arrival: chunks.length > 0 ? arrivalFit(chunks) : null };
+  const offset = buffer.audioOffsetFromVideoMs;
+  return {
+    ...track,
+    chunks,
+    arrival: chunks.length > 0 ? arrivalFit(chunks) : null,
+    offsetFromVideoMs: offset === null ? null : round(offset, 2),
+    rebaseMs: rebaseUs / 1000,
+  };
 }
 
 /** The index of the last chunk whose host time is at or before `limitMs`, or −1. */

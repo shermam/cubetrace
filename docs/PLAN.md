@@ -686,6 +686,7 @@ pipeline, §9 the data model).
 | T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | 🟨 #31 |
 | T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | ✅ #30 |
 | T2.8 | `capture`+`web`: sync check that works on real cameras: event-locked motion detection, changed-area metric, diagnostics download | T2.5 | 🟨 #35 |
+| T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ⬜ |
 | T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ⬜ |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6. Rules for every phase 2 task: nothing of
@@ -953,6 +954,70 @@ sharpness meter, exposure controls on the phone, 30 minutes of recording: heat, 
 frames, storage growth, clips play, the sync check twice); README (recording), CHANGELOG 0.2.0,
 versions 0.2.0, `docs/DEVICES.md` updated from the round; the coordinator tags after the round.
 
+### T2.9 — `capture`+`core`+`web`: clips never refused for an old start, the scramble clip's window, the clock fit across a reconnection, audio never silently absent
+
+**Goal.** Three defects of attempt 6 of the owner's GAN 356 i3 session (issues #34 and #33,
+`fixtures/hardware/2026-09-27-macbook-pro-2021-gan356i3.json`): its scramble clip was refused, since
+the scramble's first turn (a sync check's turn that entered the attempt) was 7 minutes older than
+the 90 s in memory; its clock fit went through a reconnection of the cube, whose count restarted
+(561,080 ms back to 10,977), and recorded a slope of −0.81; and none of the session's clips has an
+audio track, although Chrome was given the microphone and no notice said so.
+
+**Scope.** In `packages/capture/src/`: `cut`, `mux`, `ring-buffer`, `capture-worker`, `clip-worker`,
+`clip-writer`, `protocol`, `pipeline` and a new `audio-config`; in `packages/core/src/`: `clock`,
+`records`, `attempt`, with `packages/core/schema/attempt.schema.json`; in
+`apps/web/src/app/camera/`: `recording-service` and `recording-panel`; the solve list, the clip
+viewer and the capture lab's counters; the fixture and the tests that read it; `docs/DATA-MODEL.md`
+§6 and §7, `docs/DEVICES.md`, `docs/MANUAL-TESTS.md`.
+
+**Behaviour.**
+- **A cut whose start is older than the buffer is clipped, not refused.** It begins at the buffer's
+  first keyframe; the muxer writes it and says how late it begins (`lateMs`); its `video[]` entry
+  says `truncatedStart: true` (optional in the schema, read as false in the files written before);
+  the recording saves it as any other clip, with a notice ("Scramble clip of attempt 6 starts
+  434.1 s late: the buffer holds 90 s") and a line in the session's notes (`clip truncated: …`); the
+  solve lists and the clip viewer mark it "late".
+- **The scramble clip's window** runs from `max(scrambleStart − 2 s, scrambleDone − 60 s)` to
+  `scrambleDone + 1 s` (`SCRAMBLE_CLIP_MAX_MS`): a scramble takes 10 to 15 s, and a pause inside it
+  is not worth minutes of video. The solve clip's is unchanged; a solve longer than the buffer is
+  clipped and flagged.
+- **The clock fit starts again with the cube's clock**: a sample whose cube time, counted from the
+  fit's previous sample, is more than 1 s plus 1% of the host time between them behind its host time
+  drops the samples before it (`CLOCK_RESTART_MS`, `CLOCK_RESTART_DRIFT`): a reconnection, which
+  restarts the cube's count, and the i3's 16-bit count of a pause over 65.5 s. `samples` counts the
+  run since.
+- **Audio never silently absent.** The capture worker's counters say where the audio is
+  (`audioState`: off, waiting, encoding, stopped; `audioChunks`), and the Recording part says it
+  when it is not being encoded; 3 s after the first frame without audio from the microphone, a
+  notice says so; the notices of a recording stay together, and each is noted in the session. A clip
+  without sound while audio is recorded says why (no audio data, no decoder config, no chunk in the
+  clip's span with how far the audio's timestamps are from the frames', the encoder's error), in a
+  notice and in the notes. When the encoder's first chunk has no decoder config, one is made from
+  its config (for AAC-LC with the AudioSpecificConfig), and the session's notes say so once (`clip
+  audio described: …`), so that a clip with its sound still tells which cause it was; when the
+  audio's timestamps count on another clock than the frames' (arrival offsets more than 100 ms
+  apart), the buffer, the cut and the muxer place it by the arrival offsets, and the clip's notes
+  say by how much.
+
+**Tests.** Unit: the cut of a truncated start, the mux of it (`lateMs`), the clip worker's answer
+with its report; the restart rule on synthetic samples (a reconnection, a count that falls behind
+without going back, the jitter and a slow clock that do not restart it, the boundary); the reader
+and the schema on `truncatedStart` (the mutation corpus); the ring buffer and the cut with audio on
+another clock; the muxer's reasons for a clip without sound; the AAC decoder config the worker
+makes, read back from the MP4; the worker's audio state and its notice after 3 s; the recording's
+window, notices and notes; the late marks. The fixture: attempts 1–5 keep their recorded fits;
+attempt 6's recorded fit is the bug, its replayed fit the 112 moves after the reconnection. E2E: the
+capture lab's clips have their sound (asserted, no longer conditional: Chrome's fake microphone
+gives Opus), and a clip asked from before the buffer began is saved, flagged and plays.
+
+**Acceptance.**
+- [ ] The owner, on the MacBook: an attempt with a 3-minute pause inside the scramble saves both
+  clips.
+- [ ] The owner, on the MacBook: a clip plays with sound, or its notice and the session's notes name
+  why not.
+- [ ] The owner: the panel names the audio state (Camera settings, Recording: the codec while it
+  encodes, else where the audio is).
+- [ ] A solve after a cube reconnection has a sane `clock` in the export (a slope within 1% of 1).
 ### T2.10 — `capture`+`web`: video quality setting, 4 Mbps by default
 
 **Goal.** Clips that a laptop's or a phone's storage can hold. The first recordings on the MacBook

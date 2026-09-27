@@ -1,4 +1,5 @@
 import { Component, computed, inject } from '@angular/core';
+import type { CaptureStats } from '@cubetrace/capture';
 
 import { SessionService } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
@@ -11,9 +12,10 @@ import { attemptSizeText, bitrateText, expectedBitrate } from './video-quality';
 /**
  * The recording's part of Camera settings (docs/PLAN.md, T2.4): whether it records and why not,
  * the pipeline's counters (frames in, encoded and dropped, the buffer, the codecs and the video's
- * bitrate), the last clip saved, a clip that failed (once, until dismissed), and the storage meter
- * with what an attempt takes at the video quality (T2.10). The logic is the `RecordingService`'s;
- * this only shows it.
+ * bitrate, and where the audio is when it is not being encoded, T2.9), the notices of this recording
+ * (no audio, and why), the last clip saved, a clip that failed or was saved short of what was asked
+ * (once, until dismissed), and the storage meter with what an attempt takes at the video quality
+ * (T2.10). The logic is the `RecordingService`'s; this only shows it.
  */
 @Component({
   selector: 'app-recording-panel',
@@ -48,13 +50,21 @@ import { attemptSizeText, bitrateText, expectedBitrate } from './video-quality';
       @if (error(); as error) {
         <p class="error" role="alert" data-testid="recording-error">{{ error }}</p>
       }
-      @if (recording.notice(); as notice) {
+      @for (notice of recording.notices(); track notice) {
         <p class="notice" role="status" data-testid="recording-notice">{{ notice }}</p>
       }
       @if (recording.failure(); as failure) {
         <p class="error" role="alert" data-testid="recording-failure">
           A clip could not be saved, and the session's notes say so: {{ failure }}
           <button type="button" class="link" (click)="recording.dismissFailure()">Dismiss</button>
+        </p>
+      }
+      @if (recording.clipNotice(); as clipNotice) {
+        <p class="notice" role="status" data-testid="recording-clip-notice">
+          {{ clipNotice }} The session's notes say so.
+          <button type="button" class="link" (click)="recording.dismissClipNotice()">
+            Dismiss
+          </button>
         </p>
       }
       @if (lastClip(); as last) {
@@ -64,9 +74,10 @@ import { attemptSizeText, bitrateText, expectedBitrate } from './video-quality';
       <p class="estimate" data-testid="recording-estimate">{{ estimate() }}</p>
       <p class="hint">
         While the camera is on and a session is under way, the last 90 s are kept in memory, and
-        every attempt gets two clips in its folder: its scramble from 2 s before the first turn to 1
-        s after, and its solve from 3 s before the first turn to 1 s after. The solve list shows
-        them. Their sound and size: Record audio and Video quality, above.
+        every attempt gets two clips in its folder: its scramble from 2 s before the first turn (at
+        most a minute before it is done) to 1 s after, and its solve from 3 s before the first turn
+        to 1 s after. The solve list shows them. Their sound and size: Record audio and Video
+        quality, above.
       </p>
     </section>
   `,
@@ -186,7 +197,10 @@ export class RecordingPanel {
       ? ''
       : `${stats.bufferSeconds.toFixed(1)} s, ${formatBytes(stats.bufferBytes)}`;
   });
-  /** "avc1.640028 at 4 Mbps, mp4a.40.2": the video's codec and bitrate, then the audio's codec. */
+  /**
+   * "avc1.640028 at 4 Mbps, mp4a.40.2": the video's codec and bitrate, then the audio's codec, or
+   * where the audio is when it is not being encoded (T2.9).
+   */
   protected readonly codecs = computed(() => {
     const stats = this.recording.stats();
     if (stats === null) {
@@ -198,7 +212,7 @@ export class RecordingPanel {
         : stats.bitrate === null
           ? stats.codec
           : `${stats.codec} at ${bitrateText(stats.bitrate)}`;
-    return `${video}, ${stats.audioCodec ?? 'no audio'}`;
+    return `${video}, ${audioText(stats)}`;
   });
   /**
    * What an attempt's clips take at the video quality: at the bitrate recording now, else at the
@@ -225,4 +239,21 @@ export class RecordingPanel {
       `${formatBytes(clip.bytes)}.`
     );
   });
+}
+
+/**
+ * The audio's part of the codecs line: its codec while it is encoded, else where it is (T2.9): none
+ * asked for, nothing from the microphone yet, or stopped (a notice says why).
+ */
+function audioText(stats: CaptureStats): string {
+  switch (stats.audioState) {
+    case 'encoding':
+      return stats.audioCodec ?? 'no audio';
+    case 'off':
+      return 'no audio';
+    case 'waiting':
+      return 'no audio yet (waiting for the microphone)';
+    case 'stopped':
+      return 'audio stopped';
+  }
 }

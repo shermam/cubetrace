@@ -50,11 +50,27 @@ export interface RingBufferBounds {
 export const DEFAULT_BOUNDS: RingBufferBounds = { maxSeconds: 90, maxBytes: 160_000_000 };
 
 /**
+ * Beyond this difference between the audio's arrival offset and the video's (ms), the audio's
+ * timestamps are taken to count on a clock of their own, and are put on the frames' clock by that
+ * difference (issue #33). On the devices measured both count on the system's monotonic clock, and
+ * the offsets differ by a few ms, the pipelines' latencies (docs/DEVICES.md).
+ */
+export const AUDIO_REBASE_MS = 100;
+
+/** The newest chunks of each kind whose arrival offsets the audio's placement is the median of. */
+const OFFSET_WINDOW = 256;
+
+/**
  * Encoded chunks in the order the encoders produced them. The video always starts at a keyframe:
  * when a bound is exceeded, the oldest GOP (a keyframe and the deltas up to the next keyframe) goes
  * as a whole, never the GOP being written, and the audio goes up to the same horizon (the chunks
  * that end at or before the first frame). Chunks must come in timestamp order, as WebCodecs
  * encoders without frame reordering emit them.
+ *
+ * The audio's timestamps are compared with the frames' as they are when both count on one clock,
+ * and otherwise through their arrival offsets (`audioOffsetFromVideoMs`, `audioRebaseUs`), measured
+ * at every keyframe: so that audio on a clock of its own is neither dropped at once nor kept for
+ * ever (issue #33).
  */
 export class RingBuffer {
   readonly bounds: RingBufferBounds;
@@ -64,6 +80,8 @@ export class RingBuffer {
   #discarded = 0;
   #videoTrack: VideoTrackInfo | null = null;
   #audioTrack: AudioTrackInfo | null = null;
+  /** The audio's arrival offset minus the video's, measured at the last keyframe; null before. */
+  #audioOffsetFromVideoMs: number | null = null;
 
   constructor(bounds: Partial<RingBufferBounds> = {}) {
     this.bounds = { ...DEFAULT_BOUNDS, ...bounds };
@@ -107,6 +125,25 @@ export class RingBuffer {
     return this.#audioTrack;
   }
 
+  /**
+   * The audio's arrival offset minus the video's, ms: each the median of `arrivalHostMs −
+   * timestampUs / 1000` over the newest chunks of its kind, measured at every keyframe. A few ms
+   * when the audio's timestamps count on the frames' clock; null until both kinds are held.
+   */
+  get audioOffsetFromVideoMs(): number | null {
+    return this.#audioOffsetFromVideoMs;
+  }
+
+  /**
+   * What to add to an audio chunk's timestamp for the frames' timestamp of the same moment, µs: 0
+   * when both count on one clock (their arrival offsets within {@link AUDIO_REBASE_MS}), else the
+   * difference of the arrival offsets.
+   */
+  get audioRebaseUs(): number {
+    const offset = this.#audioOffsetFromVideoMs;
+    return offset === null || Math.abs(offset) <= AUDIO_REBASE_MS ? 0 : Math.round(offset * 1000);
+  }
+
   /** Describes the video to come; the decoder config arrives later with the encoder's output. */
   setVideoTrack(track: Omit<VideoTrackInfo, 'decoderConfig'>): void {
     this.#videoTrack = { ...track, decoderConfig: null };
@@ -140,6 +177,11 @@ export class RingBuffer {
       this.#audio.push(chunk);
     }
     this.#bytes += chunk.byteLength;
+    // At every keyframe (once a second), and as soon as both kinds are held, before the first
+    // frame evicts any audio.
+    if ((chunk.kind === 'video' && chunk.type === 'key') || this.#audioOffsetFromVideoMs === null) {
+      this.#measureAudioOffset();
+    }
     this.#evict();
   }
 
@@ -148,6 +190,15 @@ export class RingBuffer {
     this.#video = [];
     this.#audio = [];
     this.#bytes = 0;
+    this.#audioOffsetFromVideoMs = null;
+  }
+
+  #measureAudioOffset(): void {
+    if (this.#video.length > 0 && this.#audio.length > 0) {
+      this.#audioOffsetFromVideoMs =
+        medianOffsetMs(this.#audio.slice(-OFFSET_WINDOW)) -
+        medianOffsetMs(this.#video.slice(-OFFSET_WINDOW));
+    }
   }
 
   #evict(): void {
@@ -167,8 +218,10 @@ export class RingBuffer {
     }
   }
 
-  /** Drops the audio that ends at or before `horizonUs`, the first frame's timestamp. */
-  #evictAudioBefore(horizonUs: number): void {
+  /** Drops the audio that ends at or before the first frame, whose timestamp is `frameUs`. */
+  #evictAudioBefore(frameUs: number): void {
+    // The first frame's time on the audio's clock.
+    const horizonUs = frameUs - this.audioRebaseUs;
     const keep = this.#audio.findIndex((chunk) => chunk.timestampUs + chunk.durationUs > horizonUs);
     const drop = keep < 0 ? this.#audio.length : keep;
     if (drop > 0) {
@@ -201,4 +254,13 @@ export class RingBuffer {
 
 function byteSum(chunks: readonly EncodedChunkRecord[]): number {
   return chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+}
+
+/** The median of `arrivalHostMs − timestampUs / 1000` over `chunks` (at least one). */
+function medianOffsetMs(chunks: readonly EncodedChunkRecord[]): number {
+  const offsets = chunks
+    .map((chunk) => chunk.arrivalHostMs - chunk.timestampUs / 1000)
+    .sort((a, b) => a - b);
+  const middle = Math.floor(offsets.length / 2);
+  return offsets.length % 2 === 1 ? offsets[middle] : (offsets[middle - 1] + offsets[middle]) / 2;
 }

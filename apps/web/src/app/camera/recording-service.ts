@@ -9,12 +9,14 @@ import {
   untracked,
 } from '@angular/core';
 import {
+  NO_AUDIO_DATA,
   captureSupport,
   startCapture,
   type CaptureConfig,
   type CaptureHandle,
   type CaptureStats,
   type CaptureSupport,
+  type ClipReport,
   type FramingRect,
   type MotionMeterInfo,
   type MotionSample,
@@ -77,6 +79,14 @@ export interface SavedClip {
 /** The scramble clip begins this long before the first scramble turn (docs/PLAN.md, T2.4). */
 export const SCRAMBLE_LEAD_MS = 2000;
 
+/**
+ * The scramble clip begins at most this long before the scramble is done (docs/PLAN.md, T2.9). A
+ * scramble takes 10 to 15 s, and the turns that matter are its last ones before `scrambleDone`: a
+ * pause inside it (a sync check that failed, a break) is not worth minutes of video, which the 90 s
+ * in memory would not hold anyway.
+ */
+export const SCRAMBLE_CLIP_MAX_MS = 60_000;
+
 /** The solve clip begins this long before the first solve turn. */
 export const SOLVE_LEAD_MS = 3000;
 
@@ -125,15 +135,17 @@ interface Target {
  *
  * Every attempt gets two clips, cut from the last 90 s the pipeline keeps in memory, as
  * `SessionService.milestones$` says: once the scramble is done, the scramble clip
- * `[scrambleStart − 2 s, scrambleDone + 1 s]`; once the attempt ended (solved or a DNF), the solve
- * clip `[solveStart − 3 s, end + 1 s]`, none when the solve never started. Each is saved one second
- * (and {@link ENCODER_SETTLE_MS}) after its end, in the attempt's folder, with the camera's framing
- * rectangle as its `crop`, and added to the attempt's record (`SessionService.attachClip`, which saves
- * the record again: its timing never changes). The session's `cameras` holds the camera's entry
- * while it records. A clip that fails is said once (`failure`, the console) and noted in the session's
- * `notes`; the attempt is untouched. A clip of an attempt that went meanwhile (a reset, Delete last)
- * is removed again. Stopping saves the clips still waiting for their time at once, with what the
- * buffer has.
+ * `[max(scrambleStart − 2 s, scrambleDone − 60 s), scrambleDone + 1 s]`; once the attempt ended
+ * (solved or a DNF), the solve clip `[solveStart − 3 s, end + 1 s]`, none when the solve never
+ * started. Each is saved one second (and {@link ENCODER_SETTLE_MS}) after its end, in the attempt's
+ * folder, with the camera's framing rectangle as its `crop`, and added to the attempt's record
+ * (`SessionService.attachClip`, which saves the record again: its timing never changes). A clip whose
+ * start is older than the buffer begins at its oldest keyframe instead (`truncatedStart`, T2.9): it
+ * is saved, said (`clipNotice`) and noted in the session's `notes`, as is a clip without sound while
+ * audio is recorded, with why. The session's `cameras` holds the camera's entry while it records. A
+ * clip that fails is said once (`failure`, the console) and noted in the session's `notes`; the
+ * attempt is untouched. A clip of an attempt that went meanwhile (a reset, Delete last) is removed
+ * again. Stopping saves the clips still waiting for their time at once, with what the buffer has.
  */
 @Injectable({ providedIn: 'root' })
 export class RecordingService {
@@ -148,9 +160,10 @@ export class RecordingService {
   private readonly statusSignal = signal<RecordingStatus>('off');
   private readonly statsSignal = signal<CaptureStats | null>(null);
   private readonly errorSignal = signal<string | null>(null);
-  private readonly noticeSignal = signal<string | null>(null);
+  private readonly noticesSignal = signal<readonly string[]>([]);
   private readonly lastClipSignal = signal<SavedClip | null>(null);
   private readonly failureSignal = signal<string | null>(null);
+  private readonly clipNoticeSignal = signal<string | null>(null);
   private readonly savingSignal = signal(0);
 
   /** See {@link RecordingStatus}. */
@@ -159,12 +172,23 @@ export class RecordingService {
   readonly stats = this.statsSignal.asReadonly();
   /** Why it is not recording: it could not start, it stopped, or storage is full. */
   readonly error = this.errorSignal.asReadonly();
-  /** What it records otherwise than asked: no audio (the microphone refused, or lost). */
-  readonly notice = this.noticeSignal.asReadonly();
+  /**
+   * What it records otherwise than asked, since the pipeline started: no audio (the microphone
+   * refused, silent or lost, or no encoder for it), or the clip worker failed. Each stays until
+   * recording starts again, one after the other rather than the last alone, and is noted in the
+   * session (`notice: …`), so that none goes unseen (T2.9, issue #33).
+   */
+  readonly notices = this.noticesSignal.asReadonly();
   /** The last clip saved. */
   readonly lastClip = this.lastClipSignal.asReadonly();
   /** The last clip that could not be saved, as its note says; null once dismissed. */
   readonly failure = this.failureSignal.asReadonly();
+  /**
+   * What the last clip saved short of what was asked lacks (T2.9): it begins late (its start was
+   * older than the 90 s in memory), it has no sound and why, or its audio was moved onto the frames'
+   * clock; as its notes say; null once dismissed.
+   */
+  readonly clipNotice = this.clipNoticeSignal.asReadonly();
   /** How many clips are being saved (cut, muxed and written) now: the Camera preview says so. */
   readonly savingClips = this.savingSignal.asReadonly();
   /** The origin's storage: usage, quota and the share in use; null until read. */
@@ -195,6 +219,8 @@ export class RecordingService {
   /** The end of the last start or stop queued: they run one at a time. */
   private queue: Promise<void> = Promise.resolve();
   private refreshTimer: number | null = null;
+  /** The lines noted once per start of the pipeline (notices, a clip's missing audio). */
+  private readonly notedThisRun = new Set<string>();
 
   constructor() {
     this.support = this.starter.support();
@@ -242,6 +268,11 @@ export class RecordingService {
   /** Forgets the failure shown. */
   dismissFailure(): void {
     this.failureSignal.set(null);
+  }
+
+  /** Forgets the last clip's notice. */
+  dismissClipNotice(): void {
+    this.clipNoticeSignal.set(null);
   }
 
   /** Resolves once the starts and stops asked for so far are done (for tests). */
@@ -329,7 +360,7 @@ export class RecordingService {
       this.statusSignal.set('off');
       this.errorSignal.set(null);
     }
-    this.noticeSignal.set(null);
+    this.noticesSignal.set([]);
   }
 
   private async startPipeline(
@@ -340,7 +371,8 @@ export class RecordingService {
   ): Promise<void> {
     this.statusSignal.set('starting');
     this.errorSignal.set(null);
-    this.noticeSignal.set(null);
+    this.noticesSignal.set([]);
+    this.notedThisRun.clear();
     this.statsSignal.set(null);
     const video = stream.getVideoTracks().at(0);
     if (video === undefined) {
@@ -370,6 +402,10 @@ export class RecordingService {
       if (this.statusSignal() === 'starting' && stats.bufferSeconds > 0) {
         this.statusSignal.set('recording');
       }
+      if (stats.audioState === 'encoding' && this.noticesSignal().includes(NO_AUDIO_DATA)) {
+        // The microphone was late, not silent: its sound is recorded now (the note stays).
+        this.noticesSignal.update((notices) => notices.filter((n) => n !== NO_AUDIO_DATA));
+      }
     });
     handle.onError((error) => {
       if (this.handle !== handle) {
@@ -380,7 +416,7 @@ export class RecordingService {
         this.statusSignal.set('error');
         this.errorSignal.set(`Recording stopped: ${error.message}`);
       } else {
-        this.noticeSignal.set(error.message);
+        this.addNotice(error.message);
       }
     });
     void this.storageService.refresh();
@@ -390,16 +426,30 @@ export class RecordingService {
   private async openMicrophone(generation: number): Promise<MediaStream | null> {
     const media = this.globals.navigator?.mediaDevices;
     if (typeof media?.getUserMedia !== 'function') {
-      this.noticeSignal.set('Recording without audio: this browser gives no microphone.');
+      this.addNotice('Recording without audio: this browser gives no microphone.');
       return null;
     }
     try {
       return await media.getUserMedia({ audio: true });
     } catch (error: unknown) {
       if (generation === this.generation) {
-        this.noticeSignal.set(`Recording without audio: ${microphoneProblem(error)}`);
+        this.addNotice(`Recording without audio: ${microphoneProblem(error)}`);
       }
       return null;
+    }
+  }
+
+  /**
+   * Shows a notice with the others of this run of the pipeline, and notes it once in the session
+   * under way, if any: a notice is not to be missed because another came after it (issue #33).
+   */
+  private addNotice(message: string): void {
+    if (!this.noticesSignal().includes(message)) {
+      this.noticesSignal.update((notices) => [...notices, message]);
+    }
+    const session = this.session.session();
+    if (session !== null) {
+      this.noteOnce(session.id, `notice: ${message}`);
     }
   }
 
@@ -439,7 +489,10 @@ export class RecordingService {
         this.plan(
           attempt,
           'scramble',
-          milestone.scrambleStart - SCRAMBLE_LEAD_MS,
+          Math.max(
+            milestone.scrambleStart - SCRAMBLE_LEAD_MS,
+            milestone.scrambleDone - SCRAMBLE_CLIP_MAX_MS,
+          ),
           milestone.scrambleDone + CLIP_TAIL_MS,
         );
         break;
@@ -512,6 +565,7 @@ export class RecordingService {
     }
     const fpsNominal = frameRateOf(entry);
     let clip: VideoClip;
+    let report: ClipReport;
     try {
       // The session's folder exists once its creation is written.
       await this.session.whenSaved();
@@ -524,7 +578,8 @@ export class RecordingService {
         segment,
         fpsNominal,
       });
-      clip = { ...saved, crop: this.cropNow(entry) };
+      clip = { ...saved.clip, crop: this.cropNow(entry) };
+      report = saved.report;
     } catch (error: unknown) {
       this.failed(attempt, segment, errorMessage(error));
       return;
@@ -542,7 +597,68 @@ export class RecordingService {
       return;
     }
     this.lastClipSignal.set({ index: attempt.index, clip });
+    this.remark(attempt, clip, report);
     void this.storageService.refresh();
+  }
+
+  /**
+   * Says what a clip saved short of what was asked lacks, and notes it in its session (T2.9): that
+   * it begins late (every such clip), that it has no sound and why, and that its audio was moved
+   * onto the frames' clock (each once per run of the pipeline, since every clip then has it). That
+   * the capture made its audio's decoder config is only noted, once: the clip has its sound, and the
+   * note says which of the causes of issue #33 the device had.
+   */
+  private remark(attempt: AttemptRef, clip: VideoClip, report: ClipReport): void {
+    const what = `${clip.segment} of attempt ${String(attempt.index)}`;
+    const name = `${clip.segment === 'scramble' ? 'Scramble' : 'Solve'} clip of attempt ${String(attempt.index)}`;
+    const said: string[] = [];
+    if (clip.truncatedStart) {
+      const late = (report.lateMs / 1000).toFixed(1);
+      said.push(
+        `${name} starts ${late} s late: the buffer holds ${report.bufferSeconds.toFixed(0)} s.`,
+      );
+      this.note(
+        attempt.session,
+        `clip truncated: ${what} starts ${late} s late (the buffer held ${report.bufferSeconds.toFixed(1)} s)`,
+      );
+    }
+    if (report.audioMissing !== null) {
+      said.push(`${name} has no sound: ${report.audioMissing}.`);
+      this.noteOnce(
+        attempt.session,
+        `clip without audio: ${what}: ${report.audioMissing}`,
+        `audio missing: ${report.audioMissing}`,
+      );
+    }
+    if (report.audioRebasedMs !== 0) {
+      const rebase = `audio timestamps rebased by ${report.audioRebasedMs.toFixed(0)} ms`;
+      said.push(`${name}: ${rebase}.`);
+      this.noteOnce(attempt.session, `clip audio rebased: ${what}: ${rebase}`, 'audio rebased');
+    }
+    if (report.audioConfigMade) {
+      this.noteOnce(
+        attempt.session,
+        `clip audio described: ${what}: the audio encoder gave no complete decoder config; the capture made it from the encoder's settings`,
+        'audio config made',
+      );
+    }
+    if (said.length > 0) {
+      this.clipNoticeSignal.set(said.join(' '));
+    }
+  }
+
+  /** Writes a line into a session's notes, and into the console as `cubetrace: …`. */
+  private note(sessionId: string, line: string): void {
+    console.warn(`cubetrace: ${line}`);
+    this.session.addNote(sessionId, line).catch(() => undefined);
+  }
+
+  /** {@link note}, unless a line of the same `kind` was noted since the pipeline started. */
+  private noteOnce(sessionId: string, line: string, kind = line): void {
+    if (!this.notedThisRun.has(kind)) {
+      this.notedThisRun.add(kind);
+      this.note(sessionId, line);
+    }
   }
 
   /**
@@ -573,9 +689,8 @@ export class RecordingService {
       return;
     }
     const line = `clip failed: ${segment} of attempt ${String(attempt.index)}: ${reason}`;
-    console.warn(`cubetrace: ${line}`);
     this.failureSignal.set(line);
-    this.session.addNote(attempt.session, line).catch(() => undefined);
+    this.note(attempt.session, line);
   }
 
   private startRefreshing(): void {

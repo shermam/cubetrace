@@ -14,6 +14,7 @@ import {
 } from './pipeline';
 import type {
   CaptureStats,
+  ClipReport,
   ConnectMessage,
   DeleteClipParams,
   MotionMeterInfo,
@@ -105,6 +106,8 @@ const STATS: CaptureStats = {
   codec: 'vp09.00.40.08',
   bitrate: 4_000_000,
   audioCodec: 'opus',
+  audioChunks: 586,
+  audioState: 'encoding',
 };
 
 /** A stand-in for a cut: the pipeline passes it through untouched. */
@@ -135,6 +138,16 @@ const A_CLIP: VideoClip = {
   firstFrameHostMs: 1000.5,
   framesFile: 'laptop.solve.frames.json',
   syncResidualMs: null,
+  truncatedStart: false,
+};
+
+/** The report of a clip saved as asked. */
+const A_REPORT: ClipReport = {
+  lateMs: 0,
+  bufferSeconds: 12.5,
+  audioMissing: null,
+  audioRebasedMs: 0,
+  audioConfigMade: false,
 };
 
 beforeEach(() => {
@@ -428,7 +441,7 @@ describe('CaptureHandle', () => {
     // Nothing is transferred either way: the MP4 stays in the workers.
     expect(worker.posted.slice(1).map((entry) => entry.transfer)).toEqual([[], [], []]);
     // The clip worker answers the clips it saved or could not write...
-    clipWorker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP });
+    clipWorker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP, report: A_REPORT });
     clipWorker.reply({
       type: 'mux-and-write-failed',
       id: 2,
@@ -441,7 +454,7 @@ describe('CaptureHandle', () => {
       message: 'RangeError: Nothing is buffered yet.',
     });
 
-    await expect(first).resolves.toBe(A_CLIP);
+    await expect(first).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
     await expect(second).rejects.toThrow('Error: No session gone: its folder is missing.');
     await expect(third).rejects.toThrow('RangeError: Nothing is buffered yet.');
   });
@@ -521,8 +534,8 @@ describe('CaptureHandle', () => {
     // Still saving: no stop yet, and no new clip.
     expect(worker.messages().at(-1)).toMatchObject({ type: 'mux-and-write', id: 1 });
     await expect(capture.saveClip(PARAMS)).rejects.toThrow('The capture has stopped.');
-    clipWorker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP });
-    await expect(saving).resolves.toBe(A_CLIP);
+    clipWorker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP, report: A_REPORT });
+    await expect(saving).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
     await vi.waitFor(() => {
       expect(worker.messages().at(-1)).toEqual({ type: 'stop' });
     });

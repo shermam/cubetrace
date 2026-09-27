@@ -63,14 +63,21 @@ export function clip(camera: string, segment: VideoSegment): VideoClip {
     firstFrameHostMs: 1_790_000_000_812.4,
     framesFile: `${camera}.${segment}.frames.json`,
     syncResidualMs: 41.5,
+    truncatedStart: false,
   };
 }
 
-/** The solved attempt with its two clips from the laptop's camera. */
+/**
+ * The solved attempt with its two clips from the laptop's camera, the scramble's begun later than
+ * asked (its start was older than the capture's buffer, T2.9).
+ */
 export function attemptWithVideo(): AttemptRecord {
   return {
     ...solvedAttempt(),
-    video: [clip('laptop', 'scramble'), { ...clip('laptop', 'solve'), audio: null, crop: null }],
+    video: [
+      { ...clip('laptop', 'scramble'), truncatedStart: true },
+      { ...clip('laptop', 'solve'), audio: null, crop: null },
+    ],
   };
 }
 

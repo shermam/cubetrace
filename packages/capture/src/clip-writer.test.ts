@@ -29,6 +29,7 @@ const DETAILS: ClipDetails = {
   width: 1920,
   height: 1080,
   fpsNominal: 30,
+  truncatedStart: false,
 };
 
 /** Stands for an MP4: `size` bytes counting up from `seed`. */
@@ -123,6 +124,7 @@ describe('writeClip', () => {
         firstFrameHostMs: 1_790_524_522_772.81,
         framesFile: 'laptop.solve.frames.json',
         syncResidualMs: null,
+        truncatedStart: false,
       });
     },
   );
@@ -139,6 +141,22 @@ describe('writeClip', () => {
     expect(
       validate({ ...clip, crop: { x: 480, y: 120, w: 960, h: 840 }, syncResidualMs: 41.5 }),
     ).toBe(true);
+    // A clip begun later than asked (T2.9) says so.
+    const late = await writeClip(
+      root,
+      SESSION,
+      8,
+      'laptop',
+      'scramble',
+      mp4Bytes(),
+      {
+        ...FRAMES,
+        segment: 'scramble',
+      },
+      { ...DETAILS, truncatedStart: true },
+    );
+    expect(late.truncatedStart).toBe(true);
+    expect(validate(late), JSON.stringify(validate.errors)).toBe(true);
     const written: unknown = JSON.parse(
       file(root, `${FOLDER}/phone-front.scramble.frames.json`)?.text ?? '',
     );

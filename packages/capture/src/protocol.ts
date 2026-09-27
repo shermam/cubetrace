@@ -35,6 +35,26 @@ export function resolveCaptureConfig(config: CaptureConfig = {}): ResolvedCaptur
   };
 }
 
+/**
+ * How long after the first frame the capture worker waits for the microphone's first audio before
+ * it says, once, that none comes (T2.9, issue #33): a muted track, or one another app holds, sends
+ * nothing, and the clips would otherwise lack their sound without a word.
+ */
+export const AUDIO_SILENCE_MS = 3000;
+
+/** The capture worker's non-fatal `error` when no audio came within {@link AUDIO_SILENCE_MS}. */
+export const NO_AUDIO_DATA =
+  'Recording without audio: the microphone sends no audio (muted, or held by another app).';
+
+/**
+ * Where the recording's audio is (docs/PLAN.md, T2.9): `off`, none asked for (Record audio off, or
+ * no microphone); `waiting`, asked for, but nothing encoded yet (no sound has come from the
+ * microphone, or the encoder has not answered); `encoding`, its chunks go into the buffer; `stopped`,
+ * it ended (the encoder failed, no encoder takes it, or the microphone's track ended), and the window
+ * heard why in a non-fatal `error`.
+ */
+export type AudioState = 'off' | 'waiting' | 'encoding' | 'stopped';
+
 /** The pipeline's counters, once per second. */
 export interface CaptureStats {
   /** Frames that reached the worker per second, over the last second. */
@@ -58,6 +78,66 @@ export interface CaptureStats {
   readonly bitrate: number | null;
   /** `mp4a.40.2`, `opus`, or null: no audio (none asked for, none in the stream, or no encoder). */
   readonly audioCodec: string | null;
+  /** Audio chunks out of the encoder since the start. */
+  readonly audioChunks: number;
+  /** See {@link AudioState}. */
+  readonly audioState: AudioState;
+}
+
+/**
+ * The capture's audio when it cut a clip (T2.9), for the clip to say why it has no sound: its state,
+ * how much came from the microphone and out of the encoder, and why it stopped, if it did.
+ */
+export interface AudioReport {
+  readonly state: AudioState;
+  /** `AudioData` received from the microphone since the start. */
+  readonly data: number;
+  /** Chunks out of the encoder since the start. */
+  readonly chunks: number;
+  /** Why the audio stopped (the window's non-fatal `error` said it); null if it did not. */
+  readonly error: string | null;
+  /**
+   * The audio's decoder config was made, or completed, from the encoder's settings: the encoder gave
+   * none with its first chunk, or one without a field the muxer needs (issue #33).
+   */
+  readonly configMade: boolean;
+}
+
+/**
+ * What a saved clip lacks of what was asked for, for the window to say and to note in the session
+ * (T2.9); none of it goes into attempt.json but the clip's `truncatedStart`.
+ */
+export interface ClipReport {
+  /**
+   * How much later than asked the clip begins, ms: its start was older than the buffer, so it begins
+   * at the buffer's first keyframe (`truncatedStart`); 0 when it begins where asked.
+   */
+  readonly lateMs: number;
+  /** Seconds of video the buffer held when the clip was cut. */
+  readonly bufferSeconds: number;
+  /**
+   * Why the clip has no audio track although the capture records audio (no audio data, no decoder
+   * config, no chunk in the clip's span, the encoder's error); null when it has one, or none was
+   * asked for.
+   */
+  readonly audioMissing: string | null;
+  /**
+   * How far the clip's audio was moved to line up with its video, ms: the audio's timestamps were on
+   * another clock than the frames', so the arrival offsets placed it (issue #33); 0 when they share
+   * one.
+   */
+  readonly audioRebasedMs: number;
+  /**
+   * The clip's audio track has a decoder config that the capture made, or completed, from the
+   * encoder's settings (`AudioReport.configMade`); false otherwise, and without an audio track.
+   */
+  readonly audioConfigMade: boolean;
+}
+
+/** A clip saved: its `video[]` entry, and its report. */
+export interface SavedClip {
+  readonly clip: VideoClip;
+  readonly report: ClipReport;
 }
 
 /** Recording stopped by itself (`fatal`: the buffer stays, so cuts still work), or only its audio. */
@@ -168,12 +248,15 @@ export type WindowToClipWorker = ConnectMessage | DeleteClipRequest;
 
 /**
  * From the capture worker to the clip worker: a clip's request and its cut, whose chunk bytes are
- * copies that move with it (transferred), so that the capture worker only cuts.
+ * copies that move with it (transferred), so that the capture worker only cuts; with what the clip's
+ * report needs from the capture: the seconds in its buffer and its audio when it cut.
  */
 export interface ClipJob {
   readonly type: 'clip-job';
   readonly request: MuxAndWriteRequest;
   readonly cut: Cut;
+  readonly bufferSeconds: number;
+  readonly audio: AudioReport;
 }
 
 export interface StatsMessage {
@@ -194,11 +277,10 @@ export interface CutFailed {
   readonly message: string;
 }
 
-/** The answer to the `mux-and-write` request with the same id: the clip's `video[]` entry. */
-export interface MuxAndWriteDone {
+/** The answer to the `mux-and-write` request with the same id: the clip's entry and its report. */
+export interface MuxAndWriteDone extends SavedClip {
   readonly type: 'mux-and-write-done';
   readonly id: number;
-  readonly clip: VideoClip;
 }
 
 export interface MuxAndWriteFailed {

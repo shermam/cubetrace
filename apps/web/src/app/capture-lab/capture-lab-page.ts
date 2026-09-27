@@ -6,6 +6,7 @@ import {
   startCapture,
   type CaptureHandle,
   type CaptureStats,
+  type ClipReport,
   type MotionMeterInfo,
   type MotionSample,
 } from '@cubetrace/capture';
@@ -41,6 +42,8 @@ const LAB_CAMERA = 'lab';
 export interface SavedClip {
   /** The clip's `video[]` entry, as `saveClip` returned it. */
   readonly clip: VideoClip;
+  /** What it lacks of what was asked (T2.9): a late start, its sound and why, its audio moved. */
+  readonly report: ClipReport;
   /** The attempt's folder, from the file system's root. */
   readonly folder: string;
   /** The files in that folder after the save. */
@@ -393,7 +396,7 @@ export class CaptureLabPage {
       const sessions = await root.getDirectoryHandle(sessionsName, { create: true });
       const session = await sessions.getDirectoryHandle(sessionName, { create: true });
       const endHostMs = hostNow(this.globals);
-      const clip = await handle.saveClip({
+      const { clip, report } = await handle.saveClip({
         startHostMs: endHostMs - this.seconds() * 1000,
         endHostMs,
         sessionId: LAB_SESSION,
@@ -421,6 +424,7 @@ export class CaptureLabPage {
       this.setClipUrl(this.globals.URL?.createObjectURL(mp4));
       this.saved.set({
         clip,
+        report,
         folder: attemptPath(LAB_SESSION, LAB_ATTEMPT).join('/'),
         files: files.sort((p, q) => p.name.localeCompare(q.name)),
         frames: {
@@ -584,6 +588,8 @@ function counterRows(
     { label: 'Video codec', testId: 'lab-codec', value: value('codec') },
     { label: 'Video bitrate, bits per second', testId: 'lab-bitrate', value: value('bitrate') },
     { label: 'Audio codec', testId: 'lab-audio-codec', value: value('audioCodec') },
+    { label: 'Audio', testId: 'lab-audio-state', value: value('audioState') },
+    { label: 'Audio chunks encoded', testId: 'lab-audio-chunks', value: value('audioChunks') },
   ];
 }
 

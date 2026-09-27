@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_BOUNDS, RingBuffer, type EncodedChunkRecord } from './ring-buffer';
+import {
+  AUDIO_REBASE_MS,
+  DEFAULT_BOUNDS,
+  RingBuffer,
+  type EncodedChunkRecord,
+} from './ring-buffer';
 
 /** A frame's timestamp at 30 fps from an arbitrary capture-clock origin, as Chrome's are. */
 const T0 = 2_229_524_403;
@@ -25,12 +30,15 @@ function frame(index: number, byteLength = 1000, gop = 30): EncodedChunkRecord {
   };
 }
 
-/** A 20 ms audio chunk starting at `timestampUs`. */
-function audio(timestampUs: number, byteLength = 100): EncodedChunkRecord {
+/**
+ * A 20 ms audio chunk starting at `timestampUs`, arriving 10 ms after it; on a clock `clockUs` behind
+ * the frames' (its timestamps that much smaller for the same moment).
+ */
+function audio(timestampUs: number, byteLength = 100, clockUs = 0): EncodedChunkRecord {
   return {
     kind: 'audio',
     type: 'key',
-    timestampUs,
+    timestampUs: timestampUs - clockUs,
     durationUs: 20_000,
     byteLength,
     arrivalHostMs: timestampUs / 1000 + 1_790_516_343_610,
@@ -151,6 +159,55 @@ describe('RingBuffer', () => {
     expect(buffer.audio[0].timestampUs).toBe(T0 + 1_985_000);
     expect(first).toBe(T0 + 2_000_000);
     expect(buffer.bufferBytes).toBe(buffer.video.length * 1000 + buffer.audio.length * 100);
+  });
+
+  it('places audio on a clock of its own by the arrival offsets: kept to the same horizon, not dropped', () => {
+    // Audio timestamps 2,000 s smaller than the frames' for the same moment (a clock that started
+    // later, issue #33); the audio arrives 10 ms after its first sample, the frames at once.
+    const clockUs = 2_000_000_000;
+    const buffer = new RingBuffer({ maxSeconds: 3, maxBytes: 1_000_000 });
+    let offsetUs = -95_000;
+    const pushAudioUntil = (untilUs: number): void => {
+      for (; offsetUs < untilUs; offsetUs += 20_000) {
+        buffer.push(audio(T0 + offsetUs, 100, clockUs));
+      }
+    };
+    for (let index = 0; index < 150; index += 1) {
+      pushAudioUntil(timestampOf(index + 1) - T0);
+      buffer.push(frame(index));
+    }
+
+    expect(buffer.audioOffsetFromVideoMs).toBeCloseTo(clockUs / 1000 + 10, 6);
+    expect(buffer.audioRebaseUs).toBe(clockUs + 10_000);
+    // The first frame kept is frame 60; the audio from the chunk that straddles it, as with one
+    // clock (placed 10 ms late by the audio's latency, which its arrival offset includes).
+    expect(buffer.video[0].timestampUs).toBe(T0 + 2_000_000);
+    expect(buffer.audio[0].timestampUs + clockUs).toBe(T0 + 1_985_000);
+    expect(buffer.audio.length).toBeGreaterThan(150);
+    expect(buffer.bufferBytes).toBe(buffer.video.length * 1000 + buffer.audio.length * 100);
+
+    // Audio on a clock ahead of the frames' goes with them too, rather than piling up.
+    const ahead = new RingBuffer({ maxSeconds: 3, maxBytes: 1_000_000 });
+    for (let index = 0; index < 150; index += 1) {
+      for (let k = 0; k < 2; k += 1) {
+        ahead.push(audio(timestampOf(index) + k * 16_667, 100, -clockUs));
+      }
+      ahead.push(frame(index));
+    }
+    expect(ahead.audioRebaseUs).toBe(-clockUs + 10_000);
+    expect(ahead.audio.length).toBeLessThanOrEqual(2 * 91);
+  });
+
+  it('compares the timestamps as they are when both kinds count on one clock', () => {
+    const buffer = new RingBuffer();
+    fill(buffer, 30);
+    buffer.push(audio(T0));
+    // The audio's 10 ms of latency: well within one clock.
+    expect(buffer.audioOffsetFromVideoMs).toBeCloseTo(10, 6);
+    expect(AUDIO_REBASE_MS).toBe(100);
+    expect(buffer.audioRebaseUs).toBe(0);
+    buffer.clear();
+    expect(buffer.audioOffsetFromVideoMs).toBeNull();
   });
 
   it('bounds the audio on its own before the first keyframe', () => {

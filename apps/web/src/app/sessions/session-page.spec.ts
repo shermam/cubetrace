@@ -45,6 +45,7 @@ function clip(segment: 'scramble' | 'solve', bytes: number): VideoClip {
     firstFrameHostMs: 1_790_000_000_000,
     framesFile: `laptop.${segment}.frames.json`,
     syncResidualMs: null,
+    truncatedStart: false,
   };
 }
 

@@ -72,7 +72,7 @@ export type {
 } from './session';
 export { createSession, summarize } from './session';
 export type { CubeClockParams } from './clock';
-export { CLOCK_FIT_WINDOW, CubeClockFit } from './clock';
+export { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './clock';
 export type { PhaseAverage } from './stats';
 export { DNF, aoN, attemptTimes, best, mean, phaseAverages } from './stats';
 export type { SessionStore } from './store';

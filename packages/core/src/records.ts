@@ -174,6 +174,11 @@ interface Optional<T> {
   readonly optional: Reader<T>;
 }
 
+/** A field that may be absent, read as `absent` then (a clip's `truncatedStart`). */
+interface Defaulted<T> extends Optional<T> {
+  readonly absent: T;
+}
+
 type Fields<T> = {
   readonly [K in keyof T]-?: Reader<T[K]> | Optional<Exclude<T[K], undefined>>;
 };
@@ -307,6 +312,10 @@ function optional<T>(read: Reader<T>): Optional<T> {
   return { optional: read };
 }
 
+function defaulted<T>(read: Reader<T>, absent: T): Defaulted<T> {
+  return { optional: read, absent };
+}
+
 /** An array of `item`s, with at most `max` of them. */
 function list<T>(item: Reader<T>, opts: { max?: number } = {}): Reader<T[]> {
   const { max } = opts;
@@ -338,10 +347,12 @@ function list<T>(item: Reader<T>, opts: { max?: number } = {}): Reader<T[]> {
 /**
  * An object with exactly the fields of `fields`, in that order: every one present (a field whose
  * value is undefined is absent, as for JSON Schema's `required`) but the optional ones, and no
- * other.
+ * other. A defaulted field that is absent gets its default.
  */
 function object<T>(fields: Fields<T>): Reader<T> {
-  const known = fields as Readonly<Record<string, Reader<unknown> | Optional<unknown>>>;
+  const known = fields as Readonly<
+    Record<string, Reader<unknown> | Optional<unknown> | Defaulted<unknown>>
+  >;
   const keys = Object.keys(known);
   return {
     what: 'an object',
@@ -355,6 +366,8 @@ function object<T>(fields: Fields<T>): Reader<T> {
         const item = value[key];
         if (item !== undefined) {
           out[key] = ('optional' in field ? field.optional : field).read(item, join(at, key));
+        } else if ('absent' in field) {
+          out[key] = field.absent;
         } else if (!('optional' in field)) {
           fail(join(at, key), 'is missing');
         }
@@ -498,6 +511,8 @@ const clip = object<VideoClip>({
     /^[a-z0-9]+(-[a-z0-9]+)*\.(scramble|solve)\.frames\.json$/u,
   ),
   syncResidualMs: nullable(num()),
+  // Since T2.9; the clips written before it have none, and began where asked.
+  truncatedStart: defaulted(bool, false),
 });
 
 /** The fields both versions share, in the order of the schemas. */

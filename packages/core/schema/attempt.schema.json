@@ -276,6 +276,10 @@
         "syncResidualMs": {
           "description": "How far the camera lagged the cube when the clip was recorded: offsetMs of the camera's clock in session.json; null before a sync check.",
           "type": ["number", "null"]
+        },
+        "truncatedStart": {
+          "description": "The clip begins later than asked, at the oldest keyframe in memory: the start asked for was older than the capture's buffer (docs/DATA-MODEL.md §7). Absent from the files written before it existed, which read as false.",
+          "type": "boolean"
         }
       }
     }

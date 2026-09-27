@@ -17,6 +17,10 @@ builds after cubetrace 0.1.0) changed, from version 1 (written by 0.1.0):
   coarse summary: the fit that places a move on the host clock is its attempt's.
 - `<camera>.<segment>.frames.json`, the frame times of a clip, is new (§9).
 
+Within version 2, a clip in `attempt.json` gained `truncatedStart` (§7, `docs/PLAN.md` T2.9): an
+optional field, so that the version 2 files written before it stay valid (the readers take a missing
+one as false), and no new version.
+
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
 `attempt.v1.schema.json` for version 1.
@@ -184,25 +188,34 @@ mid-write; readers ignore such leftover `*.tmp` files and remove them.
 }
 ```
 
-`id` is lowercase, as `crypto.randomUUID()` writes it. `clock.cube` is the least-squares fit
-of the host time on the cube time over the moves that were the newest of their Bluetooth
-packet (the older moves of a packet carry the packet's arrival time, so they are not samples):
-`residualP95Ms` is the 95th percentile (nearest rank) of the absolute residuals of the last
-2000 of them, `samples` their number, and before the first one the fit is
-`{"a": 1, "b": 0, "residualP95Ms": 0, "samples": 0}`. The cube's clock restarts at 0 whenever
-the cube connects again, so the fit starts over with each connection: `clock.cube` is the fit of
-the connection during which the session's last attempt ended, saved with every attempt (a session
-recorded over several connections has moves on several cube clocks; every move keeps its
-`hostMs`). It is only a coarse summary: within an attempt the cube's clock runs slow against the
-host's, while across the pauses between attempts both advance equally, so one line through a
-connection that spans pauses of minutes is off by hundreds of milliseconds at its ends (as in the
-example: ±600 ms over the 14 minutes of the owner's first laptop session, `docs/DEVICES.md`); to
-place a move on the host clock, use its attempt's `clock` (§7). `audio` is on by default (phase 2
-records it with the video): it is Settings' "Record audio" when the session began, and again when
-its camera last recorded; whether a clip has sound is its own `audio` (§7). `notes` is free text, to
-which the app adds one line per clip it could not save, `clip failed: <segment> of attempt <index>:
-<reason>` (`docs/PLAN.md`, T2.4), so that a missing clip has its reason. `summary` is counted from
-the attempts: each one is solved or a DNF.
+`id` is lowercase, as `crypto.randomUUID()` writes it. `clock.cube` is the least-squares fit of the
+host time on the cube time over the moves that were the newest of their Bluetooth packet (the older
+moves of a packet carry the packet's arrival time, so they are not samples): `residualP95Ms` is the
+95th percentile (nearest rank) of the absolute residuals of the last 2000 of them, `samples` their
+number, and before the first one the fit is `{"a": 1, "b": 0, "residualP95Ms": 0, "samples": 0}`.
+The cube's clock restarts at 0 whenever the cube connects again, so the fit starts over with each
+connection, and whenever the cube's clock starts again within one (§7): `clock.cube` is the fit of
+the cube clock during which the session's last attempt ended, saved with every attempt (a session
+recorded over several connections has moves on several cube clocks; every move keeps its `hostMs`).
+It is only a coarse summary: within an attempt the cube's clock runs slow against the host's, while
+across the pauses between attempts both advance equally, so one line through a connection that spans
+pauses of minutes is off by hundreds of milliseconds at its ends (as in the example: ±600 ms over
+the 14 minutes of the owner's first laptop session, `docs/DEVICES.md`); to place a move on the host
+clock, use its attempt's `clock` (§7). `audio` is on by default (phase 2 records it with the video):
+it is Settings' "Record audio" when the session began, and again when its camera last recorded;
+whether a clip has sound is its own `audio` (§7). `notes` is free text, to which the app adds one
+line per clip it could not save, `clip failed: <segment> of attempt <index>: <reason>`
+(`docs/PLAN.md`, T2.4), so that a missing clip has its reason, and, since T2.9, one per clip that
+begins later than asked, `clip truncated: <segment> of attempt <index> starts <s> s late (the buffer
+held <s> s)` (§7); once per recording (from the camera's start to its stop), one per reason a clip
+has no sound although the sound is recorded, `clip without audio: <segment> of attempt <index>:
+<reason>` (no audio data from the microphone, no decoder config, no audio chunk in the clip's span,
+the audio encoder's error), one when the sound's timestamps counted on another clock than the
+frames' and were placed by their arrival times, `clip audio rebased: <segment> of attempt <index>:
+audio timestamps rebased by <ms> ms`, and one when the audio encoder gave no complete decoder config
+and the app made it from the encoder's settings, `clip audio described: <segment> of attempt
+<index>: …`; and each notice of a recording, once, `notice: <text>` (the microphone refused, silent
+or lost, no audio encoder). `summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in
@@ -259,7 +272,7 @@ for both. A clip's `syncResidualMs` (§7) is its camera's `offsetMs` when it was
      "codec": "avc1.640028", "audio": "mp4a.40.2", "width": 1920, "height": 1080,
      "crop": {"x": 480, "y": 120, "w": 960, "h": 840}, "fpsNominal": 30, "frames": 721,
      "firstFrameHostMs": 1730640017211.9, "framesFile": "laptop.solve.frames.json",
-     "syncResidualMs": 41.5}
+     "syncResidualMs": 41.5, "truncatedStart": false}
   ]
 }
 ```
@@ -288,32 +301,48 @@ the reported state (a resync); an event that state completes (`scrambleDone`, `s
 
 `clock` is the cube clock fit of the attempt: the least-squares line `hostMs ≈ a·cubeMs + b` over
 the attempt's moves that were the newest of their Bluetooth packet (as in §6: the older moves of a
-packet carry the packet's arrival time), from its first move to `solveEnd` or the DNF, which are
-the moves of `moves`. `residualP95Ms` is the 95th percentile (nearest rank) of their absolute
-residuals (of the last 2000 if there are more), `samples` their number, and `clock` is null
-without two of them at different cube times (a DNF before the second move). The fit belongs to the
-attempt, not to the session: while it is turned the cube's clock runs about 0.7% slow, steadily,
-and across the pauses between attempts both clocks advance equally, so each attempt's line holds
-to the Bluetooth jitter, while one line through a session is off by 0.7% of every pause
-(`docs/DEVICES.md`, measured on the owner's cube in round 1). `a·cubeMs + b` places a move on the
-host clock without the jitter of its `hostMs`, which is when its packet arrived.
+packet carry the packet's arrival time), from its first move to `solveEnd` or the DNF, which are the
+moves of `moves`. `residualP95Ms` is the 95th percentile (nearest rank) of their absolute residuals
+(of the last 2000 if there are more), `samples` their number, and `clock` is null without two of
+them at different cube times (a DNF before the second move). When the cube's clock starts again
+during the attempt, so does the fit, which then covers the moves from there on (`samples` counts
+those): when the cube reconnects, since its count restarts at 0, and when a pause between two moves
+outlasts the cube's count of it (the GAN 356 i3 reports 65,535 ms for any longer pause,
+`docs/DEVICES.md`). The app sees either as a move whose cube time, counted from the previous move in
+the fit, is more than 1 s plus 1% of the host time between them behind its host time
+(`CLOCK_RESTART_MS` and `CLOCK_RESTART_DRIFT` in `packages/core/src/clock.ts`), which the Bluetooth
+jitter and the drift never cause; the moves before it are on the cube's previous clock, of which the
+record keeps no fit, and their `hostMs` places them. Records written before the fit started again
+with the cube's clock (`docs/PLAN.md` T2.9) may have one line through both clocks (attempt 6 of
+`fixtures/hardware/2026-09-27-macbook-pro-2021-gan356i3.json`: a slope of −0.81, a `residualP95Ms`
+of 48 s). The fit belongs to the attempt, not to the session: while it is turned the cube's clock
+runs about 0.7% slow, steadily, and across the pauses between attempts both clocks advance equally,
+so each attempt's line holds to the Bluetooth jitter, while one line through a session is off by
+0.7% of every pause (`docs/DEVICES.md`, measured on the owner's cube in round 1). `a·cubeMs + b`
+places a move on the host clock without the jitter of its `hostMs`, which is when its packet
+arrived.
 
 `video` lists the attempt's clips, one per camera and segment, files in the attempt's folder (§5):
-the scramble and the solve, each with a margin before and after (`docs/PLAN.md` T2.4): the
-scramble from 2 s before `scrambleStart` to 1 s after `scrambleDone`, the solve from 3 s before
+the scramble and the solve, each with a margin before and after (`docs/PLAN.md` T2.4): the scramble
+from 2 s before `scrambleStart`, but at most 60 s before `scrambleDone` (T2.9: a pause inside a
+scramble is not worth minutes of video), to 1 s after `scrambleDone`, the solve from 3 s before
 `solveStart` to 1 s after `solveEnd` or the DNF (none when the solve did not start). A clip begins
 at the keyframe at or before its margin, so up to one keyframe interval (a second) earlier:
-`firstFrameHostMs` is where it really begins. A camera that was off has no clips; a clip that could
-not be saved is missing, and `notes` in `session.json` (§6) says why. `file` is
-`<camera>.<segment>.mp4` and `framesFile` `<camera>.<segment>.frames.json`, the times of its
-frames (§9); `bytes` is the MP4's size; `codec` and `audio` are the codec strings of its video and
-audio tracks (`avc1.640028`, `mp4a.40.2`), `audio` null without an audio track; `width` and
+`firstFrameHostMs` is where it really begins. When its start is older than what the capture holds in
+memory (the last 90 s), the clip begins at the oldest keyframe held, later than asked, and
+`truncatedStart` is true (`notes` in `session.json` says how late, §6); the field is absent from the
+files written before it existed (`docs/PLAN.md` T2.9), which read as false. A camera that was off
+has no clips; a clip that could not be saved is missing, and `notes` in `session.json` (§6) says
+why. `file` is `<camera>.<segment>.mp4` and `framesFile` `<camera>.<segment>.frames.json`, the times
+of its frames (§9); `bytes` is the MP4's size; `codec` and `audio` are the codec strings of its
+video and audio tracks (`avc1.640028`, `mp4a.40.2`), `audio` null without an audio track (when the
+sound was recorded and a clip has none, `notes` in `session.json` says why, §6); `width` and
 `height` are those of the encoded frames; `crop` is the camera's framing rectangle (§6) when the
 clip was recorded. `fpsNominal` is the frame rate the camera's track reported and `frames` the
 number of frames in the clip; the actual frame times are in the frames file, and a camera may
-deliver fewer frames than its track says (`docs/DEVICES.md`). `firstFrameHostMs` is the host time
-of the first frame (`t0HostMs` of the frames file), and `syncResidualMs` the camera's lag behind
-the cube when the clip was recorded (`offsetMs` of `clock.cameras`, §6), null before a sync check.
+deliver fewer frames than its track says (`docs/DEVICES.md`). `firstFrameHostMs` is the host time of
+the first frame (`t0HostMs` of the frames file), and `syncResidualMs` the camera's lag behind the
+cube when the clip was recorded (`offsetMs` of `clock.cameras`, §6), null before a sync check.
 
 `packages/core/schema/session.schema.json` and `attempt.schema.json` (JSON Schema draft
 2020-12) are §6 and this section in machine-readable form, for version 2; the version 1 files
@@ -327,8 +356,9 @@ columns and `cubeast_steps` (name, moves, recorded_moves, time, recognition_time
 execution_time, cumulative_time per step). `fixtures/identities.json`: solved state, the
 `R` vector, states after short scrambles, sequences that return to solved, sequences that
 do not. Generated from the owner's Cubeast export by a private script; treat as read-only.
-`fixtures/hardware/`: session exports (schema version 1) of the owner's manual rounds on real
-hardware, described in `fixtures/hardware/README.md`; read-only too.
+`fixtures/hardware/`: session exports of the owner's manual rounds on real hardware (schema version
+1 from round 1, version 2 with clips from the GAN 356 i3's), described in
+`fixtures/hardware/README.md`; read-only too.
 
 ## 9. `frames.json`
 

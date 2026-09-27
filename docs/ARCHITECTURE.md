@@ -72,15 +72,20 @@ else Opus, else no sound; a keyframe every second; frames dropped and counted wh
 wait in the encoder. The chunks, each with its frame's own timestamp and its arrival on the
 host clock, fill a ring buffer bounded by 90 s and 160 MB and evicted by whole GOPs, so that it
 always starts at a keyframe. When the timer's milestones say a segment of an attempt is over, the
-recording asks for its cut 1.25 s after its end: the scramble from 2 s before its first turn to 1 s
-after the state matched, the solve from 3 s before its first turn to 1 s after solved or the DNF,
-each from the keyframe at or before its start. The capture worker copies the cut's chunks and passes
-them over a `MessageChannel` to the **clip worker**, which muxes them into MP4 with mediabunny,
-without re-encoding, and writes the clip and its `frames.json` (the first frame's host time from the
-median arrival offset over the clip, then each frame's interval from the timestamps) into the
-attempt's OPFS folder under temporary names moved into place; the clip is then added to the
-attempt's `video` in `attempt.json`, whose timing it never changes, and a clip that fails is noted
-in `session.json`. The **sync check** runs once per session and camera: the capture worker measures
+recording asks for its cut 1.25 s after its end: the scramble from 2 s before its first turn (at
+most 60 s before the state matched) to 1 s after the state matched, the solve from 3 s before its
+first turn to 1 s after solved or the DNF, each from the keyframe at or before its start, or from
+the oldest one in memory when its start is older, the clip then marked `truncatedStart`. The capture
+worker copies the cut's chunks and passes them over a `MessageChannel` to the **clip worker**, which
+muxes them into MP4 with mediabunny, without re-encoding, and writes the clip and its `frames.json`
+(the first frame's host time from the median arrival offset over the clip, then each frame's
+interval from the timestamps) into the attempt's OPFS folder under temporary names moved into place;
+the clip is then added to the attempt's `video` in `attempt.json`, whose timing it never changes,
+and a clip that fails is noted in `session.json`, as is a clip that begins late or has no sound
+while the sound is recorded (with why: the capture worker follows its audio, from the microphone's
+first `AudioData` to the encoder's chunks and their decoder config, and places audio whose
+timestamps count on another clock than the frames' by the arrival times).
+The **sync check** runs once per session and camera: the capture worker measures
 the motion inside the framing rectangle of each frame (the share of a 320- or 160-pixel luma plane,
 read with `VideoFrame.copyTo`, that changed by more than 12 levels), the clapperboard looks for each
 single cube turn's onset in the frames around it against the picture just before it, and the median
