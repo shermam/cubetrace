@@ -283,6 +283,15 @@ their centres, so the cross is *not* complete; write the test accordingly).
 - [ ] Runs over all 300 fixtures in under 2 s.
 - [ ] `docs/DATA-MODEL.md` §4 updated only if a definition had to change, with the reason.
 
+**Outcome (2026-09-27, PR #7).** Merged with `docs/DATA-MODEL.md` §4 as the source of truth
+where it differs from the contract above: there is no cross-face switch and no
+`crossFaceSwitched` field (the first cross completed is kept, as Cubeast keeps it; the rule
+above fired on one fixture and disagreed with the reference there); F2L pairs count only while
+the cross is complete; `recognitionMs`/`executionMs` are split as Cubeast splits them (leading
+last-layer turns are recognition); slots are named by their middle-layer edge (`FR`). Result on
+the 300 fixtures: 2400/2400 boundaries and 2306/2400 recognition times within ±1 ms. Extra
+exports: `PHASE_NAMES`, `DetectPhasesOptions` (`crossFace`, `solveStartMs`).
+
 ---
 
 ## T1.4 — `core`: attempt state machine, records, clock fit, statistics, schemas, store interface
