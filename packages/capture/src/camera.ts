@@ -1,9 +1,10 @@
-import type { FramingRect } from './framing';
+import type { CameraInfo, CropRect } from '@cubetrace/core';
 
 /**
  * The camera (docs/PLAN.md, T2.1): the constraints that open the chosen camera, snapshots of what
  * its track says it is and does, the manual controls it has and applying them, where it faces, the
- * frame rate it really delivers, and the session's `cameras[]` entry (docs/DATA-MODEL.md, schema 2).
+ * frame rate it really delivers, and the session's `cameras[]` entry (@cubetrace/core's `CameraInfo`,
+ * docs/DATA-MODEL.md §6).
  * Plain TypeScript over the MediaStreamTrack API (tracks are parameters; no browser global is read),
  * tested in Node against the owner's probe reports in docs/devices/.
  *
@@ -451,7 +452,8 @@ export function facingFromLabel(label: string): CameraFacing {
 /**
  * The camera's short label in the session: `phone` when the host label says phone (the default
  * labels of phones all do: "Android phone", "iPhone", "Phone"), `laptop` otherwise, followed by
- * `-front` or `-rear` when the facing is known: `laptop`, `phone-front`, `phone-rear`.
+ * `-front` or `-rear` when the facing is known: `laptop`, `phone-front`, `phone-rear`. Lowercase
+ * words joined by hyphens, as the camera labels that name clip files must be.
  */
 export function cameraLabel(hostLabel: string, facing: CameraFacing): string {
   const base = /phone/i.test(hostLabel) ? 'phone' : 'laptop';
@@ -465,37 +467,23 @@ export function cameraLabel(hostLabel: string, facing: CameraFacing): string {
   }
 }
 
-/**
- * A camera of the session: `session.json` `cameras[]`, version 2 (docs/PLAN.md, T2.0), for a
- * camera of this device (`local`). `constraints` is what it was asked for, `crop` the framing
- * rectangle in frame pixels; `mode` is `full` in phase 2 (the video keeps the whole frame).
- */
-export interface CameraInfo {
-  readonly label: string;
-  readonly local: true;
-  readonly facing: CameraFacing;
-  readonly deviceLabel: string;
-  readonly settings: JsonObject;
-  readonly capabilities: JsonObject;
-  readonly constraints: JsonObject;
-  readonly crop: FramingRect | null;
-  readonly mode: 'full' | 'crop';
-}
-
 /** The part of a track that `cameraInfo` reads. */
 export interface CameraTrack extends SnapshotSource {
   readonly label: string;
 }
 
 /**
- * The session's entry for the camera open on `track`, which `choice` opened, framed by `crop`, on
- * the host labelled `hostLabel`.
+ * The session's entry (`session.json` `cameras[]`) for the camera open on `track`, which `choice`
+ * opened, on the host labelled `hostLabel`: a camera of this device (`local`), its facing, its
+ * label and the browser's, its settings and capabilities (`snapshot`), the constraints it was asked
+ * for (without the device id), `crop`, the framing rectangle in frame pixels (null for the whole
+ * frame), and `mode: 'full'`: in phase 2 the video keeps the whole frame.
  */
 export function cameraInfo(
   hostLabel: string,
   choice: CameraChoice,
   track: CameraTrack,
-  crop: FramingRect | null,
+  crop: CropRect | null,
 ): CameraInfo {
   const { settings, capabilities } = snapshot(track);
   const facing = facingOf(settings, track.label);

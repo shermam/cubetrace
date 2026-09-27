@@ -532,6 +532,8 @@ describe('CameraService', () => {
     const camera = load();
     expect(camera.cameraInfo()).toBeNull();
     await camera.start();
+    // The whole frame is no crop.
+    expect(camera.cameraInfo()?.crop).toBeNull();
     camera.setFraming({ x: 480, y: 270, w: 960, h: 540 });
 
     expect(camera.cameraInfo()).toEqual({

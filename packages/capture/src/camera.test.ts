@@ -1,6 +1,8 @@
 /// <reference types="node" />
 // Node's types for this file only: it reads the owner's probe reports (docs/devices/) with node:fs.
 import { readFileSync } from 'node:fs';
+import { SESSION_SCHEMA } from '@cubetrace/core';
+import { Ajv2020 } from 'ajv/dist/2020';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { CameraChoice, ControlValues, JsonObject } from './index';
@@ -389,6 +391,27 @@ describe('cameraInfo', () => {
     });
     expect(JSON.stringify(info)).not.toContain('secret-id');
     expect(info.crop).not.toBe(crop);
+  });
+
+  it("is a valid camera of session.json's schema 2, for each probed camera", () => {
+    const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
+    ajv.addSchema(SESSION_SCHEMA);
+    const validate = ajv.getSchema(`${String(SESSION_SCHEMA['$id'])}#/$defs/camera`);
+    expect(validate).toBeDefined();
+    const entries = [
+      cameraInfo('macOS laptop', { deviceId: 'id' }, trackOf(MACBOOK), null),
+      cameraInfo('Android phone', { deviceId: null }, trackOf(PHONE_FRONT), {
+        x: 0,
+        y: 420,
+        w: 1080,
+        h: 1080,
+      }),
+      cameraInfo('Android phone', { deviceId: 'id', exactFps: true }, trackOf(PHONE_REAR), null),
+    ];
+    for (const entry of entries) {
+      expect(validate?.(entry), JSON.stringify(validate?.errors)).toBe(true);
+    }
+    expect(entries.map((entry) => entry.label)).toEqual(['laptop', 'phone-front', 'phone-rear']);
   });
 
   it('labels the MacBook camera "laptop", facing unknown', () => {

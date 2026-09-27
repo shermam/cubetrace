@@ -24,11 +24,11 @@ import {
   fallbackChoice,
   fitControls,
   framingFor,
+  isFullFrame,
   snapshot,
   watchFrames,
   type CameraChoice,
   type CameraFacing,
-  type CameraInfo,
   type ControlName,
   type ControlValues,
   type FrameSize,
@@ -37,6 +37,7 @@ import {
   type LumaSampler,
   type MeteringMode,
 } from '@cubetrace/capture';
+import type { CameraInfo } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import {
@@ -406,17 +407,20 @@ export class CameraService {
   }
 
   /**
-   * The session's `cameras[]` entry for the open camera (docs/PLAN.md, T2.0: label, facing, device
-   * label, settings, capabilities, constraints, the framing as `crop`, `mode: 'full'`); null while
-   * the camera is not on.
+   * The session's `cameras[]` entry for the open camera (@cubetrace/core's `CameraInfo`: label,
+   * facing, device label, settings, capabilities, constraints, the framing rectangle as `crop`, null
+   * for the whole frame, and `mode: 'full'`); null while the camera is not on.
    */
   cameraInfo(): CameraInfo | null {
     const track = this.track;
     const choice = this.choice;
+    const rect = this.framing();
+    const size = this.frameSize();
     if (track === null || choice === null || this.statusSignal() !== 'on') {
       return null;
     }
-    return cameraInfo(this.prefs.hostLabel(), choice, track, this.framing());
+    const crop = rect === null || size === null || isFullFrame(rect, size) ? null : rect;
+    return cameraInfo(this.prefs.hostLabel(), choice, track, crop);
   }
 
   /**
