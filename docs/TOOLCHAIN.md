@@ -251,14 +251,15 @@ alive.
   `search-worker-entry.js` when it doesn't exist, if the library semantics have been mangled by
   `esbuild`"); `logPerf: false` drops the console warning it otherwise prints with the duration of
   every scramble search. Not at import time: the package declares `"sideEffects": false`.
-- *Output:* cubing.js is only in lazy chunks; the initial bundle stays at 243 kB. The build emits
-  about 1.2 MB of it in 24 chunks (335 kB gzipped), measured with `ng build --stats-json`; a 3x3x3
-  scramble loads about 110 kB of that (the worker entry, the worker's own chunk, the 3x3x3 search
-  and shared chunks). The rest is cubing.js's code for other puzzles and searches, which the timer
-  never loads; the largest is its WebAssembly search, `twips` (671 kB). Every chunk is in the `app`
-  asset group of `dist/web/browser/ngsw.json` (30 of 30 JavaScript files on 2026-09-27), so the
-  service worker prefetches all of it, the unused chunks too; a lazy asset group for those would
-  save that download if install size ever matters.
+- *Output:* cubing.js is only in lazy chunks and adds nothing to the initial bundle (checked with
+  `ng build --stats-json`: no cubing.js module in any initial chunk). The build emits about 1.2 MB
+  of it in 24 chunks (335 kB gzipped); a 3x3x3 scramble loads about 110 kB of that (the worker
+  entry, the worker's own chunk, the 3x3x3 search and shared chunks). The rest is cubing.js's code
+  for other puzzles and searches, which the timer never loads; the largest is its WebAssembly
+  search, `twips` (671 kB). Every JavaScript file of the build is in the `app` asset group of
+  `dist/web/browser/ngsw.json` (all 31 on 2026-09-27), so the service worker prefetches all of
+  cubing.js, the unused chunks too; a lazy asset group for those would save that download if
+  install size ever matters.
 - *Checked end to end:* `apps/web/e2e/scramble.spec.ts` expects a scramble on the Timer page, and
   a worker, on the dev server, on the production build under `/cubetrace/`, and on that build
   offline after the service worker has cached it.
