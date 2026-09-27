@@ -578,6 +578,74 @@ describe('the OPFS fake', () => {
     await expect(second.write('four')).rejects.toThrow(TypeError);
   });
 
+  it('keeps bytes as they are written, and text as UTF-8', async () => {
+    const handle = await new FakeDirectoryHandle().getFileHandle('f', { create: true });
+    const writable = await handle.createWritable();
+    await writable.write('é ');
+    await writable.write(new Uint8Array([0, 255, 7]));
+    await writable.write(new Uint8Array([1, 2, 3, 4]).subarray(1, 3));
+    await writable.write(new Uint16Array([0x4241]).buffer);
+    await writable.close();
+
+    expect([...handle.bytes]).toEqual([0xc3, 0xa9, 0x20, 0, 255, 7, 2, 3, 0x41, 0x42]);
+    const read = await handle.getFile();
+    expect(read.size).toBe(10);
+    expect([...new Uint8Array(await read.arrayBuffer())]).toEqual([...handle.bytes]);
+  });
+
+  it('has access handles only where asked (a worker), which write in place and lock the file', async () => {
+    const window = await new FakeDirectoryHandle().getFileHandle('f', { create: true });
+    expect(window.createSyncAccessHandle).toBeUndefined();
+
+    const dir = new FakeDirectoryHandle('', { syncAccessHandle: true });
+    await dir.plant('f', 'old content');
+    const handle = await dir.getFileHandle('f');
+    const access = await handle.createSyncAccessHandle?.();
+    if (access === undefined) {
+      throw new Error('No access handle.');
+    }
+    access.truncate(3);
+    expect(access.write(new TextEncoder().encode('ABC'), { at: 2 })).toBe(3);
+    // In place: what was written is there before close() or flush().
+    expect(handle.text).toBe('olABC');
+    expect(access.getSize()).toBe(5);
+    expect(handle.locked).toBe(true);
+    await expect(handle.createWritable()).rejects.toMatchObject({
+      name: 'NoModificationAllowedError',
+    });
+    await expect(handle.createSyncAccessHandle?.()).rejects.toMatchObject({
+      name: 'NoModificationAllowedError',
+    });
+    await expect(dir.removeEntry('f')).rejects.toMatchObject({
+      name: 'NoModificationAllowedError',
+    });
+    access.flush();
+    access.close();
+    expect(handle.locked).toBe(false);
+    expect(() => access.write(new Uint8Array(1))).toThrow('The access handle is closed.');
+    await dir.removeEntry('f');
+  });
+
+  it('cuts off an access handle with the page: what it wrote stays, its lock goes', async () => {
+    const dir = new FakeDirectoryHandle('', { syncAccessHandle: true });
+    const handle = await dir.getFileHandle('f', { create: true });
+    const access = await handle.createSyncAccessHandle?.();
+    if (access === undefined) {
+      throw new Error('No access handle.');
+    }
+    dir.interruptAfter(1);
+    access.write(new TextEncoder().encode('kept'));
+    // From here on nothing happens, as if no code ran any more.
+    expect(access.write(new TextEncoder().encode(' lost'), { at: 4 })).toBe(0);
+    access.close();
+    expect(dir.interrupted).toBe(true);
+    expect(handle.openAccessHandle).toBe(true);
+
+    dir.resume();
+    expect(handle.text).toBe('kept');
+    expect(handle.openAccessHandle).toBe(false);
+  });
+
   it('moves a file over another in one step, and the handle takes the new name', async () => {
     const dir = new FakeDirectoryHandle();
     await dir.plant('record', 'old');

@@ -1,22 +1,48 @@
-// The part of the File System API that the session store uses, as structural types: the browser's
-// origin private file system (`navigator.storage.getDirectory()`) satisfies them, and so does the
-// in-memory fake of fake-opfs.ts, which the tests run the store against in Node.
+// The part of the File System API that the session store and the clip writer (packages/capture)
+// use, as structural types: the browser's origin private file system
+// (`navigator.storage.getDirectory()`) satisfies them, and so does the in-memory fake of
+// fake-opfs.ts, which the tests run them against in Node.
 
-/** The part of `FileSystemWritableFileStream` the store uses. */
+/** The part of `FileSystemWritableFileStream` the store and the clip writer use. */
 export interface OpfsWritable {
-  write(data: string): Promise<void>;
-  /** Replaces the file's content with what was written (Chrome writes to a swap file until then). */
+  /** Text is written as UTF-8. */
+  write(data: string | BufferSource): Promise<void>;
+  /**
+   * Replaces the file's content with what was written (Chrome writes to a swap file until then).
+   */
   close(): Promise<void>;
   /** Discards what was written; the file keeps its previous content. */
   abort(reason?: unknown): Promise<void>;
 }
 
-/** The part of `FileSystemFileHandle` the store uses. */
+/**
+ * The part of `FileSystemSyncAccessHandle` the clip writer uses: a file's bytes read and written in
+ * place, synchronously (Chrome 108 and later), in dedicated workers only. Chrome writes straight
+ * into the file (no swap file, unlike a writable stream), and the handle locks the file until
+ * `close()`.
+ */
+export interface OpfsSyncAccessHandle {
+  /** Writes `data` at byte `at` (default 0) and returns the number of bytes written. */
+  write(data: BufferSource, options?: { at?: number }): number;
+  truncate(size: number): void;
+  getSize(): number;
+  /** Persists what was written. */
+  flush(): void;
+  close(): void;
+}
+
+/** The part of `FileSystemFileHandle` the store and the clip writer use. */
 export interface OpfsFileHandle {
   readonly kind: 'file';
   readonly name: string;
   getFile(): Promise<{ text(): Promise<string> }>;
   createWritable(): Promise<OpfsWritable>;
+  /**
+   * An access handle on the file (`FileSystemSyncAccessHandle`), where Chrome has one: in dedicated
+   * workers, not on the window. Rejects with `NoModificationAllowedError` while a writable stream
+   * or another access handle is open on the file.
+   */
+  createSyncAccessHandle?(): Promise<OpfsSyncAccessHandle>;
   /**
    * Renames the file within its directory, replacing a file that has the new name in one step, and
    * the handle takes the new name (Chrome 111 and later; missing before). Chrome rejects with

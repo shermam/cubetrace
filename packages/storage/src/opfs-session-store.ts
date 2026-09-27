@@ -416,8 +416,11 @@ async function removeIn(dir: OpfsDirectoryHandle, name: string): Promise<void> {
   }
 }
 
-/** A fresh temporary name for a write of the file `name`: `<name>.<8 base-36 digits>.tmp`. */
-function temporaryName(name: string): string {
+/**
+ * A fresh temporary name for a write of the file `name`: `<name>.<8 base-36 digits>.tmp`
+ * (docs/DATA-MODEL.md §5). The clip writer of packages/capture names its temporary files so too.
+ */
+export function temporaryName(name: string): string {
   const random = Math.floor(Math.random() * 36 ** 8)
     .toString(36)
     .padStart(8, '0');
@@ -425,7 +428,7 @@ function temporaryName(name: string): string {
 }
 
 /** Whether `entry` is the name of a temporary file of `name` (see temporaryName). */
-function isTemporaryOf(entry: string, name: string): boolean {
+export function isTemporaryOf(entry: string, name: string): boolean {
   return entry.startsWith(`${name}.`) && TEMPORARY_TAIL.test(entry.slice(name.length + 1));
 }
 
