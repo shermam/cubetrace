@@ -146,7 +146,9 @@ test('demo solves with the camera on get their two clips, which play and downloa
   await expect
     .poll(async () => Number(await stats.getAttribute('data-buffer-seconds')), { timeout: 20_000 })
     .toBeGreaterThanOrEqual(4);
-  await expect(page.getByTestId('recording-codecs')).toHaveText(/^vp09\.00\.40\.08, opus$/);
+  await expect(page.getByTestId('recording-codecs')).toHaveText(
+    /^vp09\.00\.40\.08 at 4 Mbps, opus$/,
+  );
 
   // The same replays with the camera on: each attempt gets both clips, the solve's a second after
   // the solve. The next replay waits for them, as a solver's next solve comes after the next

@@ -34,6 +34,7 @@ export function statsOf(seconds: number, changes: Partial<CaptureStats> = {}): C
     bufferSeconds: seconds,
     bufferBytes: Math.round(seconds * 1_000_000),
     codec: 'vp09.00.40.08',
+    bitrate: 4_000_000,
     audioCodec: 'opus',
     ...changes,
   };

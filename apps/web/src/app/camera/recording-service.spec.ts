@@ -114,7 +114,7 @@ describe('RecordingService', () => {
     const capture = r.starter.last;
     expect(capture.video).toBe(r.camera.stream()?.getVideoTracks()[0]);
     expect(capture.audio).toBe(r.media.audioTracks[0]);
-    expect(capture.config).toEqual({ audio: true });
+    expect(capture.config).toEqual({ audio: true, quality: 'standard' });
     expect(r.media.requests.at(-1)).toEqual({ audio: true });
     expect(r.recording.status()).toBe('starting');
 
@@ -167,7 +167,7 @@ describe('RecordingService', () => {
     r.s.settings.setRecordAudio(false);
     await recording(r);
     expect(r.starter.last.audio).toBeNull();
-    expect(r.starter.last.config).toEqual({ audio: false });
+    expect(r.starter.last.config).toEqual({ audio: false, quality: 'standard' });
     expect(r.media.requests.some((request) => request.audio === true)).toBe(false);
     expect(r.s.service.session()?.audio).toBe(false);
 
@@ -181,6 +181,37 @@ describe('RecordingService', () => {
     );
     r.starter.last.emitError({ message: 'The audio encoder failed.', fatal: false });
     expect(r.recording.notice()).toBe('The audio encoder failed.');
+  });
+
+  it('starts again at the video quality Settings says, once the clips waiting for their time are saved', async () => {
+    const r = rig();
+    r.s.settings.setVideoQuality('high');
+    const { fake, capture } = await recording(r);
+    expect(capture.config).toEqual({ audio: true, quality: 'high' });
+    r.s.settings.setVideoQuality('high');
+    await sync(r);
+    expect(r.starter.started).toHaveLength(1);
+
+    // The scramble is done and its clip waits for its time: Standard saves it at once, from the
+    // pipeline at High, which stops once it is written; the next one records at Standard.
+    turn(r.s, fake, 'R U F');
+    r.s.settings.setVideoQuality('standard');
+    TestBed.tick();
+    await settle();
+    expect(capture.saves.map((save) => save.params.segment)).toEqual(['scramble']);
+    expect(capture.stopped).toBe(false);
+    capture.saveNext();
+    await sync(r);
+    expect(capture.stopped).toBe(true);
+    expect(r.starter.started).toHaveLength(2);
+    expect(r.starter.last.video).toBe(capture.video);
+    expect(r.starter.last.config).toEqual({ audio: true, quality: 'standard' });
+    expect(r.media.audioTracks.map((track) => track.readyState)).toEqual(['ended', 'live']);
+    expect(r.recording.status()).toBe('starting');
+    r.starter.last.emitStats(statsOf(1));
+    expect(r.recording.status()).toBe('recording');
+    await r.s.service.whenSaved();
+    expect(r.recording.lastClip()?.clip.segment).toBe('scramble');
   });
 
   it('saves the scramble clip and the solve clip of an attempt, with their margins and the framing', async () => {

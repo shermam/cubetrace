@@ -244,6 +244,41 @@ describe('SettingsPage', () => {
     expect(settings.sharpnessThreshold()).toBe(12.5);
   });
 
+  it('keeps the video quality, Standard by default, its choices at the resolution and frame rate', async () => {
+    const fixture = await render();
+    const root = fixture.nativeElement as HTMLElement;
+    const quality = root.querySelector<HTMLSelectElement>('#video-quality');
+    const options = (): string[] =>
+      Array.from(quality?.options ?? [], (option) => option.text.trim());
+    expect(options()).toEqual([
+      'Standard (4 Mbps, ≈ 20 MB per attempt)',
+      'High (8 Mbps, ≈ 40 MB per attempt)',
+      'Maximum (12 Mbps, ≈ 60 MB per attempt)',
+    ]);
+    expect(quality?.value).toBe('standard');
+
+    if (quality) {
+      quality.value = 'high';
+      quality.dispatchEvent(new Event('change'));
+    }
+    await update(fixture);
+    const settings = TestBed.inject(SettingsService);
+    expect(settings.videoQuality()).toBe('high');
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
+      videoQuality: 'high',
+    });
+
+    // Exactly 60 fps: 1.5 times as much.
+    settings.setCameraFrameRate('60');
+    await update(fixture);
+    expect(options()).toEqual([
+      'Standard (6 Mbps, ≈ 30 MB per attempt)',
+      'High (12 Mbps, ≈ 60 MB per attempt)',
+      'Maximum (18 Mbps, ≈ 90 MB per attempt)',
+    ]);
+    expect(quality?.value).toBe('high');
+  });
+
   it('keeps Record audio, on by default', async () => {
     const fixture = await render();
     const box = input(fixture, '[data-testid="record-audio"]');

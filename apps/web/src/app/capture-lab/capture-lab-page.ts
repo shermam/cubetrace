@@ -469,6 +469,7 @@ function counterRows(
     { label: 'Buffer, seconds', testId: 'lab-buffer-seconds', value: value('bufferSeconds') },
     { label: 'Buffer, bytes', testId: 'lab-buffer-bytes', value: value('bufferBytes') },
     { label: 'Video codec', testId: 'lab-codec', value: value('codec') },
+    { label: 'Video bitrate, bits per second', testId: 'lab-bitrate', value: value('bitrate') },
     { label: 'Audio codec', testId: 'lab-audio-codec', value: value('audioCodec') },
   ];
 }

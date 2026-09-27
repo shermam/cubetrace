@@ -45,6 +45,7 @@ describe('SettingsService', () => {
     expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.sharpnessThreshold()).toBe(20);
     expect(settings.recordAudio()).toBe(true);
+    expect(settings.videoQuality()).toBe('standard');
     expect(settings.cameraSettingsOpen()).toBeNull();
     expect(settings.cameraPickFor('macOS laptop')).toBeNull();
     expect(settings.cameraControlsFor('FaceTime HD Camera')).toEqual({});
@@ -66,6 +67,7 @@ describe('SettingsService', () => {
     settings.setCameraFrameRate('60');
     expect(settings.setSharpnessThreshold(35.5)).toBe(true);
     settings.setRecordAudio(false);
+    settings.setVideoQuality('high');
     settings.setCameraSettingsOpen(false);
     settings.setCameraPick('office-mbp', 'id-1', 'FaceTime HD Camera');
     settings.setCameraControls('camera 0, facing back', { exposureMode: 'manual', iso: 400 });
@@ -88,6 +90,7 @@ describe('SettingsService', () => {
       cameraFrameRate: '60',
       sharpnessThreshold: 35.5,
       recordAudio: false,
+      videoQuality: 'high',
       cameraSettingsOpen: false,
       cameraPicks: [{ host: 'office-mbp', deviceId: 'id-1', label: 'FaceTime HD Camera' }],
       cameraControls: [
@@ -114,6 +117,7 @@ describe('SettingsService', () => {
     expect(reloaded.cameraFrameRate()).toBe('60');
     expect(reloaded.sharpnessThreshold()).toBe(35.5);
     expect(reloaded.recordAudio()).toBe(false);
+    expect(reloaded.videoQuality()).toBe('high');
     expect(reloaded.cameraSettingsOpen()).toBe(false);
     expect(reloaded.cameraPickFor('office-mbp')).toEqual({
       host: 'office-mbp',
@@ -212,6 +216,7 @@ describe('SettingsService', () => {
         cameraFrameRate: 120,
         sharpnessThreshold: -1,
         recordAudio: 'no',
+        videoQuality: 'ultra',
         cameraSettingsOpen: 'open',
         cameraPicks: [{ host: 'a', deviceId: '' }, { host: 'b', deviceId: 'id' }, 'c'],
         cameraControls: [
@@ -234,12 +239,43 @@ describe('SettingsService', () => {
     expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.sharpnessThreshold()).toBe(20);
     expect(settings.recordAudio()).toBe(true);
+    expect(settings.videoQuality()).toBe('standard');
     expect(settings.cameraSettingsOpen()).toBeNull();
     expect(settings.cameraPickFor('a')).toBeNull();
     expect(settings.cameraPickFor('b')).toEqual({ host: 'b', deviceId: 'id', label: '' });
     expect(settings.cameraControlsFor('x')).toEqual({ zoom: 2 });
     expect(settings.cameraControlsFor('y')).toEqual({});
     expect(settings.cameraFramings().map((entry) => entry.camera)).toEqual(['x']);
+  });
+
+  it('reads the settings stored before the video quality existed as Standard, the rest as stored', () => {
+    // What 0.2.0 stored before T2.10: every camera setting but the video quality.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        cameraOn: true,
+        cameraResolution: '720p',
+        cameraFrameRate: '30',
+        sharpnessThreshold: 30,
+        recordAudio: false,
+        cameraSettingsOpen: true,
+      }),
+    );
+    const settings = load();
+
+    expect(settings.videoQuality()).toBe('standard');
+    expect(settings.cameraOn()).toBe(true);
+    expect(settings.cameraResolution()).toBe('720p');
+    expect(settings.cameraFrameRate()).toBe('30');
+    expect(settings.recordAudio()).toBe(false);
+
+    settings.setVideoQuality('maximum');
+    expect(stored()).toMatchObject({ videoQuality: 'maximum', cameraResolution: '720p' });
+    expect(load().videoQuality()).toBe('maximum');
+    load().setVideoQuality('standard');
+    expect(load().videoQuality()).toBe('standard');
+    expect(stored()).toMatchObject({ videoQuality: 'standard' });
   });
 
   it('stores MAC addresses normalized, sorted by name, and refuses what is not one', () => {

@@ -28,6 +28,7 @@ import {
   CAMERA_RESOLUTIONS,
   CAMERA_RESOLUTION_TEXT,
   SettingsService,
+  VIDEO_QUALITIES,
 } from '../settings/settings-service';
 import {
   fpsText,
@@ -42,6 +43,7 @@ import { CameraService } from './camera-service';
 import { RecordingPanel } from './recording-panel';
 import { RecordingService } from './recording-service';
 import { showStream } from './video';
+import { videoQualityOptions } from './video-quality';
 
 /** A corner is taken hold of within this many CSS pixels of it (a finger's width). */
 const HANDLE_REACH_PX = 24;
@@ -76,10 +78,10 @@ interface Drag {
  * Edit shows over a larger picture of the camera (mirrored for a front camera, like a mirror; the
  * frames are not; drag the rectangle to move it, drag a corner to resize it, by mouse or touch; the
  * arrow keys move it and Shift + arrows resize it; kept per camera), the sharpness meter, the
- * camera's manual controls, the resolution, frame rate and audio of Settings, and in plain words why
- * the camera did not open or opened otherwise than asked; below them, the recording (T2.4,
- * `RecordingPanel`), which this panel's `RecordingService` runs from the moment the Timer page loads
- * it.
+ * camera's manual controls, the resolution, frame rate, video quality (T2.10) and audio of Settings,
+ * and in plain words why the camera did not open or opened otherwise than asked; below them, the
+ * recording (T2.4, `RecordingPanel`), which this panel's `RecordingService` runs from the moment the
+ * Timer page loads it.
  *
  * Closed at first; the first time the camera is on it opens by itself, so that its controls are
  * found, and from then on it stays as it was left (Settings keeps it). The larger picture is there
@@ -114,6 +116,10 @@ export class CameraPanel {
     value,
     label: CAMERA_FRAME_RATE_TEXT[value],
   }));
+  /** Each quality with its bitrate and size per attempt at the resolution and frame rate chosen. */
+  protected readonly qualities = computed(() =>
+    videoQualityOptions(this.prefs.cameraResolution(), this.prefs.cameraFrameRate()),
+  );
 
   protected readonly rect = computed(() => this.draft() ?? this.camera.framing());
   /** The rectangle over the larger picture, in percent of the frame. */
@@ -220,6 +226,13 @@ export class CameraPanel {
     const rate = CAMERA_FRAME_RATES.find((option) => option === value);
     if (rate !== undefined) {
       this.prefs.setCameraFrameRate(rate);
+    }
+  }
+
+  protected setVideoQuality(value: string): void {
+    const quality = VIDEO_QUALITIES.find((option) => option === value);
+    if (quality !== undefined) {
+      this.prefs.setVideoQuality(quality);
     }
   }
 
