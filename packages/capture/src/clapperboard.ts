@@ -524,7 +524,8 @@ function plural(count: number, word: string): string {
   return count === 1 ? word : `${word}s`;
 }
 
+/** `value` to `digits` decimals; never -0. */
 function round(value: number, digits: number): number {
   const scale = 10 ** digits;
-  return Math.round(value * scale) / scale;
+  return Math.round(value * scale) / scale + 0;
 }
