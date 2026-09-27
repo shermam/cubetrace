@@ -1,12 +1,13 @@
 // The messages between the window (pipeline.ts), the capture worker (capture-worker.ts) and the clip
 // worker (clip-worker.ts), and the settings and counters they share (docs/PLAN.md, T2.2; the clips
-// of T2.3; the clip worker of T2.4). The window starts both workers and gives each an end of a
-// channel between them: the capture worker cuts a clip and moves the cut through it to the clip
-// worker, which muxes and writes it and answers the window. Plain TypeScript: nothing here touches a
-// browser API.
+// of T2.3; the clip worker of T2.4; the sync check's motion of T2.5). The window starts both workers
+// and gives each an end of a channel between them: the capture worker cuts a clip and moves the cut
+// through it to the clip worker, which muxes and writes it and answers the window. Plain TypeScript:
+// nothing here touches a browser API.
 import type { VideoClip, VideoSegment } from '@cubetrace/core';
 
 import { cutBuffers, type Cut } from './cut';
+import type { FramingRect } from './framing';
 import { DEFAULT_BOUNDS } from './ring-buffer';
 
 /** What `startCapture` is asked for; every field has a default. */
@@ -129,7 +130,24 @@ export interface StopMessage {
   readonly type: 'stop';
 }
 
-export type WindowToWorker = StartMessage | CutRequest | MuxAndWriteRequest | StopMessage;
+/**
+ * The window asks the capture worker for the motion of every frame inside `rect` (frame pixels, as
+ * the framing rectangle is kept; null for the whole frame), for a sync check (docs/PLAN.md, T2.5),
+ * until `sync-stop` with the same id. A new `sync-start` ends the one before.
+ */
+export interface SyncStart {
+  readonly type: 'sync-start';
+  readonly id: number;
+  readonly rect: FramingRect | null;
+}
+
+export interface SyncStop {
+  readonly type: 'sync-stop';
+  readonly id: number;
+}
+
+export type WindowToWorker =
+  StartMessage | CutRequest | MuxAndWriteRequest | StopMessage | SyncStart | SyncStop;
 
 /** The window gives the clip worker its end of the channel from the capture worker. */
 export interface ConnectMessage {
@@ -198,6 +216,37 @@ export interface ErrorMessage extends CaptureError {
   readonly type: 'error';
 }
 
+/**
+ * One frame's motion during a sync check (docs/PLAN.md, T2.5): its own timestamp and its arrival in
+ * the capture worker, which place it on the host clock as the clips' frames are placed
+ * (docs/DATA-MODEL.md §9), and how much the picture in the rectangle changed since the frame before
+ * (motion.ts).
+ */
+export interface MotionSample {
+  /** The frame's `VideoFrame.timestamp`, µs. */
+  readonly timestampUs: number;
+  /** Host ms when the frame reached the capture worker. */
+  readonly arrivalHostMs: number;
+  /** The mean absolute difference of its luma from the previous frame's, in luma levels. */
+  readonly energy: number;
+  /** The capture worker's time on it, ms: the copy of the frame's pixels and the arithmetic. */
+  readonly costMs: number;
+}
+
+/** A frame's motion, for the sync check of the same id; the first frame of a check has none. */
+export interface SyncSampleMessage {
+  readonly type: 'sync-sample';
+  readonly id: number;
+  readonly sample: MotionSample;
+}
+
+/** The frames' motion cannot be measured (their pixels cannot be read): the check ends. */
+export interface SyncErrorMessage {
+  readonly type: 'sync-error';
+  readonly id: number;
+  readonly message: string;
+}
+
 /** The worker has closed its encoders and readers after `stop`. */
 export interface StoppedMessage {
   readonly type: 'stopped';
@@ -212,6 +261,8 @@ export type WorkerToWindow =
   | DeleteClipDone
   | DeleteClipFailed
   | ErrorMessage
+  | SyncSampleMessage
+  | SyncErrorMessage
   | StoppedMessage;
 
 export type CaptureMessage = WindowToWorker | WindowToClipWorker | ClipJob | WorkerToWindow;
@@ -256,6 +307,8 @@ const WINDOW_TYPES: ReadonlySet<unknown> = new Set<WindowToWorker['type']>([
   'cut',
   'mux-and-write',
   'stop',
+  'sync-start',
+  'sync-stop',
 ]);
 const WORKER_TYPES: ReadonlySet<unknown> = new Set<WorkerToWindow['type']>([
   'stats',
@@ -266,6 +319,8 @@ const WORKER_TYPES: ReadonlySet<unknown> = new Set<WorkerToWindow['type']>([
   'delete-clip-done',
   'delete-clip-failed',
   'error',
+  'sync-sample',
+  'sync-error',
   'stopped',
 ]);
 const CLIP_WORKER_TYPES: ReadonlySet<unknown> = new Set<WindowToClipWorker['type']>([

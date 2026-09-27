@@ -16,6 +16,7 @@ import type {
   CaptureStats,
   ConnectMessage,
   DeleteClipParams,
+  MotionSample,
   SaveClipParams,
   StartMessage,
   WorkerToWindow,
@@ -276,6 +277,83 @@ describe('CaptureHandle', () => {
 
     expect(stats).toEqual([STATS]);
     expect(errors).toEqual([{ message: 'The audio encoder failed.', fatal: false }]);
+  });
+
+  it("asks the capture worker for the frames' motion and relays it to the watch until it stops", () => {
+    const capture = start();
+    const samples: MotionSample[] = [];
+    const errors: string[] = [];
+    const sample: MotionSample = {
+      timestampUs: 5_305_665_091,
+      arrivalHostMs: 1_790_516_343_600.5,
+      energy: 3.25,
+      costMs: 0.8,
+    };
+    const rect = { x: 480, y: 120, w: 960, h: 840 };
+
+    const stop = capture.watchMotion(
+      rect,
+      (value) => samples.push(value),
+      (message) => errors.push(message),
+    );
+    expect(worker.messages().at(-1)).toEqual({ type: 'sync-start', id: 1, rect });
+    worker.reply({ type: 'sync-sample', id: 1, sample });
+    // A sample of another check (one that ended) is not this watch's.
+    worker.reply({ type: 'sync-sample', id: 9, sample: { ...sample, energy: 99 } });
+    stop();
+    expect(worker.messages().at(-1)).toEqual({ type: 'sync-stop', id: 1 });
+    worker.reply({ type: 'sync-sample', id: 1, sample });
+    stop();
+
+    expect(samples).toEqual([sample]);
+    expect(errors).toEqual([]);
+    expect(
+      worker.messages().filter((message) => (message as { type: string }).type === 'sync-stop'),
+    ).toHaveLength(1);
+  });
+
+  it('ends a watch with the reason the worker gives, and one watch at a time', () => {
+    const capture = start();
+    const first: string[] = [];
+    const second: string[] = [];
+    capture.watchMotion(
+      null,
+      () => undefined,
+      (message) => first.push(message),
+    );
+    const stopSecond = capture.watchMotion(
+      null,
+      () => undefined,
+      (message) => second.push(message),
+    );
+
+    // The first watch was replaced: the worker's error about it reaches nobody.
+    worker.reply({ type: 'sync-error', id: 1, message: 'Error: no pixel format' });
+    worker.reply({ type: 'sync-error', id: 2, message: 'Error: no pixel format' });
+    stopSecond();
+
+    expect(first).toEqual([]);
+    expect(second).toEqual(['Error: no pixel format']);
+    // Ended by the worker: nothing to stop.
+    expect(worker.messages().at(-1)).toEqual({ type: 'sync-start', id: 2, rect: null });
+  });
+
+  it('refuses a watch once the capture is stopping', () => {
+    const capture = start();
+    void capture.stop();
+    const errors: string[] = [];
+
+    capture.watchMotion(
+      null,
+      () => undefined,
+      (message) => errors.push(message),
+    )();
+
+    expect(errors).toEqual(['The capture has stopped.']);
+    expect(worker.messages()).toEqual([
+      expect.objectContaining({ type: 'start' }),
+      { type: 'stop' },
+    ]);
   });
 
   it('reports a worker that fails to load as a fatal error', () => {

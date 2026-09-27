@@ -8,6 +8,7 @@
 import type { VideoClip } from '@cubetrace/core';
 
 import type { Cut } from './cut';
+import type { FramingRect } from './framing';
 import {
   isWorkerToWindow,
   post,
@@ -16,6 +17,7 @@ import {
   type CaptureError,
   type CaptureStats,
   type DeleteClipParams,
+  type MotionSample,
   type SaveClipParams,
   type WorkerToWindow,
 } from './protocol';
@@ -49,6 +51,18 @@ export interface CaptureHandle {
    * whether it removed them; rejects as `saveClip` does.
    */
   deleteClip(params: DeleteClipParams): Promise<boolean>;
+  /**
+   * Measures, for a sync check (docs/PLAN.md, T2.5), the motion of every frame from the next one on
+   * inside `rect` (frame pixels, as the framing rectangle; null for the whole frame): `onSample` gets
+   * each frame's motion (`MotionSample`) until the returned function is called; `onError` hears once
+   * why the frames cannot be measured, which ends it. One watch at a time: a new one ends the one
+   * before, and so does `stop()`.
+   */
+  watchMotion(
+    rect: FramingRect | null,
+    onSample: (sample: MotionSample) => void,
+    onError?: (message: string) => void,
+  ): () => void;
   /** `listener` gets the counters once per second; call the returned function to stop. */
   onStats(listener: (stats: CaptureStats) => void): () => void;
   /**
@@ -195,6 +209,14 @@ class Capture implements CaptureHandle {
   #stopped: (() => void) | undefined;
   /** Why the clip worker failed, once it has: clips are refused from then on. */
   #clipWorkerFailure: string | undefined;
+  /** The motion watch under way (a sync check's), by its id. */
+  #motion:
+    | {
+        readonly id: number;
+        readonly onSample: (sample: MotionSample) => void;
+        readonly onError: ((message: string) => void) | undefined;
+      }
+    | undefined;
 
   constructor(worker: Worker, clipWorker: Worker) {
     this.#worker = worker;
@@ -301,6 +323,29 @@ class Capture implements CaptureHandle {
     });
   }
 
+  watchMotion(
+    rect: FramingRect | null,
+    onSample: (sample: MotionSample) => void,
+    onError?: (message: string) => void,
+  ): () => void {
+    if (this.#stopping !== undefined) {
+      onError?.('The capture has stopped.');
+      return () => undefined;
+    }
+    const id = this.#nextId;
+    this.#nextId += 1;
+    this.#motion = { id, onSample, onError };
+    post(this.#worker, { type: 'sync-start', id, rect });
+    return () => {
+      if (this.#motion?.id === id) {
+        this.#motion = undefined;
+        if (this.#stopping === undefined) {
+          post(this.#worker, { type: 'sync-stop', id });
+        }
+      }
+    };
+  }
+
   onStats(listener: (stats: CaptureStats) => void): () => void {
     this.#statsListeners.add(listener);
     return () => {
@@ -342,6 +387,7 @@ class Capture implements CaptureHandle {
     this.#rejectAll([this.#cuts, this.#clips, this.#deletions], 'The capture has stopped.');
     this.#statsListeners.clear();
     this.#errorListeners.clear();
+    this.#motion = undefined;
   }
 
   /** Rejects every request of `requests` with `message`. */
@@ -409,6 +455,19 @@ class Capture implements CaptureHandle {
       case 'error':
         this.#emitError({ message: message.message, fatal: message.fatal });
         break;
+      case 'sync-sample':
+        if (this.#motion?.id === message.id) {
+          this.#motion.onSample(message.sample);
+        }
+        break;
+      case 'sync-error': {
+        const motion = this.#motion;
+        if (motion?.id === message.id) {
+          this.#motion = undefined;
+          motion.onError?.(message.message);
+        }
+        break;
+      }
       case 'stopped':
         this.#stopped?.();
         break;

@@ -241,6 +241,12 @@ describe('message guards', () => {
     expect(isWindowToClipWorker({ type: 'delete-clip' })).toBe(true);
     expect(isWindowToClipWorker({ type: 'mux-and-write' })).toBe(false);
     expect(isWindowToWorker({ type: 'delete-clip' })).toBe(false);
+    expect(isWindowToWorker({ type: 'sync-start', id: 1, rect: null })).toBe(true);
+    expect(isWindowToWorker({ type: 'sync-stop', id: 1 })).toBe(true);
+    expect(isWindowToWorker({ type: 'sync-sample' })).toBe(false);
+    expect(isWorkerToWindow({ type: 'sync-sample' })).toBe(true);
+    expect(isWorkerToWindow({ type: 'sync-error' })).toBe(true);
+    expect(isWorkerToWindow({ type: 'sync-start' })).toBe(false);
     expect(isClipJob({ type: 'clip-job' })).toBe(true);
     expect(isClipJob({ type: 'mux-and-write' })).toBe(false);
     for (const other of [null, undefined, 'stop', 3, {}, { type: 3 }, []]) {
