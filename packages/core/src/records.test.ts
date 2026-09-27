@@ -229,16 +229,19 @@ describe('parseAttempt and parseSession', () => {
     }
   });
 
-  it('read the real-hardware export of version 2 as it is: a camera, a fit and two clips per attempt', () => {
+  it('read the real-hardware export of version 2 as it is: a camera, a fit and the clips of each attempt', () => {
     const i3 = HARDWARE.filter(({ schema }) => schema === 2);
     expect(i3.map(({ file, attempts }) => [file, attempts.length])).toEqual([
-      ['2026-09-27-macbook-pro-2021-gan356i3.json', 5],
+      ['2026-09-27-macbook-pro-2021-gan356i3.json', 6],
     ]);
     for (const { file, session, attempts } of i3) {
       expect(VALIDATE.session[2](session), JSON.stringify(VALIDATE.session[2].errors)).toBe(true);
       const s = parseSession(session);
       expect(s, file).toEqual(session);
       expect(s.cameras.map(({ label }) => label)).toEqual(['laptop']);
+      // Attempt 6's scramble clip was refused on the day (its start was older than the buffer, issue
+      // #34), and the session's notes say so.
+      expect(s.notes).toMatch(/^clip failed: scramble of attempt 6: /);
       for (const [k, attempt] of attempts.entries()) {
         const at = `${file} attempts[${String(k)}]`;
         expect(VALIDATE.attempt[2](attempt), JSON.stringify(VALIDATE.attempt[2].errors)).toBe(true);
@@ -249,7 +252,7 @@ describe('parseAttempt and parseSession', () => {
         expect(
           a.video.map(({ camera, segment }) => `${camera} ${segment}`),
           at,
-        ).toEqual(['laptop scramble', 'laptop solve']);
+        ).toEqual(a.index === 6 ? ['laptop solve'] : ['laptop scramble', 'laptop solve']);
       }
     }
   });

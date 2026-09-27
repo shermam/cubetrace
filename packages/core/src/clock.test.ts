@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CLOCK_FIT_WINDOW, CubeClockFit } from './index';
+import { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './index';
 
 /** A seeded pseudo-random generator (mulberry32), so that "random" tests are reproducible. */
 function random(seed: number): () => number {
@@ -158,6 +158,107 @@ describe('CubeClockFit', () => {
     const fit = new CubeClockFit();
     fit.params.a = 2;
     expect(fit.params.a).toBe(1);
+  });
+
+  describe("when the cube's clock starts again", () => {
+    /** `count` moves 300 ms apart on the cube clock from `cubeMs`, on the line host = a·cube + b. */
+    function run(a: number, b: number, cubeMs: number, count: number, seed: number): Sample[] {
+      const next = random(seed);
+      return Array.from({ length: count }, (_, k) => {
+        const cube = cubeMs + 300 * k;
+        return { cubeMs: cube, hostMs: a * cube + b + (2 * next() - 1) * 15, packetLast: true };
+      });
+    }
+
+    it('starts again at a reconnection: the fit is that of the moves since, as attempt 6 of the i3 needs', () => {
+      // Two moves 9 minutes into a connection, then 434 s later the cube's count restarted (561,080 ms
+      // back to 10,977 on the i3): the same cube, 0.1% slow, on a new line.
+      const before = run(1.001, 1_790_544_000_000, 559_025, 2, 1);
+      const after = run(1.001, 1_790_545_043_814, 10_977, 112, 2);
+      const fit = fitOf([...before, ...after]);
+      const fresh = fitOf(after);
+
+      expect(fit.restarts).toBe(1);
+      expect(fit.params).toEqual(fresh.params);
+      expect(fit.params.samples).toBe(112);
+      expect(fit.params.a).toBeCloseTo(1.001, 4);
+      expect(fit.params.residualP95Ms).toBeLessThan(16);
+      expect(fit.toHost(40_000)).toBeCloseTo(fresh.toHost(40_000), 6);
+    });
+
+    it("starts again when the cube's time falls behind the host's without going back", () => {
+      // A connection 5 s old at its last move; 300 s later the new connection's count is at 20 s.
+      const short = fitOf([
+        { cubeMs: 4000, hostMs: 1_000_000, packetLast: true },
+        { cubeMs: 5000, hostMs: 1_001_000, packetLast: true },
+        { cubeMs: 20_000, hostMs: 1_301_000, packetLast: true },
+        { cubeMs: 21_000, hostMs: 1_302_000, packetLast: true },
+      ]);
+      expect(short.restarts).toBe(1);
+      expect(short.params.samples).toBe(2);
+      expect(short.params.b).toBeCloseTo(1_281_000, 6);
+      // The i3's count of a pause of 80.1 s: 65,535 ms, the most its 16 bits hold.
+      const capped = fitOf([
+        { cubeMs: 100_000, hostMs: 5_000_000, packetLast: true },
+        { cubeMs: 101_000, hostMs: 5_001_001, packetLast: true },
+        { cubeMs: 101_000 + 65_535, hostMs: 5_001_001 + 80_131, packetLast: true },
+      ]);
+      expect(capped.restarts).toBe(1);
+      expect(capped.params.samples).toBe(1);
+      expect(capped.hasLine).toBe(false);
+    });
+
+    it('keeps its line through the jitter, a slow cube and pauses where both clocks advance alike', () => {
+      const samples: Sample[] = [
+        { cubeMs: 1000, hostMs: 50_000, packetLast: true },
+        // A cube time a few ms back, as the driver's reconstruction can give.
+        { cubeMs: 995, hostMs: 50_040, packetLast: true },
+        // A late packet: 300 ms of Bluetooth delay.
+        { cubeMs: 1300, hostMs: 50_600, packetLast: true },
+        // A pause of 5 minutes, both clocks alike (docs/DEVICES.md).
+        { cubeMs: 301_300, hostMs: 350_300, packetLast: true },
+      ];
+      // Then a cube 0.7% slow for 10 minutes of turns, a move every 300 ms of its clock.
+      for (let k = 1; k <= 2000; k++) {
+        samples.push({
+          cubeMs: 301_300 + 300 * k,
+          hostMs: 350_300 + 1.007 * 300 * k,
+          packetLast: true,
+        });
+      }
+      const fit = fitOf(samples);
+      expect(fit.restarts).toBe(0);
+      expect(fit.params.samples).toBe(samples.length);
+    });
+
+    it('draws the line between the two clocks at 1 s plus 1% of the host time between the samples', () => {
+      expect([CLOCK_RESTART_MS, CLOCK_RESTART_DRIFT]).toEqual([1000, 0.01]);
+      const behind = (ms: number): number =>
+        fitOf([
+          { cubeMs: 10_000, hostMs: 20_000, packetLast: true },
+          { cubeMs: 10_000 + 60_000 - ms, hostMs: 20_000 + 60_000, packetLast: true },
+        ]).restarts;
+      // 60 s of host time: 1000 + 600 ms allowed.
+      expect(behind(1600)).toBe(0);
+      expect(behind(1600.5)).toBe(1);
+      expect(behind(1601)).toBe(1);
+    });
+
+    it("waits for a packet's newest move: the older ones of a packet do not start it again", () => {
+      const fit = fitOf([
+        { cubeMs: 500_000, hostMs: 2_000_000, packetLast: true },
+        { cubeMs: 500_300, hostMs: 2_000_300, packetLast: true },
+        // After the reconnection, a packet of three moves.
+        { cubeMs: 9000, hostMs: 2_400_000, packetLast: false },
+        { cubeMs: 9200, hostMs: 2_400_000, packetLast: false },
+        { cubeMs: 9400, hostMs: 2_400_000, packetLast: true },
+        { cubeMs: 9700, hostMs: 2_400_300, packetLast: true },
+      ]);
+      expect(fit.restarts).toBe(1);
+      expect(fit.params.samples).toBe(2);
+      expect(fit.params.a).toBeCloseTo(1, 9);
+      expect(fit.toHost(10_000)).toBeCloseTo(2_400_600, 6);
+    });
   });
 
   it('rejects samples that are not finite, and a window that is not a positive integer', () => {
