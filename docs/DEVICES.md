@@ -74,7 +74,9 @@ its `hostMs` anyway, and the session-level `clock.cube` of schema 1 stays as a c
 What the capture worker sees of a frame's own time (T2.2), measured on 2026-09-27 with Chrome's fake
 camera and microphone (Playwright's Chromium 141, headless, on Linux, with
 `--use-fake-device-for-media-stream=fps=30`): by `apps/web/e2e/capture.spec.ts`, which prints these
-numbers at every run, and by a 96 s recording through `/capture-lab`.
+numbers at every run, and by a 96 s recording through `/capture-lab`. CI's runner gave the same
+picture on another machine: a first `timestamp` of 192,556,290 µs on a runner up for 203.4 s, a
+95th percentile of +0.4 ms around the median offset, and the audio's offset 0.1 ms from the video's.
 
 - **It does not start at 0 at the first frame.** It is the frame's time in microseconds on the
   system's monotonic clock (Chrome's `base::TimeTicks`: the time since boot, on Linux). The first
