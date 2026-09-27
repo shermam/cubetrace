@@ -935,5 +935,6 @@ starts no timer.
 kB raw. The motion code is in the capture worker only, 18.2 kB raw, 6.2 kB transferred (12.1 and 4.2
 before). The clapperboard and `SyncRun`, which the Camera section and the capture lab share, joined
 the window side of `packages/capture` in the chunk the two load, 20.1 kB raw (14.0 before); the
-Camera section's chunk, with `SyncService` and the panel, is 50.3 kB (13.6 kB transferred), against
-42.2 (11.8); the capture lab's 19.2 kB, against 16.0.
+Camera section's chunk, with `SyncService` and the panel, is 50.6 kB (13.6 kB transferred), against
+42.2 (11.8); the capture lab's 19.2 kB, against 16.0; the chunk of `SessionService` 24.1 kB, against
+23.1 (the suspension and `putCameraClock`); the Timer page's 34.2 kB, against 34.1 (a status line).
