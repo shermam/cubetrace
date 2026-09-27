@@ -13,9 +13,9 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 
 | Phase | Delivers | Status |
 |---|---|---|
-| **1. The timer, on any device** | cube connection, scrambles, state tracking, mis-scramble guidance, timer, colour-neutral CFOP breakdown validated against the Cubeast fixtures, session records staged in OPFS, PWA, probe page, fake cube, e2e suite, GitHub Pages deploy. Replaces Cubeast for daily practice. | 🟦 |
-| 2. The host's own camera | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ⬜ |
-| 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ⬜ |
+| **1. The timer, on any device** | cube connection, scrambles, state tracking, mis-scramble guidance, timer, colour-neutral CFOP breakdown validated against the Cubeast fixtures, session records staged in OPFS, PWA, probe page, fake cube, e2e suite, GitHub Pages deploy. Replaces Cubeast for daily practice. | ✅ v0.1.0 (2026-09-27) |
+| **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | 🟦 board below |
+| 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ⬜ board below; the Firebase project `cubetrace-cacd9` and the R2 decision exist |
 | 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ⬜ |
 | 5. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
@@ -666,9 +666,341 @@ the owner's manual round, and issues for whatever the round finds.
 
 ---
 
-## Phase 2 onwards
+## Phase 2 task board — the host's own camera
 
-Task lists for phases 2–5 will be written the same way when phase 1 is done; their scope
-is in `docs/ARCHITECTURE.md` and the private design. Two decisions already taken that later
-phases must respect: the bucket provider is a configuration (both R2 and GCS are supported
-through the same signed-URL function), and audio is recorded by default.
+Same rules as phase 1: one task per PR, branch `task/<id>-<slug>`, the coordinator reviews and
+squash-merges, statuses in this table. The measurements behind the choices are in
+`docs/DEVICES.md` (both default cameras deliver 30 fps; sensor timestamps are steady while the
+callback jitters ±10 ms; `MediaStreamTrackProcessor` is main-thread only; hardware H.264 at
+1080p60 on both devices; about 10 GB of local quota) and in the private design (§6 time, §7 the
+pipeline, §9 the data model).
+
+| Id | Task | Depends on | Status |
+|---|---|---|---|
+| T2.0 | `core`: schema 2 (per-attempt clock fit, video and camera entries, `frames.json`), readers for schemas 1 and 2 | — | ⬜ |
+| T2.1 | `capture`+`web`: camera panel: choose, open, preview, controls, sharpness meter, framing rectangle | — | ⬜ |
+| T2.2 | `capture`: encoder pipeline in a worker, ring buffer, cuts | — | ⬜ |
+| T2.3 | `capture`: MP4 muxing (mediabunny) and OPFS clip writing | T2.2 | ⬜ |
+| T2.4 | `web`: recording in the timer: two clips per attempt, storage meter, clip viewer, downloads | T2.0, T2.1, T2.3 | ⬜ |
+| T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | ⬜ |
+| T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | ⬜ |
+
+Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → T2.5 → T2.6. Rules for every phase 2 task: nothing of
+the capture code in the initial bundle (lazy chunks; check `ng build`); the worker code is plain
+TypeScript in `packages/capture` (no Angular), tested in Node where it is pure and in Playwright
+with Chrome's fake camera (`--use-fake-device-for-media-stream`, see `apps/web/e2e/probe.spec.ts`)
+where it needs a browser; every new dependency named and justified in the PR (mediabunny is the
+one expected); no personal data in fixtures.
+
+### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
+
+**Goal.** The records phase 2 writes, defined before anything writes them, and the clock fit
+where the data showed it belongs: per attempt (`docs/DEVICES.md`: the cube's clock runs 0.7% slow
+within attempts, both clocks advance equally across pauses, one fit per session drifts by 0.7% of
+each pause).
+
+**Scope.** `packages/core/src/{attempt,session,clock,schemas,records}.ts`,
+`packages/core/schema/{session,attempt}.schema.json` (now version 2) plus the version 1 files kept
+as `*.v1.schema.json`, `docs/DATA-MODEL.md` (schema 2: the changes below, a `frames.json` section,
+a "reading older records" paragraph), tests.
+
+**Contracts.**
+- `attempt.json` version 2 adds `clock: {a, b, residualP95Ms, samples} | null`: the least-squares
+  fit of `hostMs` on `cubeMs` over the attempt's own `packetLast` moves, from its first move to
+  `solveEnd` (or the DNF); `null` with fewer than 2 samples. `CubeMoveInput` gains
+  `packetLast?: boolean` (default true); `AttemptMachine` keeps one `CubeClockFit` per attempt and
+  `toRecord()` fills `clock`.
+- `attempt.json.video[]` entries are validated (they were declared empty in version 1):
+  `{camera, segment: 'scramble' | 'solve', file, bytes, codec, audio: string | null, width, height,
+  crop: {x, y, w, h} | null, fpsNominal, frames, firstFrameHostMs, framesFile, syncResidualMs:
+  number | null}`.
+- `session.json` version 2: `cameras[]` entries validated: `{label, local: true, facing: 'user' |
+  'environment' | 'unknown', deviceLabel, settings, capabilities, constraints, crop, mode: 'full' |
+  'crop'}` (`settings`/`capabilities`/`constraints` are the snapshots as JSON, unknown keys
+  allowed); `clock.cameras[label] = {offsetMs, rttMs, driftPpm, clapperboardResidualMs,
+  clapperboardSamples, samples?: [{moveHostMs, onsetHostMs}]}`; `clock.cube` stays, documented as a
+  coarse per-connection summary.
+- `frames.json` (per clip): `{schema: 2, camera, segment, t0HostMs, dtMs: number[] (per frame,
+  first 0, 0.1 ms resolution, from the frames' own timestamps), keyframes: number[] (indices),
+  arrival: {offsetMs, residualP95Ms}}` — see T2.2 for how `t0HostMs` is derived.
+- `records.ts`: `parseAttempt(json: unknown): AttemptRecord` and `parseSession(json)` accept
+  versions 1 and 2 and return version 2 objects (`clock: null`, `video: []`, `cameras: []` where
+  missing); the schemas validate each version by its `schema` field; `SESSION_SCHEMA`/
+  `ATTEMPT_SCHEMA` are version 2, `*_V1` exported too. The app (SessionService, the stores) reads
+  through `parseAttempt`/`parseSession` and writes version 2.
+
+**Tests.** Fixture replays (all `packetLast`, cube ms as both clocks) give `a ≈ 1`, `b ≈ 0`,
+residual 0. **Real-hardware regression:** every attempt of `fixtures/hardware/*.json`, replayed
+through the machine with its own `hostMs`/`cubeMs`, gives `clock.a` within 1.0069–1.0072 and
+`residualP95Ms` under 20 ms (the numbers in `docs/DEVICES.md`). Version 1 exports in
+`fixtures/hardware/` parse, upgrade and validate as version 2; a version 2 record validates;
+version 1 records still validate against the v1 schemas.
+
+**Acceptance.**
+- [ ] DATA-MODEL says "schema 2" with every change above and a CHANGELOG entry; no stored file is rewritten.
+- [ ] The hardware regression test passes on both exports.
+- [ ] T1.9's export validation still passes (it validates whatever version the app writes).
+
+### T2.1 — `capture`+`web`: camera panel
+
+**Goal.** A camera the solver can see, judge and adjust before recording: the right device,
+1080p, the real frame rate, manual exposure where it exists, a sharpness number, and the
+framing rectangle the model will be trained on.
+
+**Scope.** `packages/capture/src/{camera,sharpness,framing}.ts` (plain TS: constraint building
+from a chosen `{deviceId, width, height, fps}` and the exposure/focus options, capability and
+settings snapshots as JSON, the sharpness metric on a `VideoFrame`/`ImageData`), `apps/web/src/app/camera/*`
+(`CameraService` with signals: devices, selected, `MediaStream`, settings, capabilities,
+sharpness, framing; a `CameraPanel` on the Timer page below the Cube section), Settings (camera
+choices persist per device label).
+
+**Behaviour.** Enumerate cameras after a permission prompt; front/rear labels on phones;
+open the chosen one at `{width: {ideal: 1920}, height: {ideal: 1080}, frameRate: {ideal: 60}}`
+then read `getSettings()` and show the real values; a preview `<video>` (mirrored on screen for
+a front camera, never in the data); controls shown only when the capability exists: exposure
+mode auto/manual with exposure time and ISO, focus mode auto/manual with distance, white
+balance, zoom (`applyConstraints` with `advanced`), and "Reset to auto"; the sharpness meter:
+variance of the Laplacian of the luma of a 320-px-wide downscale of the framing rectangle,
+every 10th frame through `requestVideoFrameCallback`, shown as a number and a bar with a
+"good / soft" threshold calibrated on the fake camera and adjustable; the framing rectangle
+drawn on the preview and dragged/resized (default: full frame; stored per camera label in
+Settings; `mode` stays `'full'` in phase 2: the rectangle is metadata for training, not a
+crop at the source); Camera on/off; permission and device errors in plain words; the session's
+`cameras[]` entry built from all of this (label `laptop` or `phone` from the host label plus
+`-front`/`-rear` when known) for T2.4 to store.
+
+**Tests.** Unit: constraint building, capability parsing, the sharpness metric on synthetic
+images (flat = 0, edges high), framing maths. Playwright with the fake camera: the panel lists
+it, opens it, shows settings, the meter updates, the rectangle persists across a reload.
+
+**Acceptance.**
+- [ ] On the fake camera in CI the panel works end to end; on the real devices the owner checks in round 2 that manual exposure appears on the ThinkPhone and not on the MacBook (`docs/DEVICES.md`).
+- [ ] Nothing of it in the initial bundle.
+
+### T2.2 — `capture`: encoder pipeline, ring buffer, cuts
+
+**Goal.** Continuous encoding of the camera into memory, from which any interval of the last
+90 s can be cut without re-encoding.
+
+**Scope.** `packages/capture/src/{pipeline,protocol,ring-buffer,cut,capture-worker}.ts`, tests.
+
+**Contracts.**
+- Main thread: `startCapture(stream: MediaStream, config: CaptureConfig) → CaptureHandle` creates
+  `MediaStreamTrackProcessor`s for the video track and the audio track (audio optional), transfers
+  their `readable` streams to a module `Worker` (`capture-worker.ts`, its own lazy chunk), and
+  exposes `cut(startHostMs, endHostMs): Promise<Cut>`, `stats: signal-free observable of
+  {fps, encodedFps, dropped, queue, bufferSeconds, bufferBytes}` (a callback or an
+  `EventTarget`), `stop()`. A typed message protocol between window and worker (`protocol.ts`).
+- Worker: `VideoEncoder` configured from the track settings: codec `avc1.640028` (High 4.0), else
+  `avc1.4d0028` (Main), each tried with `hardwareAcceleration: 'prefer-hardware'` then
+  `'no-preference'` through `isConfigSupported`; if no H.264 encoder exists (Chromium in CI has
+  none), `vp09.00.40.08` (VP9) so that the pipeline and the tests still run, with the codec recorded
+  in the clip; `avc: {format: 'avc'}`; bitrate 8 Mbps at 1080p30 and 12 at 60; `latencyMode:
+  'quality'`; a keyframe forced every 1 s (`encode(frame, {keyFrame: true})`); `AudioEncoder` AAC-LC
+  `mp4a.40.2` 128 kbps at the track's sample rate, else Opus, else no audio, recorded. Backpressure:
+  when `encodeQueueSize` exceeds 8, frames are dropped and counted, never queued without bound.
+- **Frame times.** For each `VideoFrame` the worker records `timestamp` (µs, the frame's own
+  clock, exact for intervals) and the arrival `hostMs = performance.timeOrigin + performance.now()`
+  in the worker (Unix-epoch based, so the same scale as the window's `hostMs`). Per clip, the
+  arrival-on-timestamp fit (median offset, residual p95) gives `t0HostMs` for the first frame
+  without the ±10 ms callback jitter; `dtMs` comes from `timestamp` deltas. Measure and write in
+  `docs/DEVICES.md` what `timestamp` is on the fake camera (from 0 at the first frame? capture time?)
+  and leave a note for the owner's round on the real devices.
+- **Ring buffer.** Encoded chunks with their metadata (`type`, `timestamp`, `byteLength`, arrival
+  hostMs, keyframe flag) in memory, bounded by both 90 s and 160 MB; eviction by whole GOPs so the
+  buffer always starts at a keyframe; audio chunks likewise, evicted to the same horizon.
+- **Cut.** `cut(start, end)` returns the chunks from the last keyframe at or before `start` to the
+  last frame at or before `end`, the audio chunks overlapping that span, and the frames'
+  metadata; ArrayBuffers transferred, never copied twice; a cut whose start is older than the
+  buffer returns what exists and says `truncatedStart: true`.
+
+**Tests.** Vitest on the ring buffer and the cut (synthetic chunks: keyframe rules, eviction by
+GOP, truncation, audio overlap, memory bound). Playwright with the fake camera: the pipeline
+starts, `stats` show ~30 fps encoded, a cut of the last 3 s returns chunks beginning with a
+keyframe, the codec chosen is reported; measure and print the encoded bitrate.
+
+**Acceptance.**
+- [ ] 10 s of the fake camera at 1080p30 encode with 0 drops in CI, and the cut returns within 50 ms.
+- [ ] The worker chunk is lazy; the main bundle is unchanged.
+
+### T2.3 — `capture`: MP4 muxing and OPFS clip writing
+
+**Goal.** A cut becomes a file any tool can play, plus its `frames.json`, in the attempt's folder.
+
+**Scope.** `packages/capture/src/{mux,clip-writer}.ts` (run in the worker), `fixtures/media/`
+(a tiny encoded sample for the Node tests, generated once from the fake camera and committed,
+under 300 kB), tests; dependency **mediabunny** (1.60.0 at the time of writing; MPL-2.0),
+justified in the PR and in `docs/TOOLCHAIN.md`.
+
+**Contracts.** `muxClip(cut, meta): Promise<{mp4: ArrayBuffer, frames: FramesJson}>` with
+mediabunny: `Output` + `Mp4OutputFormat({fastStart: 'in-memory'})` + `BufferTarget`; the video
+packets through `EncodedPacket.fromEncodedChunk`, the audio packets likewise, no re-encoding;
+timestamps rebased so the clip starts at 0. `writeClip(root, sessionId, index, camera, segment,
+mp4, frames): Promise<VideoClip>` writes `<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`
+into `sessions/<id>/attempts/<index>/` with `FileSystemSyncAccessHandle` in the worker, under a
+temporary name moved into place (as T1.11 does), and returns the `video[]` entry (T2.0's shape)
+with `bytes`, `codec`, `audio`, `width`, `height`, `frames`, `firstFrameHostMs`, `framesFile`.
+
+**Tests.** Node: muxing the committed sample gives an MP4 whose `ftyp`/`moov` parse (mediabunny
+can read it back: track count, duration, codec); a synthetic cut with a truncated start is
+rejected with a clear error. Playwright: a clip from the fake camera plays in a `<video>`
+(`loadedmetadata`, duration within 10% of the cut length).
+
+**Acceptance.**
+- [ ] The clip plays in Chrome and its duration and frame count match `frames.json`.
+- [ ] mediabunny is in the worker chunk only.
+
+### T2.4 — `web`: recording in the timer
+
+**Goal.** The first paired data: every attempt gets its two clips, automatically.
+
+**Scope.** `apps/web/src/app/camera/*` (recording state), `session/session-service.ts` (the cut
+hooks), `timer/*` (clip badges on the solve list, a clip viewer), `sessions/*` (bytes per session,
+download), Settings (Camera on/off, Keep clips), `docs/DATA-MODEL.md` if anything needed
+clarifying, `docs/MANUAL-TESTS.md` T2 section started.
+
+**Behaviour.** With the camera on and a session active, the pipeline runs; on `scrambleDone`
+the scramble segment `[scrambleStart − 2 s, scrambleDone + 1 s]` is cut (one second after the
+event, so the margin exists), muxed and written; on `solveEnd` or DNF the solve segment
+`[solveStart − 3 s, end + 1 s]`; the attempt's record is saved again with `video[]` filled
+(upsert). Failures never touch the attempt's timing data: a clip that fails is logged in the
+session's `notes` and shown once. Storage: a meter in the Camera panel and on the Sessions page
+(usage/quota from `navigator.storage.estimate()`); warn at 80%, stop recording (not timing) at
+95%. The solve list shows a clip badge per attempt; the viewer plays a clip from OPFS (object URL)
+with the attempt's moves listed by time next to it; "Download" gives the two MP4s and the
+`attempt.json`. Demo mode with the fake camera works end to end (that is what CI runs).
+
+**Tests.** Unit with a fake pipeline (the cut intervals, the upsert, the failure path, the
+storage thresholds). Playwright, fake camera + `?demo=0&speed=20`: after one solve, both clips
+exist in OPFS, `video[]` has two valid entries, the viewer plays the solve clip, the export
+validates against schema 2.
+
+**Acceptance.**
+- [ ] The e2e flow passes in CI under 4 minutes total for the suite.
+- [ ] Recording never delays the timer: the solve's `timeMs` in the record is unchanged by the camera (compare with the camera off in the same e2e).
+
+### T2.5 — `capture`+`web`: clapperboard and per-camera sync residual
+
+**Goal.** Know, per session and camera, how far the video lags the cube, so that the training
+pipeline can subtract it.
+
+**Scope.** `packages/capture/src/{motion,clapperboard}.ts` (worker-side motion energy per frame
+inside the framing rectangle: mean absolute luma difference on a 160-px downscale; onset
+detection against a quiet baseline), `apps/web/src/app/camera/*` ("Sync check" at session start
+when a camera is on, and on demand), `session.json.clock.cameras[label]` (T2.0's shape),
+`attempt.json.video[].syncResidualMs` from then on.
+
+**Behaviour.** The app asks for five single turns with a pause of at least a second between
+them and watches 20 s; onsets = frames where the energy rises above 4× the baseline's median
+after at least 500 ms of quiet; each onset is matched to the nearest cube move within 500 ms;
+offset = median of (onsetHostMs − moveHostMs), spread = p95 − p5; fewer than 4 matches or a
+spread over 40 ms (a frame at 30 fps) → "Sync check failed: …" with the reason and a Retry; the
+result is written to `clock.cameras[label]` with the five pairs, and shown as "camera lags the
+cube by X ms (±Y)". Later clips carry `syncResidualMs = offsetMs`.
+
+**Tests.** Unit on synthetic energy series (clean onsets, noise, missing turn, extra motion).
+Playwright: the flow with the fake camera and the demo cube reaches a result or the graceful
+failure (the fake camera has no onsets; the test asserts the failure text and the Retry).
+
+**Acceptance.**
+- [ ] On the owner's devices in round 2 the spread is under 40 ms and the offset is stable across two checks (recorded in `docs/DEVICES.md`).
+
+### T2.6 — e2e for recording, docs, `v0.2.0`, manual round 2
+
+**Scope.** Any e2e flow the tasks above left out; `docs/MANUAL-TESTS.md` "Round 2" (both devices:
+sharpness meter, exposure controls on the phone, 30 minutes of recording: heat, battery, dropped
+frames, storage growth, clips play, the sync check twice); README (recording), CHANGELOG 0.2.0,
+versions 0.2.0, `docs/DEVICES.md` updated from the round; the coordinator tags after the round.
+
+## Phase 3 task board — cloud
+
+Prerequisites, all done on 2026-09-27: the Firebase project `cubetrace-cacd9` (Blaze, Google
+sign-in, Firestore in `nam5`, a web app registered) and the decision for Cloudflare R2, with GCS
+kept as a configuration (`docs/USER-ACTIONS.md`). The coordinator deploys with a service-account
+key held only by the coordinator session; a GitHub Actions workflow deploys on merge with a
+second key. Phase 3 starts after T2.4, because it changes the same `SessionService`.
+
+| Id | Task | Depends on | Status |
+|---|---|---|---|
+| T3.0 | `web`: Firebase in the app: config, Google sign-in, `users/{uid}`, Firestore rules with emulator tests, deploy workflow | T2.4 | ⬜ |
+| T3.1 | `web`: Firestore session index; the Sessions page merges local and cloud sessions; QA view | T3.0 | ⬜ |
+| T3.2 | `functions`: `signUpload` and `confirmUpload` with presigned URLs for R2 (S3 SigV4) or GCS by configuration, quotas, secrets, bucket CORS | T3.0 | ⬜ |
+| T3.3 | `upload`: the upload queue: per attempt JSON and clips, resumable, retried, throttled, persistent; local clips deleted after confirmation by policy | T3.1, T3.2 | ⬜ |
+| T3.4 | `web`: cube MAC addresses synced per user (issue #21) | T3.0 | ⬜ |
+| T3.5 | e2e against the emulators, docs, `v0.3.0`, manual round 3 (two devices, one dataset, `rclone ls` on the training machine) | T3.3, T3.4 | ⬜ |
+
+Waves: T3.0 → {T3.1, T3.2, T3.4} → T3.3 → T3.5.
+
+### T3.0 — Firebase in the app
+
+`firebase` (12.19 at the time of writing; modular `firebase/app`, `firebase/auth`,
+`firebase/firestore`) as a dependency of `apps/web`; `apps/web/src/environments/firebase.ts` with
+the project's public web config (the owner pastes it; it is public by design; the file is
+committed); `AuthService` (Google provider; popup on desktop, redirect in the installed app on
+Android; the header shows the account and Sign in / Sign out; the app works signed out exactly as
+today); `users/{uid}` (created on first sign-in: `createdMs`, `displayName`, `devices: {label:
+lastSeenMs}`); Firestore rules in `firebase/firestore.rules` (a user reads and writes only
+`users/{uid}` and sessions whose `owner` is the uid; attempts under them; nothing public) with
+`@firebase/rules-unit-testing` against the Firestore emulator in CI (`actions/setup-java`,
+`firebase emulators:exec`); `firebase.json`, `.firebaserc`; `.github/workflows/firebase.yml`
+deploying rules (and later functions) on merge with the `FIREBASE_SERVICE_ACCOUNT` secret.
+Owner actions: add `shermam.github.io` to Authentication → Settings → Authorized domains; paste
+the web config; create the two keys (`docs/USER-ACTIONS.md`).
+
+### T3.1 — Firestore session index and the merged Sessions page
+
+When signed in, every `saveSession` also writes `sessions/{id}` (the record plus `owner`) and
+every `saveAttempt` writes `sessions/{id}/attempts/{index}` (the record without `moves`, plus
+`upload: {state: 'pending' | 'uploading' | 'done' | 'failed', files: {path: {bytes, doneMs}}}` and
+`device`); Firestore's persistent local cache queues writes offline; demo sessions (`cube.hardware
+=== 'simulated'`) never sync. The Sessions page merges OPFS and cloud sessions by id with badges
+(this device, cloud, both) and a device filter; a QA view lists attempts per day per device with
+bytes uploaded and pending.
+
+### T3.2 — `functions`: signed uploads
+
+`functions/` (Node 22, TypeScript, `firebase-functions` v7 `onCall`, auth required):
+`signUpload({sessionId, attemptIndex, files: [{path, bytes, contentType}]})` checks ownership and
+the user's daily quota (`users/{uid}.quota`, bytes and files), records the intent on the attempt
+document and returns `[{path, url, headers, expiresAt}]` with presigned `PUT` URLs (15 minutes):
+provider `r2` through the S3 SigV4 presigner (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`
+against `https://<account>.r2.cloudflarestorage.com`), provider `gcs` through
+`@google-cloud/storage` v4 signed URLs; `BUCKET_PROVIDER`, bucket name and account id as
+parameters, the R2 keys as secrets (`defineSecret`); object keys `users/{uid}/sessions/{id}/attempts/{index}/<file>`;
+`confirmUpload({sessionId, attemptIndex, files})` verifies each object's size with the SDK and
+marks the attempt `upload.state = 'done'`. `bucket/cors.json` for R2 (PUT and GET from
+`https://shermam.github.io` and `http://localhost:4200`); a `functions/README.md` for deploying; the
+coordinator deploys first with the session key, the workflow thereafter.
+
+### T3.3 — the upload queue
+
+`packages/upload` (plain TS over `SessionStore`, a `signUpload` port and a `fetch`/`XMLHttpRequest`
+port): per attempt, `attempt.json`, the clips and their `frames.json`, plus `session.json` once per
+session and again when it changes; two uploads at a time; retries with exponential backoff;
+progress per file (`XMLHttpRequest` for upload progress); the queue state in OPFS (`uploads.json`)
+so a reload resumes; a "Wi-Fi only" setting on devices that expose `navigator.connection`; after
+`confirmUpload`, local clips are deleted by policy: "Keep local copies" on (default on laptops)
+or off (default on phones), and in any case oldest uploaded clips first when storage passes 70%.
+UI: a queue panel on the Sessions page (pending, uploading with progress, done, failed with
+Retry) and a header indicator.
+
+### T3.4 — cube MAC addresses synced per user
+
+Issue #21: `users/{uid}/cubes/{name}` mirrors Settings' cube list; union on sign-in, newest
+`updatedAt` wins; never in exports or uploads.
+
+### T3.5 — e2e, docs, `v0.3.0`, manual round 3
+
+Playwright against the Auth and Firestore emulators in CI and a local `PUT` sink for uploads
+(`BUCKET_PROVIDER=local` in the emulated function returning URLs to a test server started by the
+e2e config); `docs/MANUAL-TESTS.md` "Round 3" (sign in on both devices, record on both, one merged
+list, uploads reach R2, `rclone ls` from the training machine); README; CHANGELOG 0.3.0.
+
+## Phases 4 and 5
+
+Outlines only, written into boards when phase 3 ends: **4. Remote cameras** — WebRTC pairing by
+QR code, the data-channel clock sync of the private design (§6), remote cuts and clip transfer in
+16–64 KB messages with backpressure, the desk rig with one or two phones; **5. Community** —
+consent flow, quotas, delete-my-data, community mode (§12 of the private design). Two decisions
+already taken that they must respect: the bucket provider is a configuration, and audio is
+recorded by default.
