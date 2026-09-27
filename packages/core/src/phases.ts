@@ -165,7 +165,8 @@ export function crossComplete(f: Facelets, face: Face): boolean {
  * The F2L slots (relative to `crossFace`) whose corner–edge pair is fully in place: the corner
  * between the cross face and the slot, and the slot's middle-layer edge, both solved. Slots are
  * named by their middle-layer edge position (`'FR'`, `'FL'`, `'BL'`, `'BR'` for a U or D cross)
- * and listed in EDGE_FACELETS order. The cross itself is not checked here.
+ * and listed in EDGE_FACELETS order. The cross itself is not checked here; detectPhases counts
+ * these pairs only while the cross is complete.
  */
 export function f2lSlotsComplete(f: Facelets, crossFace: Face): EdgePos[] {
   return TABLES[crossFace].slots
@@ -196,9 +197,13 @@ export function ocllComplete(f: Facelets, crossFace: Face): boolean {
 
 // ---- The detector ----
 
-/** The pairs that count towards the f2l phases on `crossFace`. */
+/**
+ * The pairs that count towards the f2l phases on `crossFace`: none while its cross is broken.
+ * During an insertion that takes a cross edge out, another pair can sit in place for a move or
+ * two; counting it would end the phase mid-insertion with the wrong slot (docs/DATA-MODEL.md §4).
+ */
 function countedSlots(f: Facelets, crossFace: Face): EdgePos[] {
-  return f2lSlotsComplete(f, crossFace);
+  return crossComplete(f, crossFace) ? f2lSlotsComplete(f, crossFace) : [];
 }
 
 /**
@@ -269,9 +274,7 @@ function scan(scrambled: Facelets, moves: readonly TimedMove[], forced: Face | u
         const current = crossFace;
         const other = mostPairs(
           f,
-          FACE_ORDER.filter(
-            (x) => x !== current && crossComplete(f, x) && countedSlots(f, x).length > 0,
-          ),
+          FACE_ORDER.filter((x) => x !== current && countedSlots(f, x).length > 0),
         );
         if (other !== undefined) {
           return { crossFace, ends, solvedAt: null, switchTo: other };

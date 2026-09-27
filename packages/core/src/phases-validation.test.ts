@@ -89,7 +89,62 @@ interface Mismatch {
   report: PhaseReport;
 }
 
+interface Comparison {
+  elapsedMs: number;
+  /** Per phase, in PHASE_NAMES order, the fixtures whose boundary agrees. */
+  agree: number[];
+  mismatches: Mismatch[];
+}
+
+/** Runs the detector on every fixture (timed) and compares each boundary with Cubeast's. */
+function compare(): Comparison {
+  const start = performance.now();
+  const reports = FIXTURES.map((s) => detectPhases(s.scrambled, s.moves));
+  const elapsedMs = performance.now() - start;
+  const agree = PHASE_NAMES.map(() => 0);
+  const mismatches: Mismatch[] = [];
+  for (const [i, s] of FIXTURES.entries()) {
+    const report = reports[i];
+    const first = s.moves[0].ms;
+    for (const [k, phase] of PHASE_NAMES.entries()) {
+      const record = report.phases.at(k);
+      const ours = record === undefined ? null : record.endMs - first;
+      const cubeast = s.steps[k].cumulativeTime;
+      if (ours !== null && Math.abs(ours - cubeast) <= TOLERANCE_MS) {
+        agree[k] += 1;
+      } else {
+        mismatches.push({ fixture: i, phase, ours, cubeast, report });
+      }
+    }
+  }
+  return { elapsedMs, agree, mismatches };
+}
+
+function table({ elapsedMs, agree, mismatches }: Comparison): string {
+  const pairs = FIXTURES.length * PHASE_NAMES.length;
+  const total = agree.reduce((a, b) => a + b, 0);
+  const percent = (n: number, of: number): string => `${((100 * n) / of).toFixed(1)}%`;
+  return [
+    `Phase boundaries within ±${String(TOLERANCE_MS)} ms of Cubeast (${String(FIXTURES.length)} solves, ${elapsedMs.toFixed(0)} ms):`,
+    '| phase | agree | share |',
+    '|---|---|---|',
+    ...PHASE_NAMES.map(
+      (phase, k) =>
+        `| ${phase} | ${String(agree[k])}/${String(FIXTURES.length)} | ${percent(agree[k], FIXTURES.length)} |`,
+    ),
+    `| all | ${String(total)}/${String(pairs)} | ${percent(total, pairs)} |`,
+    ...(mismatches.length === 0 ? [] : ['Mismatches (fixture, phase: ours vs Cubeast, ms):']),
+    ...mismatches.map(
+      (m) =>
+        `  solves[${String(m.fixture)}] ${m.phase}: ${String(m.ours)} vs ${String(m.cubeast)} (cross ${String(m.report.crossFace)}${m.report.crossFaceSwitched ? ', switched' : ''})`,
+    ),
+  ].join('\n');
+}
+
 describe('agreement with Cubeast on the 300 fixture solves', () => {
+  let comparison: Comparison | undefined;
+  const result = (): Comparison => (comparison ??= compare());
+
   it("measures Cubeast's times from the first move", () => {
     // The last step ends at time_ms, which is the time from the first move to the last one; the
     // cross has no recognition time. So a phase's end compares with its cumulative time as
@@ -105,48 +160,21 @@ describe('agreement with Cubeast on the 300 fixture solves', () => {
   });
 
   it('matches at least 95% of the (fixture, phase) boundaries within ±1 ms, in under 2 s', () => {
-    const start = performance.now();
-    const reports = FIXTURES.map((s) => detectPhases(s.scrambled, s.moves));
-    const elapsedMs = performance.now() - start;
+    const r = result();
+    console.log(table(r));
+    const total = r.agree.reduce((a, b) => a + b, 0);
+    expect(r.elapsedMs).toBeLessThan(2000);
+    expect(total / (FIXTURES.length * PHASE_NAMES.length)).toBeGreaterThanOrEqual(THRESHOLD);
+  });
 
-    const agree = PHASE_NAMES.map(() => 0);
-    const mismatches: Mismatch[] = [];
-    for (const [i, s] of FIXTURES.entries()) {
-      const report = reports[i];
-      const first = s.moves[0].ms;
-      for (const [k, phase] of PHASE_NAMES.entries()) {
-        const record = report.phases.at(k);
-        const ours = record === undefined ? null : record.endMs - first;
-        const cubeast = s.steps[k].cumulativeTime;
-        if (ours !== null && Math.abs(ours - cubeast) <= TOLERANCE_MS) {
-          agree[k] += 1;
-        } else {
-          mismatches.push({ fixture: i, phase, ours, cubeast, report });
-        }
-      }
-    }
-
-    const pairs = FIXTURES.length * PHASE_NAMES.length;
-    const total = agree.reduce((a, b) => a + b, 0);
-    const percent = (n: number, of: number): string => `${((100 * n) / of).toFixed(1)}%`;
-    const lines = [
-      `Phase boundaries within ±${String(TOLERANCE_MS)} ms of Cubeast (${String(FIXTURES.length)} solves, ${elapsedMs.toFixed(0)} ms):`,
-      '| phase | agree | share |',
-      '|---|---|---|',
-      ...PHASE_NAMES.map(
-        (phase, k) =>
-          `| ${phase} | ${String(agree[k])}/${String(FIXTURES.length)} | ${percent(agree[k], FIXTURES.length)} |`,
-      ),
-      `| all | ${String(total)}/${String(pairs)} | ${percent(total, pairs)} |`,
-      ...(mismatches.length === 0 ? [] : ['Mismatches (fixture, phase: ours vs Cubeast, ms):']),
-      ...mismatches.map(
-        (m) =>
-          `  solves[${String(m.fixture)}] ${m.phase}: ${String(m.ours)} vs ${String(m.cubeast)} (cross ${String(m.report.crossFace)}${m.report.crossFaceSwitched ? ', switched' : ''})`,
-      ),
-    ];
-    console.log(lines.join('\n'));
-
-    expect(elapsedMs).toBeLessThan(2000);
-    expect(total / pairs).toBeGreaterThanOrEqual(THRESHOLD);
+  it('disagrees only on solves[13], where it switches the cross face and Cubeast does not', () => {
+    // Cubeast keeps the first cross, F, completed by accident at move 49; the detector switches to
+    // U, the solver's cross, when it completes with its pairs at move 89 (phases.test.ts). Cubeast's
+    // PLL, the last phase, agrees.
+    const r = result();
+    expect(r.mismatches.map((m) => `${String(m.fixture)} ${m.phase}`)).toEqual(
+      PHASE_NAMES.slice(0, 7).map((phase) => `13 ${phase}`),
+    );
+    expect(r.mismatches.every((m) => m.report.crossFaceSwitched)).toBe(true);
   });
 });

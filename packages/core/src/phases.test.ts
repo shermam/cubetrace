@@ -552,6 +552,40 @@ describe('detectPhases on hand-built solves', () => {
   });
 });
 
+describe('detectPhases on fixture solves', () => {
+  it('counts a pair only while the cross is complete (solves[79])', () => {
+    // Move 33 leaves the BL pair in place while a U cross edge is out; move 35 puts the edge back
+    // with BR in place and BL out again. The third pair is BR, at move 35, as Cubeast has it.
+    const s = SOLVES[79];
+    const midInsertion = applyMoves(
+      s.scrambled,
+      s.moves.slice(0, 34).map(({ m }) => m),
+    );
+    expect(crossComplete(midInsertion, 'U')).toBe(false);
+    expect(f2lSlotsComplete(midInsertion, 'U')).toEqual(['FR', 'FL', 'BL']);
+    const r = detect(s);
+    expect(r.crossFace).toBe('U');
+    expect(r.phases[3]).toMatchObject({ name: 'f2l3', slot: 'BR', endMs: 10020, endMoveIndex: 35 });
+    expect(r.phases[4]).toMatchObject({ name: 'f2l4', slot: 'BL' });
+  });
+
+  it('switches to a face whose cross has a pair before any pair counts on the first (solves[13])', () => {
+    // The F cross completes by accident at move 49. The solver's cross is U: it completes at move
+    // 89 with its four pairs and an oriented last layer, and no pair has counted on F yet.
+    const s = SOLVES[13];
+    const r = detect(s);
+    expect(r.crossFace).toBe('U');
+    expect(r.crossFaceSwitched).toBe(true);
+    expect(endIndices(r)).toEqual([89, 89, 89, 89, 89, 89, 89, 109]);
+    // Forcing F keeps the first cross, as Cubeast does, and gives Cubeast's boundaries.
+    const onF = detect(s, { crossFace: 'F' });
+    expect(onF.crossFaceSwitched).toBe(false);
+    expect(onF.phases.map((p) => p.endMs)).toEqual([
+      18961, 31614, 31614, 34635, 34635, 34635, 34635, 34635,
+    ]);
+  });
+});
+
 describe('colour neutrality', () => {
   it('has 24 rotations that commute with every move (a check of the test helper)', () => {
     expect(ROTATIONS).toHaveLength(24);
@@ -580,9 +614,9 @@ describe('colour neutrality', () => {
     expect([...crossFaces].sort()).toEqual(['B', 'D', 'F', 'L', 'R', 'U']);
   });
 
-  it('gives the same phases for fixture solves rotated in all 24 ways', () => {
+  it('gives the same phases for fixture solves rotated in all 24 ways, a switch included', () => {
     for (const [i, s] of SOLVES.entries()) {
-      if (i % 25 !== 0) {
+      if (i % 25 !== 0 && i !== 13) {
         continue;
       }
       const r = detect(s);
