@@ -1,0 +1,147 @@
+<dialog
+  #dialog
+  aria-labelledby="connect-dialog-title"
+  data-testid="connect-dialog"
+  (close)="onClosed()"
+>
+  <div class="head">
+    <h2 id="connect-dialog-title">Cube</h2>
+    <button type="button" class="close" aria-label="Close" title="Close" (click)="close()">
+      ×
+    </button>
+  </div>
+
+  @switch (cube.status()) {
+    @case ('connected') {
+      <p class="state" data-testid="connect-state">
+        <span class="dot" aria-hidden="true"></span>Connected{{
+          cube.kind() === 'fake' ? ' to the demo cube' : ''
+        }}.
+      </p>
+      @if (cube.demo(); as demo) {
+        <p class="note">
+          It replays demo solve {{ demo.index }} at {{ cube.demoSpeed() }}× speed: the scramble,
+          then the solve.
+        </p>
+      }
+      <dl class="details" data-testid="cube-details">
+        <dt>Model</dt>
+        <dd>{{ cube.hardware()?.model || '…' }}</dd>
+        <dt>Hardware</dt>
+        <dd>{{ cube.hardware()?.hardware || '…' }}</dd>
+        <dt>Firmware</dt>
+        <dd>{{ cube.hardware()?.firmware || '…' }}</dd>
+        <dt>Battery</dt>
+        <dd>{{ batteryText() }}</dd>
+        <dt>Gyroscope</dt>
+        <dd>{{ gyroText() }}</dd>
+      </dl>
+      <div class="actions">
+        <button type="button" (click)="disconnect()">Disconnect</button>
+      </div>
+    }
+    @case ('connecting') {
+      @if (cube.macPrompt(); as prompt) {
+        <form class="mac-form" data-testid="mac-prompt" (submit)="submitMac($event)">
+          <p>
+            Chrome cannot read the MAC address of
+            <strong data-testid="mac-device">{{ prompt.deviceName ?? 'this cube' }}</strong
+            >, and the cube needs it to connect. Type it: six hex bytes, such as AB:12:CD:34:EF:56.
+          </p>
+          <label for="mac-input">MAC address</label>
+          <input
+            #macInput
+            id="mac-input"
+            type="text"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            data-testid="mac-input"
+            [value]="macText()"
+            [attr.aria-invalid]="macError() !== null"
+            [attr.aria-describedby]="macError() !== null ? 'mac-error' : 'mac-preview'"
+            (input)="onMacInput(macInput.value)"
+          />
+          @if (macError(); as error) {
+            <p id="mac-error" class="error" role="alert" data-testid="mac-error">{{ error }}</p>
+          } @else {
+            <p id="mac-preview" class="note">
+              @if (macPreview(); as mac) {
+                Connects with {{ mac }}.
+              } @else {
+                Colons, dashes or nothing between the bytes.
+              }
+            </p>
+          }
+          <label class="switch">
+            <input
+              #rememberBox
+              type="checkbox"
+              data-testid="mac-remember"
+              [checked]="remember()"
+              [disabled]="prompt.deviceName === null"
+              (change)="remember.set(rememberBox.checked)"
+            />
+            Remember it for this cube (Settings)
+          </label>
+          <div class="actions">
+            <button type="submit" class="primary">Connect</button>
+            <button type="button" (click)="cancelMac()">Cancel</button>
+          </div>
+        </form>
+      } @else {
+        <p class="state" role="status" data-testid="connect-state">
+          <span class="spinner" aria-hidden="true"></span>Connecting…
+        </p>
+        <p class="note">
+          {{
+            cube.kind() === 'gan'
+              ? 'Choose the cube in Chrome’s list; its state arrives within 5 seconds.'
+              : 'Loading the demo solves…'
+          }}
+        </p>
+        <div class="actions">
+          <button type="button" (click)="disconnect()">Cancel</button>
+        </div>
+      }
+    }
+    @default {
+      @if (cube.lastError(); as error) {
+        <p class="error" role="alert" data-testid="connect-error">{{ error }}</p>
+      } @else if (cube.disconnectReason(); as reason) {
+        <p class="state" data-testid="connect-state">Last connection: {{ reason }}</p>
+      }
+      <p class="hint" data-testid="bluetooth-hint">{{ support.hint }}</p>
+      @if (support.flagUrl; as flagUrl) {
+        <div class="flag" data-testid="flag-steps">
+          <p>To let Chrome read the address by itself, turn on this flag:</p>
+          <p class="flag-url">
+            <code data-testid="flag-url">{{ flagUrl }}</code>
+            <button type="button" aria-label="Copy the flag address" (click)="copyFlag(flagUrl)">
+              Copy
+            </button>
+          </p>
+          @if (copyNotice(); as notice) {
+            <p class="note" role="status" data-testid="copy-notice">{{ notice }}</p>
+          }
+          <ol>
+            <li>Paste it in Chrome’s address bar and press Enter.</li>
+            <li>Set the highlighted flag, {{ flagName }}, to Enabled.</li>
+            <li>Relaunch Chrome.</li>
+          </ol>
+        </div>
+      }
+      <div class="actions">
+        <button
+          type="button"
+          class="primary"
+          [disabled]="!support.available"
+          (click)="connectCube()"
+        >
+          {{ cube.canReconnect() ? 'Reconnect' : 'Connect cube' }}
+        </button>
+        <button type="button" (click)="demoCube()">Demo cube</button>
+      </div>
+    }
+  }
+</dialog>

@@ -5,7 +5,14 @@ import { APP_BUILD } from '../environments/version';
 import { App } from './app';
 import { routes } from './app.routes';
 import { BROWSER_GLOBALS, type BrowserGlobals } from './device/browser-globals';
-import { FakeStorageManager, FakeVideoEncoder, FakeWakeLock } from './device/fake-browser';
+import {
+  FakeLocalStorage,
+  FakeStorageManager,
+  FakeVideoEncoder,
+  FakeWakeLock,
+  polyfillDialog,
+  settle,
+} from './device/fake-browser';
 
 /** Chrome on a phone or a laptop: every API the app needs (Web Bluetooth is not in the DOM types). */
 function chrome(): BrowserGlobals {
@@ -14,7 +21,7 @@ function chrome(): BrowserGlobals {
     wakeLock: new FakeWakeLock(),
     storage: new FakeStorageManager({}),
   };
-  return { navigator, VideoEncoder: FakeVideoEncoder };
+  return { navigator, VideoEncoder: FakeVideoEncoder, localStorage: new FakeLocalStorage() };
 }
 
 describe('App', () => {
@@ -83,5 +90,23 @@ describe('App', () => {
     query(fixture, '[data-testid="support-banner"] button')?.click();
     await fixture.whenStable();
     expect(query(fixture, '[data-testid="support-banner"]')).toBeNull();
+  });
+
+  it('shows the cube status in the header; the pill opens the connect dialog', async () => {
+    polyfillDialog();
+    const fixture = await render(chrome());
+    // The pill and the dialog are deferred: their code loads right after the first render.
+    await settle();
+    await fixture.whenStable();
+
+    const pill = query(fixture, '[data-testid="cube-status"]');
+    expect(pill?.textContent.trim()).toBe('No cube');
+    expect(query(fixture, 'app-cube-status-pill')).not.toBeNull();
+    expect(query(fixture, 'dialog')?.hasAttribute('open')).toBe(false);
+
+    pill?.click();
+    await settle();
+    await fixture.whenStable();
+    expect(query(fixture, 'dialog')?.hasAttribute('open')).toBe(true);
   });
 });

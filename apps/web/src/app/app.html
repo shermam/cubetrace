@@ -13,15 +13,33 @@
       >
     }
   </nav>
-  <p
-    class="wake-lock"
-    role="status"
-    data-testid="wake-lock-status"
-    [attr.data-status]="wakeLockStatus()"
-    [title]="wakeLockText().detail"
-  >
-    <span class="dot" aria-hidden="true"></span>{{ wakeLockText().label }}
-  </p>
+  <div class="status">
+    <p
+      class="wake-lock"
+      role="status"
+      data-testid="wake-lock-status"
+      [attr.data-status]="wakeLockStatus()"
+      [title]="wakeLockText().detail"
+    >
+      <span class="dot" aria-hidden="true"></span>{{ wakeLockText().label }}
+    </p>
+    <!-- Deferred: the cube code imports @cubetrace/gan and @cubetrace/core, whose index files
+         would pull cubing.js into the initial bundle (docs/TOOLCHAIN.md, "Cube connection"). -->
+    @defer (on immediate) {
+      <app-cube-status-pill />
+    } @placeholder {
+      <button
+        type="button"
+        class="cube-pill"
+        aria-haspopup="dialog"
+        data-testid="cube-status"
+        data-status="disconnected"
+        (click)="openConnectDialog()"
+      >
+        <span class="dot" aria-hidden="true"></span><span class="label">No cube</span>
+      </button>
+    }
+  </div>
 </header>
 @if (missingApis && !bannerDismissed()) {
   <section class="support-banner" aria-label="Browser support" data-testid="support-banner">
@@ -36,6 +54,9 @@
 <main>
   <router-outlet />
 </main>
+@defer (on immediate) {
+  <app-connect-dialog />
+}
 <footer class="app-footer">
   <span data-testid="app-version">cubetrace {{ build.version }} · {{ build.commit }}</span>
 </footer>
