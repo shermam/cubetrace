@@ -62,6 +62,8 @@ describe('CaptureLabPage', () => {
     expect(text(fixture, 'lab-status')).toBe('Not started.');
     expect(button(fixture, 'Stop').disabled).toBe(true);
     expect(button(fixture, 'Cut the last 3 s').disabled).toBe(true);
+    expect(button(fixture, 'Mux and save the last 3 s').disabled).toBe(true);
+    expect(text(fixture, 'lab-clip-files')).toBeUndefined();
 
     button(fixture, 'Start').click();
     await settle();
@@ -100,5 +102,6 @@ describe('CaptureLabPage', () => {
 
     expect(getUserMedia).toHaveBeenCalledWith(expect.objectContaining({ audio: false }));
     expect(button(fixture, 'Cut the last 10 s').disabled).toBe(true);
+    expect(button(fixture, 'Mux and save the last 10 s').disabled).toBe(true);
   });
 });

@@ -1,10 +1,14 @@
 import { uptime } from 'node:os';
 import { expect, test, type Page } from '@playwright/test';
+import { ATTEMPT_SCHEMA, FRAMES_SCHEMA, type FramesJson, type VideoClip } from '@cubetrace/core';
+import { Ajv2020 } from 'ajv/dist/2020';
+import { ALL_FORMATS, BufferSource, Input } from 'mediabunny';
 
 // The capture pipeline (docs/PLAN.md, T2.2) on Chrome's fake camera, through the capture lab
-// (/capture-lab). The fake camera runs at 20 fps unless told otherwise; `fps=30` gives the 1080p30
-// of the owner's cameras (docs/DEVICES.md). The fake microphone comes with it, and the camera
-// prompt is answered "Allow". Launch options force a browser of their own for this file.
+// (/capture-lab), and its clips (T2.3): muxed into MP4 and written into the origin private file
+// system by the worker. The fake camera runs at 20 fps unless told otherwise; `fps=30` gives the
+// 1080p30 of the owner's cameras (docs/DEVICES.md). The fake microphone comes with it, and the
+// camera prompt is answered "Allow". Launch options force a browser of their own for this file.
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],
@@ -62,6 +66,15 @@ interface CutSummary {
   };
 }
 
+/** The lab's summary of the clip it saved (apps/web/src/app/capture-lab/capture-lab-page.ts). */
+interface SavedClip {
+  readonly clip: VideoClip;
+  readonly folder: string;
+  readonly files: { name: string; bytes: number }[];
+  readonly frames: { count: number; t0HostMs: number; durationMs: number; keyframes: number[] };
+  readonly latencyMs: number;
+}
+
 async function readJson<T>(page: Page, testId: string): Promise<T> {
   return JSON.parse((await page.getByTestId(testId).textContent()) ?? 'null') as T;
 }
@@ -94,6 +107,44 @@ function percentile(values: readonly number[], p: number): number {
 
 const round = (value: number, digits = 1): number =>
   Math.round(value * 10 ** digits) / 10 ** digits;
+
+/** Records at least `seconds` of encoded video, from the lab's Start. */
+async function record(page: Page, seconds: number): Promise<void> {
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect
+    .poll(async () => (await history(page)).at(-1)?.bufferSeconds ?? 0, { timeout: 30_000 })
+    .toBeGreaterThanOrEqual(seconds);
+}
+
+/** Mux and save of the last 3 s, and the lab's summary of the clip once it is saved. */
+async function saveLast3s(page: Page): Promise<SavedClip> {
+  await page.getByRole('button', { name: 'Mux and save the last 3 s' }).click();
+  await expect(page.getByTestId('lab-status')).toHaveText(/^Saved lab\.solve\.mp4: \d+ frames/, {
+    timeout: 20_000,
+  });
+  return readJson<SavedClip>(page, 'lab-clip-json');
+}
+
+/** A file of the lab's clip folder in the origin private file system, read in the page. */
+async function readLabFile(page: Page, name: string): Promise<Buffer> {
+  const base64 = await page.evaluate(async (file) => {
+    const root = await navigator.storage.getDirectory();
+    const folder = await (
+      await (
+        await (await root.getDirectoryHandle('sessions')).getDirectoryHandle('capture-lab')
+      ).getDirectoryHandle('attempts')
+    ).getDirectoryHandle('0001');
+    const bytes = new Uint8Array(
+      await (await (await folder.getFileHandle(file)).getFile()).arrayBuffer(),
+    );
+    let text = '';
+    for (let at = 0; at < bytes.length; at += 0x8000) {
+      text += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    }
+    return btoa(text);
+  }, name);
+  return Buffer.from(base64, 'base64');
+}
 
 test('10 s of the fake camera at 1080p30 encode without drops, and the last 3 s cut from a keyframe within 50 ms', async ({
   page,
@@ -204,21 +255,140 @@ test('10 s of the fake camera at 1080p30 encode without drops, and the last 3 s 
   await expect(page.getByTestId('lab-status')).toHaveText('Stopped.');
 });
 
-test('the production build under /cubetrace/ starts the worker from its own chunk', async ({
+test('the last 3 s muxed and saved: an MP4 and its frames.json in OPFS, which play with the duration and the frames they say', async ({
   page,
 }) => {
+  test.setTimeout(90_000);
+  await page.goto('/capture-lab');
+  await record(page, 4);
+
+  const saved = await saveLast3s(page);
+
+  // The two files in the attempt's folder of the lab's scratch session, and nothing else.
+  expect(saved.folder).toBe('sessions/capture-lab/attempts/0001');
+  expect(saved.files.map((file) => file.name)).toEqual(['lab.solve.frames.json', 'lab.solve.mp4']);
+  expect(saved.files[1].bytes).toBe(saved.clip.bytes);
+  // The video[] entry: valid against attempt.schema.json's clip, as the worker muxed it.
+  const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
+  ajv.addSchema(ATTEMPT_SCHEMA);
+  const isClip = ajv.getSchema(`${String(ATTEMPT_SCHEMA['$id'])}#/$defs/clip`);
+  expect(isClip?.(saved.clip), ajv.errorsText(isClip?.errors)).toBe(true);
+  const stats = (await history(page)).at(-1);
+  expect(saved.clip).toMatchObject({
+    camera: 'lab',
+    segment: 'solve',
+    file: 'lab.solve.mp4',
+    framesFile: 'lab.solve.frames.json',
+    codec: stats?.codec,
+    audio: stats?.audioCodec,
+    width: 1920,
+    height: 1080,
+    fpsNominal: 30,
+    crop: null,
+    syncResidualMs: null,
+  });
+
+  // frames.json, read back from OPFS: valid, one entry per frame of the clip.
+  const frames = JSON.parse(
+    (await readLabFile(page, 'lab.solve.frames.json')).toString(),
+  ) as FramesJson;
+  const isFrames = new Ajv2020({ allowUnionTypes: true, allErrors: true }).compile(FRAMES_SCHEMA);
+  expect(isFrames(frames), JSON.stringify(isFrames.errors)).toBe(true);
+  expect(frames.dtMs).toHaveLength(saved.clip.frames);
+  expect(frames.t0HostMs).toBe(saved.clip.firstFrameHostMs);
+  expect(frames.keyframes[0]).toBe(0);
+  // 3 s asked for, from the keyframe at or before its start: 3 to 4 s of frames.
+  expect(saved.frames.durationMs).toBeGreaterThanOrEqual(2900);
+  expect(saved.frames.durationMs).toBeLessThanOrEqual(4100);
+
+  // The MP4 in a <video>: its metadata loads, with the duration of the frames (within 10%) and
+  // their size; then it plays to the end.
+  await expect(page.getByTestId('lab-clip-metadata')).toHaveText(/^The video element reads/);
+  const video = page.getByTestId('lab-clip-video');
+  const metadata = await video.evaluate((element: HTMLVideoElement) => ({
+    durationS: element.duration,
+    width: element.videoWidth,
+    height: element.videoHeight,
+  }));
+  expect(Math.abs(metadata.durationS * 1000 - saved.frames.durationMs)).toBeLessThanOrEqual(
+    0.1 * saved.frames.durationMs,
+  );
+  expect([metadata.width, metadata.height]).toEqual([1920, 1080]);
+  const played = await video.evaluate(async (element: HTMLVideoElement) => {
+    const ended = new Promise<void>((resolve) => {
+      element.addEventListener('ended', () => {
+        resolve();
+      });
+      // A clip that stops playing fails the test below rather than hanging it.
+      setTimeout(resolve, 20_000);
+    });
+    element.playbackRate = 4;
+    await element.play();
+    await ended;
+    const quality = element.getVideoPlaybackQuality();
+    return { ended: element.ended, frames: quality.totalVideoFrames, error: element.error?.code };
+  });
+  expect(played).toMatchObject({ ended: true, error: undefined });
+
+  // The MP4 read back from OPFS and demuxed: as many frames as frames.json, the codecs of the
+  // entry.
+  const mp4 = await readLabFile(page, 'lab.solve.mp4');
+  expect(mp4.length).toBe(saved.clip.bytes);
+  const input = new Input({ source: new BufferSource(new Uint8Array(mp4)), formats: ALL_FORMATS });
+  const videoTrack = await input.getPrimaryVideoTrack();
+  const audioTrack = await input.getPrimaryAudioTrack();
+  const packets = (await videoTrack?.computePacketStats())?.packetCount;
+  expect(packets).toBe(frames.dtMs.length);
+  expect((await videoTrack?.getCodecParameterString())?.startsWith(saved.clip.codec)).toBe(true);
+  expect(audioTrack === null ? null : await audioTrack.getCodecParameterString()).toBe(
+    saved.clip.audio,
+  );
+  const fileDurationMs = (await input.computeDuration()) * 1000;
+  expect(Math.abs(fileDurationMs - saved.frames.durationMs)).toBeLessThanOrEqual(
+    0.1 * saved.frames.durationMs,
+  );
+
+  const report = {
+    saveLatencyMs: saved.latencyMs,
+    mp4Bytes: saved.clip.bytes,
+    framesJsonBytes: saved.files[0].bytes,
+    frames: saved.clip.frames,
+    keyframes: saved.frames.keyframes,
+    framesDurationMs: saved.frames.durationMs,
+    videoElementDurationMs: round(metadata.durationS * 1000),
+    fileDurationMs: round(fileDurationMs),
+    mp4Packets: packets,
+    playedFrames: played.frames,
+    codec: saved.clip.codec,
+    audio: saved.clip.audio,
+    audioPackets: audioTrack === null ? null : (await audioTrack.computePacketStats()).packetCount,
+    audioFromMs: audioTrack === null ? null : round((await audioTrack.getFirstTimestamp()) * 1000),
+    audioToMs: audioTrack === null ? null : round((await audioTrack.computeDuration()) * 1000),
+  };
+  console.log(`clip: ${JSON.stringify(report, null, 2)}`);
+  test.info().annotations.push({ type: 'clip', description: JSON.stringify(report) });
+
+  await page.getByRole('button', { name: 'Stop' }).click();
+  await expect(page.getByTestId('lab-status')).toHaveText('Stopped.');
+});
+
+test('the production build under /cubetrace/ starts the worker from its own chunk, which saves clips', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
   // The production build that pwa.spec.ts serves like GitHub Pages (playwright.config.ts).
   const workers: string[] = [];
   page.on('worker', (worker) => workers.push(worker.url()));
   await page.goto('http://localhost:4300/cubetrace/capture-lab');
-  await page.getByRole('button', { name: 'Start' }).click();
+  await record(page, 3.5);
 
-  await expect
-    .poll(async () => (await history(page)).at(-1)?.codec ?? null, { timeout: 20_000 })
-    .not.toBeNull();
   expect(workers).toContainEqual(
     expect.stringMatching(/^http:\/\/localhost:4300\/cubetrace\/worker-[A-Z0-9]{8}\.js$/),
   );
+  // mediabunny, bundled into the worker's chunk, muxes there too.
+  const saved = await saveLast3s(page);
+  expect(saved.clip.frames).toBe(saved.frames.count);
+  await expect(page.getByTestId('lab-clip-metadata')).toHaveText(/^The video element reads/);
 
   await page.getByRole('button', { name: 'Stop' }).click();
   await expect(page.getByTestId('lab-status')).toHaveText('Stopped.');
