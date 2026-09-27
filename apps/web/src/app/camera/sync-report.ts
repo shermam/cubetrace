@@ -3,12 +3,13 @@ import {
   BASELINE_TO_MS,
   CLOCK_TOLERANCE_MS,
   ENERGY_FLOOR,
-  MAX_SPREAD_MS,
   MIN_BASELINE_FRAMES,
   MIN_MATCHES,
+  MIN_SPREAD_LIMIT_MS,
   ONSET_MADS,
   PEAK_MADS,
   SINGLE_TURN_MS,
+  SPREAD_ALLOWANCE_MS,
   WINDOW_AFTER_MS,
   WINDOW_BEFORE_MS,
   isWideFraming,
@@ -72,7 +73,9 @@ export interface SyncReport {
     readonly floor: number;
     readonly singleTurnMs: number;
     readonly minMatches: number;
-    readonly maxSpreadMs: number;
+    /** The spread limit is this plus the frames' median interval, and never under the minimum. */
+    readonly spreadAllowanceMs: number;
+    readonly minSpreadLimitMs: number;
     readonly clockToleranceMs: number;
   };
   /** How it ended. */
@@ -83,6 +86,9 @@ export interface SyncReport {
     readonly message: string | null;
     readonly offsetMs: number | null;
     readonly spreadMs: number | null;
+    /** The frames' median interval, and the widest spread that passes with it. */
+    readonly frameIntervalMs: number | null;
+    readonly maxSpreadMs: number;
     /** Single turns matched and not, moves and frames. */
     readonly matched: number;
     readonly unmatched: number;
@@ -159,7 +165,8 @@ export function syncReport(
       floor: ENERGY_FLOOR,
       singleTurnMs: SINGLE_TURN_MS,
       minMatches: MIN_MATCHES,
-      maxSpreadMs: MAX_SPREAD_MS,
+      spreadAllowanceMs: SPREAD_ALLOWANCE_MS,
+      minSpreadLimitMs: MIN_SPREAD_LIMIT_MS,
       clockToleranceMs: CLOCK_TOLERANCE_MS,
     },
     result: {
@@ -168,6 +175,8 @@ export function syncReport(
       message: outcome.ok ? null : outcome.message,
       offsetMs: analysis.offsetMs,
       spreadMs: analysis.spreadMs,
+      frameIntervalMs: analysis.frameIntervalMs,
+      maxSpreadMs: analysis.maxSpreadMs,
       matched: analysis.matched,
       unmatched: analysis.unmatched,
       moves: analysis.moves,

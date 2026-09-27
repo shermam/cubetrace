@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  MAX_SPREAD_MS,
   MIN_MATCHES,
   SINGLE_TURN_MS,
   detectClapperboard,
@@ -290,7 +289,9 @@ describe('a sync check filmed with the whole frame as the region, a person movin
       // The camera shows each turn on the first frame 60 ms or more after it: 60 to 93 ms later.
       expect(result.offsetMs).toBeGreaterThanOrEqual(60);
       expect(result.offsetMs).toBeLessThan(94);
-      expect(result.clapperboardResidualMs).toBeLessThanOrEqual(MAX_SPREAD_MS);
+      // Within the limit of 50 ms plus a frame at 30 fps.
+      expect(result.analysis.maxSpreadMs).toBeCloseTo(83.3, 1);
+      expect(result.clapperboardResidualMs).toBeLessThanOrEqual(result.analysis.maxSpreadMs);
     }
   });
 });

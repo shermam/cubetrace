@@ -83,7 +83,8 @@ describe('syncReport', () => {
         onsetMads: 3,
         peakMads: 6,
         floor: 0.001,
-        maxSpreadMs: 40,
+        spreadAllowanceMs: 50,
+        minSpreadLimitMs: 40,
         clockToleranceMs: 1000,
       },
       result: {
@@ -96,6 +97,9 @@ describe('syncReport', () => {
         moves: 3,
         frames: 60,
         durationMs: 2000,
+        // Frames at 30 fps: a spread of up to 50 ms plus a frame passes.
+        frameIntervalMs: 33.33,
+        maxSpreadMs: 83.3,
       },
       // Received 3 ms after arriving, half a ms after their host time.
       clock: { frameMinusPageMs: -2.5 },

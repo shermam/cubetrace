@@ -68,12 +68,13 @@ export {
   BASELINE_TO_MS,
   CLOCK_TOLERANCE_MS,
   ENERGY_FLOOR,
-  MAX_SPREAD_MS,
   MIN_BASELINE_FRAMES,
   MIN_MATCHES,
+  MIN_SPREAD_LIMIT_MS,
   ONSET_MADS,
   PEAK_MADS,
   SINGLE_TURN_MS,
+  SPREAD_ALLOWANCE_MS,
   SYNC_CHECK_MS,
   WINDOW_AFTER_MS,
   WINDOW_BEFORE_MS,
@@ -81,6 +82,7 @@ export {
   frameHostTimes,
   percentile,
   singleTurns,
+  spreadLimitMs,
 } from './clapperboard';
 
 // T2.10 — the video quality: the encoder's bitrate, which the app also shows for each quality.

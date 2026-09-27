@@ -54,8 +54,30 @@ export const SINGLE_TURN_MS = 500;
 /** Fewer turns matched to an onset fail the check. */
 export const MIN_MATCHES = 4;
 
-/** A wider spread of the lags fails the check: over a frame at 30 fps. */
-export const MAX_SPREAD_MS = 40;
+/**
+ * A check allows a spread of the lags of this, ms, plus the median interval of its frames
+ * (`spreadLimitMs`): each onset is only known to a frame, an error of up to one interval (33 ms at
+ * 30 fps), on top of the Bluetooth jitter of the cube's reports (a 95th percentile of 13 to 23 ms on
+ * both cubes, docs/DEVICES.md), and with ten turns the 95th minus the 5th percentile is their range.
+ */
+export const SPREAD_ALLOWANCE_MS = 50;
+
+/**
+ * The spread limit is never under this, ms (T2.5's fixed limit), and is this when the frames'
+ * interval is unknown (fewer than two frames).
+ */
+export const MIN_SPREAD_LIMIT_MS = 40;
+
+/**
+ * The widest spread of the lags that passes a check whose frames come `frameIntervalMs` apart (their
+ * median interval; null when unknown): `SPREAD_ALLOWANCE_MS` plus that interval, 83 ms at 30 fps and
+ * 67 at 60, never under `MIN_SPREAD_LIMIT_MS`.
+ */
+export function spreadLimitMs(frameIntervalMs: number | null): number {
+  return frameIntervalMs === null
+    ? MIN_SPREAD_LIMIT_MS
+    : Math.max(MIN_SPREAD_LIMIT_MS, SPREAD_ALLOWANCE_MS + frameIntervalMs);
+}
 
 /**
  * The frames' host times and the page's clock when their motion reached it differ by the delivery
@@ -146,6 +168,10 @@ export interface ClapperboardAnalysis {
   readonly offsetMs: number | null;
   /** The 95th minus the 5th percentile of those lags (nearest rank), ms; null without pairs. */
   readonly spreadMs: number | null;
+  /** The median interval of the frames, ms; null with fewer than two frames. */
+  readonly frameIntervalMs: number | null;
+  /** The widest spread that passes, ms: `spreadLimitMs` of that interval. */
+  readonly maxSpreadMs: number;
 }
 
 /** A check's outcome as `session.json` keeps it (`clock.cameras[label]` less the remote fields). */
@@ -186,7 +212,7 @@ const MISS_WORDS: Readonly<Record<TurnMiss, string>> = {
  * matched turns, the residual their spread (95th minus 5th percentile). Fails, saying why, without
  * moves or frames; when the frames' host times are more than `CLOCK_TOLERANCE_MS` from the page's
  * clock (`receivedHostMs`); when no single turn's window rises (no motion); with fewer than
- * `MIN_MATCHES` matched turns; or with a spread over `MAX_SPREAD_MS`.
+ * `MIN_MATCHES` matched turns; or with a spread over `spreadLimitMs` of the frames' median interval.
  */
 export function detectClapperboard(
   frames: readonly ClapperboardFrame[],
@@ -205,6 +231,8 @@ export function detectClapperboard(
   const lags = pairs.map((pair) => pair.onsetHostMs - pair.moveHostMs).sort((a, b) => a - b);
   const offset = lags.length === 0 ? null : median(lags);
   const spread = lags.length === 0 ? null : percentile(lags, 0.95) - percentile(lags, 0.05);
+  const interval = frameInterval(times);
+  const limit = spreadLimitMs(interval);
   const analysis: ClapperboardAnalysis = {
     frames: ordered.length,
     moves: moves.length,
@@ -215,6 +243,8 @@ export function detectClapperboard(
     pairs,
     offsetMs: offset === null ? null : round(offset, 1),
     spreadMs: spread === null ? null : round(spread, 1),
+    frameIntervalMs: interval === null ? null : round(interval, 2),
+    maxSpreadMs: round(limit, 1),
   };
   const fail = (reason: ClapperboardFailure, message: string): ClapperboardResult => ({
     ok: false,
@@ -241,10 +271,11 @@ export function detectClapperboard(
   if (pairs.length < MIN_MATCHES) {
     return fail('few-matches', fewMatches(turns, moves.length));
   }
-  if (offset === null || spread === null || spread > MAX_SPREAD_MS) {
+  if (offset === null || spread === null || spread > limit) {
+    const rate = interval === null ? '' : ` at ${String(Math.round(1000 / interval))} fps`;
     return fail(
       'wide-spread',
-      `spread over ${String(MAX_SPREAD_MS)} ms (${String(analysis.spreadMs)} ms)`,
+      `spread over ${String(Math.round(limit))} ms${rate} (${String(analysis.spreadMs)} ms)`,
     );
   }
   return {
@@ -272,6 +303,19 @@ export function frameHostTimes(frames: readonly MotionSample[]): {
     frames.map((frame) => frame.arrivalHostMs - frame.timestampUs / 1000).sort((a, b) => a - b),
   );
   return { offsetMs, times: frames.map((frame) => frame.timestampUs / 1000 + offsetMs) };
+}
+
+/**
+ * The median interval between consecutive frames (`times`, increasing), ms; null with fewer than two
+ * frames. A dropped frame makes one interval double, which the median passes over.
+ */
+function frameInterval(times: readonly number[]): number | null {
+  const intervals = times
+    .slice(1)
+    .map((time, k) => time - times[k])
+    .filter((interval) => interval > 0)
+    .sort((a, b) => a - b);
+  return intervals.length === 0 ? null : median(intervals);
 }
 
 /**

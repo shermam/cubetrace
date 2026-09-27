@@ -5,12 +5,13 @@ import {
   BASELINE_TO_MS,
   CLOCK_TOLERANCE_MS,
   ENERGY_FLOOR,
-  MAX_SPREAD_MS,
   MIN_BASELINE_FRAMES,
   MIN_MATCHES,
+  MIN_SPREAD_LIMIT_MS,
   ONSET_MADS,
   PEAK_MADS,
   SINGLE_TURN_MS,
+  SPREAD_ALLOWANCE_MS,
   SYNC_CHECK_MS,
   WINDOW_AFTER_MS,
   WINDOW_BEFORE_MS,
@@ -18,6 +19,7 @@ import {
   frameHostTimes,
   percentile,
   singleTurns,
+  spreadLimitMs,
   type ClapperboardFrame,
 } from './clapperboard';
 
@@ -97,6 +99,35 @@ function check(
   return { frames, moves };
 }
 
+/**
+ * A check filmed at `fps` frames a second for 20 s: five turns, their motion from the frames nearest
+ * 2, 4, 6, 8 and 10 s, each reported by the cube its lag (ms) before that frame.
+ */
+function atRate(
+  fps: number,
+  lags: readonly number[],
+): { frames: ClapperboardFrame[]; moves: number[] } {
+  const stamp = (frame: number): number => T0_US + Math.round((frame * 1e6) / fps);
+  const host = (frame: number): number => stamp(frame) / 1000 + OFFSET_MS;
+  const onsets = lags.map((_, k) => Math.round(2 * (k + 1) * fps));
+  const motion = new Map<number, number>();
+  for (const onset of onsets) {
+    TURN.forEach((_, k) => motion.set(onset + k, k));
+  }
+  const frames = Array.from({ length: 20 * fps }, (_, frame) => {
+    const at = motion.get(frame);
+    return {
+      timestampUs: stamp(frame),
+      arrivalHostMs: host(frame),
+      receivedHostMs: host(frame) + 2,
+      mean: at === undefined ? 1 : TURN_MEAN[at],
+      changed: at === undefined ? still(frame) : TURN[at],
+      costMs: 0.8,
+    };
+  });
+  return { frames, moves: onsets.map((onset, k) => host(onset) - lags[k]) };
+}
+
 /** Whether `times` are the host times of the frames `frames`, to a hundredth of a ms. */
 function expectTimes(times: readonly (number | null)[], frames: readonly number[]): void {
   expect(times).toHaveLength(frames.length);
@@ -110,8 +141,17 @@ describe('the thresholds', () => {
     expect([SYNC_CHECK_MS, WINDOW_BEFORE_MS, WINDOW_AFTER_MS]).toEqual([20_000, 400, 700]);
     expect([BASELINE_FROM_MS, BASELINE_TO_MS, MIN_BASELINE_FRAMES]).toEqual([900, 300, 5]);
     expect([ONSET_MADS, PEAK_MADS, ENERGY_FLOOR]).toEqual([3, 6, 0.001]);
-    expect([MIN_MATCHES, MAX_SPREAD_MS, SINGLE_TURN_MS]).toEqual([4, 40, 500]);
-    expect(CLOCK_TOLERANCE_MS).toBe(1000);
+    expect([MIN_MATCHES, SINGLE_TURN_MS, CLOCK_TOLERANCE_MS]).toEqual([4, 500, 1000]);
+    expect([SPREAD_ALLOWANCE_MS, MIN_SPREAD_LIMIT_MS]).toEqual([50, 40]);
+  });
+
+  it('allow a spread of 50 ms plus the frames’ interval, and never under 40', () => {
+    expect(spreadLimitMs(1000 / 30)).toBeCloseTo(83.33, 2);
+    expect(spreadLimitMs(1000 / 60)).toBeCloseTo(66.67, 2);
+    expect(spreadLimitMs(1000 / 120)).toBeCloseTo(58.33, 2);
+    expect(spreadLimitMs(0)).toBe(50);
+    // Without an interval (fewer than two frames): the floor.
+    expect(spreadLimitMs(null)).toBe(40);
   });
 });
 
@@ -143,6 +183,9 @@ describe('detectClapperboard', () => {
       // The arrivals' jitter does not move the frames: their median offset is the true one; the page
       // got them 2 ms after they arrived.
       clock: { arrivalOffsetMs: OFFSET_MS, arrivalResidualP95Ms: 8, frameMinusPageMs: -2 },
+      // Frames at 30 fps: a spread of up to 50 ms plus a frame passes.
+      frameIntervalMs: 33.33,
+      maxSpreadMs: 83.3,
     });
     expect(result.analysis.turns.map((turn) => turn.miss)).toEqual(Array(5).fill(null));
     expect(result.analysis.turns.map((turn) => turn.lagMs)).toEqual([38, 41, 45, 40, 43]);
@@ -321,8 +364,8 @@ describe('detectClapperboard', () => {
     expect(result).toMatchObject({ ok: true, clapperboardSamples: 4 });
   });
 
-  it('fails when the lags spread over 40 ms, saying the spread', () => {
-    const turns = [10, 41, 45, 40, 90].map((lagMs, k) => ({ frame: 60 * (k + 1), lagMs }));
+  it('fails when the lags spread wider than 50 ms plus a frame, saying the spread and the limit', () => {
+    const turns = [10, 41, 45, 40, 110].map((lagMs, k) => ({ frame: 60 * (k + 1), lagMs }));
     const { frames, moves } = check(turns);
 
     const result = detectClapperboard(frames, moves);
@@ -330,9 +373,30 @@ describe('detectClapperboard', () => {
     expect(result).toMatchObject({
       ok: false,
       reason: 'wide-spread',
-      message: 'spread over 40 ms (80 ms)',
+      message: 'spread over 83 ms at 30 fps (100 ms)',
     });
-    expect(result.analysis).toMatchObject({ offsetMs: 41, spreadMs: 80 });
+    expect(result.analysis).toMatchObject({ offsetMs: 41, spreadMs: 100, maxSpreadMs: 83.3 });
+  });
+
+  it('lets a spread of 60 ms pass at 30 fps and fails it at 120 fps', () => {
+    // Each onset is only known to a frame: at 30 fps the limit is 83 ms, at 120 fps 58 ms.
+    const lags = [30, 90, 50, 60, 55];
+
+    const slow = atRate(30, lags);
+    expect(detectClapperboard(slow.frames, slow.moves)).toMatchObject({
+      ok: true,
+      offsetMs: 55,
+      clapperboardResidualMs: 60,
+      analysis: { frameIntervalMs: 33.33, maxSpreadMs: 83.3 },
+    });
+
+    const fast = atRate(120, lags);
+    expect(detectClapperboard(fast.frames, fast.moves)).toMatchObject({
+      ok: false,
+      reason: 'wide-spread',
+      message: 'spread over 58 ms at 120 fps (60 ms)',
+      analysis: { offsetMs: 55, spreadMs: 60, frameIntervalMs: 8.33, maxSpreadMs: 58.3 },
+    });
   });
 
   it("fails with the clock's reason when the frames' times are 3 s off the page's clock", () => {

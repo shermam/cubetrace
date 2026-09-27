@@ -118,9 +118,9 @@ Bluetooth (the median over the turns matched), and Y the spread of those lags (9
 percentile). A frame at host time t thus shows the cube as the move log has it at t − X. The lag is
 kept in the session (`clock.cameras`) and in every later clip of that camera (`syncResidualMs`), for
 the training to subtract. A check that fails says why (the cube did not move, no motion in the
-framing rectangle, fewer than 4 matches, a spread over 40 ms), with Retry and "Download check data",
-a file of what the camera saw around each turn to attach to an issue; Later hides it, and "Sync
-check", under the camera's picture, runs it again between attempts.
+framing rectangle, fewer than 4 matches, a spread over 50 ms plus a frame), with Retry and "Download
+check data", a file of what the camera saw around each turn to attach to an issue; Later hides it,
+and "Sync check", under the camera's picture, runs it again between attempts.
 
 **Video quality**, in Camera settings and in Settings → Camera, sets the video's bitrate, and so
 what the clips take: Standard, the default, 4 Mbps at 1920×1080 and 30 fps, about 20 MB per attempt

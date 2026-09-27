@@ -959,16 +959,23 @@ not a window that begins in motion), provided the window's peak exceeds `baselin
 0.2%)`; the lag is onset minus `t`. An onset goes to one turn only: when two turns' windows share it
 (turns 0.5 to 1.1 s apart), the turn whose move is nearer keeps it and the other takes its next
 rise. The offset is the median lag, the residual the spread from the 5th to the 95th percentile
-(nearest rank: with 19 turns or fewer, the widest two lags); fewer than 4 matches or a spread over
-40 ms fail, as in T2.5. Each turn's analysis says why it is unmatched (no frames, no baseline, no
-rise, the picture already changing, or its motion nearer another turn), and the failure's message
-counts those. On a synthetic film of a check (`clapperboard-scene.test.ts`: 640 × 360 frames of a
-room and a person swaying and breathing, with the sensor's noise, a flickering light and three
-fidgets, ten turns each a compact change of about 0.7% of the picture 60 ms after the move) T2.5's
-detector matched none of the ten turns and T2.8's all ten, with a lag of 73.5 ms and a spread of
-26.9 ms. The 0.1% floor keeps a still picture (a MAD of 0) from taking a few changed pixels for a
-turn; on the fake camera the changed area's median is 0.7% and its peaks 11% (its test pattern
-moves), which the MAD absorbs.
+(nearest rank: with 19 turns or fewer, the widest two lags); fewer than 4 matches fail, as in T2.5.
+**The spread a check allows follows the frame rate**: 50 ms plus the median interval of the check's
+frames (83 ms at 30 fps, 67 at 60, 58 at 120; never under T2.5's 40 ms, which is also the limit
+without an interval), since each onset is only known to a frame, an error of up to one interval, on
+top of the Bluetooth jitter of the cube's reports (a 95th percentile of 13 to 23 ms on both cubes,
+`docs/DEVICES.md`), and with ten turns the spread is their range: T2.5's fixed 40 ms would fail
+correct checks at 30 fps. The analysis keeps the interval and the limit, and a failure says both
+("spread over 83 ms at 30 fps (91.2 ms)"); `clapperboardResidualMs` stays the spread itself, the
+honest number (the offset, a median of n lags, is known to about the spread over √n). Each turn's
+analysis says why it is unmatched (no frames, no baseline, no rise, the picture already changing, or
+its motion nearer another turn), and the failure's message counts those. On a synthetic film of a
+check (`clapperboard-scene.test.ts`: 640 × 360 frames of a room and a person swaying and breathing,
+with the sensor's noise, a flickering light and three fidgets, ten turns each a compact change of
+about 0.7% of the picture 60 ms after the move) T2.5's detector matched none of the ten turns and
+T2.8's all ten, with a lag of 73.5 ms and a spread of 26.9 ms. The 0.1% floor keeps a still picture
+(a MAD of 0) from taking a few changed pixels for a turn; on the fake camera the changed area's
+median is 0.7% and its peaks 11% (its test pattern moves), which the MAD absorbs.
 
 **The check in the Timer** is due by itself when a session is under way with the camera recording, a
 cube connected and no check of that camera in the session's `clock.cameras`, once per session and

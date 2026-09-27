@@ -13,7 +13,9 @@ versions follow [Semantic Versioning](https://semver.org/).
   brightness moved by more than 12 levels, so that the camera's noise and a flicker of the light
   count for nothing), at twice the resolution when the whole frame is watched, and each turn's
   motion is looked for in the frames around it, against the picture just before it, rather than
-  anywhere in the check.
+  anywhere in the check. The spread of the lags a check allows follows the camera's frame rate:
+  50 ms plus one frame interval (83 ms at 30 fps, where the fixed 40 ms failed correct checks),
+  since each turn's motion is only seen to the nearest frame.
 - The turns made for a sync check no longer end up in the next attempt's scramble (issue #34): a
   check waits 20 s for the first turn, then runs until the ten turns are made, showing "Turn 3 of
   10", and after it the timer waits until the cube has been still for 2 s (or the result is closed),
