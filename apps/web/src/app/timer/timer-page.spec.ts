@@ -47,7 +47,7 @@ describe('TimerPage', () => {
     return (fixture.nativeElement as HTMLElement).querySelector(selector);
   }
 
-  it('lays out the scramble, the time, the breakdown and the solves, and the Cube section', async () => {
+  it('lays out the scramble, the time, the breakdown and the solves, the Cube and Camera sections', async () => {
     setup();
     const fixture = await render();
 
@@ -65,6 +65,13 @@ describe('TimerPage', () => {
     expect(cube?.hasAttribute('open')).toBe(false);
     expect(cube?.querySelector('summary')?.textContent).toContain('No cube');
     expect(cube?.querySelector('app-live-cube-panel')).not.toBeNull();
+    // The camera panel, a chunk of its own, comes right after the page; it stays off.
+    await fixture.whenStable();
+    const camera = query(fixture, '[data-testid="camera-section"]');
+    expect(camera?.tagName).toBe('DETAILS');
+    expect(camera?.hasAttribute('open')).toBe(false);
+    expect(camera?.querySelector('summary')?.textContent).toContain('Off');
+    expect(cube?.nextElementSibling?.tagName).toBe('APP-CAMERA-PANEL');
     expect(autoStartDemo).not.toHaveBeenCalled();
   });
 

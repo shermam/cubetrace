@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 
+import { CameraPanel } from '../camera/camera-panel';
 import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { CubeService } from '../cube/cube-service';
 import { demoRequestFrom } from '../cube/demo';
@@ -14,14 +15,16 @@ import { TimerClock } from './timer-clock';
 /**
  * `/`: the timer (docs/PLAN.md, T1.6b). Stacked on a phone (scramble, time, breakdown and solves);
  * on wider screens the scramble and the time on the left, the breakdown and the solves on the
- * right, with the live cube panel (T1.6a) in a collapsible "Cube" section below them. The keys:
+ * right, with the live cube panel (T1.6a) in a collapsible "Cube" section below them, and the
+ * camera panel (T2.1) in a "Camera" section below that, loaded after the page (its code is a chunk
+ * of its own, which the page does not wait for). The keys:
  * `Esc` marks a DNF, `Delete` deletes the last attempt, `N` skips the scramble (or starts the next
  * attempt), except while typing or while a dialog is open. `?demo=<index>&speed=<n>` connects the
  * demo cube once the stored session has been read, so that its first attempt continues it.
  */
 @Component({
   selector: 'app-timer-page',
-  imports: [BreakdownChart, LiveCubePanel, ScrambleView, SolveList, TimerClock],
+  imports: [BreakdownChart, CameraPanel, LiveCubePanel, ScrambleView, SolveList, TimerClock],
   host: { '(document:keydown)': 'onKeydown($event)' },
   template: `
     <h1>Timer</h1>
@@ -42,6 +45,11 @@ import { TimerClock } from './timer-clock';
           </summary>
           <app-live-cube-panel />
         </details>
+        @defer (on immediate) {
+          <app-camera-panel />
+        } @placeholder {
+          <p class="camera-loading"><span class="title">Camera</span></p>
+        }
       </section>
     </div>
   `,
@@ -107,6 +115,16 @@ import { TimerClock } from './timer-clock';
     .cube-state {
       color: var(--text-muted);
       font-size: 0.875rem;
+    }
+
+    /* Where the Camera section appears once its code has loaded. */
+    .camera-loading {
+      margin: 0;
+
+      .title {
+        font-size: 1.125rem;
+        font-weight: 600;
+      }
     }
   `,
 })

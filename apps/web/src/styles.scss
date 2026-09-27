@@ -145,7 +145,8 @@ button {
 }
 
 input[type='text'],
-input[type='number'] {
+input[type='number'],
+select {
   min-width: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
@@ -162,6 +163,12 @@ input[type='number'] {
 input[type='checkbox'] {
   width: 1.125rem;
   height: 1.125rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+input[type='range'] {
+  min-width: 0;
   margin: 0;
   accent-color: var(--accent);
 }
