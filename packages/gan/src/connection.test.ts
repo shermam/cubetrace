@@ -517,6 +517,104 @@ describe('openGanConnection', () => {
   });
 });
 
+describe('resetToSolved', () => {
+  const NOW = ORIGIN + 5000;
+  const OTHER: Facelets = applyMoves(SOLVED, parseMoves('F2 D'));
+
+  /** A connection whose cube answered SCRAMBLED on connecting and answers `then` afterwards. */
+  async function connected(...then: string[]) {
+    const driver = fakeDriver({ answers: [SCRAMBLED, ...then] });
+    const conn = await open(driver, typedMac, { now: () => NOW });
+    await settle(); // The hardware and battery requests.
+    driver.commands.length = 0;
+    return { driver, conn, ...record(conn) };
+  }
+
+  /** Writes wait until the test lets them finish, in order. */
+  function holdWrites(driver: ReturnType<typeof fakeDriver>): (() => void)[] {
+    const pending: (() => void)[] = [];
+    driver.send.mockImplementation((command) => {
+      driver.commands.push(command.type);
+      return new Promise<void>((resolve) => pending.push(resolve));
+    });
+    return pending;
+  }
+
+  it("writes REQUEST_RESET, then emits the solved state (reset), then asks for the cube's, whose answer follows", async () => {
+    const { driver, conn, events } = await connected(SOLVED);
+
+    await conn.resetToSolved();
+    await settle(); // The cube's answer.
+    expect(driver.commands).toEqual(['REQUEST_RESET', 'REQUEST_FACELETS']);
+    expect(conn.facelets).toBe(SOLVED);
+    expect(events).toEqual([
+      { type: 'facelets', facelets: SOLVED, hostMs: NOW, reset: true },
+      { type: 'facelets', facelets: SOLVED, hostMs: ORIGIN + 900 },
+    ]);
+
+    // Moves go on from the solved state.
+    driver.subject.next(move('R', { serial: 9, timestamp: 6000, cubeTimestamp: 9000 }));
+    expect(conn.facelets).toBe(applyMove(SOLVED, { face: 'R', turns: 1 }));
+  });
+
+  it('emits the solved state only once REQUEST_RESET is written, and asks for the state after it', async () => {
+    const { driver, conn, events } = await connected(SOLVED);
+    const pending = holdWrites(driver);
+
+    const resetting = conn.resetToSolved();
+    await settle();
+    expect(driver.commands).toEqual(['REQUEST_RESET']);
+    expect(events).toEqual([]);
+    expect(conn.facelets).toBe(SCRAMBLED);
+
+    pending[0]();
+    await settle();
+    expect(events).toEqual([{ type: 'facelets', facelets: SOLVED, hostMs: NOW, reset: true }]);
+    expect(conn.facelets).toBe(SOLVED);
+    expect(driver.commands).toEqual(['REQUEST_RESET', 'REQUEST_FACELETS']);
+
+    pending[1]();
+    await resetting;
+  });
+
+  it("adopts the cube's own state when its answer disagrees", async () => {
+    const { conn, events } = await connected(OTHER);
+
+    await conn.resetToSolved();
+    await settle();
+    expect(events.map((e) => (e.type === 'facelets' ? [e.facelets, e.reset] : e.type))).toEqual([
+      [SOLVED, true],
+      [OTHER, undefined],
+    ]);
+    expect(conn.facelets).toBe(OTHER);
+  });
+
+  it('rejects once disconnected, and emits nothing', async () => {
+    const { driver, conn, events } = await connected();
+    await conn.disconnect();
+
+    await expect(conn.resetToSolved()).rejects.toThrow('The cube is disconnected.');
+    expect(driver.commands).toEqual([]);
+    expect(events).toEqual([{ type: 'disconnected', reason: 'Disconnected on request.' }]);
+  });
+
+  it('rejects when the link closes while the reset is written, and emits no solved state', async () => {
+    const { driver, conn, events } = await connected();
+    const pending = holdWrites(driver);
+
+    const resetting = conn.resetToSolved();
+    await settle();
+    driver.subject.complete(); // The GATT server disconnected.
+    pending[0]();
+
+    await expect(resetting).rejects.toThrow('The cube is disconnected.');
+    expect(events).toEqual([
+      { type: 'disconnected', reason: 'The Bluetooth connection was closed.' },
+    ]);
+    expect(conn.facelets).toBe(SCRAMBLED);
+  });
+});
+
 describe('the end of a GAN connection', () => {
   it('emits disconnected and completes when the driver stream completes (the fork, on GATT disconnection)', async () => {
     const driver = fakeDriver();

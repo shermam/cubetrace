@@ -18,6 +18,7 @@ export {
   connectGanCube,
   normalizeMac,
 } from './connection';
+export { loadGanDriver } from './driver';
 export { MAC_FLAG_URL, checkBluetoothSupport } from './support';
 export type { FakeCubeOptions, ScheduledMove } from './fake';
 export { FAKE_CUBE_BATTERY, FAKE_CUBE_HARDWARE, FakeCube } from './fake';
