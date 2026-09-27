@@ -1,1 +1,25 @@
-/* You can add global styles to this file, and also import other style files */
+/* Global styles. Pages keep their own styles in their components. */
+:root {
+  color-scheme: light dark;
+  --line: #d0d4da;
+  --hover: #eef0f3;
+  --accent: #1f6feb;
+  --on-accent: #ffffff;
+
+  @media (prefers-color-scheme: dark) {
+    --line: #30363d;
+    --hover: #21262d;
+    --accent: #388bfd;
+    --on-accent: #0d1117;
+  }
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
