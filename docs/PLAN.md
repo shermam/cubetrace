@@ -684,7 +684,7 @@ pipeline, §9 the data model).
 | T2.4 | `web`: recording in the timer: two clips per attempt, storage meter, clip viewer, downloads | T2.0, T2.1, T2.3 | ✅ #28 |
 | T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | ⬜ |
 | T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | ⬜ |
-| T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | 🟨 #30 |
+| T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | ✅ #30 |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6. Rules for every phase 2 task: nothing of
 the capture code in the initial bundle (lazy chunks; check `ng build`); the worker code is plain
