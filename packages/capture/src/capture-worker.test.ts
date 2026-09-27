@@ -688,8 +688,46 @@ describe('CaptureWorker', () => {
               byte.toString(16).padStart(2, '0'),
             ).join(' '),
       ).toBe(description);
+      // The clips' reports say that the capture made it (which of issue #33's causes it was).
+      await capture.feed(0, 40);
+      capture.worker.handle({
+        type: 'mux-and-write',
+        id: 1,
+        startHostMs: arrivalOf(20),
+        endHostMs: arrivalOf(40),
+        sessionId: '3f1c2b7e-8a4d-4f2e-9b1a-0c5d6e7f8a9b',
+        index: 1,
+        camera: 'laptop',
+        segment: 'solve',
+        fpsNominal: 30,
+      });
+      expect(capture.jobs.map((job) => job.audio.configMade)).toEqual([true]);
     },
   );
+
+  it("keeps the encoder's own decoder config when it gave a whole one", async () => {
+    const capture = harness({ audio: true });
+    for (let index = 0; index < 5; index += 1) {
+      capture.audio.push(new FakeAudio(T0 + index * 10_000));
+      await settle();
+    }
+    await capture.feed(0, 40);
+    capture.worker.handle({
+      type: 'mux-and-write',
+      id: 1,
+      startHostMs: arrivalOf(20),
+      endHostMs: arrivalOf(40),
+      sessionId: '3f1c2b7e-8a4d-4f2e-9b1a-0c5d6e7f8a9b',
+      index: 1,
+      camera: 'laptop',
+      segment: 'solve',
+      fpsNominal: 30,
+    });
+    expect(capture.worker.buffer.audioTrack?.decoderConfig?.codec).toBe('opus');
+    expect(capture.jobs.map((job) => job.audio)).toEqual([
+      { state: 'encoding', data: 5, chunks: 2, error: null, configMade: false },
+    ]);
+  });
 
   it('records video only when no audio encoder takes the audio, and says so once', async () => {
     FakeAudioEncoder.supported = new Set();
@@ -923,7 +961,7 @@ describe('CaptureWorker saving clips', () => {
     expect(job.request).toEqual(request(1, { segment: 'scramble' }));
     // What the clip's report needs: the seconds in the buffer, and the audio (none asked for here).
     expect(job.bufferSeconds).toBeCloseTo(worker.buffer.bufferSeconds, 3);
-    expect(job.audio).toEqual({ state: 'off', data: 0, chunks: 0, error: null });
+    expect(job.audio).toEqual({ state: 'off', data: 0, chunks: 0, error: null, configMade: false });
     expect(job.cut.video.chunks).toHaveLength(sample.video.chunks.length);
     expect(job.cut.frames.t0HostMs).toBe(sample.frames.t0HostMs);
     // The job moves its own copies of the bytes; the buffer keeps its own.

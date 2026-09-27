@@ -68,6 +68,19 @@ export function audioDecoderConfigFor(
   return completed;
 }
 
+/**
+ * Whether `given`, an audio encoder's decoder config, has what the muxer needs as it is: a sample rate
+ * and a channel count, and for AAC-LC a description. False for none (the encoder gave no config).
+ */
+export function isAudioDecoderConfigComplete(given: AudioDecoderConfig | undefined): boolean {
+  return (
+    given !== undefined &&
+    positiveInteger(given.sampleRate) !== undefined &&
+    positiveInteger(given.numberOfChannels) !== undefined &&
+    (given.codec !== AAC_LC || given.description !== undefined)
+  );
+}
+
 function positiveInteger(value: number | undefined): number | undefined {
   return value !== undefined && Number.isInteger(value) && value > 0 ? value : undefined;
 }

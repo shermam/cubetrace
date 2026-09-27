@@ -993,9 +993,11 @@ viewer and the capture lab's counters; the fixture and the tests that read it; `
   without sound while audio is recorded says why (no audio data, no decoder config, no chunk in the
   clip's span with how far the audio's timestamps are from the frames', the encoder's error), in a
   notice and in the notes. When the encoder's first chunk has no decoder config, one is made from
-  its config (for AAC-LC with the AudioSpecificConfig); when the audio's timestamps count on another
-  clock than the frames' (arrival offsets more than 100 ms apart), the buffer, the cut and the muxer
-  place it by the arrival offsets, and the clip's notes say by how much.
+  its config (for AAC-LC with the AudioSpecificConfig), and the session's notes say so once (`clip
+  audio described: …`), so that a clip with its sound still tells which cause it was; when the
+  audio's timestamps count on another clock than the frames' (arrival offsets more than 100 ms
+  apart), the buffer, the cut and the muxer place it by the arrival offsets, and the clip's notes
+  say by how much.
 
 **Tests.** Unit: the cut of a truncated start, the mux of it (`lateMs`), the clip worker's answer
 with its report; the restart rule on synthetic samples (a reconnection, a count that falls behind

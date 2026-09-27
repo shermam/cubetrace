@@ -147,6 +147,7 @@ const A_REPORT: ClipReport = {
   bufferSeconds: 12.5,
   audioMissing: null,
   audioRebasedMs: 0,
+  audioConfigMade: false,
 };
 
 beforeEach(() => {

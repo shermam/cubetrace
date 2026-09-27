@@ -311,12 +311,18 @@ describe('muxClip on a cut older than the buffer, and on audio of another clock 
   });
 
   describe('says why a clip has no sound while the capture records audio', () => {
-    const ENCODING: AudioReport = { state: 'encoding', data: 400, chunks: 200, error: null };
+    const ENCODING: AudioReport = {
+      state: 'encoding',
+      data: 400,
+      chunks: 200,
+      error: null,
+      configMade: false,
+    };
 
     it.each([
       [
         'no audio data',
-        { state: 'waiting', data: 0, chunks: 0, error: null },
+        { state: 'waiting', data: 0, chunks: 0, error: null, configMade: false },
         (cut: Cut): Cut => ({ ...cut, audio: null }),
         'no audio data: the microphone sent nothing (muted, or held by another app)',
       ],
@@ -328,13 +334,14 @@ describe('muxClip on a cut older than the buffer, and on audio of another clock 
           chunks: 0,
           error:
             'No audio encoder takes 48000 Hz, 3 channel(s) (tried mp4a.40.2, opus): recording video only.',
+          configMade: false,
         },
         (cut: Cut): Cut => ({ ...cut, audio: null }),
         'the audio stopped (No audio encoder takes 48000 Hz, 3 channel(s) (tried mp4a.40.2, opus): recording video only.)',
       ],
       [
         'an encoder not started yet',
-        { state: 'waiting', data: 3, chunks: 0, error: null },
+        { state: 'waiting', data: 3, chunks: 0, error: null, configMade: false },
         (cut: Cut): Cut => ({ ...cut, audio: null }),
         'the audio encoder had not started',
       ],
@@ -351,6 +358,7 @@ describe('muxClip on a cut older than the buffer, and on audio of another clock 
           data: 900,
           chunks: 400,
           error: 'The audio encoder failed: EncodingError: the encoder crashed',
+          configMade: false,
         },
         (cut: Cut): Cut => ({ ...cut, audio: cut.audio && { ...cut.audio, chunks: [] } }),
         'the audio stopped (The audio encoder failed: EncodingError: the encoder crashed)',
@@ -372,7 +380,7 @@ describe('muxClip on a cut older than the buffer, and on audio of another clock 
     );
 
     it('says nothing when no audio was asked for, or the clip has its sound', async () => {
-      const off: AudioReport = { state: 'off', data: 0, chunks: 0, error: null };
+      const off: AudioReport = { state: 'off', data: 0, chunks: 0, error: null, configMade: false };
       const silent = await muxClip({ ...readMediaSample(), audio: null }, { ...META, audio: off });
       expect(silent.info).toMatchObject({ audio: null, audioMissing: null });
       const heard = await muxClip(readMediaSample(), { ...META, audio: ENCODING });

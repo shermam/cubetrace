@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { aacAudioSpecificConfig, audioDecoderConfigFor } from './audio-config';
+import {
+  aacAudioSpecificConfig,
+  audioDecoderConfigFor,
+  isAudioDecoderConfigComplete,
+} from './audio-config';
 
 // The decoder config a clip gets when the audio encoder describes its output poorly or not at all
 // (T2.9, issue #33): the AudioSpecificConfig of AAC-LC, bit by bit, and the completion of a config.
@@ -63,6 +67,19 @@ describe('audioDecoderConfigFor', () => {
       sampleRate: 48_000,
       numberOfChannels: 1,
     });
+  });
+
+  it('says whether what the encoder gave will do as it is', () => {
+    expect(isAudioDecoderConfigComplete(undefined)).toBe(false);
+    expect(
+      isAudioDecoderConfigComplete({ codec: 'opus', sampleRate: 48_000, numberOfChannels: 2 }),
+    ).toBe(true);
+    const aac = { codec: 'mp4a.40.2', sampleRate: 48_000, numberOfChannels: 1 };
+    expect(isAudioDecoderConfigComplete(aac)).toBe(false);
+    expect(
+      isAudioDecoderConfigComplete({ ...aac, description: new Uint8Array([0x11, 0x88]) }),
+    ).toBe(true);
+    expect(isAudioDecoderConfigComplete({ ...aac, codec: 'opus', sampleRate: 0 })).toBe(false);
   });
 
   it('keeps what the encoder gave, and completes what it left out', () => {

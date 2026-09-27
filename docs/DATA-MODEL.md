@@ -210,11 +210,12 @@ begins later than asked, `clip truncated: <segment> of attempt <index> starts <s
 held <s> s)` (§7); once per recording (from the camera's start to its stop), one per reason a clip
 has no sound although the sound is recorded, `clip without audio: <segment> of attempt <index>:
 <reason>` (no audio data from the microphone, no decoder config, no audio chunk in the clip's span,
-the audio encoder's error), and one when the sound's timestamps counted on another clock than the
+the audio encoder's error), one when the sound's timestamps counted on another clock than the
 frames' and were placed by their arrival times, `clip audio rebased: <segment> of attempt <index>:
-audio timestamps rebased by <ms> ms`; and each notice of a recording, once, `notice: <text>` (the
-microphone refused, silent or lost, no audio encoder). `summary` is counted from the attempts: each
-one is solved or a DNF.
+audio timestamps rebased by <ms> ms`, and one when the audio encoder gave no complete decoder config
+and the app made it from the encoder's settings, `clip audio described: <segment> of attempt
+<index>: …`; and each notice of a recording, once, `notice: <text>` (the microphone refused, silent
+or lost, no audio encoder). `summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in

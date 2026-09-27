@@ -69,7 +69,13 @@ function request(id: number, changes: Partial<MuxAndWriteRequest> = {}): MuxAndW
 }
 
 /** The capture's audio while it encodes the fake microphone. */
-const ENCODING: AudioReport = { state: 'encoding', data: 400, chunks: 200, error: null };
+const ENCODING: AudioReport = {
+  state: 'encoding',
+  data: 400,
+  chunks: 200,
+  error: null,
+  configMade: false,
+};
 
 function job(
   id: number,
@@ -146,6 +152,7 @@ describe('ClipWorker', () => {
       bufferSeconds: 90,
       audioMissing: null,
       audioRebasedMs: 0,
+      audioConfigMade: false,
     });
     const mp4 = root.files().get(`${FOLDER}/laptop.solve.mp4`)?.bytes;
     expect(mp4?.length).toBe(clip.bytes);
@@ -184,6 +191,7 @@ describe('ClipWorker', () => {
       bufferSeconds: 90,
       audioMissing: null,
       audioRebasedMs: 0,
+      audioConfigMade: false,
     });
     expect(root.files().get(`${FOLDER}/laptop.scramble.mp4`)?.bytes.length).toBe(clip.bytes);
   });
@@ -192,12 +200,25 @@ describe('ClipWorker', () => {
     const { worker, posted } = await clipWorker();
     const silent: Cut = { ...readMediaSample(), audio: null };
 
-    await worker.handle(job(5, {}, silent, { state: 'waiting', data: 0, chunks: 0, error: null }));
+    await worker.handle(
+      job(5, {}, silent, { state: 'waiting', data: 0, chunks: 0, error: null, configMade: false }),
+    );
 
     expect(clipOf(posted.at(-1)).audio).toBeNull();
     expect(reportOf(posted.at(-1)).audioMissing).toBe(
       'no audio data: the microphone sent nothing (muted, or held by another app)',
     );
+  });
+
+  it('reports that the capture made the audio decoder config of a clip with sound', async () => {
+    const { worker, posted } = await clipWorker();
+
+    await worker.handle(job(6, {}, undefined, { ...ENCODING, configMade: true }));
+    await worker.handle(
+      job(7, {}, { ...readMediaSample(), audio: null }, { ...ENCODING, configMade: true }),
+    );
+
+    expect(posted.map((message) => reportOf(message).audioConfigMade)).toEqual([true, false]);
   });
 
   it('says why when there is no clip: no session folder, a bad label', async () => {

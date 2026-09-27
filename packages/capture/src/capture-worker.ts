@@ -10,7 +10,7 @@
 // encoders, the clock and the timer come in through `WorkerEnvironment`, so the logic also runs in
 // Node's tests with fakes; the last lines wire it to the worker's global scope.
 // It encodes the video at the bitrate of the start's quality (bitrate.ts, T2.10).
-import { audioDecoderConfigFor } from './audio-config';
+import { audioDecoderConfigFor, isAudioDecoderConfigComplete } from './audio-config';
 import { videoBitrate, type VideoQuality } from './bitrate';
 import { cut } from './cut';
 import type { FramingRect } from './framing';
@@ -231,6 +231,8 @@ export class CaptureWorker {
   #audioChunks = 0;
   /** Why the audio stopped, as the window heard it; null while it has not. */
   #audioError: string | null = null;
+  /** Whether the audio's decoder config was made or completed here (`AudioReport.configMade`). */
+  #audioConfigMade = false;
   /** The first frame's arrival: the microphone has `AUDIO_SILENCE_MS` from there to send audio. */
   #firstFrameHostMs: number | undefined;
   #silenceSaid = false;
@@ -816,9 +818,10 @@ export class CaptureWorker {
     const copied = given === undefined ? undefined : copyDecoderConfig(given);
     let described = copied;
     const config = this.#audioConfig;
-    if (config !== undefined) {
+    if (config !== undefined && !isAudioDecoderConfigComplete(copied)) {
       try {
         described = audioDecoderConfigFor(config, copied);
+        this.#audioConfigMade = true;
       } catch {
         // No AudioSpecificConfig for this rate or channel count: the encoder's config as it came, if
         // any; else none, and the clips say so.
@@ -922,6 +925,7 @@ export class CaptureWorker {
       data: this.#audioData,
       chunks: this.#audioChunks,
       error: this.#audioError,
+      configMade: this.#audioConfigMade,
     };
   }
 }

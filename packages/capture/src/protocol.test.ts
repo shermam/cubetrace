@@ -141,7 +141,7 @@ describe('transferList', () => {
         request,
         cut: result,
         bufferSeconds: 90,
-        audio: { state: 'encoding', data: 9000, chunks: 4200, error: null },
+        audio: { state: 'encoding', data: 9000, chunks: 4200, error: null, configMade: false },
       }),
     ).toEqual(cutBuffers(result));
   });

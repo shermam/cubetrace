@@ -96,6 +96,11 @@ export interface AudioReport {
   readonly chunks: number;
   /** Why the audio stopped (the window's non-fatal `error` said it); null if it did not. */
   readonly error: string | null;
+  /**
+   * The audio's decoder config was made, or completed, from the encoder's settings: the encoder gave
+   * none with its first chunk, or one without a field the muxer needs (issue #33).
+   */
+  readonly configMade: boolean;
 }
 
 /**
@@ -122,6 +127,11 @@ export interface ClipReport {
    * one.
    */
   readonly audioRebasedMs: number;
+  /**
+   * The clip's audio track has a decoder config that the capture made, or completed, from the
+   * encoder's settings (`AudioReport.configMade`); false otherwise, and without an audio track.
+   */
+  readonly audioConfigMade: boolean;
 }
 
 /** A clip saved: its `video[]` entry, and its report. */

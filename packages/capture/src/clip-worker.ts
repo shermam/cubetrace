@@ -84,6 +84,7 @@ export class ClipWorker {
           bufferSeconds: job.bufferSeconds,
           audioMissing: info.audioMissing,
           audioRebasedMs: info.audioRebasedMs,
+          audioConfigMade: info.audio !== null && job.audio.configMade,
         },
       });
     } catch (error: unknown) {

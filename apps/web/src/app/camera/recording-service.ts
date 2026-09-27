@@ -604,7 +604,9 @@ export class RecordingService {
   /**
    * Says what a clip saved short of what was asked lacks, and notes it in its session (T2.9): that
    * it begins late (every such clip), that it has no sound and why, and that its audio was moved
-   * onto the frames' clock (each once per run of the pipeline, since every clip then has it).
+   * onto the frames' clock (each once per run of the pipeline, since every clip then has it). That
+   * the capture made its audio's decoder config is only noted, once: the clip has its sound, and the
+   * note says which of the causes of issue #33 the device had.
    */
   private remark(attempt: AttemptRef, clip: VideoClip, report: ClipReport): void {
     const what = `${clip.segment} of attempt ${String(attempt.index)}`;
@@ -632,6 +634,13 @@ export class RecordingService {
       const rebase = `audio timestamps rebased by ${report.audioRebasedMs.toFixed(0)} ms`;
       said.push(`${name}: ${rebase}.`);
       this.noteOnce(attempt.session, `clip audio rebased: ${what}: ${rebase}`, 'audio rebased');
+    }
+    if (report.audioConfigMade) {
+      this.noteOnce(
+        attempt.session,
+        `clip audio described: ${what}: the audio encoder gave no complete decoder config; the capture made it from the encoder's settings`,
+        'audio config made',
+      );
     }
     if (said.length > 0) {
       this.clipNoticeSignal.set(said.join(' '));

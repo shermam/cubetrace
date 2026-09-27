@@ -383,6 +383,27 @@ describe('RecordingService', () => {
     );
   });
 
+  it('notes once, without a notice, that the capture made the audio decoder config of its clips', async () => {
+    const r = rig();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { fake, capture } = await recording(r);
+
+    turn(r.s, fake, 'R U F');
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext({ audio: 'mp4a.40.2' }, { audioConfigMade: true });
+    await settle();
+    turn(r.s, fake, "F' U' R'", 500);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext({ audio: 'mp4a.40.2' }, { audioConfigMade: true });
+    await settle();
+    await r.s.service.whenSaved();
+
+    expect(r.recording.clipNotice()).toBeNull();
+    expect(r.s.service.session()?.notes).toBe(
+      "clip audio described: scramble of attempt 1: the audio encoder gave no complete decoder config; the capture made it from the encoder's settings",
+    );
+  });
+
   it('says once that a clip failed and notes it in the session; the attempt is recorded as ever', async () => {
     const r = rig();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

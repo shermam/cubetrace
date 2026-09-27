@@ -33,6 +33,7 @@ export const CLIP_AS_ASKED: ClipReport = {
   bufferSeconds: 90,
   audioMissing: null,
   audioRebasedMs: 0,
+  audioConfigMade: false,
 };
 
 /** The counters of a pipeline that has buffered `seconds`. */
