@@ -4,10 +4,13 @@ import {
   detectClapperboard,
   percentile,
   type ClapperboardAnalysis,
+  type ClapperboardFrame,
   type ClapperboardResult,
   type FramingRect,
+  type MotionMeterInfo,
   type MotionSample,
 } from '@cubetrace/capture';
+import { formatMove } from '@cubetrace/core';
 import type { CubeEvent } from '@cubetrace/gan';
 import type { Observable, Subscription } from 'rxjs';
 
@@ -21,10 +24,9 @@ export const SYNC_TICK_MS = 250;
 export const SYNC_TURNS = 10;
 
 /**
- * A check ends early once all its turns are matched, the spread is within the limit and a second
- * has passed since the last turn and the last onset: it has what it asked for.
+ * Once the turns asked for are made, a check ends when the cube has been still this long, ms: the
+ * last turn's motion is in the frames by then (the detection looks 700 ms past a turn).
  */
-export const SYNC_EARLY_MATCHES = SYNC_TURNS;
 export const SYNC_EARLY_QUIET_MS = 1000;
 
 /** Starts measuring the camera's motion in `rect`; returns the stop, or null without a capture. */
@@ -32,6 +34,7 @@ export type MotionWatch = (
   rect: FramingRect | null,
   onSample: (sample: MotionSample) => void,
   onError: (message: string) => void,
+  onMeter: (meter: MotionMeterInfo) => void,
 ) => (() => void) | null;
 
 export interface SyncRunOptions {
@@ -44,17 +47,29 @@ export interface SyncRunOptions {
    * disconnection ends the check, at once (before another connection can begin).
    */
   readonly events$: Observable<CubeEvent>;
-  /** How long it watches, ms; `SYNC_CHECK_MS` (20 s) by default. */
+  /**
+   * How long it waits, ms (`SYNC_CHECK_MS`, 20 s, by default): for the first turn when it runs until
+   * the turns are done (`untilDone`), else in all.
+   */
   readonly durationMs?: number;
+  /**
+   * True (the Timer's check, by default): once the first turn is made, it runs until the
+   * `SYNC_TURNS` turns asked for are made and the cube has been still for a second, whatever the
+   * time, or until it is cancelled; it never gives up in the middle of what it asked for (T2.8).
+   * False (the capture lab's): it watches `durationMs`, ending sooner once the turns asked for are
+   * all matched within the spread and the cube has been still for a second.
+   */
+  readonly untilDone?: boolean;
   /** The host clock and its timers (BROWSER_GLOBALS in the app; fakes in the tests). */
   readonly now: () => number;
   readonly setTimeout: (callback: () => void, ms: number) => number;
   readonly clearTimeout: (handle: number) => void;
   /**
    * Called once when the check ends, at once (within the call that ends it, even during the
-   * construction when the camera does not record): with the outcome, or null when cancelled.
+   * construction when the camera does not record): with the outcome, or null when cancelled, and the
+   * check itself.
    */
-  readonly onEnd?: (outcome: SyncOutcome | null) => void;
+  readonly onEnd?: (outcome: SyncOutcome | null, run: SyncRun) => void;
 }
 
 /** What the camera's frames cost to measure, ms: the capture worker's time per frame. */
@@ -82,42 +97,71 @@ export type SyncOutcome = (ClapperboardResult | SyncInterrupted) & {
   readonly durationMs: number;
 };
 
+/** A move of the cube during a check: its host time and the move, such as `U'`. */
+export interface SyncMove {
+  readonly hostMs: number;
+  readonly move: string;
+}
+
+/** What a check collected, for its diagnostics (sync-report.ts). */
+export interface SyncRunData {
+  /** When it started, host ms. */
+  readonly startMs: number;
+  /** The frames' motion, each with the page's clock when it came (`receivedHostMs`). */
+  readonly samples: readonly ClapperboardFrame[];
+  readonly moves: readonly SyncMove[];
+  /** How the capture worker read the frames; null before the first. */
+  readonly meter: MotionMeterInfo | null;
+}
+
 /** `running`, then `done` with an outcome, or `cancelled` without one. */
 export type SyncRunState = 'running' | 'done' | 'cancelled';
 
 /**
- * One sync check (docs/PLAN.md, T2.5): for `durationMs` it collects the motion of the camera's
- * frames (the capture worker's `sync-sample`s) and the host times of the cube's moves, updating a
- * countdown and the counts of frames, moves and onsets four times a second, then runs the
- * clapperboard (@cubetrace/capture's `detectClapperboard`) on them. It ends early once its ten
- * turns (`SYNC_TURNS`) are matched within the spread and a second has passed since the last one.
- * The Timer page's check (`SyncService`) and the capture lab's run it.
+ * One sync check (docs/PLAN.md, T2.5 and T2.8): it collects the motion of the camera's frames (the
+ * capture worker's `sync-sample`s, each stamped with the page's clock when it came) and the cube's
+ * moves, updating a countdown and the counts of frames, turns and turns matched four times a second,
+ * and runs the clapperboard (@cubetrace/capture's `detectClapperboard`) on them. The Timer's check
+ * waits 20 s for the first turn, then runs until the ten turns asked for (`SYNC_TURNS`) are made and
+ * the cube has been still for a second (`untilDone`); the capture lab's watches its time. The Timer
+ * page's check (`SyncService`) and the capture lab's run it.
  */
 export class SyncRun {
   private readonly stateSignal = signal<SyncRunState>('running');
   private readonly secondsLeftSignal = signal(0);
   private readonly framesSignal = signal(0);
   private readonly movesSignal = signal(0);
-  private readonly onsetsSignal = signal(0);
+  private readonly matchedSignal = signal(0);
+  private readonly meterSignal = signal<MotionMeterInfo | null>(null);
+  private readonly lastSignal = signal<MotionSample | null>(null);
   private readonly outcomeSignal = signal<SyncOutcome | null>(null);
 
   readonly state = this.stateSignal.asReadonly();
-  /** Seconds until it ends, counted down. */
+  /**
+   * Seconds until it gives up, counted down: until the first turn when it runs until the turns are
+   * done (0 from then on), else until it ends.
+   */
   readonly secondsLeft = this.secondsLeftSignal.asReadonly();
   /** Frames measured so far. */
   readonly frames = this.framesSignal.asReadonly();
-  /** The cube's moves so far. */
+  /** The cube's moves so far: the turns made. */
   readonly moves = this.movesSignal.asReadonly();
-  /** Motion onsets so far. */
-  readonly onsets = this.onsetsSignal.asReadonly();
+  /** The single turns matched to a motion so far. */
+  readonly matched = this.matchedSignal.asReadonly();
+  /** How the capture worker reads the frames; null before the first. */
+  readonly meter = this.meterSignal.asReadonly();
+  /** The latest frame's motion (the capture lab's live bars); null before the first. */
+  readonly last = this.lastSignal.asReadonly();
   /** How it ended; null while it runs, and when it was cancelled. */
   readonly outcome = this.outcomeSignal.asReadonly();
+  /** Whether it runs until the turns asked for are done (the Timer's check). */
+  readonly untilDone: boolean;
 
   private readonly options: SyncRunOptions;
   private readonly durationMs: number;
   private readonly startMs: number;
-  private readonly samples: MotionSample[] = [];
-  private readonly moveTimes: number[] = [];
+  private readonly samples: ClapperboardFrame[] = [];
+  private readonly moveLog: SyncMove[] = [];
   private stopWatch: (() => void) | null = null;
   private subscription: Subscription | null = null;
   private timer: number | null = null;
@@ -125,6 +169,7 @@ export class SyncRun {
   constructor(options: SyncRunOptions) {
     this.options = options;
     this.durationMs = options.durationMs ?? SYNC_CHECK_MS;
+    this.untilDone = options.untilDone ?? true;
     this.startMs = options.now();
     this.secondsLeftSignal.set(Math.ceil(this.durationMs / 1000));
     this.subscription = options.events$.subscribe((event) => {
@@ -132,8 +177,8 @@ export class SyncRun {
         return;
       }
       if (event.type === 'move') {
-        this.moveTimes.push(event.hostMs);
-        this.movesSignal.set(this.moveTimes.length);
+        this.moveLog.push({ hostMs: event.hostMs, move: formatMove(event.m) });
+        this.movesSignal.set(this.moveLog.length);
       } else if (event.type === 'disconnected') {
         this.interrupt('the cube disconnected');
       }
@@ -142,12 +187,16 @@ export class SyncRun {
       options.rect,
       (sample) => {
         if (this.stateSignal() === 'running') {
-          this.samples.push(sample);
+          this.samples.push({ ...sample, receivedHostMs: options.now() });
           this.framesSignal.set(this.samples.length);
+          this.lastSignal.set(sample);
         }
       },
       (message) => {
         this.interrupt(`the camera's frames could not be measured (${message})`);
+      },
+      (meter) => {
+        this.meterSignal.set(meter);
       },
     );
     if (stop === null) {
@@ -162,6 +211,16 @@ export class SyncRun {
     }
   }
 
+  /** What it collected so far (the frames, the moves, how the frames are read). */
+  data(): SyncRunData {
+    return {
+      startMs: this.startMs,
+      samples: [...this.samples],
+      moves: [...this.moveLog],
+      meter: this.meterSignal(),
+    };
+  }
+
   /** Ends the check without an outcome ("Later"). */
   cancel(): void {
     if (this.stateSignal() !== 'running') {
@@ -169,7 +228,7 @@ export class SyncRun {
     }
     this.release();
     this.stateSignal.set('cancelled');
-    this.options.onEnd?.(null);
+    this.options.onEnd?.(null, this);
   }
 
   /** Ends the check as failed, for `message` (the recording stopped, say). */
@@ -177,8 +236,15 @@ export class SyncRun {
     if (this.stateSignal() !== 'running') {
       return;
     }
-    const result = detectClapperboard(this.samples, this.moveTimes);
+    const result = this.detect();
     this.end({ ok: false, reason: 'interrupted', message, analysis: result.analysis });
+  }
+
+  private detect(): ClapperboardResult {
+    return detectClapperboard(
+      this.samples,
+      this.moveLog.map((move) => move.hostMs),
+    );
   }
 
   private schedule(): void {
@@ -194,23 +260,32 @@ export class SyncRun {
     }
     const now = this.options.now();
     const elapsed = now - this.startMs;
-    this.secondsLeftSignal.set(Math.max(0, Math.ceil((this.durationMs - elapsed) / 1000)));
-    const result = detectClapperboard(this.samples, this.moveTimes);
-    this.onsetsSignal.set(result.analysis.onsets.length);
-    if (elapsed >= this.durationMs || this.complete(result, now)) {
+    const turning = this.untilDone && this.moveLog.length > 0;
+    this.secondsLeftSignal.set(
+      turning ? 0 : Math.max(0, Math.ceil((this.durationMs - elapsed) / 1000)),
+    );
+    const result = this.detect();
+    this.matchedSignal.set(result.analysis.matched);
+    if ((!turning && elapsed >= this.durationMs) || this.complete(result, now)) {
       this.end(result);
       return;
     }
     this.schedule();
   }
 
-  /** All the turns matched within the spread, and a second of stillness since. */
+  /**
+   * Whether it has what it asked for: the turns made (the Timer's) or matched within the spread (the
+   * lab's), and a second of stillness since the last turn and the last onset.
+   */
   private complete(result: ClapperboardResult, now: number): boolean {
-    if (!result.ok || result.clapperboardSamples < SYNC_EARLY_MATCHES) {
+    const done = this.untilDone
+      ? this.moveLog.length >= SYNC_TURNS
+      : result.ok && result.clapperboardSamples >= SYNC_TURNS;
+    if (!done) {
       return false;
     }
-    const lastMove = this.moveTimes.at(-1) ?? 0;
-    const lastOnset = result.analysis.onsets.at(-1) ?? 0;
+    const lastMove = this.moveLog.at(-1)?.hostMs ?? 0;
+    const lastOnset = result.analysis.pairs.at(-1)?.onsetHostMs ?? 0;
     return now - Math.max(lastMove, lastOnset) >= SYNC_EARLY_QUIET_MS;
   }
 
@@ -221,11 +296,11 @@ export class SyncRun {
       cost: costOf(this.samples),
       durationMs: Math.round(this.options.now() - this.startMs),
     };
-    this.onsetsSignal.set(outcome.analysis.onsets.length);
+    this.matchedSignal.set(outcome.analysis.matched);
     this.secondsLeftSignal.set(0);
     this.outcomeSignal.set(outcome);
     this.stateSignal.set('done');
-    this.options.onEnd?.(outcome);
+    this.options.onEnd?.(outcome, this);
   }
 
   private release(): void {

@@ -10,6 +10,7 @@ import type {
   Cut,
   DeleteClipParams,
   FramingRect,
+  MotionMeterInfo,
   MotionSample,
   SaveClipParams,
 } from '@cubetrace/capture';
@@ -69,6 +70,8 @@ export interface MotionWatchCall {
   readonly rect: FramingRect | null;
   readonly onSample: (sample: MotionSample) => void;
   readonly onError: ((message: string) => void) | undefined;
+  /** Where the test says how the frames are read (T2.8). */
+  readonly onMeter: ((meter: MotionMeterInfo) => void) | undefined;
   /** Whether its stop was called. */
   stopped: boolean;
 }
@@ -111,8 +114,9 @@ export class FakeCapture implements CaptureHandle {
     rect: FramingRect | null,
     onSample: (sample: MotionSample) => void,
     onError?: (message: string) => void,
+    onMeter?: (meter: MotionMeterInfo) => void,
   ): () => void {
-    const call: MotionWatchCall = { rect, onSample, onError, stopped: false };
+    const call: MotionWatchCall = { rect, onSample, onError, onMeter, stopped: false };
     this.watches.push(call);
     return () => {
       call.stopped = true;

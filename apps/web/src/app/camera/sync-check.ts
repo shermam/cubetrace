@@ -1,27 +1,35 @@
 import { Component, computed, inject } from '@angular/core';
 
 import { RecordingService } from './recording-service';
+import { SYNC_TURNS } from './sync-run';
 import { SyncService, type SyncBlock } from './sync-service';
 
-/** What the panel shows: a check under way, how the last one went, or nothing yet. */
-type PanelState = 'running' | 'passed' | 'failed' | 'idle';
+/**
+ * What the panel shows: a check under way; a check due, waiting for a framing rectangle around the
+ * cube (`framing`) or for Start once there is one (`ready`); how the last one went; or nothing yet.
+ */
+type PanelState = 'running' | 'framing' | 'ready' | 'passed' | 'failed' | 'idle';
 
-/** Why "Sync check" cannot be pressed, for its title. */
+/** Why a check cannot be started, for the title of its button and the line beside it. */
 const BLOCKED: Readonly<Record<SyncBlock, string>> = {
   'not-recording': 'Once the camera records (a session under way).',
   'no-cube': 'Once a cube is connected.',
+  loading: 'Once the session is loaded.',
   scrambling: "Before the scramble's first turn, or after the solve.",
   solving: 'After the solve.',
   running: 'A check is under way.',
 };
 
 /**
- * The sync check under the camera's preview (docs/PLAN.md, T2.5): while a check runs, what to do
- * (one face turned and turned back, five times, with pauses), a countdown and how many turns and
- * motion onsets it has seen; then the camera's lag behind the cube, or why the check failed, with
- * Retry; "Later" hides it.
- * Hidden, one line says the lag this session has for the camera, with "Sync check" to run one. The
- * logic is `SyncService`'s; this only shows it.
+ * The sync check under the camera's preview (docs/PLAN.md, T2.5 and T2.8): while the framing
+ * rectangle is the whole frame or most of it, a check that is due first asks for a rectangle around
+ * the cube (with "Edit the framing", which opens Camera settings to the editor, and "Start anyway");
+ * while a check runs, what to do (one face turned and turned back, five times, with pauses), how long
+ * it waits for the first turn, then the turns made out of ten and how many the camera saw; then the
+ * camera's lag behind the cube, or why the check failed, with Retry and "Download check data" (a
+ * small link after a success); "Later" hides it. Hidden, one line says the lag this session has for
+ * the camera, with "Sync check" to run one. Wherever a check cannot be started, the reason is written
+ * beside its button. The logic is `SyncService`'s; this only shows it.
  */
 @Component({
   selector: 'app-sync-check',
@@ -35,6 +43,17 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
       >
         <h3 id="sync-heading">Sync check</h3>
         @switch (state()) {
+          @case ('framing') {
+            <p class="ask" data-testid="sync-framing">
+              Draw the framing rectangle around the cube first (Camera settings → Framing → Edit):
+              the check looks for motion inside it.
+            </p>
+          }
+          @case ('ready') {
+            <p class="ask" data-testid="sync-ready">
+              The framing rectangle is set: start the check with the cube in it.
+            </p>
+          }
           @case ('running') {
             @if (sync.run(); as run) {
               <p class="ask">Turn one face, pause, turn it back; repeat five times.</p>
@@ -43,15 +62,20 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
                 data-testid="sync-count"
                 [attr.data-frames]="run.frames()"
                 [attr.data-moves]="run.moves()"
-                [attr.data-onsets]="run.onsets()"
+                [attr.data-matched]="run.matched()"
               >
-                <span class="seconds" data-testid="sync-seconds">{{ run.secondsLeft() }} s</span>
-                {{ counts() }}
+                @if (run.moves() === 0) {
+                  <span class="seconds" data-testid="sync-seconds">{{ run.secondsLeft() }} s</span>
+                  for the first turn
+                } @else {
+                  <span class="progress" data-testid="sync-progress">{{ progress() }}</span>
+                  · {{ seen() }}
+                }
               </p>
               <p class="hint">
                 Any face, with the cube in the framing rectangle and a pause of about a second after
                 every turn. The timer waits meanwhile: the attempt begins again, with its scramble,
-                once the check ends and the cube is solved.
+                once the check ends and the cube is solved and still.
               </p>
             }
           }
@@ -62,35 +86,92 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
             <p class="error" role="alert" data-testid="sync-failure" [attr.data-reason]="reason()">
               {{ failed() }}
             </p>
+            <p class="hint">
+              If it keeps failing, download the check's data and attach it to an issue: it holds
+              what the camera saw around each turn.
+            </p>
           }
         }
         <div class="actions">
-          @if (state() === 'failed') {
-            <button
-              type="button"
-              class="primary"
-              data-testid="sync-retry"
-              [disabled]="sync.blocked() !== null"
-              [title]="blockedText()"
-              (click)="sync.start()"
-            >
-              Retry
-            </button>
-          } @else if (state() === 'passed') {
-            <button
-              type="button"
-              data-testid="sync-again"
-              [disabled]="sync.blocked() !== null"
-              [title]="blockedText()"
-              (click)="sync.start()"
-            >
-              Check again
-            </button>
+          @switch (state()) {
+            @case ('framing') {
+              <button
+                type="button"
+                class="primary"
+                data-testid="sync-edit-framing"
+                (click)="sync.editFraming()"
+              >
+                Edit the framing
+              </button>
+              <button
+                type="button"
+                data-testid="sync-anyway"
+                [disabled]="blocked()"
+                [title]="blockedText()"
+                (click)="sync.startAnyway()"
+              >
+                Start anyway
+              </button>
+            }
+            @case ('ready') {
+              <button
+                type="button"
+                class="primary"
+                data-testid="sync-go"
+                [disabled]="blocked()"
+                [title]="blockedText()"
+                (click)="sync.start()"
+              >
+                Start
+              </button>
+            }
+            @case ('failed') {
+              <button
+                type="button"
+                class="primary"
+                data-testid="sync-retry"
+                [disabled]="blocked()"
+                [title]="blockedText()"
+                (click)="sync.start()"
+              >
+                Retry
+              </button>
+              <button type="button" data-testid="sync-download" (click)="sync.downloadReport()">
+                Download check data
+              </button>
+            }
+            @case ('passed') {
+              <button
+                type="button"
+                data-testid="sync-again"
+                [disabled]="blocked()"
+                [title]="blockedText()"
+                (click)="sync.start()"
+              >
+                Check again
+              </button>
+            }
           }
           <button type="button" data-testid="sync-later" (click)="sync.later()">
             {{ state() === 'passed' ? 'Close' : 'Later' }}
           </button>
+          @if (state() === 'passed') {
+            <button
+              type="button"
+              class="link"
+              data-testid="sync-download"
+              (click)="sync.downloadReport()"
+            >
+              Download check data
+            </button>
+          }
         </div>
+        @if (blocked() && state() !== 'running') {
+          <p class="why" data-testid="sync-why">{{ blockedText() }}</p>
+        }
+        @if (sync.notice(); as notice) {
+          <p class="notice" role="status" data-testid="sync-notice">{{ notice }}</p>
+        }
       </section>
     } @else if (lineShown()) {
       <p class="line" data-testid="sync-line">
@@ -99,12 +180,18 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
           type="button"
           class="link"
           data-testid="sync-start"
-          [disabled]="sync.blocked() !== null"
+          [disabled]="blocked()"
           [title]="blockedText()"
           (click)="sync.start()"
         >
           Sync check
         </button>
+        @if (blocked()) {
+          <span class="why" data-testid="sync-why">{{ blockedText() }}</span>
+        }
+        @if (sync.notice(); as notice) {
+          <span class="notice" role="status" data-testid="sync-notice">{{ notice }}</span>
+        }
       </p>
     }
   `,
@@ -133,19 +220,27 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
       font-variant-numeric: tabular-nums;
     }
 
-    .seconds {
-      margin-right: var(--space-2);
+    .seconds,
+    .progress {
       font-weight: 600;
     }
 
     .line,
     .count,
-    .hint {
+    .hint,
+    .why {
       color: var(--text-muted);
     }
 
-    .hint {
+    .hint,
+    .why,
+    .notice {
       font-size: 0.75rem;
+    }
+
+    .line .why,
+    .line .notice {
+      display: block;
     }
 
     .passed {
@@ -156,9 +251,14 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
       color: var(--danger);
     }
 
+    .notice {
+      color: var(--warn);
+    }
+
     .actions {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       gap: var(--space-2);
     }
 
@@ -170,6 +270,11 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
       color: var(--accent);
       text-decoration: underline;
     }
+
+    .actions .link {
+      margin-left: 0;
+      font-size: 0.75rem;
+    }
   `,
 })
 export class SyncCheck {
@@ -180,24 +285,25 @@ export class SyncCheck {
     if (this.sync.run()?.state() === 'running') {
       return 'running';
     }
+    if (this.sync.waiting()) {
+      return this.sync.framingWide() ? 'framing' : 'ready';
+    }
     const result = this.sync.result();
     if (result === null) {
       return 'idle';
     }
     return result.outcome.ok ? 'passed' : 'failed';
   });
-  /** "3 turns, 2 motion onsets" while a check runs. */
-  protected readonly counts = computed(() => {
+  /** "Turn 3 of 10" once the turns have begun. */
+  protected readonly progress = computed(() => {
+    const moves = this.sync.run()?.moves() ?? 0;
+    return `Turn ${String(Math.min(moves, SYNC_TURNS))} of ${String(SYNC_TURNS)}`;
+  });
+  /** "2 seen by the camera", and what to do once the ten turns are made. */
+  protected readonly seen = computed(() => {
     const run = this.sync.run();
-    if (run === null) {
-      return '';
-    }
-    const moves = run.moves();
-    const onsets = run.onsets();
-    return (
-      `${String(moves)} ${moves === 1 ? 'turn' : 'turns'}, ` +
-      `${String(onsets)} motion ${onsets === 1 ? 'onset' : 'onsets'}`
-    );
+    const seen = `${String(run?.matched() ?? 0)} seen by the camera`;
+    return (run?.moves() ?? 0) >= SYNC_TURNS ? `${seen}; hold the cube still` : seen;
   });
   /** "Camera lags the cube by 38 ms (±7); was 41 ms." */
   protected readonly passed = computed(() => {
@@ -233,6 +339,8 @@ export class SyncCheck {
       ? 'Sync: this camera has no check in this session.'
       : `Sync: ${lagText(stored.offsetMs, stored.clapperboardResidualMs).toLowerCase()}.`;
   });
+  /** A check cannot be started now (one that runs aside). */
+  protected readonly blocked = computed(() => this.sync.blocked() !== null);
   protected readonly blockedText = computed(() => {
     const blocked = this.sync.blocked();
     return blocked === null ? '' : BLOCKED[blocked];

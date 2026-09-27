@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -106,8 +107,11 @@ export class CameraPanel {
 
   /** Whether the disclosure is open: as it was left, closed before it ever was opened. */
   protected readonly open = signal(this.prefs.cameraSettingsOpen() ?? false);
-  /** The framing rectangle is being edited, over the larger picture. */
-  protected readonly editing = signal(false);
+  /**
+   * The framing rectangle is being edited, over the larger picture: by Edit here, or by the sync
+   * check's "Edit the framing" under the preview (T2.8), which opens these settings to it.
+   */
+  protected readonly editing = this.camera.framingEditing;
   protected readonly resolutions = CAMERA_RESOLUTIONS.map((value) => ({
     value,
     label: CAMERA_RESOLUTION_TEXT[value],
@@ -207,6 +211,30 @@ export class CameraPanel {
         onCleanup(showStream(video, stream));
       }
     });
+    // Asked to edit the framing from elsewhere (the sync check): the settings open to the editor.
+    effect(() => {
+      if (this.camera.framingEditing() && !untracked(() => this.open())) {
+        untracked(() => {
+          this.setOpen(true);
+        });
+      }
+    });
+    // The editor's picture scrolled into view when it appears, so that the rectangle is at hand.
+    effect(() => {
+      const frame = this.frame()?.nativeElement;
+      if (frame !== undefined && typeof frame.scrollIntoView === 'function') {
+        frame.scrollIntoView({ block: 'nearest' });
+      }
+    });
+    // Leaving the page closes the editor, as it was before the editor could be asked for.
+    inject(DestroyRef).onDestroy(() => {
+      this.camera.setFramingEditing(false);
+    });
+  }
+
+  /** Edit or Done: the framing rectangle's editor opened or closed. */
+  protected toggleEditing(): void {
+    this.camera.setFramingEditing(!this.editing());
   }
 
   /** The disclosure was opened or closed: kept for the next loads. */

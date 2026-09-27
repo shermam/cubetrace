@@ -76,7 +76,7 @@
             class="link"
             data-testid="camera-framing-edit"
             [attr.aria-pressed]="editing()"
-            (click)="editing.set(!editing())"
+            (click)="toggleEditing()"
           >
             {{ editing() ? 'Done' : 'Edit' }}
           </button>

@@ -204,6 +204,34 @@ describe('CameraPanel', () => {
     expect(details().open).toBe(true);
   });
 
+  it('opens to the framing editor when the sync check asks for it, and leaving the page closes the editor', async () => {
+    await render();
+    const camera = TestBed.inject(CameraService);
+    const details = (): HTMLDetailsElement => element('camera-section') as HTMLDetailsElement;
+    await turnOn();
+    details().open = false;
+    details().dispatchEvent(new Event('toggle'));
+    await update();
+    expect(element('camera-framing-video')).toBeNull();
+
+    // "Edit the framing" under the preview (T2.8).
+    camera.setFramingEditing(true);
+    await update();
+    expect(details().open).toBe(true);
+    expect(element('camera-framing-video')).not.toBeNull();
+    expect(text('camera-framing-edit')).toBe('Done');
+
+    // Done closes it; so does leaving the page.
+    element('camera-framing-edit')?.click();
+    await update();
+    expect(camera.framingEditing()).toBe(false);
+    expect(element('camera-framing-video')).toBeNull();
+    await edit();
+    expect(camera.framingEditing()).toBe(true);
+    fixture.destroy();
+    expect(camera.framingEditing()).toBe(false);
+  });
+
   it('has the resolution, frame rate, video quality and audio of Settings', async () => {
     await render();
     const settings = TestBed.inject(SettingsService);

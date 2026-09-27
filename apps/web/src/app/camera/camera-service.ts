@@ -166,6 +166,7 @@ export class CameraService {
   private readonly measuredFpsSignal = signal<number | null>(null);
   private readonly frameProblemSignal = signal<string | null>(null);
   private readonly busySignal = signal(false);
+  private readonly framingEditingSignal = signal(false);
 
   /** This device's cameras (see `cameraDevices`). */
   readonly devices = this.devicesSignal.asReadonly();
@@ -237,6 +238,11 @@ export class CameraService {
     const label = this.labelSignal();
     return size === null ? null : framingFor(this.prefs.cameraFramingsOf(label), size);
   });
+  /**
+   * The framing rectangle is being edited in Camera settings (Framing → Edit), or is asked to be: the
+   * sync check's "Edit the framing" (T2.8) opens the editor from under the preview.
+   */
+  readonly framingEditing = this.framingEditingSignal.asReadonly();
   /** The last sharpness measured (variance of the Laplacian); null before the first. */
   readonly sharpness = this.sharpnessSignal.asReadonly();
   /** How many times the sharpness was measured since the camera opened. */
@@ -400,6 +406,11 @@ export class CameraService {
     } finally {
       this.busySignal.set(false);
     }
+  }
+
+  /** Opens (true) or closes the framing rectangle's editor of Camera settings. */
+  setFramingEditing(editing: boolean): void {
+    this.framingEditingSignal.set(editing);
   }
 
   /** Keeps `rect` (frame pixels, clamped) as the framing of the open camera at its frame size. */
