@@ -167,11 +167,15 @@ it gives the cost: in Playwright's Chromium 141 on the containers' four CPUs, wh
 encoded 1080p30 VP9 in software, measuring a frame of the whole 1920×1080 picture took 1.1 to 1.2 ms
 at the median and 1.5 to 4.9 ms at the 95th percentile in four runs of the lab's e2e test (the
 highest with the rest of the suite running beside it): its luma copied out of the frame with
-`VideoFrame.copyTo` and averaged down to 160 pixels wide (drawing the frame into a canvas instead took
-10 to 20 ms there, `docs/TOOLCHAIN.md`). Over the whole frame its test pattern changes by about 1.7
-luma levels from one frame to the next, and by about 15 times that every 14 to 16 frames, so some of
-those jumps come after half a second of stillness: onsets that a check there cannot match, since the
-demo cube's turns come close together, not as single turns (`docs/TOOLCHAIN.md`).
+`VideoFrame.copyTo` and averaged down to 160 pixels wide (drawing the frame into a canvas instead
+took 10 to 20 ms there, `docs/TOOLCHAIN.md`). Since T2.8 the whole frame is averaged down to 320
+pixels wide, with the changed area beside the mean difference: 1.0 ms at the median and 1.6 ms at
+the 95th percentile (4 at most) in the same test. The fake camera's frames are I420, copied; the
+page gets each frame's motion 1.6 to 3.4 ms after the frame's host time. Over the whole frame its
+test pattern changes by about 1.7 luma levels from one frame to the next, and by about 15 times that
+every 14 to 16 frames, so some of those jumps come after half a second of stillness: onsets that a
+check there cannot match, since the demo cube's turns come close together, not as single turns
+(`docs/TOOLCHAIN.md`). Its changed area (T2.8) is 0.7% of the pixels at the median and 11% at most.
 
 ## Manual round 2 (v0.2.0)
 

@@ -81,12 +81,12 @@ median arrival offset over the clip, then each frame's interval from the timesta
 attempt's OPFS folder under temporary names moved into place; the clip is then added to the
 attempt's `video` in `attempt.json`, whose timing it never changes, and a clip that fails is noted
 in `session.json`. The **sync check** runs once per session and camera: the capture worker measures
-the motion inside the framing rectangle of each frame (a 160-pixel luma plane read with
-`VideoFrame.copyTo`), the clapperboard matches the motion's onsets after 500 ms of stillness to
-single cube turns within 500 ms, and the median lag becomes the camera's `offsetMs` in
-`clock.cameras` and the `syncResidualMs` of its later clips. Idle time is never stored. Remote
-cameras (phase 4) will cut the same way and ship their clips over the WebRTC data channel; phase 3
-uploads them.
+the motion inside the framing rectangle of each frame (the share of a 320- or 160-pixel luma plane,
+read with `VideoFrame.copyTo`, that changed by more than 12 levels), the clapperboard looks for each
+single cube turn's onset in the frames around it against the picture just before it, and the median
+lag becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
+Idle time is never stored. Remote cameras (phase 4) will cut the same way and ship their clips over
+the WebRTC data channel; phase 3 uploads them.
 
 ## Storage (phase 3)
 

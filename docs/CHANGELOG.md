@@ -5,6 +5,31 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Fixed
+
+- The sync check works on a real camera (T2.8): the owner's first checks on the MacBook's FaceTime
+  camera matched none of their turns ("fewer than 4 matches (0 of 8 single turns matched a
+  motion)"). The motion is now measured as the share of the picture that changed (pixels whose
+  brightness moved by more than 12 levels, so that the camera's noise and a flicker of the light
+  count for nothing), at twice the resolution when the whole frame is watched, and each turn's
+  motion is looked for in the frames around it, against the picture just before it, rather than
+  anywhere in the check.
+- The turns made for a sync check no longer end up in the next attempt's scramble (issue #34): a
+  check waits 20 s for the first turn, then runs until the ten turns are made, showing "Turn 3 of
+  10", and after it the timer waits until the cube has been still for 2 s (or the result is closed),
+  then for a second of stillness more, before the attempt begins.
+
+### Changed
+
+- While the framing rectangle is the whole frame or most of it, the sync check asks first for one
+  around the cube ("Edit the framing" opens Camera settings to it), and starts with Start, or with
+  "Start anyway".
+- A sync check that cannot start says why beside its button; one that ended writes a line to the
+  console (`cubetrace: sync check …`) and offers "Download check data", a JSON file of what the
+  camera saw around each turn, to attach to an issue.
+- The capture lab's sync check shows the latest frame's motion in two bars as it comes, with the
+  frames' pixel format and how they are read.
+
 ## 0.2.0 — 2026-09-27
 
 Phase 2 of `docs/PLAN.md`: the device's own camera records every attempt, in sync with the cube.

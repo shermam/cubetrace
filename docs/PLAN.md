@@ -685,6 +685,7 @@ pipeline, §9 the data model).
 | T2.5 | `capture`+`web`: clapperboard and per-camera sync residual | T2.4 | ✅ #29 |
 | T2.6 | e2e for recording, docs, `v0.2.0`, manual round 2 | T2.5 | 🟨 #31 |
 | T2.7 | `web`: timer layout with the camera always in view, the last 12 solves on the timer, a session history page | T2.4 | ✅ #30 |
+| T2.8 | `capture`+`web`: sync check that works on real cameras: event-locked motion detection, changed-area metric, diagnostics download | T2.5 | 🟨 #<PR> |
 | T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ⬜ |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6. Rules for every phase 2 task: nothing of
