@@ -5,6 +5,21 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+
+- The Camera section of the Timer page, below the Cube section (T2.1): the device's cameras to
+  choose from ("Front camera" and "Rear camera" on a phone), Turn on and Turn off (the camera stays
+  as it was left across reloads), a preview (mirrored like a mirror for a front camera), what the
+  camera claims next to the frame rate and frame size measured on the preview (a phone may claim
+  60 fps and deliver 30), a sharpness meter of the framing rectangle ("good" or "soft"), and the
+  framing rectangle itself, the part of the picture the model will learn from, dragged and resized by
+  mouse, finger or arrow keys and kept per camera. The manual controls a camera has appear, and only
+  those: exposure (Auto or Manual, the exposure time and ISO), focus, white balance, zoom and the
+  torch, kept per camera, with "Reset to auto". Why a camera did not open is said in plain words
+  (permission, no camera, in use by another app), and so is a camera that opened otherwise than asked
+  (no 60 fps mode, the chosen camera gone). Settings has the resolution (1920×1080 or 1280×720), the
+  frame rate (the camera's best, exactly 60 fps, or 30 fps) and the sharpness threshold.
+
 ### Changed
 
 - The records are schema version 2 (T2.0, `docs/DATA-MODEL.md`). Every `attempt.json` keeps the

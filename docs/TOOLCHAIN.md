@@ -464,3 +464,79 @@ export), without its time check, which flow 1 makes on a settled page (below). T
 The whole suite (34 tests, two workers) took 44 s and 59 s in CI in the pull request's first two
 runs (the `npm run e2e` step, servers included; T1.6b's suite took 40 s), and 58 to 60 s locally on
 four CPUs in three runs in a row on 2026-09-27.
+
+## packages/capture
+
+Added by T2.1 on 2026-09-27: `@cubetrace/capture`, a workspace package like `core`, `gan` and
+`storage` (plain TypeScript, `src/index.ts` through the `@cubetrace/*` paths, Vitest in Node,
+`sideEffects: false`), which imports only types from `@cubetrace/core` (`CameraInfo`, `CropRect`).
+T2.1 put the camera in it (`camera.ts`, `sharpness.ts`, `framing.ts`); T2.2 adds the encoder
+pipeline. The Timer page's Camera section is `apps/web/src/app/camera/`.
+
+**Tracks are parameters.** The functions take a track, or the part of it they use (`getSettings`,
+`getCapabilities`, `applyConstraints`), and read no browser global, so their tests run in Node on
+the three probe reports of `docs/devices/` (the MacBook's camera has no control; the ThinkPhone's
+have exposure, focus, white balance and zoom, and the rear one a torch), and `cameraInfo()` is
+checked against schema 2's `camera`. The app reads `navigator.mediaDevices` through
+`BROWSER_GLOBALS`; its unit tests use `FakeMediaDevices` (`device/fake-browser.ts`), and
+`e2e/camera.spec.ts` and `e2e/camera-denied.spec.ts` use Chrome's fake camera
+(`--use-fake-device-for-media-stream`), a green test pattern at 20 fps with manual exposure and focus.
+
+**Manual controls.** Chrome adds the Image Capture controls to a camera track: `exposureMode`,
+`exposureTime` (in units of 100 µs), `iso`, `focusMode`, `focusDistance`, `whiteBalanceMode`,
+`colorTemperature`, `zoom`, `torch`. TypeScript's DOM types describe none of them, so they are read as
+unknown values and checked. They are set with `applyConstraints({advanced: [...]})`, one constraint
+set per group (exposure, focus, white balance, zoom, torch): Chrome applies each set it can satisfy
+and skips the others without an error (checked in Chromium 141 with the fake camera: an
+out-of-range focus distance left the exposure set applied), so each value is first fitted to its
+range and steps, and a group the camera refuses leaves the others alone. Only Image Capture
+constraints are sent, which leave the track's size and frame rate as they are. The ThinkPhone's front
+camera lists only `manual` focus while its setting is `continuous`: the mode a setting reports counts
+as one the camera has, and a camera that does not go back to an automatic mode by a constraint is
+reopened (a new capture starts in the automatic modes, and the other kept controls are applied
+again). "Reset to auto" reopens the camera for the same reason. The torch is never kept: it would
+light by itself at the next start.
+
+**What was asked, and what came.** `buildConstraints` asks for the chosen camera (else
+`facingMode: {ideal: 'user'}`, the front camera on a phone) at 1920×1080 ideally and 60 fps
+ideally, or exactly 60 when Settings says so. When `getUserMedia` fails, `fallbackChoice` gives the
+next thing to ask for and the notice says it: the default camera when the chosen one is gone (Chrome
+reports an unknown id as an OverconstrainedError on `deviceId`), the camera's best rate when exactly
+60 fps is refused (an OverconstrainedError on `frameRate`), 1280×720 at 30 fps when the camera could
+not start (a NotReadableError, after one retry 0.5 s later, in case it was this app's own camera
+closing). Both of the ThinkPhone's cameras claim 60 fps and deliver 30 (`docs/DEVICES.md`), so the
+panel shows, next to the track's claim, the rate measured on the preview with
+`requestVideoFrameCallback`: the frames presented (`presentedFrames`, which counts the ones no callback
+saw) over the last second of the camera's own clock (`mediaTime`), and the size of the frames as
+they arrive.
+
+**Snapshots.** `snapshot()` copies `getSettings()` and `getCapabilities()` as JSON for
+`session.json`: every key with a JSON value (a number only when it is finite), ranges as
+`{min, max, step?}`, except `deviceId` and `groupId`, hashed identifiers of the browser's
+installation that say nothing about the pictures (the probes in `docs/devices/` have them redacted
+for the same reason); the `constraints` of `cameraInfo()` leave the device id out too.
+
+**Sharpness.** The variance of the 4-neighbour Laplacian of the luma (BT.601 weights) of the framing
+rectangle drawn 320 pixels wide into an `OffscreenCanvas` (`willReadFrequently`), every 10th frame of
+the preview. Calibrated on Chromium 141's fake camera on 2026-09-27, over 12 s of frames (24
+measurements each): the whole frame measured 76–135, a centred 1080×1080 square 30–93 and a centred
+half 55–145; the same frames blurred by 1 pixel at 320 wide (a canvas `blur(1px)` filter, about 6
+pixels at 1080p) 1.4–8.7; black frames 0. The default threshold, 20, lies between the two with a
+margin each side; since the number depends on the scene as much as on the camera, it is a setting,
+which the owner's round 2 sets for real cameras. A measurement took 12 ms (18 at most) in headless
+Chromium, whose canvas is software; three a second at 30 fps.
+
+**Framing.** The rectangle is in the pixels of the frames as they arrive (a phone held upright
+delivers 1080×1920 while its settings may say 1920×1080), at least a tenth of the shorter side, and
+is kept in Settings per camera label and frame size: another size of the same orientation scales it,
+a turned picture starts from the full frame. `cameraInfo()` records it as `crop`, null for the whole
+frame; `mode` stays `full` in phase 2.
+
+**Sizes** (production build, 2026-09-27, against `main` at a44a0ae): the panel and all of
+`@cubetrace/capture` are one lazy chunk, `camera-panel`, 37.8 kB raw (11.2 kB transferred), which the
+Timer page loads right after it renders (`@defer (on immediate)`), so that a camera left on opens
+again with the page. The initial bundle has no camera code: 263.66 kB raw against 263.53 (72.4 kB
+transferred against 72.3), of which 0.1 kB is the global style of `select` and range inputs. The
+Timer page's chunk grew by 0.4 kB; the chunk shared by the cube pill and the pages, which holds
+`SettingsService`, by 3.3 kB raw (0.9 kB transferred): the camera settings and their checks, which
+import only types from the package.
