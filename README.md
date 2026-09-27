@@ -61,11 +61,11 @@ the CFOP breakdown and the solve list.
 ![The Timer page on a laptop: a scramble with its picture on the left, the time 14.99 under it with "#2 · Saved" and "Attempt 3", and on the right the CFOP breakdown of the last solve and of the session average, and the solve list with its statistics](docs/screenshots/timer-laptop.png)
 
 The same on a phone in portrait, 390 px wide, and the connect dialog in Chrome without the MAC
-address flag:
+address flag, once the cube is chosen:
 
 <p>
   <img src="docs/screenshots/timer-phone.png" width="260" alt="The Timer page on a phone: scramble, picture, time, breakdown and solves stacked in one column">
-  <img src="docs/screenshots/connect-dialog.png" width="400" alt="The connect dialog: the Bluetooth hint, the flag's address with a Copy button, the three steps to enable it, and the Connect cube and Demo cube buttons">
+  <img src="docs/screenshots/connect-dialog.png" width="400" alt="The connect dialog asking for the cube's MAC address, with an address typed, Connect and Cancel, and under it, unfolded, the flag that lets Chrome read the address: its address with a Copy button and the three steps to enable it">
 </p>
 
 The Sessions page, with Export and Delete for each session:
