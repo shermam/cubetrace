@@ -55,15 +55,19 @@ export { attemptPath, clipFiles } from './clip-files';
 
 // T2.5 — the clapperboard: the camera's lag behind the cube, from the motion the capture worker
 // measures in the framing rectangle during a sync check (`CaptureHandle.watchMotion`); since T2.8
-// locked to each single turn, on the changed area of the picture. motion.ts, which measures it, is the
-// worker's and is not exported, so that it stays in the worker's chunk.
+// locked to each single turn, on the changed area of the picture; since T2.11 to the middle of each
+// turn's motion, with a spread that leaves out the fifth of the lags farthest from their median.
+// motion.ts, which measures it, is the worker's and is not exported, so that it stays in the worker's
+// chunk.
 export type {
   ClapperboardAnalysis,
   ClapperboardClock,
+  ClapperboardEstimator,
   ClapperboardFailure,
   ClapperboardFit,
   ClapperboardFrame,
   ClapperboardResult,
+  DroppedPair,
   TurnAnalysis,
   TurnMiss,
 } from './clapperboard';
@@ -71,7 +75,10 @@ export {
   BASELINE_FROM_MS,
   BASELINE_TO_MS,
   CLOCK_TOLERANCE_MS,
+  DROPPED_PERCENT,
+  EARLIER_PEAK_SHARE,
   ENERGY_FLOOR,
+  EVENT_HALF_WINDOW_MS,
   MIN_BASELINE_FRAMES,
   MIN_MATCHES,
   MIN_SPREAD_LIMIT_MS,
@@ -83,6 +90,7 @@ export {
   WINDOW_AFTER_MS,
   WINDOW_BEFORE_MS,
   detectClapperboard,
+  droppedCount,
   frameHostTimes,
   percentile,
   singleTurns,

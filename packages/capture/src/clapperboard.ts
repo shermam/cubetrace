@@ -1,13 +1,18 @@
-// The clapperboard (docs/PLAN.md, T2.5 and T2.8; docs/DATA-MODEL.md §6): single turns of the cube
-// with pauses between them, seen twice: by the cube, whose moves have their host times, and by a
+// The clapperboard (docs/PLAN.md, T2.5, T2.8 and T2.11; docs/DATA-MODEL.md §6): single turns of the
+// cube with pauses between them, seen twice: by the cube, whose moves have their host times, and by a
 // camera, whose frames change where the face turns (motion.ts). Since T2.8 the detection is locked to
 // the turns: for each single turn it reads the frames around it against the picture just before it,
 // rather than looking for motion anywhere in the check and pairing it with turns afterwards, which on
 // a real camera (the whole 1080p frame, a person moving a little all the time) found no quiet stretch
-// and no jump high enough, and matched none of the owner's turns. The median lag of the motion's
-// onsets behind the turns is how far the camera's frames lag the cube (`offsetMs`), which the
-// training pipeline subtracts; their spread says how far to trust it. Pure TypeScript, tested on
-// synthetic series.
+// and no jump high enough, and matched none of the owner's turns. Since T2.11 a turn's time in the
+// frames is the middle of its motion, not the first frame of its rise: the cube reports a turn in the
+// middle of the face's motion, while the hand gets ready for it (the fingers placed, the cube shifted
+// in the hands) a varying time before, which the first rise caught, so that the owner's two checks of
+// issue #38 matched every turn and spread their lags over 340 ms. The median lag of those events
+// behind the moves is how far the camera's frames lag the cube (`offsetMs`), which the training
+// pipeline subtracts; the range of the lags, less the fifth of them farthest from that median, says
+// how far to trust it. Pure TypeScript, tested on synthetic series and on the owner's checks
+// (fixtures/sync/).
 import type { CameraClock, ClapperboardSample } from '@cubetrace/core';
 
 import type { MotionSample } from './protocol';
@@ -29,12 +34,32 @@ export const BASELINE_TO_MS = 300;
 export const MIN_BASELINE_FRAMES = 5;
 
 /**
- * The onset is the first frame that rises above the baseline's median by this many median absolute
- * deviations (MAD) of the baseline, or by `ENERGY_FLOOR` when that is more …
+ * A turn's motion must rise in its window, from a frame at or under the baseline's median plus this
+ * many median absolute deviations (MAD) of the baseline (or plus `ENERGY_FLOOR` when that is more) to
+ * one above it: the first such frame is its onset, which T2.8 took for the turn's time and which the
+ * diagnostics keep …
  */
 export const ONSET_MADS = 3;
 /** … in a window whose peak rises above it by this many (or twice the floor): a rise, not noise. */
 export const PEAK_MADS = 6;
+
+/**
+ * A turn's event, the middle of its motion (T2.11), is the centroid of its motion over the frames
+ * within this of the peak it is centred on, ms, before and after: a face's quarter turn takes a few
+ * frames. A peak is a frame of the window that no frame this close to it rises above; two peaks this
+ * close are the same motion.
+ */
+export const EVENT_HALF_WINDOW_MS = 150;
+
+/**
+ * A turn's event is centred on the highest peak of its window, or on an earlier peak that rises above
+ * the baseline by at least this share of the highest's rise: of two motions about as strong, the
+ * turn's is the earlier. What follows a turn in its window (the hand letting go, a fidget) can move
+ * the picture as much as the turn did (the synthetic scene's fidgets; on the owner's checks of issue
+ * #38 a later motion rose 0.95 and 0.98 as high as the turn's), while the hand getting ready before a
+ * turn moved it at most 0.68 as much.
+ */
+export const EARLIER_PEAK_SHARE = 0.8;
 
 /**
  * The least rise that counts, in the energy's units: 0.1% of the region's pixels changed
@@ -51,14 +76,22 @@ export const ENERGY_FLOOR = 0.001;
  */
 export const SINGLE_TURN_MS = 500;
 
-/** Fewer turns matched to an onset fail the check. */
+/** Fewer turns matched to a motion fail the check. */
 export const MIN_MATCHES = 4;
 
 /**
+ * The spread leaves out this share of the matched turns, in percent, rounded up (`droppedCount`):
+ * those whose lags are farthest from the median lag. The range of all the lags hangs on the two most
+ * extreme turns, and the median does not: on the owner's checks of issue #38 the two lags farthest
+ * from the median were 36 to 94 ms from it.
+ */
+export const DROPPED_PERCENT = 20;
+
+/**
  * A check allows a spread of the lags of this, ms, plus the median interval of its frames
- * (`spreadLimitMs`): each onset is only known to a frame, an error of up to one interval (33 ms at
+ * (`spreadLimitMs`): the frames see each turn's motion a frame at a time (an interval is 33 ms at
  * 30 fps), on top of the Bluetooth jitter of the cube's reports (a 95th percentile of 13 to 23 ms on
- * both cubes, docs/DEVICES.md), and with ten turns the 95th minus the 5th percentile is their range.
+ * both cubes, docs/DEVICES.md), and the spread is the range of the lags kept.
  */
 export const SPREAD_ALLOWANCE_MS = 50;
 
@@ -99,12 +132,19 @@ export type ClapperboardFailure =
   'no-moves' | 'no-frames' | 'clock' | 'no-motion' | 'few-matches' | 'wide-spread';
 
 /**
- * Why a single turn has no onset: no frame in its window (`no-frames`); fewer than
+ * Why a single turn is unmatched: no frame in its window (`no-frames`); fewer than
  * `MIN_BASELINE_FRAMES` before it (`no-baseline`); a window whose peak does not rise enough
  * (`no-rise`); a picture already above the onset's level from before the window to its end
- * (`no-onset`); or every rise in its window nearer another turn's move, which took it (`taken`).
+ * (`no-onset`); or every peak of its window high enough taken by a turn whose move is nearer it
+ * (`taken`).
  */
 export type TurnMiss = 'no-frames' | 'no-baseline' | 'no-rise' | 'no-onset' | 'taken';
+
+/**
+ * How a turn's time in the frames is found: since T2.11 the middle of its motion
+ * (`EVENT_HALF_WINDOW_MS`); T2.8 took the first frame of its rise, the onset.
+ */
+export type ClapperboardEstimator = 'motion-centre';
 
 /** What the detection saw around one single turn (host ms; the energy as a share of pixels). */
 export interface TurnAnalysis {
@@ -122,12 +162,25 @@ export interface TurnAnalysis {
   /** What the onset exceeds, and what the window's peak must exceed; null without a baseline. */
   readonly onsetLevel: number | null;
   readonly peakLevel: number | null;
-  /** The window's highest energy, and its frame's host time; null without frames. */
+  /**
+   * The energy of the frame its event is centred on, and that frame's host time: the window's peak
+   * (its highest, or an earlier peak nearly as high, `EARLIER_PEAK_SHARE`), or, when a turn whose move
+   * is nearer took that one, its window's peak more than `EVENT_HALF_WINDOW_MS` from it; the window's
+   * highest frame when unmatched; null without frames.
+   */
   readonly peak: number | null;
   readonly peakHostMs: number | null;
-  /** The motion's onset: its first frame's host time; null when the turn is unmatched. */
+  /**
+   * The motion's onset, the first frame of the window that rises above the onset level (T2.8's time
+   * of the turn; since T2.11 a diagnostic): its host time; null when the turn is unmatched.
+   */
   readonly onsetHostMs: number | null;
-  /** Onset minus move, ms; null when unmatched. */
+  /**
+   * The middle of the turn's motion (T2.11): the centroid of `max(0, energy − baseline)²` over the
+   * frames within `EVENT_HALF_WINDOW_MS` of the peak, at their host times; null when unmatched.
+   */
+  readonly eventHostMs: number | null;
+  /** Event minus move, ms; null when unmatched. */
   readonly lagMs: number | null;
   /** Why it is unmatched; null when matched. */
   readonly miss: TurnMiss | null;
@@ -149,24 +202,42 @@ export interface ClapperboardClock {
   readonly frameMinusPageMs: number | null;
 }
 
+/** A matched turn that the spread leaves out (`DROPPED_PERCENT`): its move and event, and its lag. */
+export interface DroppedPair extends ClapperboardSample {
+  /** Event minus move, ms. */
+  readonly lagMs: number;
+}
+
 /** What the detection saw: the check's live counts, its diagnostics and the lab's report. */
 export interface ClapperboardAnalysis {
+  /** How a turn's time in the frames is found: the middle of its motion (T2.11). */
+  readonly estimator: ClapperboardEstimator;
   /** Frames measured. */
   readonly frames: number;
   /** The cube's moves given. */
   readonly moves: number;
   /** One per single turn (`SINGLE_TURN_MS`), in time order: the turns the check matches. */
   readonly turns: readonly TurnAnalysis[];
-  /** Of those, the turns matched to an onset, and the others. */
+  /** Of those, the turns matched to a motion, and the others. */
   readonly matched: number;
   readonly unmatched: number;
   /** The frames' clock; null without frames. */
   readonly clock: ClapperboardClock | null;
-  /** The matched turns' moves and onsets, in the order of the moves. */
+  /**
+   * The matched turns' moves and events, in the order of the moves: `onsetHostMs` is the event, the
+   * middle of the turn's motion (the name `session.json` keeps, docs/DATA-MODEL.md §6).
+   */
   readonly pairs: readonly ClapperboardSample[];
-  /** The median of onset minus move over the pairs, ms; null without pairs. */
+  /**
+   * The pairs the spread leaves out, with their lags, in the order of the moves: the
+   * `droppedCount(matched)` whose lags are farthest from the median lag of all the pairs.
+   */
+  readonly dropped: readonly DroppedPair[];
+  /** The pairs kept: `matched` less those dropped. */
+  readonly kept: number;
+  /** The median lag (event minus move) of the kept pairs, ms; null without pairs. */
   readonly offsetMs: number | null;
-  /** The 95th minus the 5th percentile of those lags (nearest rank), ms; null without pairs. */
+  /** The range of their lags (the largest less the smallest), ms; null without pairs. */
   readonly spreadMs: number | null;
   /** The median interval of the frames, ms; null with fewer than two frames. */
   readonly frameIntervalMs: number | null;
@@ -200,19 +271,23 @@ const MISS_WORDS: Readonly<Record<TurnMiss, string>> = {
 };
 
 /**
- * The camera's lag behind the cube from a sync check (docs/PLAN.md, T2.5 and T2.8): `frames`, the
- * motion of the camera's frames during the check, and `moves`, the host times of the cube's moves
+ * The camera's lag behind the cube from a sync check (docs/PLAN.md, T2.5, T2.8 and T2.11): `frames`,
+ * the motion of the camera's frames during the check, and `moves`, the host times of the cube's moves
  * during it. Each frame is placed on the host clock by its timestamp and the median arrival offset
  * (the clips' rule, so without the arrival's jitter); its energy is its changed area. For each single
  * turn (`SINGLE_TURN_MS`) at `t`, the baseline is the median and the MAD of the energy from
- * `t − 900` to `t − 300` ms, and the onset is the first frame from `t − 400` to `t + 700` ms that
- * rises above `baseline + max(3 × MAD, floor)` from a frame that did not, provided the window's peak
- * exceeds `baseline + max(6 × MAD, 2 × floor)`; an onset goes to one turn only, the one whose move is
- * nearer (the other takes its next rise). The offset is the median of onset minus move over the
- * matched turns, the residual their spread (95th minus 5th percentile). Fails, saying why, without
- * moves or frames; when the frames' host times are more than `CLOCK_TOLERANCE_MS` from the page's
- * clock (`receivedHostMs`); when no single turn's window rises (no motion); with fewer than
- * `MIN_MATCHES` matched turns; or with a spread over `spreadLimitMs` of the frames' median interval.
+ * `t − 900` to `t − 300` ms; the turn is matched when its window, from `t − 400` to `t + 700` ms,
+ * rises from a frame at or under `baseline + max(3 × MAD, floor)` to one above it (its onset) and
+ * peaks above `baseline + max(6 × MAD, 2 × floor)`; its event is the middle of its motion, the
+ * centroid of `max(0, energy − baseline)²` over the frames within 150 ms of the window's peak (its
+ * highest frame, or an earlier peak that rises at least 0.8 as high, `EARLIER_PEAK_SHARE`), and a
+ * peak goes to one turn only, the one whose move is nearer it (the other takes the peak of its window
+ * more than 150 ms from it). The offset is the median of event minus move over the matched turns less
+ * the fifth whose lags are farthest from the median of all (`droppedCount`), the residual the range
+ * of the lags kept. Fails, saying why, without moves or frames; when the frames' host times
+ * are more than `CLOCK_TOLERANCE_MS` from the page's clock (`receivedHostMs`); when no single turn's
+ * window rises (no motion); with fewer than `MIN_MATCHES` matched turns; or with a spread over
+ * `spreadLimitMs` of the frames' median interval.
  */
 export function detectClapperboard(
   frames: readonly ClapperboardFrame[],
@@ -223,24 +298,29 @@ export function detectClapperboard(
   const clock = arrivalOffsetMs === null ? null : frameClock(ordered, times, arrivalOffsetMs);
   const energies = ordered.map((frame) => frame.changed);
   const turns = analyseTurns(singleTurns(moves), times, energies);
-  const pairs = turns.flatMap((turn) =>
-    turn.onsetHostMs === null
+  const matched = turns.flatMap((turn) =>
+    turn.eventHostMs === null || turn.lagMs === null
       ? []
-      : [{ moveHostMs: turn.moveHostMs, onsetHostMs: turn.onsetHostMs }],
+      : [{ moveHostMs: turn.moveHostMs, onsetHostMs: turn.eventHostMs, lagMs: turn.lagMs }],
   );
-  const lags = pairs.map((pair) => pair.onsetHostMs - pair.moveHostMs).sort((a, b) => a - b);
+  const left = farthest(matched.map((pair) => pair.lagMs));
+  const kept = matched.filter((_, k) => !left.has(k));
+  const lags = kept.map((pair) => pair.lagMs).sort((a, b) => a - b);
   const offset = lags.length === 0 ? null : median(lags);
-  const spread = lags.length === 0 ? null : percentile(lags, 0.95) - percentile(lags, 0.05);
+  const spread = lags.length === 0 ? null : lags[lags.length - 1] - lags[0];
   const interval = frameInterval(times);
   const limit = spreadLimitMs(interval);
   const analysis: ClapperboardAnalysis = {
+    estimator: 'motion-centre',
     frames: ordered.length,
     moves: moves.length,
     turns,
-    matched: pairs.length,
-    unmatched: turns.length - pairs.length,
+    matched: matched.length,
+    unmatched: turns.length - matched.length,
     clock,
-    pairs,
+    pairs: matched.map(sampleOf),
+    dropped: matched.filter((_, k) => left.has(k)),
+    kept: kept.length,
     offsetMs: offset === null ? null : round(offset, 1),
     spreadMs: spread === null ? null : round(spread, 1),
     frameIntervalMs: interval === null ? null : round(interval, 2),
@@ -268,24 +348,55 @@ export function detectClapperboard(
   if (turns.length > 0 && turns.every((turn) => turn.miss === 'no-rise')) {
     return fail('no-motion', 'no motion seen in the framing rectangle');
   }
-  if (pairs.length < MIN_MATCHES) {
+  if (matched.length < MIN_MATCHES) {
     return fail('few-matches', fewMatches(turns, moves.length));
   }
   if (offset === null || spread === null || spread > limit) {
     const rate = interval === null ? '' : ` at ${String(Math.round(1000 / interval))} fps`;
     return fail(
       'wide-spread',
-      `spread over ${String(Math.round(limit))} ms${rate} (${String(analysis.spreadMs)} ms)`,
+      `spread over ${String(Math.round(limit))} ms${rate} (${String(analysis.spreadMs)} ms over ` +
+        `the ${String(kept.length)} turns kept of ${String(matched.length)})`,
     );
   }
   return {
     ok: true,
     offsetMs: round(offset, 1),
     clapperboardResidualMs: round(spread, 1),
-    clapperboardSamples: pairs.length,
-    samples: [...pairs],
+    clapperboardSamples: kept.length,
+    samples: kept.map(sampleOf),
     analysis,
   };
+}
+
+/**
+ * How many of `matched` turns' lags a check's spread leaves out (`DROPPED_PERCENT`): a fifth of
+ * them, rounded up (1 of 4 or 5, 2 of 6 to 10, 3 of 11 to 15), and none of fewer than `MIN_MATCHES`,
+ * a check that fails anyway.
+ */
+export function droppedCount(matched: number): number {
+  return matched < MIN_MATCHES ? 0 : Math.ceil((matched * DROPPED_PERCENT) / 100);
+}
+
+/**
+ * Which of the matched turns' `lags` (ms, in the order of the moves) the spread leaves out: the
+ * `droppedCount` farthest from their median, measured to a hundredth of a ms; of two as far, the
+ * later turn's first.
+ */
+function farthest(lags: readonly number[]): Set<number> {
+  const count = droppedCount(lags.length);
+  if (count === 0) {
+    return new Set();
+  }
+  const middle = median([...lags].sort((a, b) => a - b));
+  const away = lags.map((lag) => Math.round(Math.abs(lag - middle) * 100));
+  const order = lags.map((_, k) => k).sort((p, q) => away[q] - away[p] || q - p);
+  return new Set(order.slice(0, count));
+}
+
+/** The pair `session.json` keeps (its `samples`): the move and the event, without the lag. */
+function sampleOf(pair: ClapperboardSample): ClapperboardSample {
+  return { moveHostMs: pair.moveHostMs, onsetHostMs: pair.onsetHostMs };
 }
 
 /**
@@ -342,17 +453,27 @@ function frameClock(
   };
 }
 
-/** A turn's analysis before the onsets are shared out, with the rises of its window. */
+/** A turn's window and analysis before the peaks are shared out (`detectClapperboard`). */
 interface Candidate {
+  /** Its analysis without an event: why it cannot be matched, or `miss` null while it can. */
   readonly analysis: TurnAnalysis;
-  /** The frames (indices) that rise above its onset level, in time order. */
-  readonly rises: readonly number[];
+  /** Its window's frames (indices): from `first` to before `end`. */
+  readonly first: number;
+  readonly end: number;
+  /**
+   * When it can be matched: its baseline, the level a peak must exceed, and its onset (the first
+   * frame of the window that rises above the onset level); null otherwise.
+   */
+  readonly match: {
+    readonly baseline: number;
+    readonly peakLevel: number;
+    readonly onset: number;
+  } | null;
 }
 
 /**
- * Every single turn's analysis (`TurnAnalysis`), each onset given to one turn at most: a turn takes
- * the first rise of its window, unless the move of another turn that takes it too is nearer to it,
- * in which case it takes its next rise (the earlier move keeps a rise at the same distance).
+ * Every single turn's analysis (`TurnAnalysis`): its window, baseline and onset, then its event, the
+ * middle of its motion around the peak it is given (`sharePeaks`).
  */
 function analyseTurns(
   turns: readonly number[],
@@ -360,52 +481,148 @@ function analyseTurns(
   energies: readonly number[],
 ): TurnAnalysis[] {
   const candidates = turns.map((move) => candidateOf(move, times, energies));
-  const next = candidates.map(() => 0);
-  const holders = new Map<number, number>();
-  const waiting = candidates.flatMap((candidate, k) => (candidate.rises.length > 0 ? [k] : []));
-  for (let k = waiting.shift(); k !== undefined; k = waiting.shift()) {
-    const { rises } = candidates[k];
-    while (next[k] < rises.length) {
-      const frame = rises[next[k]];
-      const holder = holders.get(frame);
-      if (holder === undefined) {
-        holders.set(frame, k);
-        break;
-      }
-      const mine = Math.abs(times[frame] - turns[k]);
-      const theirs = Math.abs(times[frame] - turns[holder]);
-      if (mine < theirs || (mine === theirs && turns[k] < turns[holder])) {
-        holders.set(frame, k);
-        next[holder] += 1;
-        waiting.push(holder);
-        break;
-      }
-      next[k] += 1;
-    }
-  }
-  const onsets = new Map<number, number>();
-  for (const [frame, k] of holders) {
-    onsets.set(k, frame);
-  }
+  const peaks = sharePeaks(candidates, turns, times, energies);
   return candidates.map((candidate, k) => {
-    const frame = onsets.get(k);
-    if (candidate.rises.length === 0) {
-      return candidate.analysis;
+    const { analysis, match } = candidate;
+    if (match === null) {
+      return analysis;
     }
-    if (frame === undefined) {
-      return { ...candidate.analysis, miss: 'taken' };
+    const peak = peaks[k];
+    if (peak < 0) {
+      return { ...analysis, miss: 'taken' };
     }
-    const onset = round(times[frame], 2);
+    const event = round(motionCentre(times, energies, peak, match.baseline), 2);
     return {
-      ...candidate.analysis,
-      onsetHostMs: onset,
-      lagMs: round(onset - turns[k], 2),
+      ...analysis,
+      peak: energies[peak],
+      peakHostMs: round(times[peak], 2),
+      onsetHostMs: round(times[match.onset], 2),
+      eventHostMs: event,
+      lagMs: round(event - turns[k], 2),
       miss: null,
     };
   });
 }
 
-/** One turn's window, baseline and rises (`detectClapperboard`), before any onset is shared out. */
+/**
+ * The frame each turn's event is centred on (an index; -1 for none: the turn is `taken`), one turn
+ * per motion. A turn that can be matched takes its window's peak (`peakFrame`); when two turns take
+ * peaks within `EVENT_HALF_WINDOW_MS` of each other (the same frame, or the same motion seen through
+ * two windows, which overlap for turns 0.5 to 1.1 s apart), the turn whose move is nearer its peak
+ * keeps it (the earlier move at the same distance), and the other takes its window's peak more than
+ * `EVENT_HALF_WINDOW_MS` from it, or none.
+ */
+function sharePeaks(
+  candidates: readonly Candidate[],
+  turns: readonly number[],
+  times: readonly number[],
+  energies: readonly number[],
+): number[] {
+  const held = candidates.map(() => -1);
+  // The host times of the peaks each turn lost: it keeps away from them.
+  const lost: number[][] = candidates.map(() => []);
+  const waiting = candidates.flatMap((candidate, k) => (candidate.match === null ? [] : [k]));
+  for (let k = waiting.shift(); k !== undefined; k = waiting.shift()) {
+    const peak = peakFrame(candidates[k], times, energies, lost[k]);
+    if (peak < 0) {
+      continue;
+    }
+    const distance = Math.abs(times[peak] - turns[k]);
+    const rivals = held.flatMap((frame, j) =>
+      frame >= 0 && Math.abs(times[frame] - times[peak]) <= EVENT_HALF_WINDOW_MS ? [j] : [],
+    );
+    const keeper = rivals.find((j) => {
+      const theirs = Math.abs(times[held[j]] - turns[j]);
+      return theirs < distance || (theirs === distance && turns[j] < turns[k]);
+    });
+    if (keeper !== undefined) {
+      lost[k].push(times[held[keeper]]);
+      waiting.push(k);
+      continue;
+    }
+    for (const j of rivals) {
+      lost[j].push(times[peak]);
+      held[j] = -1;
+      waiting.push(j);
+    }
+    held[k] = peak;
+  }
+  return held;
+}
+
+/**
+ * The peak a turn's event is centred on, among the frames of its window more than
+ * `EVENT_HALF_WINDOW_MS` from each of the peaks it lost (`lost`, host ms): the first frame above its
+ * peak level that no frame within `EVENT_HALF_WINDOW_MS` rises above (nor equals before it) and that
+ * rises above the baseline by at least `EARLIER_PEAK_SHARE` of the highest frame's rise, which is
+ * that frame when no earlier one does; -1 when no frame rises above the peak level.
+ */
+function peakFrame(
+  candidate: Candidate,
+  times: readonly number[],
+  energies: readonly number[],
+  lost: readonly number[],
+): number {
+  const { match } = candidate;
+  if (match === null) {
+    return -1;
+  }
+  const frames: number[] = [];
+  for (let i = candidate.first; i < candidate.end; i++) {
+    if (lost.every((at) => Math.abs(times[i] - at) > EVENT_HALF_WINDOW_MS)) {
+      frames.push(i);
+    }
+  }
+  let top = -1;
+  for (const i of frames) {
+    if (top < 0 || energies[i] > energies[top]) {
+      top = i;
+    }
+  }
+  if (top < 0 || energies[top] <= match.peakLevel) {
+    return -1;
+  }
+  const least = match.baseline + EARLIER_PEAK_SHARE * (energies[top] - match.baseline);
+  const isPeak = (i: number): boolean =>
+    frames.every(
+      (j) =>
+        Math.abs(times[j] - times[i]) > EVENT_HALF_WINDOW_MS ||
+        energies[j] < energies[i] ||
+        (energies[j] === energies[i] && j >= i),
+    );
+  // The highest frame is a peak itself (the first of equals), so one is always found.
+  return (
+    frames.find((i) => energies[i] > match.peakLevel && energies[i] >= least && isPeak(i)) ?? top
+  );
+}
+
+/**
+ * The middle of a turn's motion, host ms: the centroid of `max(0, energy − baseline)²` over the frames
+ * within `EVENT_HALF_WINDOW_MS` of the frame `peak`, at the frames' own times (nothing interpolated).
+ * Squared, so that the frames of the motion's peak weigh most, and its tails, near the baseline, and
+ * the frames around it that do not rise above the baseline, little or nothing.
+ */
+function motionCentre(
+  times: readonly number[],
+  energies: readonly number[],
+  peak: number,
+  baseline: number,
+): number {
+  const from = firstAtOrAfter(times, times[peak] - EVENT_HALF_WINDOW_MS);
+  const to = firstAfter(times, times[peak] + EVENT_HALF_WINDOW_MS);
+  let weights = 0;
+  let moments = 0;
+  for (let i = from; i < to; i++) {
+    const above = Math.max(0, energies[i] - baseline);
+    weights += above * above;
+    // From the peak's time, so that the products stay small: host times are about 1.8e12 ms.
+    moments += above * above * (times[i] - times[peak]);
+  }
+  // The peak rises above its peak level, which is above the baseline: the weights are never 0.
+  return times[peak] + moments / weights;
+}
+
+/** One turn's window, baseline and onset (`detectClapperboard`), before any peak is shared out. */
 function candidateOf(
   move: number,
   times: readonly number[],
@@ -438,26 +655,41 @@ function candidateOf(
     peak: peakAt < 0 ? null : energies[peakAt],
     peakHostMs: peakAt < 0 ? null : round(times[peakAt], 2),
     onsetHostMs: null,
+    eventHostMs: null,
     lagMs: null,
     miss,
   });
+  const cannot = (miss: TurnMiss): Candidate => ({
+    analysis: unmatched(miss),
+    first,
+    end,
+    match: null,
+  });
   if (peakAt < 0) {
-    return { analysis: unmatched('no-frames'), rises: [] };
+    return cannot('no-frames');
   }
   if (level === null) {
-    return { analysis: unmatched('no-baseline'), rises: [] };
+    return cannot('no-baseline');
   }
   if (energies[peakAt] <= level.peak) {
-    return { analysis: unmatched('no-rise'), rises: [] };
+    return cannot('no-rise');
   }
-  const rises: number[] = [];
-  for (let i = Math.max(first, 1); i < end; i++) {
+  let onset = -1;
+  for (let i = Math.max(first, 1); i < end && onset < 0; i++) {
     if (energies[i] > level.onset && energies[i - 1] <= level.onset) {
-      rises.push(i);
+      onset = i;
     }
   }
-  // A candidate with rises is matched or `taken` once the onsets are shared out.
-  return { analysis: unmatched(rises.length === 0 ? 'no-onset' : null), rises };
+  if (onset < 0) {
+    return cannot('no-onset');
+  }
+  // Matched once the peaks are shared out, or `taken`.
+  return {
+    analysis: unmatched(null),
+    first,
+    end,
+    match: { baseline: level.baseline, peakLevel: level.peak, onset },
+  };
 }
 
 /** A baseline's median and MAD, and the levels the onset and the window's peak must exceed. */
