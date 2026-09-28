@@ -131,7 +131,7 @@ test('the Timer: the check asks for the framing first, pauses the timer once sta
   );
   // "Hold still…" for its first second, then the countdown for the first turn.
   await expect(page.getByTestId('sync-count')).toHaveText(
-    /^(Hold still… wait a second before the first turn|\d+ s for the first turn)$/,
+    /^\s*(Hold still… wait a second before the first turn|\d+ s for the first turn)\s*$/,
   );
   await expect(page.getByTestId('sync-seconds')).toHaveText(/^\d+ s$/);
   await expect(status).toHaveAttribute('data-phase', 'sync-check');
