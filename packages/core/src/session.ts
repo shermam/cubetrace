@@ -64,7 +64,10 @@ export interface CameraInfo {
 export interface ClapperboardSample {
   /** The turn, on the host clock. */
   moveHostMs: number;
-  /** The motion onset in the camera's frames, on the host clock. */
+  /**
+   * The middle of the turn's motion in the camera's frames, on the host clock (until T2.11, the first
+   * frame of the motion's rise; the name stays, docs/DATA-MODEL.md §6).
+   */
   onsetHostMs: number;
 }
 
@@ -72,18 +75,22 @@ export interface ClapperboardSample {
 export interface CameraClock {
   /**
    * How far the camera's frames lag the cube: the median of `onsetHostMs − moveHostMs` over the
-   * clapperboard's turns. A clip's `syncResidualMs` is this value when it was recorded.
+   * clapperboard's turns kept (since T2.11 the fifth of the turns matched farthest from the median
+   * are left out). A clip's `syncResidualMs` is this value when it was recorded.
    */
   offsetMs: number;
   /** The round-trip time of a remote camera's clock sync (phase 4); 0 for a local camera. */
   rttMs: number;
   /** The drift of a remote camera's clock against the host's, in ppm (phase 4); 0 for a local one. */
   driftPpm: number;
-  /** The spread of the clapperboard's offsets (95th minus 5th percentile). */
+  /**
+   * The spread of the clapperboard's offsets: since T2.11 the range of those of the turns kept (until
+   * then the 95th minus the 5th percentile of all of them).
+   */
   clapperboardResidualMs: number;
-  /** The clapperboard's turns matched to a motion onset. */
+  /** The clapperboard's turns kept (until T2.11, all the turns matched to a motion). */
   clapperboardSamples: number;
-  /** The matched pairs, when kept. */
+  /** The pairs of the turns kept, when the record keeps them. */
   samples?: ClapperboardSample[];
 }
 
