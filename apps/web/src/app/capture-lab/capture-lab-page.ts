@@ -491,10 +491,10 @@ function syncStatusOf(run: SyncRun | null): string {
   }
   switch (run.state()) {
     case 'running':
-      return (
-        `Watching: ${String(run.secondsLeft())} s left; ${String(run.moves())} turns, ` +
-        `${String(run.matched())} seen by the camera, ${String(run.frames())} frames measured.`
-      );
+      return run.holding()
+        ? 'Hold still… wait a second before the first turn.'
+        : `Watching: ${String(run.secondsLeft())} s left; ${String(run.moves())} turns, ` +
+            `${String(run.matched())} seen by the camera, ${String(run.frames())} frames measured.`;
     case 'cancelled':
       return 'Stopped.';
     case 'done':
@@ -514,8 +514,8 @@ function syncStatusOf(run: SyncRun | null): string {
   }
   return (
     `The camera lags the cube by ${String(outcome.offsetMs)} ms (spread ` +
-    `${String(outcome.clapperboardResidualMs)} ms over ${String(outcome.clapperboardSamples)} ` +
-    `turns).${cost}`
+    `${String(outcome.clapperboardResidualMs)} ms over the ${String(outcome.clapperboardSamples)} ` +
+    `turns kept of ${String(outcome.analysis.matched)}).${cost}`
   );
 }
 

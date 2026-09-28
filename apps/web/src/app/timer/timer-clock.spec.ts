@@ -344,7 +344,7 @@ describe('TimerClock', () => {
     s.service.suspendForSyncCheck();
     await fixture.whenStable();
     expect(text(fixture, 'timer-status')).toBe(
-      'Sync check: turn one face, pause, turn it back; repeat five times.',
+      'Sync check: hold the cube still and flick one face, then back after a second; five times.',
     );
 
     turn(s, fake, 'U', 1200);

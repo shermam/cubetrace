@@ -50,7 +50,7 @@ describe('SyncCheck', () => {
     return element.querySelector('[data-testid="sync-check"]')?.getAttribute('data-state');
   }
 
-  it('asks for one face turned and turned back five times, counts the turns out of ten, then says why the check failed, with Retry and its data', async () => {
+  it('asks for one face flicked and flicked back five times, the cube still, counts the turns out of ten, then says why the check failed, with Retry and its data', async () => {
     const r = rig();
     const { element, refresh } = render(r);
     await refresh();
@@ -60,15 +60,23 @@ describe('SyncCheck', () => {
     const { fake, capture } = await recording(r);
     await refresh();
     const panel = element.querySelector('[data-testid="sync-check"]');
+    const words = panel?.textContent.replace(/\s+/g, ' ');
     expect(state(element)).toBe('running');
-    expect(panel?.textContent).toContain('Turn one face, pause, turn it back; repeat five times.');
-    expect(panel?.textContent).toContain(
+    expect(words).toContain(
+      'Hold the cube still inside the rectangle. With one finger, flick one face; keep your other hand and the cube still; after a second, flick it back. Five times.',
+    );
+    expect(words).toContain(
       'The timer waits meanwhile: the attempt begins again, with its scramble, once the check ends and the cube is solved and still.',
     );
-    expect(text(element, 'sync-count')).toBe('20 s for the first turn');
+    // Its first second: hold still.
+    expect(text(element, 'sync-count')).toBe('Hold still… wait a second before the first turn');
+    expect(text(element, 'sync-hold')).toBe('Hold still…');
 
     const { turns, energy } = clapperboard(r.s.perf.hostMs, [40, 42, 41]);
-    await film(r, capture, fake, 1300, energy, turns);
+    await film(r, capture, fake, 1100, energy, turns);
+    await refresh();
+    expect(text(element, 'sync-count')).toBe('19 s for the first turn');
+    await film(r, capture, fake, 200, energy, turns);
     await refresh();
     expect(text(element, 'sync-count')).toBe('Turn 1 of 10 · 1 seen by the camera');
     const count = element.querySelector('[data-testid="sync-count"]');
@@ -112,7 +120,8 @@ describe('SyncCheck', () => {
     const r = rig();
     const { element, refresh } = render(r);
     const { fake, capture } = await recording(r);
-    const first = clapperboard(r.s.perf.hostMs, [44, 50, 47, 52, 49, 44, 50, 47, 52, 49]);
+    // Two lags far off, which the spread leaves out: the other eight's median is 49, their spread 8.
+    const first = clapperboard(r.s.perf.hostMs, [45, 10, 47, 48, 49, 95, 49, 50, 51, 53]);
     await film(r, capture, fake, 14_000, first.energy, first.turns);
     await refresh();
 
@@ -130,6 +139,25 @@ describe('SyncCheck', () => {
     await film(r, capture, fake, 14_000, second.energy, second.turns);
     await refresh();
     expect(text(element, 'sync-result')).toBe('Camera lags the cube by 31 ms (±2); was 49 ms.');
+  });
+
+  it('counts no turn made in its first second, while it asks to hold still', async () => {
+    const r = rig();
+    const { element, refresh } = render(r);
+    const { fake, capture } = await recording(r);
+    await refresh();
+
+    // A turn half a second in: the panel still asks to hold still, and counts nothing.
+    await film(r, capture, fake, 600, STILL, [r.s.perf.hostMs + 500]);
+    await refresh();
+    expect(text(element, 'sync-count')).toBe('Hold still… wait a second before the first turn');
+    const count = element.querySelector('[data-testid="sync-count"]');
+    expect(count?.getAttribute('data-moves')).toBe('0');
+    // The second over, it waits for the first turn, as if none had been made.
+    await film(r, capture, fake, 700, STILL);
+    await refresh();
+    expect(text(element, 'sync-count')).toBe('19 s for the first turn');
+    expect(count?.getAttribute('data-moves')).toBe('0');
   });
 
   it('with the whole frame to watch, asks for a framing rectangle around the cube first, which the settings open to', async () => {

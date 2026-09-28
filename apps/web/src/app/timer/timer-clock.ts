@@ -7,7 +7,8 @@ import { SettingsService } from '../settings/settings-service';
 
 const STATUS: Readonly<Record<TimerPhase, string>> = {
   loading: 'Loading the session…',
-  'sync-check': 'Sync check: turn one face, pause, turn it back; repeat five times.',
+  'sync-check':
+    'Sync check: hold the cube still and flick one face, then back after a second; five times.',
   'no-cube': 'Connect a cube to start.',
   connecting: 'Connecting the cube…',
   'solve-first': 'Solve the cube first: the attempt starts when it is solved.',

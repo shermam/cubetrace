@@ -21,15 +21,16 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
 };
 
 /**
- * The sync check under the camera's preview (docs/PLAN.md, T2.5 and T2.8): while the framing
+ * The sync check under the camera's preview (docs/PLAN.md, T2.5, T2.8 and T2.11): while the framing
  * rectangle is the whole frame or most of it, a check that is due first asks for a rectangle around
  * the cube (with "Edit the framing", which opens Camera settings to the editor, and "Start anyway");
- * while a check runs, what to do (one face turned and turned back, five times, with pauses), how long
- * it waits for the first turn, then the turns made out of ten and how many the camera saw; then the
- * camera's lag behind the cube, or why the check failed, with Retry and "Download check data" (a
- * small link after a success); "Later" hides it. Hidden, one line says the lag this session has for
- * the camera, with "Sync check" to run one. Wherever a check cannot be started, the reason is written
- * beside its button. The logic is `SyncService`'s; this only shows it.
+ * while a check runs, what to do (the cube held still, one face flicked with one finger and flicked
+ * back after a second, five times), "Hold still…" for its first second, how long it waits for the
+ * first turn, then the turns made out of ten and how many the camera saw; then the camera's lag
+ * behind the cube, or why the check failed, with Retry and "Download check data" (a small link after
+ * a success); "Later" hides it. Hidden, one line says the lag this session has for the camera, with
+ * "Sync check" to run one. Wherever a check cannot be started, the reason is written beside its
+ * button. The logic is `SyncService`'s; this only shows it.
  */
 @Component({
   selector: 'app-sync-check',
@@ -56,7 +57,10 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
           }
           @case ('running') {
             @if (sync.run(); as run) {
-              <p class="ask">Turn one face, pause, turn it back; repeat five times.</p>
+              <p class="ask">
+                Hold the cube still inside the rectangle. With one finger, flick one face; keep your
+                other hand and the cube still; after a second, flick it back. Five times.
+              </p>
               <p
                 class="count"
                 data-testid="sync-count"
@@ -64,7 +68,10 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
                 [attr.data-moves]="run.moves()"
                 [attr.data-matched]="run.matched()"
               >
-                @if (run.moves() === 0) {
+                @if (run.holding()) {
+                  <span class="seconds" data-testid="sync-hold">Hold still…</span>
+                  wait a second before the first turn
+                } @else if (run.moves() === 0) {
                   <span class="seconds" data-testid="sync-seconds">{{ run.secondsLeft() }} s</span>
                   for the first turn
                 } @else {
@@ -73,9 +80,8 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
                 }
               </p>
               <p class="hint">
-                Any face, with the cube in the framing rectangle and a pause of about a second after
-                every turn. The timer waits meanwhile: the attempt begins again, with its scramble,
-                once the check ends and the cube is solved and still.
+                Any face will do. The timer waits meanwhile: the attempt begins again, with its
+                scramble, once the check ends and the cube is solved and still.
               </p>
             }
           }
@@ -348,8 +354,8 @@ export class SyncCheck {
 }
 
 /**
- * "Camera lags the cube by 41 ms (±12)": the offset and, after ±, the spread of the check's lags
- * (95th minus 5th percentile, `clapperboardResidualMs`), in whole ms.
+ * "Camera lags the cube by 41 ms (±12)": the offset and, after ±, the spread of the check's lags (the
+ * range of the lags kept, `clapperboardResidualMs`), in whole ms.
  */
 function lagText(offsetMs: number, spreadMs: number): string {
   const offset = Math.round(offsetMs);
