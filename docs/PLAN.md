@@ -688,7 +688,7 @@ pipeline, §9 the data model).
 | T2.8 | `capture`+`web`: sync check that works on real cameras: event-locked motion detection, changed-area metric, diagnostics download | T2.5 | ✅ #35 |
 | T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ✅ #37 |
 | T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ✅ #36 |
-| T2.11 | `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread | T2.8 | ⬜ |
+| T2.11 | `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread | T2.8 | ✅ #39 |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6 → {T2.8, T2.9, T2.10} (from the owner's
 first recordings, issues #33 and #34; all merged on 2026-09-27). Rules for every phase 2 task: nothing of

@@ -197,7 +197,7 @@
       ],
       "properties": {
         "offsetMs": {
-          "description": "How far the camera's frames lag the cube: the median of onsetHostMs − moveHostMs over the clapperboard's turns.",
+          "description": "How far the camera's frames lag the cube: the median of onsetHostMs − moveHostMs over the clapperboard's turns kept (since T2.11 the 20% of turns farthest from the median are left out).",
           "type": "number"
         },
         "rttMs": {
@@ -210,12 +210,12 @@
           "type": "number"
         },
         "clapperboardResidualMs": {
-          "description": "The spread of the clapperboard's offsets (95th minus 5th percentile).",
+          "description": "The spread of the clapperboard's lags over the turns kept: their range since T2.11 (the 95th minus 5th percentile of all matched turns before).",
           "type": "number",
           "minimum": 0
         },
         "clapperboardSamples": {
-          "description": "The clapperboard's turns matched to a motion onset.",
+          "description": "The clapperboard's turns kept: matched to a motion and not left out.",
           "type": "integer",
           "minimum": 0
         },
@@ -233,7 +233,7 @@
       "properties": {
         "moveHostMs": { "description": "The turn, on the host clock.", "type": "number" },
         "onsetHostMs": {
-          "description": "The motion onset in the camera's frames, on the host clock.",
+          "description": "The middle of the turn's motion in the camera's frames, on the host clock (its first rise before T2.11).",
           "type": "number"
         }
       }
