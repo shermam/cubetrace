@@ -50,7 +50,7 @@ synchronous so it can be unit-tested by replaying fixtures through it.
 All timestamps are host milliseconds. Cube time is mapped by a linear fit of (cubeMs, hostMs) pairs
 per attempt (docs/DEVICES.md). Remote phones (phase 4) are mapped by a data-channel ping protocol;
 video frames carry their own timestamps and their arrival time in the capture worker; a
-"clapperboard", one face turned and turned back five times at session start, measures each camera's
+"clapperboard", one face flicked and flicked back five times at session start, measures each camera's
 constant latency. See the private design for the measurements and the reasoning.
 
 ## Capture (phase 2)
@@ -87,9 +87,10 @@ first `AudioData` to the encoder's chunks and their decoder config, and places a
 timestamps count on another clock than the frames' by the arrival times).
 The **sync check** runs once per session and camera: the capture worker measures
 the motion inside the framing rectangle of each frame (the share of a 320- or 160-pixel luma plane,
-read with `VideoFrame.copyTo`, that changed by more than 12 levels), the clapperboard looks for each
-single cube turn's onset in the frames around it against the picture just before it, and the median
-lag becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
+read with `VideoFrame.copyTo`, that changed by more than 12 levels), the clapperboard finds the
+middle of each single cube turn's motion in the frames around it, against the picture just before it,
+and the median lag of the turns kept (the fifth farthest from the median left out of the spread)
+becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
 Idle time is never stored. Remote cameras (phase 4) will cut the same way and ship their clips over
 the WebRTC data channel; phase 3 uploads them.
 

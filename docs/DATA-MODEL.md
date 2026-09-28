@@ -231,14 +231,19 @@ frame. `mode` is `full` when whole frames are recorded (always in phase 2, where
 metadata for training) and `crop` when only the rectangle is (later).
 
 `clock.cameras` holds each camera's clock sync, by label (from the clapperboard, `docs/PLAN.md`
-T2.5: one face turned and turned back, five times over, so up to ten single turns, watched by
-the camera while attempt tracking is suspended). `offsetMs` is how far the camera's
-frames lag the cube: the median over the matched turns of the host time of the motion's onset in
-the frames minus the host time of the turn. `clapperboardResidualMs` is the spread of those
-differences (95th minus 5th percentile), `clapperboardSamples` the number of turns matched, and
-`samples`, when kept, the matched pairs. `rttMs` and `driftPpm` are the round-trip time and the
-drift of a remote camera's clock sync (phase 4); a local camera shares the host's clock and has 0
-for both. A clip's `syncResidualMs` (§7) is its camera's `offsetMs` when it was recorded.
+T2.5, T2.8 and T2.11: one face flicked and flicked back, five times over, so up to ten single turns,
+watched by the camera while attempt tracking is suspended). Each turn matched in the frames gives a
+lag: the host time of the middle of the turn's motion in the frames (the centroid of the picture's
+change around its peak) minus the host time of the turn; the fifth of those lags farthest from their
+median, rounded up, are left out (two of ten). `offsetMs` is how far the camera's frames lag the
+cube: the median of the lags kept. `clapperboardResidualMs` is the range of the lags kept (the
+largest minus the smallest), `clapperboardSamples` their number, and `samples`, when kept, the pairs
+kept: `moveHostMs`, the turn, and `onsetHostMs`, the middle of its motion since T2.11 (the name is
+older: until T2.11 it was the first frame of the motion's rise, `offsetMs` the median over every
+turn matched and `clapperboardResidualMs` their spread from the 5th to the 95th percentile; the
+schema is unchanged). `rttMs` and `driftPpm` are the round-trip time and the drift of a remote
+camera's clock sync (phase 4); a local camera shares the host's clock and has 0 for both. A clip's
+`syncResidualMs` (§7) is its camera's `offsetMs` when it was recorded.
 
 ## 7. `attempt.json`
 

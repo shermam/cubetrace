@@ -423,9 +423,9 @@ On https://shermam.github.io/cubetrace/, Timer page, with the GAN 12 ui FreePlay
 FaceTime camera and on the ThinkPhone's front camera (the phone on its stand), then its rear camera.
 Next to each item, write the device, the camera, Chrome's version and the numbers asked for. The
 check measures how far the camera's frames lag the cube (`docs/PLAN.md`, T2.5; since T2.8 it looks
-for each turn's motion in the frames around it, inside the framing rectangle): the lag goes into the
-session (`clock.cameras`) and into every later clip of that camera (`syncResidualMs`), for the
-training pipeline to subtract. While it runs, and until the cube has been still for a few seconds
+for each turn's motion in the frames around it, inside the framing rectangle, and since T2.11 it
+takes the middle of that motion): the lag goes into the session (`clock.cameras`) and into every
+later clip of that camera (`syncResidualMs`), for the training pipeline to subtract. While it runs, and until the cube has been still for a few seconds
 after it, the timer tracks no attempt, so its turns are in no record.
 
 - [ ] The framing hint (T2.8): camera on with the framing rectangle as the whole frame (Camera
@@ -438,20 +438,24 @@ after it, the timer tracks no attempt, so its turns are in no record.
   hands, as they are while turning (well under two thirds of the frame). The hint then says "The
   framing rectangle is set: start the check with the cube in it." Press Done, then Start.
 - [ ] A check: after Start (or by itself, at a new session's start, once the camera has a rectangle
-  around the cube), it says "Turn one face, pause, turn it back; repeat five times" and counts down
-  20 s for the first turn; the timer's status line says "Sync check: …" and the scramble waits. Turn
-  one face a quarter turn, hold the cube and the hands still for about a second, turn it back, hold
-  still again, five times over: the panel counts "Turn 1 of 10 · 1 seen by the camera", and so on
-  (the second number is the turns whose motion the camera saw). It never gives up in the middle:
-  take a longer pause once and see that it waits. About a second after the tenth turn it says
-  "Camera lags the cube by X ms (±Y)". Write down X and Y. The status line then says "Sync check
-  over: the attempt begins once the cube is still": turn the face once more and back within two
-  seconds and see that the timer keeps waiting; hold still, and the timer is back on the same
-  scramble and attempt number (the cube solved again), with none of those turns in the scramble.
+  around the cube), it says "Hold the cube still inside the rectangle. With one finger, flick one
+  face; keep your other hand and the cube still; after a second, flick it back. Five times.", then
+  "Hold still… wait a second before the first turn" for a second, then counts down the rest of 20 s
+  for the first turn; the timer's status line says "Sync check: …" and the scramble waits. A turn
+  made in that first second does not count (the panel goes on counting down for the first turn), so
+  wait for the countdown. Hold the cube still, flick one face a quarter turn with one finger, the
+  other hand and the cube still, wait about a second, flick it back, wait again, five times over: the
+  panel counts "Turn 1 of 10 · 1 seen by the camera", and so on (the second number is the turns whose
+  motion the camera saw). It never gives up in the middle: take a longer pause once and see that it
+  waits. About a second after the tenth turn it says "Camera lags the cube by X ms (±Y)". Write down
+  X and Y. The status line then says "Sync check over: the attempt begins once the cube is still":
+  turn the face once more and back within two seconds and see that the timer keeps waiting; hold
+  still, and the timer is back on the same scramble and attempt number (the cube solved again), with
+  none of those turns in the scramble.
 - [ ] The offset is stable: "Sync check" (the line under the picture), the same turns: it says "…;
-  was X ms". The two offsets are within 10 ms of each other and both spreads under 83 ms (the limit
-  at 30 fps: 50 ms plus a frame interval; 67 ms at 60 fps). Write down
-  both checks.
+  was X ms". The two offsets are within 25 ms of each other and both spreads under 83 ms (the limit
+  at 30 fps: 50 ms plus a frame interval; 67 ms at 60 fps; the spread is that of the turns kept, the
+  fifth farthest from the median left out). Write down both checks.
 - [ ] A failure says why and offers Retry and "Download check data": 20 s without turning ("the cube
   did not move"); the turns with the lens covered ("no motion seen in the framing rectangle"); the
   turns made quickly, without pauses ("fewer than 4 matches …", which says why the turns it counts
@@ -469,16 +473,16 @@ after it, the timer tracks no attempt, so its turns are in no record.
   the scramble's first turn.
 - [ ] Three solves after a check, then Sessions → Export: in `session.json`,
   `clock.cameras.<camera>` has `offsetMs` (X), `rttMs` and `driftPpm` 0, `clapperboardResidualMs`
-  (Y), `clapperboardSamples` (10, or fewer when a turn was not seen; at least 4) and the matched
-  `samples`; the attempts recorded after the check have `syncResidualMs` X in their `video` entries,
+  (Y), `clapperboardSamples` (the turns kept: 8 of 10 matched, the two farthest from the median left
+  out; fewer when a turn was not seen, at least 3) and the `samples` kept; the attempts recorded after the check have `syncResidualMs` X in their `video` entries,
   those recorded before it null. The attempt that was waiting for the check has none of its turns in
   `moves`, and `scrambleCorrected` false unless its own scramble went wrong. Paste the
   `clock.cameras` entry here.
 - [ ] https://shermam.github.io/cubetrace/capture-lab, each camera: Start, connect the cube with the
   cube button at the top, Sync check. Before turning, wave a hand in front of the camera: the two
   bars ("Mean difference" and "Changed area") jump, and the line under them says the frames' pixel
-  format (such as NV12) and "copied out (VideoFrame.copyTo)"; write both down. Then the same turns
-  (the lab watches the whole frame: keep the rest of the picture still). Write down the lag it says
+  format (such as NV12) and "copied out (VideoFrame.copyTo)"; write both down. Then, after "Hold
+  still…", the same turns (the lab watches the whole frame: keep the rest of the picture still). Write down the lag it says
   and "Measuring a frame took the capture worker … ms (95th percentile … ms)": the plan allows 2 ms
   per frame. When a check fails for no clear reason, "Download check data" and attach the file to an
   issue.

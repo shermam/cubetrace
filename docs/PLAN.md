@@ -688,6 +688,7 @@ pipeline, §9 the data model).
 | T2.8 | `capture`+`web`: sync check that works on real cameras: event-locked motion detection, changed-area metric, diagnostics download | T2.5 | ✅ #35 |
 | T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ✅ #37 |
 | T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ✅ #36 |
+| T2.11 | `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread | T2.8 | ⬜ |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6 → {T2.8, T2.9, T2.10} (from the owner's
 first recordings, issues #33 and #34; all merged on 2026-09-27). Rules for every phase 2 task: nothing of
@@ -702,8 +703,9 @@ round 2): (a) the worker's clock against the page's after the machine sleeps: ea
 own `timeOrigin` and the monotonic clock stops in sleep, so the frame and clip times of a worker
 created after a sleep could be off by the sleep, which the sync check's frame-clock self-check
 (T2.8) would report as "the frame clock is wrong"; the fix measures the worker–page offset and
-corrects frame and clip times; (b) sub-frame onsets in the sync check: the spread is quantized to
-frames on top of the cube's Bluetooth jitter (T2.8); (c) a quality or audio change mid-attempt
+corrects frame and clip times; (b) ~~sub-frame onsets in the sync check: the spread is quantized to
+frames on top of the cube's Bluetooth jitter (T2.8)~~, moot since T2.11, whose event, the centroid of
+a turn's motion, falls between frames; (c) a quality or audio change mid-attempt
 restarts the pipeline and empties the buffer, so that attempt's clips begin late (flagged
 `truncatedStart` since T2.9): a guard could defer the restart to the end of the attempt;
 (d) crop-at-source (the design's later phase), the biggest lever left on clip size after T2.10.
@@ -1073,6 +1075,65 @@ Camera settings says "4 Mbps", also after a reload; no sideways scroll at 320 px
 - [ ] CI green; the recording's counters say the bitrate of the quality chosen.
 - [ ] Settings stored before this change read Standard.
 - [ ] Owner: clip sizes at Standard on the MacBook (round 2): a 20 s solve clip about 10 MB, and "4 Mbps" in Camera settings.
+
+### T2.11 — `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread
+
+**Goal.** A sync check that passes on the owner's MacBook as the owner makes it. The first two
+checks of round 2 (issue #38, `fixtures/sync/`: the FaceTime camera at 1080p30, the GAN 356 i3 held
+in the air close to the camera with both hands, U and U′ turned with the fingers, the rectangle
+around the cube and the hands) found every turn and failed with spreads of 341 and 343 ms: T2.8's
+onset, the first frame of a turn's window to rise above its baseline, came from 381 ms before the
+move to 8 ms after it, catching the hand getting ready a varying time before the turn, while the
+peak of each turn's motion came within 90 ms before and 130 ms after its move. The cube reports a
+turn in the middle of the face's motion: the middle of the turn's motion is the event to match.
+
+**Scope.** `packages/capture/src/clapperboard.ts` and its tests, with a new
+`clapperboard-hardware.test.ts`; `fixtures/sync/` (the two checks' data files and a README);
+`apps/web/src/app/camera/{sync-run,sync-check,sync-report}.ts` and their specs, with a new
+`sync-run.spec.ts`; the timer's status line, the capture lab's sync section, the e2e texts; the
+comments on the clapperboard's fields in `packages/core/src/session.ts` (the schema is unchanged);
+README, `docs/{ARCHITECTURE,TOOLCHAIN,DATA-MODEL,DEVICES,MANUAL-TESTS,CHANGELOG}.md`.
+
+**Behaviour.**
+- **The event.** T2.8's window, baseline, peak gate and rise stay; a matched turn's time is
+  `eventHostMs`, the centroid of `max(0, changed − baseline)²` over the frames within 150 ms of its
+  peak (`EVENT_HALF_WINDOW_MS`), at the frames' own times. The peak is the window's highest frame, or
+  an earlier peak whose rise above the baseline is at least 0.8 of the highest's
+  (`EARLIER_PEAK_SHARE`): what follows a turn in its window can move the picture as much as the turn
+  (the synthetic scene's fidgets; two of the owner's turns, 0.95 and 0.98 as much), while the hand
+  getting ready before it moved it at most 0.68 as much. The first rise stays in each turn's analysis
+  as `onsetHostMs`, for the diagnostics. One motion per turn: when two turns' peaks are within 150 ms
+  of each other, the turn whose move is nearer keeps it and the other takes the peak of its window
+  more than 150 ms from it, or is `taken`.
+- **The spread.** `offsetMs` is the median of the lags kept: the matched lags less the ⌈20%⌉
+  farthest from the median of all (2 of 6 to 10, 1 of 4 or 5, none of fewer than 4, which fail
+  anyway); `clapperboardResidualMs` their range, against T2.8's limit (50 ms plus the median frame
+  interval); `clapperboardSamples` their count and `samples` the pairs kept, whose `onsetHostMs` is
+  the event (the schema is unchanged). The analysis says `estimator: 'motion-centre'`, `kept` and
+  `dropped` (the pairs left out, with their lags); a wide spread says "spread over 83 ms at 30 fps
+  (91.2 ms over the 8 turns kept of 10)".
+- **The instruction.** "Hold the cube still inside the rectangle. With one finger, flick one face;
+  keep your other hand and the cube still; after a second, flick it back. Five times." The check
+  shows "Hold still…" for its first second, "wait a second before the first turn", and counts no turn
+  made then, so that every turn counted has a baseline; the timer's status line says it in short.
+- **The diagnostics.** The data file (version 2) and the console line carry the estimator, the turns
+  kept and the lags left out, and each turn's event; the capture lab says the spread over the turns
+  kept of those matched, and its check ends early once all ten turns are matched and it passes.
+
+**Tests.** Node: the two checks replayed from their files, through a copy of T2.8's estimator (the
+day's lags, turn by turn; spreads of 341.4 and 343.5 ms: both fail) and through the new one (38.3 ms
+with a spread of 51.2 over 8 turns of 10, and 18.7 ms with 70.9 over 7 of 9: both pass, 20 ms
+apart); synthetic series for the centroid and its weights, the trimmed spread and its ties,
+`dropped`, the messages, a later motion as strong as the turn and an earlier one weaker, the one
+turn per motion, also across the edge of a window; the synthetic film (T2.5's detector matches 0 of
+10 turns, the new one all ten, each on its own motion, with a lag of 127 ms and a spread of 20 ms).
+App: the second of stillness and the count, the texts, the report, the lab's early end. E2E: the new
+texts.
+
+**Acceptance.**
+- [ ] CI green; the two checks of issue #38 pass in `clapperboard-hardware.test.ts`, and T2.8's
+  estimator fails them there as it did on the day.
+- [ ] Owner, on the MacBook: two checks on the FaceTime camera pass and agree within 25 ms.
 
 ## Phase 3 task board — cloud
 
