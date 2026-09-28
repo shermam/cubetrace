@@ -284,9 +284,9 @@ const MISS_WORDS: Readonly<Record<TurnMiss, string>> = {
  * peak goes to one turn only, the one whose move is nearer it (the other takes the peak of its window
  * more than 150 ms from it). The offset is the median of event minus move over the matched turns less
  * the fifth whose lags are farthest from the median of all (`droppedCount`), the residual the range
- * of the lags kept. Fails, saying why, without moves or frames; when the frames' host times
- * are more than `CLOCK_TOLERANCE_MS` from the page's clock (`receivedHostMs`); when no single turn's
- * window rises (no motion); with fewer than `MIN_MATCHES` matched turns; or with a spread over
+ * of the lags kept. Fails, saying why, without moves or frames; when the frames' host times are more
+ * than `CLOCK_TOLERANCE_MS` from the page's clock (`receivedHostMs`); when no single turn's window
+ * rises (no motion); with fewer than `MIN_MATCHES` matched turns; or with a spread over
  * `spreadLimitMs` of the frames' median interval.
  */
 export function detectClapperboard(
