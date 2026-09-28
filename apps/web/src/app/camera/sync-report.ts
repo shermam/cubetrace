@@ -2,7 +2,10 @@ import {
   BASELINE_FROM_MS,
   BASELINE_TO_MS,
   CLOCK_TOLERANCE_MS,
+  DROPPED_PERCENT,
+  EARLIER_PEAK_SHARE,
   ENERGY_FLOOR,
+  EVENT_HALF_WINDOW_MS,
   MIN_BASELINE_FRAMES,
   MIN_MATCHES,
   MIN_SPREAD_LIMIT_MS,
@@ -15,6 +18,8 @@ import {
   isWideFraming,
   singleTurns,
   type ClapperboardClock,
+  type ClapperboardEstimator,
+  type DroppedPair,
   type FrameSize,
   type FramingRect,
   type MotionMeterInfo,
@@ -40,14 +45,19 @@ export interface SyncReportContext {
 }
 
 /**
- * A sync check's diagnostics (docs/PLAN.md, T2.8), the JSON file the check's panel offers for an
- * issue: where it ran, how the frames were read, the whole motion series, the cube's moves, what the
- * detection saw around each single turn, and how it ended. Not a record of the data model: nothing
- * keeps it but the file.
+ * A sync check's diagnostics (docs/PLAN.md, T2.8 and T2.11), the JSON file the check's panel offers
+ * for an issue: where it ran, how the frames were read, the whole motion series, the cube's moves,
+ * what the detection saw around each single turn, and how it ended. Not a record of the data model:
+ * nothing keeps it but the file.
  */
 export interface SyncReport {
   readonly report: 'cubetrace sync check';
-  readonly version: 1;
+  /**
+   * 2 since T2.11: a turn's lag is to the middle of its motion (`turns[].eventHostMs`,
+   * `detection.estimator`), and the result says the turns kept and those left out of the spread; the
+   * files of version 1 (T2.8) have the lags to the first rise (`turns[].onsetHostMs`).
+   */
+  readonly version: 2;
   /** When it was made: host ms, and the same as a date. */
   readonly createdMs: number;
   readonly createdAt: string;
@@ -65,14 +75,22 @@ export interface SyncReport {
   readonly meter: MotionMeterInfo | null;
   /** The detection's parameters (packages/capture/src/clapperboard.ts). */
   readonly detection: {
+    /** How a turn's time in the frames is found: the middle of its motion. */
+    readonly estimator: ClapperboardEstimator;
     readonly windowMs: readonly [number, number];
     readonly baselineMs: readonly [number, number];
     readonly minBaselineFrames: number;
     readonly onsetMads: number;
     readonly peakMads: number;
     readonly floor: number;
+    /** A turn's event is the centroid of its motion within this of its peak, ms, either side. */
+    readonly eventHalfWindowMs: number;
+    /** An earlier peak this share as high above the baseline as the window's highest is taken. */
+    readonly earlierPeakShare: number;
     readonly singleTurnMs: number;
     readonly minMatches: number;
+    /** The share of the matched turns, in percent, whose lags the spread leaves out. */
+    readonly droppedPercent: number;
     /** The spread limit is this plus the frames' median interval, and never under the minimum. */
     readonly spreadAllowanceMs: number;
     readonly minSpreadLimitMs: number;
@@ -84,6 +102,7 @@ export interface SyncReport {
     /** The failure's reason and message; null when it passed. */
     readonly reason: string | null;
     readonly message: string | null;
+    /** The median lag of the turns kept, and the range of their lags. */
     readonly offsetMs: number | null;
     readonly spreadMs: number | null;
     /** The frames' median interval, and the widest spread that passes with it. */
@@ -92,6 +111,9 @@ export interface SyncReport {
     /** Single turns matched and not, moves and frames. */
     readonly matched: number;
     readonly unmatched: number;
+    /** Of the matched turns, those whose lags the spread keeps, and those it leaves out. */
+    readonly kept: number;
+    readonly dropped: readonly DroppedPair[];
     readonly moves: number;
     readonly frames: number;
     readonly durationMs: number;
@@ -140,7 +162,7 @@ export function syncReport(
   const single = new Set(singleTurns(data.moves.map((move) => move.hostMs)));
   return {
     report: 'cubetrace sync check',
-    version: 1,
+    version: 2,
     createdMs: round(createdMs, 1),
     createdAt: new Date(createdMs).toISOString(),
     app: { version: context.app.version, commit: context.app.commit },
@@ -157,14 +179,18 @@ export function syncReport(
     },
     meter: data.meter,
     detection: {
+      estimator: analysis.estimator,
       windowMs: [-WINDOW_BEFORE_MS, WINDOW_AFTER_MS],
       baselineMs: [-BASELINE_FROM_MS, -BASELINE_TO_MS],
       minBaselineFrames: MIN_BASELINE_FRAMES,
       onsetMads: ONSET_MADS,
       peakMads: PEAK_MADS,
       floor: ENERGY_FLOOR,
+      eventHalfWindowMs: EVENT_HALF_WINDOW_MS,
+      earlierPeakShare: EARLIER_PEAK_SHARE,
       singleTurnMs: SINGLE_TURN_MS,
       minMatches: MIN_MATCHES,
+      droppedPercent: DROPPED_PERCENT,
       spreadAllowanceMs: SPREAD_ALLOWANCE_MS,
       minSpreadLimitMs: MIN_SPREAD_LIMIT_MS,
       clockToleranceMs: CLOCK_TOLERANCE_MS,
@@ -179,6 +205,8 @@ export function syncReport(
       maxSpreadMs: analysis.maxSpreadMs,
       matched: analysis.matched,
       unmatched: analysis.unmatched,
+      kept: analysis.kept,
+      dropped: analysis.dropped,
       moves: analysis.moves,
       frames: analysis.frames,
       durationMs: outcome.durationMs,
@@ -205,17 +233,21 @@ export function syncReportFileName(createdMs: number): string {
 }
 
 /**
- * The console's line for a check (`cubetrace: sync check failed {…}`): the outcome, the counts, the
- * frames' clock, the camera and how its frames were read, and the time per frame.
+ * The console's line for a check (`cubetrace: sync check failed {…}`): the outcome, the counts (the
+ * turns matched, kept, and the lags of those left out), the frames' clock, the camera and how its
+ * frames were read, and the time per frame.
  */
 export function syncSummaryLine(report: SyncReport): string {
   const { result, meter, clock } = report;
   const facts = {
     reason: result.reason,
     message: result.message,
+    estimator: report.detection.estimator,
     offsetMs: result.offsetMs,
     spreadMs: result.spreadMs,
     matched: result.matched,
+    kept: result.kept,
+    droppedLagsMs: result.dropped.map((pair) => pair.lagMs),
     turns: result.matched + result.unmatched,
     moves: result.moves,
     frames: result.frames,

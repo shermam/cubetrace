@@ -170,19 +170,27 @@ whether frames were dropped.
 
 ## Camera lag
 
-How far each camera's frames lag the cube, from the sync check (T2.5, `docs/DATA-MODEL.md` §6): the
-median, over the turns matched, of the motion's onset in the frames minus the turn's host time
-(`offsetMs` of `clock.cameras`), and the spread of those lags (95th minus 5th percentile,
-`clapperboardResidualMs`); with the capture worker's time per frame to measure the motion (the
-capture lab's Sync check). For the owner's round 2 (`docs/MANUAL-TESTS.md`, T2.5): two checks per
-camera, whose offsets should agree within 10 ms, each spread under the limit of 50 ms plus a frame
-interval (83 ms at 30 fps, 67 at 60).
+How far each camera's frames lag the cube, from the sync check (T2.5, T2.8 and T2.11,
+`docs/DATA-MODEL.md` §6): the median, over the turns kept, of the middle of each turn's motion in the
+frames minus the turn's host time (`offsetMs` of `clock.cameras`), and the range of those lags
+(`clapperboardResidualMs`), the fifth of the matched turns farthest from the median being left out;
+with the capture worker's time per frame to measure the motion. For the owner's round 2
+(`docs/MANUAL-TESTS.md`, T2.5): two checks per camera, whose offsets should agree within 25 ms, each
+spread under the limit of 50 ms plus a frame interval (83 ms at 30 fps, 67 at 60).
 
 | Camera | Date, Chrome | Check 1: offset / spread / turns | Check 2: offset / spread / turns | Per frame: median / p95 |
 |---|---|---|---|---|
-| MacBook Pro 2021, FaceTime HD | | | | |
+| MacBook Pro 2021, FaceTime HD, 1080p30 | 2026-09-27, Chrome 153 | 38.3 ms / 51.2 ms / 8 kept of 10 (T2.8: −85.8 ms / 341.4 ms, failed) | 18.7 ms / 70.9 ms / 7 kept of 9 (T2.8: −269 ms / 343.5 ms, failed) | 0.8 and 0.9 ms / 1.9 ms |
 | ThinkPhone, front camera | | | | |
 | ThinkPhone, rear camera | | | | |
+
+The FaceTime row is the owner's first two checks of round 2 (issue #38, `fixtures/sync/`), made with
+app 0.2.0, whose detection (T2.8, the first rise of each turn's motion) failed both; T2.11 recomputed
+them from their data files. The cube was held in the air close to the camera, both hands on it, the
+top face turned with the fingers, the framing rectangle around the cube and the hands (585×558 and
+816×703 of the 1920×1080 frame, measured on a plane 160 pixels wide). The two offsets agree within
+20 ms: the camera lags the cube by about 20 to 40 ms. Checks made as T2.11 asks (the cube held still,
+one face flicked with one finger) are still to come.
 
 Chrome's fake camera cannot give a lag, since nothing in its test pattern turns with the cube, but
 it gives the cost: in Playwright's Chromium 141 on the containers' four CPUs, while the same worker

@@ -427,7 +427,7 @@ cube.
 | Idle setting (T1.14) | `cube.spec.ts`, last test | Settings shows the idle disconnection at 5 minutes; 1 survives a reload; 61 is refused with its message. The timer itself is tested in the unit tests, on a fake clock. |
 | Scramble marks (T1.13) | `scramble-colours.spec.ts` | Demo solve 1 at speed 20: each of its 11 half turns marked partial after its first quarter turn, then done; every view while scrambling agrees with its progress; all moves but the last done before the attempt arms, all done while armed, none from the solve on. `&misscramble=5` (demo solve 0): move 6 marked wrong exactly while the undo guidance shows, then done; all done while armed. |
 | Recording (T2.4) | `recording.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: four replays with the camera off, then four with it on, each waiting for the last one's clips; every attempt recorded has its two clips in OPFS, their frames files valid, each clip from its margin (2 s before the scramble's first turn, 3 s before the solve's) to at most one GOP earlier and to about 1 s after its segment; the viewer plays the last solve clip (`loadedmetadata`) with its moves, and Download gives the five files with the sizes of the record; the export validates; the median `timeMs` with the camera on is within 5 ms of the median with it off. In the capture lab, a 10 s clip saved mid-way: no frame dropped and no double interval in the second after it. The file's two tests run one after the other (`mode: 'default'`): each encodes 1080p30 in software. |
-| Sync check (T2.5, T2.8) | `sync-check.spec.ts` | Chrome's fake camera at 30 fps, demo solve 0 at speed 20: once the solve is recorded, the camera on; when it records, the check is due and, the whole frame being framed, asks for a rectangle around the cube first ("Edit the framing"; the timer goes on); "Start anyway" starts it (the capture worker's frames counted), the timer's status says `sync-check`, the scramble and "Attempt 2" stay; after 20 s without a turn it fails with "the cube did not move" (the demo has finished: the same outcome every run), with Retry and "Download check data", whose file has the whole motion series, the camera, how its frames were read and the frames' clock within 1 s of the page's; attempt 2 is back with its scramble; Retry, Later and "Sync check" start and hide it; the export has no `clock.cameras` entry and the one attempt of the solve. A second test draws the rectangle with the keyboard in the editor that "Edit the framing" opens: the hint goes, Start starts the check, and Full frame brings the hint back. In the capture lab, a 6 s check with the demo cube's turns shows the latest frame's motion in its bars (the mean difference above 0), the frames' format and "copied out", reports its outcome and the capture worker's time per frame, which it prints, and saves its data. |
+| Sync check (T2.5, T2.8, T2.11) | `sync-check.spec.ts` | Chrome's fake camera at 30 fps, demo solve 0 at speed 20: once the solve is recorded, the camera on; when it records, the check is due and, the whole frame being framed, asks for a rectangle around the cube first ("Edit the framing"; the timer goes on); "Start anyway" starts it: it asks to hold still for a second, then counts down for the first turn (the capture worker's frames counted), the timer's status says `sync-check`, the scramble and "Attempt 2" stay; after 20 s without a turn it fails with "the cube did not move" (the demo has finished: the same outcome every run), with Retry and "Download check data", whose file has the whole motion series, the camera, how its frames were read and the frames' clock within 1 s of the page's; attempt 2 is back with its scramble; Retry, Later and "Sync check" start and hide it; the export has no `clock.cameras` entry and the one attempt of the solve. A second test draws the rectangle with the keyboard in the editor that "Edit the framing" opens: the hint goes, Start starts the check, and Full frame brings the hint back. In the capture lab, a 6 s check with the demo cube's turns shows the latest frame's motion in its bars (the mean difference above 0), the frames' format and "copied out", reports its outcome and the capture worker's time per frame, which it prints, and saves its data. |
 | Session with clips (T2.6) | `session-clips.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: the solve that starts with the page, recorded before the camera is on, is deleted (Delete last); the camera on, the sync check that starts by itself is ended with Later; two replays, each with its two clips; then a new page load straight to the session's page: both attempts listed with a badge "2 clips, …", "4 clips, …" in its header, the first attempt's solve clip plays in the viewer, and the page's Export validates against schema 2; every clip of the records is a file in its attempt's folder in OPFS, the MP4 of the record's size and the frames file valid against its schema, with the record's frame count and first frame, and nothing else is there but `attempt.json`. |
 | First render (T2.6) | `timer-render.spec.ts` | On the production build under `/cubetrace/`, after a demo solve (a session with a stored solve), the first animation frame that shows the clock comes within 2 s of `DOMContentLoaded`, with the camera setting off and on; with the camera (`getUserMedia`) and the storage (`navigator.storage.getDirectory`) each held back 3 s, the clock still comes within 2 s, and the solve list and the camera's preview after them. Recording is off in the file (no `MediaStreamTrackProcessor`), as in `timer-layout.spec.ts`. It prints the times: over three runs, the clock 44 to 83 ms after `DOMContentLoaded` with the camera off or on, the solve list 104 to 177 ms and the preview 137 to 194 ms; held back, the clock 39 to 104 ms, the list 3,056 to 3,121 ms and the preview 3,139 to 3,237 ms. |
 
@@ -890,7 +890,7 @@ kB), the preview, 6.1 kB (2.4 kB), and `CameraService` with `RecordingService`, 
 kB (6.9 kB), against one chunk of 42.2 kB (13.2 kB). The session's page, new, is 9.1 kB (3.3 kB); the
 Sessions page 8.3 kB (2.8 kB), against 8.1 (2.8).
 
-## The sync check (T2.5, T2.8)
+## The sync check (T2.5, T2.8, T2.11)
 
 Added by T2.5 on 2026-09-27: the motion of the frames in the capture worker
 (`packages/capture/src/motion.ts`), the clapperboard (`clapperboard.ts`), and the check in the app
@@ -899,7 +899,11 @@ capture lab). Remade by T2.8 the same day, after the owner's first checks on the
 camera matched none of their turns ("fewer than 4 matches (0 of 8 single turns matched a motion)",
 the framing rectangle most likely the whole 1080p frame): the changed area, the detection locked to
 each turn, the framing hint, the check that runs until its ten turns are made and the timer's wait
-after it, and the diagnostics (`sync-report.ts`).
+after it, and the diagnostics (`sync-report.ts`). Remade again by T2.11 after the owner's first checks
+of round 2 on the same camera (issue #38), which matched every turn but spread their lags over 341 and
+343 ms: a turn's time in the frames is the middle of its motion rather than its first rise, the spread
+leaves out the fifth of the lags farthest from their median, and the check asks to hold still for its
+first second.
 
 **The motion is read with `VideoFrame.copyTo`, not drawn into a canvas.** Measured on 2026-09-27 in
 Playwright's Chromium 141 with the fake camera (1080p30 I420 frames), 150 frames each way in a
@@ -957,29 +961,64 @@ there was neither a quiet half second nor a jump to 4 times the baseline, and it
 within 500 ms either way, as the check asks for: the demo cube's scramble and solve, and a solver's,
 come so close together that any motion is near one of them, and would give a lag and a narrow spread
 out of nothing), the baseline is the median and the median absolute deviation (MAD) of the changed
-area from `t − 900` to `t − 300` ms (at least 5 frames); the onset is the first frame from `t − 400`
-to `t + 700` ms that rises above `baseline + max(3 × MAD, 0.1%)` from a frame that did not (a rise,
-not a window that begins in motion), provided the window's peak exceeds `baseline + max(6 × MAD,
-0.2%)`; the lag is onset minus `t`. An onset goes to one turn only: when two turns' windows share it
-(turns 0.5 to 1.1 s apart), the turn whose move is nearer keeps it and the other takes its next
-rise. The offset is the median lag, the residual the spread from the 5th to the 95th percentile
-(nearest rank: with 19 turns or fewer, the widest two lags); fewer than 4 matches fail, as in T2.5.
-**The spread a check allows follows the frame rate**: 50 ms plus the median interval of the check's
-frames (83 ms at 30 fps, 67 at 60, 58 at 120; never under T2.5's 40 ms, which is also the limit
-without an interval), since each onset is only known to a frame, an error of up to one interval, on
-top of the Bluetooth jitter of the cube's reports (a 95th percentile of 13 to 23 ms on both cubes,
-`docs/DEVICES.md`), and with ten turns the spread is their range: T2.5's fixed 40 ms would fail
-correct checks at 30 fps. The analysis keeps the interval and the limit, and a failure says both
-("spread over 83 ms at 30 fps (91.2 ms)"); `clapperboardResidualMs` stays the spread itself, the
-honest number (the offset, a median of n lags, is known to about the spread over √n). Each turn's
-analysis says why it is unmatched (no frames, no baseline, no rise, the picture already changing, or
-its motion nearer another turn), and the failure's message counts those. On a synthetic film of a
+area from `t − 900` to `t − 300` ms (at least 5 frames); the turn's motion must rise in its window,
+from `t − 400` to `t + 700` ms, above `baseline + max(3 × MAD, 0.1%)` from a frame that did not (a
+rise, not a window that begins in motion: the first such frame is the onset), and the window's peak
+must exceed `baseline + max(6 × MAD, 0.2%)`. T2.8 took the onset for the turn's time.
+
+**Since T2.11 a turn's time is the middle of its motion.** The owner's first checks of round 2
+(`fixtures/sync/`: the MacBook's FaceTime camera at 1080p30, the GAN 356 i3 held in the air close to
+the camera, both hands on it, the top face turned with the fingers, the rectangle around the cube and
+the hands) matched every turn, but the onsets came from 381 ms before the move to 8 ms after it: they
+caught the hand getting ready, the fingers placed and the cube shifted a varying time before the turn,
+in a picture where 4.6 to 4.8% of the rectangle changed from frame to frame at rest and each turn
+16 to 31%; the peak of each turn's motion came from 90 ms before its move to 130 ms after. The cube
+reports a turn in the middle of the face's motion, so the event is the middle of the turn's motion:
+the centroid of `max(0, changed − baseline)²` over the frames within 150 ms of its peak, at the
+frames' own times (nothing is interpolated, and the centroid falls between frames), squared so that
+the frames of the peak weigh most and the tails, near the baseline, little. The peak is the window's
+highest frame, or an earlier peak (a frame that no frame within 150 ms rises above) whose rise above
+the baseline is at least 0.8 of the highest's (`EARLIER_PEAK_SHARE`): what follows a turn in its
+window (the hand letting go, a fidget) can move the picture as much as the turn, as the synthetic
+scene's fidgets do and as a later motion did in two of the owner's turns (0.95 and 0.98 of the
+turn's), while the hand getting ready before a turn moved it at most 0.68 as much. A motion goes to
+one turn only: when two turns' peaks are within 150 ms of each other (the same frame, or the same
+motion seen through the edges of two windows, which overlap for turns 0.5 to 1.1 s apart), the turn
+whose move is nearer its peak keeps it, and the other takes the peak of its window more than 150 ms
+from it, or none. The onset stays in each turn's analysis, for the diagnostics. The offset is the
+median lag of the turns kept and the residual the range of their lags: of the matched turns, the
+fifth whose lags are farthest from the median of all, rounded up, are left out (1 of 4 or 5, 2 of 6
+to 10, 3 of 11 to 15; of two as far, the later turn's), since the range hangs on the two most extreme
+turns and the median does not; fewer than 4 matches fail, as in T2.5.
+
+**The spread a check allows follows the frame rate** (T2.8): 50 ms plus the median interval of the
+check's frames (83 ms at 30 fps, 67 at 60, 58 at 120; never under T2.5's 40 ms, which is also the
+limit without an interval), since the frames see each turn's motion a frame at a time, an error of up
+to about one interval, on top of the Bluetooth jitter of the cube's reports (a 95th percentile of 13
+to 23 ms on both cubes, `docs/DEVICES.md`): T2.5's fixed 40 ms would fail correct checks at 30 fps.
+The analysis keeps the interval and the limit, and a failure says both and the turns kept ("spread
+over 83 ms at 30 fps (91.2 ms over the 8 turns kept of 10)"); `clapperboardResidualMs` stays the
+spread itself, the honest number (the offset, a median of n lags, is known to about the spread over
+√n). Each turn's analysis says why it is unmatched (no frames, no baseline, no rise, the picture
+already changing, or its motion nearer another turn), and the failure's message counts those.
+
+**The numbers.** The owner's two checks, replayed from their data files by
+`clapperboard-hardware.test.ts`: T2.8's estimator (a copy of it in the test, which gives the day's
+lags turn by turn) fails both, with lags of −85.8 and −269 ms spread over 341.4 and 343.5 ms (10 and 9
+turns matched; the second check's first turn came 0.14 s after its first frame, without a baseline);
+T2.11's passes both: a lag of 38.3 ms with a spread of 51.2 ms over the 8 turns kept of 10 (lags 21,
+38, 24, 1, 38, 72, 35, 44, 51 and 75 ms; 1 and 75 left out) and 18.7 ms with 70.9 ms over 7 of 9 (12,
+19, −5, 78, 52, 66, 45, −75 and 18 ms; 78 and −75 left out), 20 ms apart. On a synthetic film of a
 check (`clapperboard-scene.test.ts`: 640 × 360 frames of a room and a person swaying and breathing,
 with the sensor's noise, a flickering light and three fidgets, ten turns each a compact change of
-about 0.7% of the picture 60 ms after the move) T2.5's detector matched none of the ten turns and
-T2.8's all ten, with a lag of 73.5 ms and a spread of 26.9 ms. The 0.1% floor keeps a still picture
-(a MAD of 0) from taking a few changed pixels for a turn; on the fake camera the changed area's
-median is 0.7% and its peaks 11% (its test pattern moves), which the MAD absorbs.
+about 0.7% of the picture from the first frame 60 ms or more after the move) T2.5's detector matched
+none of the ten turns, and T2.8's all ten, with a lag of 73.5 ms and a spread of 26.9 ms; T2.11's
+matches all ten with a lag of 127.2 ms (the middle of each turn's motion, drawn over four frames, is
+about 50 ms after its first) and a spread of 20.1 ms. Three of the fidgets change as much of the
+picture as a turn within half a second after one: the window's highest frame alone would have taken
+them for those turns, and failed the film with a spread of 368.2 ms. The 0.1% floor keeps a still
+picture (a MAD of 0) from taking a few changed pixels for a turn; on the fake camera the changed
+area's median is 0.7% and its peaks 11% (its test pattern moves), which the MAD absorbs.
 
 **The check in the Timer** is due by itself when a session is under way with the camera recording, a
 cube connected and no check of that camera in the session's `clock.cameras`, once per session and
@@ -990,13 +1029,16 @@ cannot start, the reason is written beside its button, and a start refused says 
 while the framing rectangle is wide (the whole frame, the default, or more than 60% of it) a check
 that is due asks first for a rectangle around the cube ("Edit the framing" opens Camera settings to
 the editor, through `CameraService.framingEditing`), then starts with Start, or at once with "Start
-anyway", which the session remembers for the camera. It asks to turn one face, pause, turn it back,
-five times over: ten single turns that leave the cube as it was. It waits 20 s for the first turn
-(and fails, "the cube did not move", without one); from the first turn on it never gives up in the
-middle of what it asked for, counting "Turn 3 of 10", and ends once ten turns are made and the cube
-has been still for a second (the capture lab's check keeps T2.5's end: its time, or sooner once ten
-turns are matched within the spread); the recording stopping or the cube disconnecting end it as
-failed. While it runs the timer tracks no attempt (`SessionService.suspendForSyncCheck`, refused
+anyway", which the session remembers for the camera. It asks to hold the cube still inside the
+rectangle and flick one face with one finger, the other hand and the cube still, and to flick it back
+after a second, five times over: ten single turns that leave the cube as it was. Since T2.11 it says
+"Hold still…" for its first second and counts no turn made then, which would have no baseline (the
+owner's second check of issue #38 lost its first turn so). It waits 20 s from its start for the
+first turn (and fails, "the cube did not move", without one); from the first turn on it never gives
+up in the middle of what it asked for, counting "Turn 3 of 10", and ends once ten turns are made and
+the cube has been still for a second (the capture lab's check keeps T2.5's end: its time, or sooner
+once its ten turns are matched and it passes); the recording stopping or the cube disconnecting end
+it as failed. While it runs the timer tracks no attempt (`SessionService.suspendForSyncCheck`, refused
 while an attempt is armed or solving): the attempt waiting for its scramble is dropped without a
 record, by the path "Mark as solved" takes, the cube's moves go to no attempt (they still feed the
 session's coarse cube clock fit), the status line says "Sync check: …" (a timer phase of its own,
@@ -1024,8 +1066,13 @@ and commit and the browser, the camera's label and name and frame size, the fram
 the frames were read, the detection's parameters, the result, the frames' clock, every single turn's
 window, baseline, MAD, levels, peak and onset or why it has none, the cube's moves with whether each
 was single, and the whole series (`{hostMs, mean, changed}` per frame). It is a file for an issue,
-not a record of the data model. The capture lab also shows the latest frame's two measures in bars
-as they come, so that a hand waved in front of the camera can be seen to register.
+not a record of the data model. Since T2.11 it is version 2: each turn's analysis has its event
+(`eventHostMs`) beside its onset, and its lag is to the event; the detection says its estimator
+(`motion-centre`) and the new parameters (the half window of the event, the share of an earlier
+peak, the share of the turns left out); the result says the turns kept and the pairs left out with
+their lags; and the console line has the estimator, the count kept and the lags left out. The
+capture lab also shows the latest frame's two measures in bars as they come, so that a hand waved in
+front of the camera can be seen to register.
 
 **Sizes** (`ng build`, 2026-09-27, against `main` at 01706c2, with T2.7): the initial bundle is
 unchanged, 264.46 kB raw. The motion code is in the capture worker only, 18.2 kB raw, 6.2 kB
@@ -1040,7 +1087,12 @@ settings' unchanged but for a status line (28.2 and 25.2 kB). With T2.8 (`ng bui
 against `main` at 1cbd063) the initial bundle is unchanged, 264.46 kB raw; the capture worker is
 19.6 kB raw, 6.7 kB transferred (18.2 and 6.2 with T2.5: the changed area, the unrolled loop, the
 meter's description); the camera preview's chunk, with the sync panel, `SyncService` and the report,
-20.1 kB, 5.6 kB transferred; the capture lab's 22.8 kB; Camera settings' 25.6 kB.
+20.1 kB, 5.6 kB transferred; the capture lab's 22.8 kB; Camera settings' 25.6 kB. With T2.11 (`ng
+build`, 2026-09-28, against `main` at 5ab4270) the initial bundle is unchanged, 264.46 kB raw; the
+window side of `packages/capture`, with the clapperboard, is 21.5 kB raw, 7.4 kB transferred (20.2
+and 7.0: the peaks, the event and the trimmed spread); `SyncRun`'s chunk 6.2 kB (5.8: the second of
+stillness); the camera preview's 20.3 kB (20.1); the capture lab's 23.3 kB (23.1); the Timer page's
+28.3 kB (a status line); the capture worker is unchanged, 22.5 kB.
 
 ## Video quality (T2.10)
 

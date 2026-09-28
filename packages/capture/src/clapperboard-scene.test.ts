@@ -11,16 +11,17 @@ import { MotionMeter } from './motion';
 import type { MotionSample } from './protocol';
 import { SyntheticFrame, seeded } from './test-frames';
 
-// A sync check filmed (docs/PLAN.md, T2.8): a synthetic camera sees a person holding a cube in the
-// middle of a room, the whole picture as the region, as the owner's first checks had it. Everywhere in
-// the picture, all the time: the sensor's noise, a flicker of the light, the body and the cube
-// swaying and breathing, and a few fidgets of a hand or the head between the turns. Ten single turns,
+// A sync check filmed (docs/PLAN.md, T2.8 and T2.11): a synthetic camera sees a person holding a cube
+// in the middle of a room, the whole picture as the region, as the owner's first checks had it.
+// Everywhere in the picture, all the time: the sensor's noise, a flicker of the light, the body and the
+// cube swaying and breathing, and a few fidgets of a hand or the head between the turns, each changing
+// as much of the picture as a turn, three of them within half a second after a turn. Ten single turns,
 // 1.25 s apart: each is the cube's top layer turning, with a finger on it, over three frames from the
 // first frame 60 ms or more after the cube reports the move, a compact change of about 1% of the
 // picture. The frames go through the capture worker's motion meter (320 × 180 for the whole frame),
-// then through the clapperboard of T2.5 on the mean difference, and through T2.8's on the changed
-// area. 640 × 360 frames, so that the test stays fast: a pixel of the meter's plane is 2 × 2 of them,
-// as a pixel is 6 × 6 of a 1080p frame's.
+// then through the clapperboard of T2.5 on the mean difference, and through the detection of T2.8 and
+// T2.11 on the changed area. 640 × 360 frames, so that the test stays fast: a pixel of the meter's
+// plane is 2 × 2 of them, as a pixel is 6 × 6 of a 1080p frame's.
 const WIDTH = 640;
 const HEIGHT = 360;
 const FPS = 30;
@@ -254,7 +255,7 @@ function matchesOfT25(samples: readonly MotionSample[], moves: readonly number[]
 }
 
 describe('a sync check filmed with the whole frame as the region, a person moving in it', () => {
-  it("defeats T2.5's detector, while T2.8's matches the turns and finds the lag", async () => {
+  it("defeats T2.5's detector, while the detection since T2.8 matches the turns and finds the lag", async () => {
     const samples = await measure();
     const moves = TURNS_MS.map((ms) => T0_US / 1000 + OFFSET_MS + 1 + ms);
 
@@ -278,17 +279,27 @@ describe('a sync check filmed with the whole frame as the region, a person movin
     const old = matchesOfT25(samples, moves);
     const result = detectClapperboard(samples, moves);
     console.log(
-      `T2.5's detector matched ${String(old)} of 10 turns; T2.8's ${String(result.analysis.matched)}` +
-        ` (${result.ok ? `lag ${String(result.offsetMs)} ms, spread ${String(result.clapperboardResidualMs)} ms` : result.message})`,
+      `T2.5's detector matched ${String(old)} of 10 turns; the detection since T2.8 ${String(result.analysis.matched)}` +
+        ` (${result.ok ? `lag ${String(result.offsetMs)} ms, spread ${String(result.clapperboardResidualMs)} ms over ${String(result.clapperboardSamples)} turns kept` : result.message};` +
+        ` each turn's lag ${JSON.stringify(result.analysis.turns.map((turn) => turn.lagMs))})`,
     );
 
     expect(old).toBeLessThan(MIN_MATCHES);
     expect(result.analysis.matched).toBeGreaterThanOrEqual(8);
+    // Since T2.11 a turn's lag is to the middle of its motion, not to its first frame (T2.8's 60 to
+    // 93 ms): the camera shows each turn from the first frame 60 ms or more after the move, changing the
+    // picture over four frames (the stickers sliding over three, then into place), whose middle is
+    // about a frame and a half (50 ms) after the first, so about 110 to 143 ms after the move. So is
+    // every turn's: none of the fidgets, which change as much of the picture within half a second after
+    // three of the turns, took a turn's place (EARLIER_PEAK_SHARE).
+    for (const turn of result.analysis.turns) {
+      expect(turn.lagMs).toBeGreaterThanOrEqual(105);
+      expect(turn.lagMs).toBeLessThan(145);
+    }
     expect(result).toMatchObject({ ok: true });
     if (result.ok) {
-      // The camera shows each turn on the first frame 60 ms or more after it: 60 to 93 ms later.
-      expect(result.offsetMs).toBeGreaterThanOrEqual(60);
-      expect(result.offsetMs).toBeLessThan(94);
+      expect(result.offsetMs).toBeGreaterThanOrEqual(105);
+      expect(result.offsetMs).toBeLessThan(145);
       // Within the limit of 50 ms plus a frame at 30 fps.
       expect(result.analysis.maxSpreadMs).toBeCloseTo(83.3, 1);
       expect(result.clapperboardResidualMs).toBeLessThanOrEqual(result.analysis.maxSpreadMs);

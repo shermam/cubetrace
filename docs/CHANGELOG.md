@@ -101,6 +101,11 @@ Deployed at https://shermam.github.io/cubetrace/.
   lists its clips in `video`, `session.json` lists its `cameras` and their `clock.cameras`, and every
   clip has a `frames.json`; sessions recorded by 0.1.0 are still read, resumed and exported, as
   version 2, and their files are not rewritten.
+- The sync check asks to hold the cube still inside the framing rectangle and flick one face with one
+  finger, the other hand still, then flick it back a second later, five times (T2.11); it says "Hold
+  still…" for its first second and counts no turn made then, which it could not match. Its result
+  in the capture lab, its console line and its data file (version 2) say the turns kept and those
+  left out of the spread.
 
 ### Fixed
 
@@ -121,6 +126,12 @@ Deployed at https://shermam.github.io/cubetrace/.
   config, the clip gets one made from the encoder's settings (for AAC with its AudioSpecificConfig);
   when the sound's timestamps count on another clock than the frames', the arrival times place it,
   and the clip's notes say by how much; the round on the owner's MacBook tells which cause it was.
+- The sync check failed checks in which the camera saw every turn (issue #38, T2.11): it took each
+  turn's time in the picture at the first frame that changed around it, which caught the hand getting
+  ready a varying time before the turn, so that the owner's two checks on the MacBook's FaceTime
+  camera spread their lags over 341 and 343 ms. It now takes the middle of each turn's motion, where
+  the cube reports the turn, and the spread leaves out the fifth of the turns farthest from the
+  median: the same two checks pass, with lags of 38 and 19 ms (spreads of 51 and 71 ms).
 
 ## 0.1.0 — 2026-09-27
 

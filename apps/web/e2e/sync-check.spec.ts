@@ -5,16 +5,16 @@ import { expect, test, type Page } from '@playwright/test';
 import { exportSession } from './helpers/export';
 import { demoPath, expectSolves } from './helpers/timer';
 
-// The sync check (docs/PLAN.md, T2.5 and T2.8) with Chrome's fake camera at 30 fps and the demo cube.
-// Nothing in the fake camera's test pattern turns with the cube (its jumps come every half second or
-// so, at their own pace), so a check there cannot find the camera's lag. On the Timer the camera's
-// framing rectangle is the whole frame at first, so the check that is due asks for one around the
-// cube before it starts; started anyway, and the demo cube having finished its solve when it starts,
-// it always ends in the same failure, the cube did not move, with Retry and its data to download;
-// meanwhile the timer tracks no attempt, and the attempt it dropped begins again afterwards with its
-// scramble and number. The capture lab's check reports what it measured, the capture worker's time
-// per frame included, and shows the latest frame's motion as it comes. Launch options force a browser
-// of their own for this file.
+// The sync check (docs/PLAN.md, T2.5, T2.8 and T2.11) with Chrome's fake camera at 30 fps and the
+// demo cube. Nothing in the fake camera's test pattern turns with the cube (its jumps come every half
+// second or so, at their own pace), so a check there cannot find the camera's lag. On the Timer the
+// camera's framing rectangle is the whole frame at first, so the check that is due asks for one around
+// the cube before it starts; started anyway, it asks to hold still for a second, and, the demo cube
+// having finished its solve when it starts, it always ends in the same failure, the cube did not move,
+// with Retry and its data to download; meanwhile the timer tracks no attempt, and the attempt it
+// dropped begins again afterwards with its scramble and number. The capture lab's check reports what
+// it measured, the capture worker's time per frame included, and shows the latest frame's motion as it
+// comes. Launch options force a browser of their own for this file.
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],
@@ -126,11 +126,17 @@ test('the Timer: the check asks for the framing first, pauses the timer once sta
   // dropped, its scramble and number kept).
   await page.getByTestId('sync-anyway').click();
   await expect(panel).toHaveAttribute('data-state', 'running');
-  await expect(panel).toContainText('Turn one face, pause, turn it back; repeat five times.');
+  await expect(panel).toContainText(
+    'Hold the cube still inside the rectangle. With one finger, flick one face; keep your other hand and the cube still; after a second, flick it back. Five times.',
+  );
+  // "Hold still…" for its first second, then the countdown for the first turn.
+  await expect(page.getByTestId('sync-count')).toHaveText(
+    /^\s*(Hold still… wait a second before the first turn|\d+ s for the first turn)\s*$/,
+  );
   await expect(page.getByTestId('sync-seconds')).toHaveText(/^\d+ s$/);
   await expect(status).toHaveAttribute('data-phase', 'sync-check');
   await expect(status).toHaveText(
-    'Sync check: turn one face, pause, turn it back; repeat five times.',
+    'Sync check: hold the cube still and flick one face, then back after a second; five times.',
   );
   await expect(scramble).toHaveText(scrambleText);
   await expect(attempt).toHaveText('Attempt 2');

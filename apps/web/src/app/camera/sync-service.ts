@@ -67,14 +67,15 @@ export interface SyncCheckResult {
  * remembers for the camera).
  *
  * A check asks for one face turned and turned back, five times, so that the cube ends as it began,
- * and the timer tracks no attempt meanwhile (`SessionService.suspendForSyncCheck`); it waits 20 s for
- * the first turn, then runs until the ten turns are made (`SyncRun`), watching the camera's motion
+ * and the timer tracks no attempt meanwhile (`SessionService.suspendForSyncCheck`); it asks to hold
+ * still for its first second (since T2.11), waits 20 s from its start for the first turn, then runs
+ * until the ten turns are made (`SyncRun`), watching the camera's motion
  * in the framing rectangle, measured by the capture worker, and the cube's moves, and the
  * clapperboard gives the lag. When it ends, the timer stays suspended until the cube has been still
  * for 2 s or the result is dismissed (`SessionService.holdAfterSyncCheck`), so that turns made after
  * it go to no attempt; the attempt that had not started its scramble then begins again with its
  * scramble and number. On success the lag goes into the session's `clock.cameras[label]` (`rttMs`
- * and `driftPpm` 0: the camera is this device's; the matched pairs kept), replacing an earlier
+ * and `driftPpm` 0: the camera is this device's; the pairs the spread keeps), replacing an earlier
  * check's, and the camera's later clips carry it as their `syncResidualMs`
  * (`SessionService.attachClip`). A check ends as failed when the recording stops or the cube
  * disconnects. Every check that ends writes one line to the console, and its diagnostics can be

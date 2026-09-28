@@ -64,7 +64,7 @@ describe('syncReport', () => {
 
     expect(report).toMatchObject({
       report: 'cubetrace sync check',
-      version: 1,
+      version: 2,
       createdMs: T0_MS + 2500,
       createdAt: new Date(T0_MS + 2500).toISOString(),
       app: { version: '0.2.0', commit: 'abc1234' },
@@ -78,11 +78,15 @@ describe('syncReport', () => {
       framing: { rect: { x: 0, y: 0, w: 1920, h: 1080 }, wide: true },
       meter: METER,
       detection: {
+        estimator: 'motion-centre',
         windowMs: [-400, 700],
         baselineMs: [-900, -300],
         onsetMads: 3,
         peakMads: 6,
         floor: 0.001,
+        eventHalfWindowMs: 150,
+        earlierPeakShare: 0.8,
+        droppedPercent: 20,
         spreadAllowanceMs: 50,
         minSpreadLimitMs: 40,
         clockToleranceMs: 1000,
@@ -94,6 +98,9 @@ describe('syncReport', () => {
           'fewer than 4 matches (1 of 1 single turn matched a motion; 2 turns came within half a second of another)',
         matched: 1,
         unmatched: 0,
+        // None is left out of the spread of fewer than four turns.
+        kept: 1,
+        dropped: [],
         moves: 3,
         frames: 60,
         durationMs: 2000,
@@ -111,6 +118,9 @@ describe('syncReport', () => {
     ]);
     expect(report.turns).toHaveLength(1);
     expect(report.turns[0]).toMatchObject({ miss: null, lagMs: 40.5 });
+    // The motion is one frame: its onset and the middle of its motion, the event, are that frame.
+    expect(report.turns[0].eventHostMs).toBeCloseTo(T0_MS + 4000 / 3 + 0.5, 1);
+    expect(report.turns[0].onsetHostMs).toBeCloseTo(T0_MS + 4000 / 3 + 0.5, 1);
     // The frames in time order, at their timestamps plus the arrival offset (half a ms here).
     expect(report.series).toHaveLength(60);
     expect(report.series[0]).toEqual({ hostMs: T0_MS + 0.5, mean: 1.25, changed: 0.0002 });
@@ -145,7 +155,10 @@ describe('syncSummaryLine', () => {
     const facts = JSON.parse(line.slice(line.indexOf('{'))) as Record<string, unknown>;
     expect(facts).toMatchObject({
       reason: 'few-matches',
+      estimator: 'motion-centre',
       matched: 1,
+      kept: 1,
+      droppedLagsMs: [],
       turns: 1,
       moves: 3,
       frames: 60,

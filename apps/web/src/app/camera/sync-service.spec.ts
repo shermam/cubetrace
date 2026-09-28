@@ -15,8 +15,13 @@ import {
   type Rig,
 } from './sync-testing';
 
-/** The lags of a check's ten turns in the frames, ms: median 49, spread (p95 − p5) 8. */
-const LAGS = [44, 50, 47, 52, 49, 44, 50, 47, 52, 49];
+/**
+ * The lags of a check's ten turns in the frames, ms: two far off (10 and 95 ms), which the spread
+ * leaves out (T2.11); the other eight's median is 49 and their spread 8.
+ */
+const LAGS = [45, 10, 47, 48, 49, 95, 49, 50, 51, 53];
+/** The turns the spread keeps: all but the second and the sixth. */
+const KEPT = [0, 2, 3, 4, 6, 7, 8, 9];
 
 /** Films the stillness after a check until the timer tracks attempts again (hold, then grace). */
 async function settleAfter(r: Rig, capture: FakeCapture, fake: FakeCube): Promise<void> {
@@ -48,7 +53,7 @@ describe('SyncService', () => {
     expect(SYNC_TURNS).toBe(10);
     expect(r.sync.run()?.secondsLeft()).toBe(20);
 
-    const { turns, energy, onsets } = clapperboard(r.s.perf.hostMs, LAGS);
+    const { turns, energy, events } = clapperboard(r.s.perf.hostMs, LAGS);
     await film(r, capture, fake, 2000, energy, turns);
     expect(r.sync.run()?.moves()).toBe(1);
     expect(r.sync.run()?.frames()).toBeGreaterThan(55);
@@ -67,7 +72,13 @@ describe('SyncService', () => {
       label: 'laptop',
       previousOffsetMs: null,
       saved: true,
-      outcome: { ok: true, offsetMs: 49, clapperboardResidualMs: 8, clapperboardSamples: 10 },
+      outcome: {
+        ok: true,
+        offsetMs: 49,
+        clapperboardResidualMs: 8,
+        clapperboardSamples: 8,
+        analysis: { matched: 10, kept: 8 },
+      },
     });
     const clock = r.s.service.session()?.clock.cameras['laptop'];
     expect(clock).toMatchObject({
@@ -75,11 +86,12 @@ describe('SyncService', () => {
       rttMs: 0,
       driftPpm: 0,
       clapperboardResidualMs: 8,
-      clapperboardSamples: 10,
+      clapperboardSamples: 8,
     });
-    expect(clock?.samples?.map((pair) => pair.moveHostMs)).toEqual(turns);
+    // The pairs kept, each move with the middle of its turn's motion.
+    expect(clock?.samples?.map((pair) => pair.moveHostMs)).toEqual(KEPT.map((k) => turns[k]));
     clock?.samples?.forEach((pair, k) => {
-      expect(pair.onsetHostMs).toBeCloseTo(onsets[k], 1);
+      expect(pair.onsetHostMs).toBeCloseTo(events[KEPT[k]], 1);
     });
     expect(r.sync.stored()).toEqual(clock);
     await r.s.service.whenSaved();
@@ -151,11 +163,7 @@ describe('SyncService', () => {
     const r = rig();
     const { fake, capture } = await recording(r);
     // Ten turns 2.5 s apart: the tenth 25 s in.
-    const start = r.s.perf.hostMs;
-    const onsets = LAGS.map((_, k) => start + 2500 * (k + 1));
-    const turns = onsets.map((onset, k) => onset - LAGS[k]);
-    const energy = (hostMs: number): number =>
-      onsets.some((onset) => hostMs >= onset - 1 && hostMs < onset + 150) ? 0.02 : STILL();
+    const { turns, energy } = clapperboard(r.s.perf.hostMs, LAGS, 2500);
 
     await film(r, capture, fake, 22_000, energy, turns);
     expect(r.sync.run()?.state()).toBe('running');
@@ -462,7 +470,7 @@ describe('SyncService', () => {
     const report = r.sync.report();
     expect(report).toMatchObject({
       report: 'cubetrace sync check',
-      version: 1,
+      version: 2,
       camera: {
         label: 'laptop',
         deviceLabel: 'fake_device_0',
@@ -471,7 +479,16 @@ describe('SyncService', () => {
       },
       framing: { rect: AROUND_THE_CUBE, wide: false },
       meter: { format: 'NV12', path: 'copy', planeWidth: 160 },
-      result: { ok: true, reason: null, offsetMs: 49, spreadMs: 8, matched: 10, unmatched: 0 },
+      detection: { estimator: 'motion-centre' },
+      result: {
+        ok: true,
+        reason: null,
+        offsetMs: 49,
+        spreadMs: 8,
+        matched: 10,
+        unmatched: 0,
+        kept: 8,
+      },
     });
     expect(report?.moves.map((move) => move.move)).toEqual(Array(5).fill(['U', "U'"]).flat());
     expect(report?.moves.every((move) => move.single)).toBe(true);
@@ -486,6 +503,7 @@ describe('SyncService', () => {
     expect(info).toHaveBeenCalledTimes(1);
     expect(info.mock.calls[0][0]).toMatch(/^cubetrace: sync check passed \{"reason":null,/);
     expect(info.mock.calls[0][0]).toContain('"offsetMs":49');
+    expect(info.mock.calls[0][0]).toContain('"matched":10,"kept":8,"droppedLagsMs":[10,95]');
     expect(info.mock.calls[0][0]).toContain('"format":"NV12","path":"copy","plane":"160×90"');
   });
 });

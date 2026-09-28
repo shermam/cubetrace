@@ -125,15 +125,26 @@ export async function film(
   await update(r);
 }
 
+/** A turn's motion, the changed area of the frames from two before its middle to two after. */
+const TURN = [0.01, 0.02, 0.03, 0.02, 0.01];
+
 /**
- * One turn per lag, 1.2 s apart from `start`, each lagged by its lag (ms) in the frames: a turn at a
- * frame's time minus its lag, so that its motion (2% of the pixels changed, over five frames) begins
- * on that frame.
+ * One turn per lag, `everyMs` apart from `start` (1.2 s, a whole number of frames), each lagged by
+ * its lag (ms) in the frames: a turn at a frame's time minus its lag, so that its motion (1 to 3% of
+ * the pixels changed, over five frames, rising to that frame and falling as it rose) has its middle,
+ * the check's event (T2.11), on that frame. `events` are those frames' times.
  */
-export function clapperboard(start: number, lags: readonly number[]) {
-  const onsets = lags.map((_, k) => start + FRAME_MS * 36 * (k + 1));
-  const turns = onsets.map((onset, k) => onset - lags[k]);
-  const energy = (hostMs: number): number =>
-    onsets.some((onset) => hostMs >= onset - 1 && hostMs < onset + 150) ? 0.02 : STILL();
-  return { turns, energy, onsets };
+export function clapperboard(start: number, lags: readonly number[], everyMs = FRAME_MS * 36) {
+  const events = lags.map((_, k) => start + everyMs * (k + 1));
+  const turns = events.map((event, k) => event - lags[k]);
+  const energy = (hostMs: number): number => {
+    for (const event of events) {
+      const frame = Math.round((hostMs - event) / FRAME_MS);
+      if (Math.abs(frame) <= 2 && Math.abs(hostMs - event - frame * FRAME_MS) < 1) {
+        return TURN[frame + 2];
+      }
+    }
+    return STILL();
+  };
+  return { turns, energy, events };
 }
