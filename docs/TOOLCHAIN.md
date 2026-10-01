@@ -25,6 +25,10 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | `@angular/service-worker` | 22.2.0 | `apps/web/package.json` | added by `ng add @angular/pwa@22.2.0` (T1.7); `@angular/pwa` itself is only the schematic and is not installed |
 | cubing (cubing.js) | 0.63.7 | `packages/core/package.json`, `apps/web/package.json` | added by T1.2 for scrambles; the app uses it directly for the scramble picture (`cubing/twisty`, T1.6b); MPL-2.0 or GPL-3.0; needs Node 22.3 or later; see "cubing.js" below |
 | mediabunny | 1.60.0 | `packages/capture/package.json` | added by T2.3 to mux the encoded chunks into MP4 without re-encoding, in a worker (the clip worker since T2.4); MPL-2.0; brings `@types/dom-webcodecs` 0.1.13 and `@types/dom-mediacapture-transform` 0.1.12 (type declarations only); see "Clips" below |
+| firebase (the Firebase JavaScript SDK) | 12.19.0 | `apps/web/package.json` | added by T3.0: Authentication and Firestore, modular imports, in one lazy chunk; Apache-2.0; see "Account" below |
+| `@firebase/rules-unit-testing` | 5.0.2 | root `package.json` | added by T3.0: the Firestore rules' tests against the emulator; its peer is the same `firebase` |
+| firebase-tools (the Firebase CLI) | 15.32.1, exact | the `firebase` script of the root `package.json` (npx) | not installed by `npm ci`: the emulators (`npm run test:rules`) and the deploys (`.github/workflows/firebase.yml`); see "Account" below |
+| Java | 21: Temurin in CI, OpenJDK 21.0.10 locally | `.github/workflows/ci.yml` (`actions/setup-java`) | the Firestore emulator, 1.22.0 with firebase-tools 15.32.1, a jar that the CLI downloads into `~/.cache/firebase/emulators` (137 MB), which CI caches |
 
 ## Commands
 
@@ -36,6 +40,8 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | `npm run lint` | `typecheck`, then `eslint .` (everything outside `apps/web`), then `ng lint` (`apps/web`: `src`, `e2e`, configs) |
 | `npm test` | `vitest run` (`packages/**/src/**/*.test.ts`, Node), then `ng test --watch=false` (the app's `*.spec.ts`, jsdom, headless) |
 | `npm run test:watch` | `vitest` in watch mode for the packages; the app: `npm run test -w @cubetrace/web` |
+| `npm run test:rules` | `firebase emulators:exec --only firestore --project demo-cubetrace "vitest run --config firebase/vitest.config.ts"`: starts the Firestore emulator (port 8080, `firebase.json`), runs `firebase/*.test.ts` against it, stops it |
+| `npm run firebase -- <arguments>` | the Firebase CLI: `npx --yes firebase-tools@15.32.1 <arguments>`, downloaded into npm's cache on first use |
 | `npm run e2e` | `playwright test -c apps/web/e2e/playwright.config.ts` (Chromium; report in `apps/web/e2e/playwright-report`); starts `ng serve` on port 4200 and a production build under `/cubetrace/` on port 4300 |
 | `npm run icons -w @cubetrace/web` | `scripts/generate-icons.mts`: redraws `apps/web/public/icons/` (the SVG and the PNGs the manifest lists) |
 | `npm run format` / `format:check` | `prettier --write .` / `prettier --check .` |
@@ -1205,3 +1211,95 @@ after the first render, is 47.6 kB raw against 46.8 (15.2 kB transferred against
 service's 22.3 kB against 21.3, Camera settings' 28.4 against 27.4, the Settings page's 18.1 against
 17.0, the capture lab's 23.4 against 23.3; `microphone.ts`, which the recording and the capture lab
 share, is a chunk of its own, 1.3 kB.
+
+## Account (T3.0)
+
+Added by T3.0 on 2026-10-01: Google sign-in through Firebase Authentication, `users/{uid}` in
+Firestore, the Firestore rules and their tests, and the deploy workflow (`docs/ARCHITECTURE.md`,
+"Account"; `docs/DATA-MODEL.md` §10).
+
+**Firebase 12.19.0, modular, behind one file.** The latest 12.x on 2026-10-01 and the version the plan
+names (13.0 exists only as prereleases). `apps/web/src/app/auth/firebase-sdk.ts` is the only file
+that imports it: `initializeApp`, `initializeAuth` (IndexedDB persistence, then `localStorage`; no
+popup and redirect resolver at start, so that a remembered account starts without Google's iframe:
+the calls that open Google's page pass `browserPopupRedirectResolver`), `GoogleAuthProvider` (with
+`prompt: select_account`) and `initializeFirestore` with `persistentLocalCache` and
+`persistentMultipleTabManager`, so that writes wait in IndexedDB while offline, across reloads, and
+the app's tabs share the cache. It implements `AccountBackend` (`account-backend.ts`), the few calls
+the app makes, which the unit tests fake (`fake-account.ts`) and `AuthService` reaches through
+`ACCOUNT_LOADER`. The config is `apps/web/src/environments/firebase.ts`, committed: a web app's config
+names the project and is public; the rules and the authorized domains protect the data.
+
+**One lazy chunk, named, out of the service worker's prefetch.** `ACCOUNT_LOADER` is a dynamic import
+of `firebase-sdk.ts`, so the whole SDK is one chunk. The service worker's `app` group prefetches every
+`.js` file, which would have downloaded Firebase into every installation; `namedChunks` (in
+`angular.json`) names the lazy chunks after their files (`firebase-sdk-<hash>.js`,
+`timer-page-<hash>.js`, …, shared chunks stay `chunk-<hash>.js`), so that `ngsw-config.json` takes
+`firebase-sdk-*.js` out of the `app` group and into `account`, a lazy group: cached when the app first
+loads it, and updated with each version once cached. Signed in after an update, the first start
+offline cannot load the new chunk: the account says it could not be loaded, and comes back at the
+next start online (the timer is unaffected). `account.spec.ts` checks it on the production build:
+signed out, no request to Google's or Firebase's servers or for the chunk, while the timer solves
+and Settings opens; the shell cached, the chunk not.
+
+**The header's controls are one deferred component.** `HeaderControls` holds the cube's pill and the
+account's control, so the shell's `@defer` block still imports one chunk. Two smaller choices kept
+Angular's runtime in `main` as it was: the empty photo of "Sign in" is drawn in CSS, since an SVG
+followed by HTML in a template costs `ɵɵnamespaceHTML` (83 bytes), which no other template needed; and
+the photo is a component of its own rather than an `<ng-template>` (`NgTemplateOutlet`, see "Cube
+connection").
+
+**Sizes** (`ng build`, 2026-10-01, against `main` at b0c908a): the initial bundle's code is
+unchanged, but it is 264.53 kB raw, 72.58 kB transferred (264.46 and 72.56 before): `main` names the
+eight lazy chunks it imports (the pages, the header's controls, the connect dialog), and their names
+are 63 bytes longer in all with `namedChunks`. Firebase is `firebase-sdk-<hash>.js`, 619.1 kB raw,
+156.6 kB transferred. The account's code (`AuthService`, the control, the photo, the error texts) is a
+chunk of 13.0 kB raw, 3.9 kB transferred, which the header's controls (`header-controls-<hash>.js`,
+2.3 kB, the cube's pill with it; the pill alone was 1.9 kB) and the Settings page share, and which
+every start loads right after the first render; the Settings page's own chunk is 17.0 kB (16.4).
+
+**Sign-in flows.** A popup (`signInWithPopup`), except in the app installed on Android (display mode
+`standalone` and the platform Android), where a popup would leave the app for a Chrome tab: there
+`signInWithRedirect`, whose outcome the next start reads (`getRedirectResult`), the `localStorage`
+flag `cubetrace.account` saying `redirect` meanwhile. A redirect that comes back without an account
+says so ("Signing in did not finish…"): the outcome comes back through Firebase's helper frame on
+`cubetrace-cacd9.firebaseapp.com`, which browsers that partition third-party storage (Chrome 115+)
+can cut off from the app on another site (Firebase's "signInWithRedirect best practices"); manual
+round 3 checks it on the phone. Errors keep Firebase's codes' meaning in plain sentences
+(`auth-error.ts`).
+
+**The end-to-end suite's fake.** The dev server's app takes a fake backend from
+`window.cubetraceE2eAccountLoader` (`apps/web/e2e/helpers/account.ts`, installed with
+`page.addInitScript`), read only when `isDevMode()`; production builds ignore it. The fake keeps its
+account and what it was asked in `localStorage`, so the suite checks the remembered start, the loads
+and `users/{uid}` (against `user.schema.json`) without Google.
+
+**The rules' tests run against the Firestore emulator.** `@firebase/rules-unit-testing` 5.0.2 drives
+it from Vitest in Node (`firebase/rules.test.ts`, its own `firebase/vitest.config.ts`, the root
+`tsconfig.json` type-checks `firebase/`); `npm run test:rules` starts it with `firebase
+emulators:exec` under the project id `demo-cubetrace`, which keeps the emulator offline. The emulator
+needs Java 21 or later. 22 tests take about 8 s; the first run downloads firebase-tools (about 25 s)
+and the emulator's jar. Each rule's clause was checked to fail its test when removed (the parent
+session of an attempt, `createdMs` kept, the record's fields, the owner kept), and every refusal
+when everything is allowed.
+
+**The Firebase CLI through npx, pinned.** firebase-tools would add 672 packages and 271 MB to every
+`npm ci` (which installs 484 with `firebase`), and 9 `npm audit` findings (4 moderate, 5 high) in its
+own tree, for two commands that need Java or a key anyway; `npm run firebase` runs the pinned version
+through npx instead, into npm's cache, which `actions/setup-node` keeps in CI.
+
+**`npm audit`.** `firebase` brings `@grpc/grpc-js` 1.9.16 (Firestore's build for Node pins
+`~1.9.0`), and its two advisories (GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4: what a gRPC server
+accepts or sends) make 5 high findings along `@firebase/firestore`, `firebase` and
+`@firebase/rules-unit-testing`. The app's chunk has no gRPC (the browser build talks to Firestore over
+HTTP), and the rules' tests are a client of the local emulator; an `overrides` past Firebase's range
+was not worth it.
+
+**CI and the deploy.** `ci.yml` installs Temurin 21 (`actions/setup-java`), restores
+`~/.cache/firebase/emulators` (`actions/cache`, keyed on `package.json`, where the CLI's version is
+pinned) and runs `npm run test:rules` after `npm test`. `firebase.yml` deploys the rules
+(`firebase deploy --only firestore:rules --project cubetrace-cacd9 --non-interactive`) on pushes to
+`main` that change `firebase/**`, `firebase.json`, `.firebaserc` or itself, and by hand: it fails in
+its first step while the repository secret `FIREBASE_SERVICE_ACCOUNT` is missing, then writes the key
+into the runner's temporary directory for the CLI (`GOOGLE_APPLICATION_CREDENTIALS`) and removes it at
+the end (`docs/USER-ACTIONS.md` has the key and its roles).

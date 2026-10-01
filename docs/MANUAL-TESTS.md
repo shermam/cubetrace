@@ -538,3 +538,28 @@ what Camera settings said.
   it): the turns are heard, a click each, a rattle during the solve, also with a TV or voices in the
   room. In the session's export, `cameras[0].microphone` says `"processing": "raw"` with what the
   browser applied: write it in `docs/DEVICES.md`, "Audio", one row per device.
+
+## T3.0 — account
+
+On https://shermam.github.io/cubetrace/, on the MacBook (Chrome) and on the ThinkPhone (the installed
+app, then a Chrome tab), with a Google account. Next to each item, write the device, Chrome's version
+and what happened. The Firebase console (Firestore Database → Data) shows the records.
+
+- [ ] Signed out, on the MacBook: the header shows an empty photo and "Sign in". DevTools → Network,
+  filtered on `firebase` and on `googleapis`, over a reload and a demo solve: no request.
+- [ ] Sign in (the header) opens Google's window; once the account is chosen the window closes, and
+  the header shows the account's photo and name, whose menu has the email and Sign out; Settings →
+  Account shows the same. In the console, `users/<uid>` has `schema` 1, `createdMs`, the name, the
+  email and, in `devices`, the laptop's label (Settings → This device) with a time.
+- [ ] Reload: still signed in ("Signing in…" for a moment). Sign out, then Sign in and close Google's
+  window without choosing: Settings → Account says "Signing in was cancelled: the Google window was
+  closed first."; nothing else changes.
+- [ ] The ThinkPhone, the installed app: Settings → Account → Sign in with Google leaves for Google's
+  page and comes back signed in, and `devices` gains the phone's label. If it comes back with
+  "Signing in did not finish: Google sent the page back without an account", write it down: Chrome
+  kept the outcome away from the app (`docs/ARCHITECTURE.md`, "Account"); then try in a Chrome tab
+  (a popup there) and write both results.
+- [ ] Signed in, airplane mode, then open the installed app: it opens signed in, the timer works and
+  a solve is saved; back online, nothing to do.
+- [ ] Sign out (the header's menu or Settings): "Sign in" again; reload: still signed out, and the
+  Network panel shows no `firebase` request.

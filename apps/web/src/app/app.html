@@ -24,9 +24,11 @@
       <span class="dot" aria-hidden="true"></span>{{ wakeLockText().label }}
     </p>
     <!-- Deferred: the cube code imports @cubetrace/gan and @cubetrace/core, whose index files
-         would pull cubing.js into the initial bundle (docs/TOOLCHAIN.md, "Cube connection"). -->
+         would pull cubing.js into the initial bundle (docs/TOOLCHAIN.md, "Cube connection"). The
+         account's control comes with the cube's pill; it loads Firebase only once the account is
+         used (docs/ARCHITECTURE.md, "Account"). -->
     @defer (on immediate) {
-      <app-cube-status-pill />
+      <app-header-controls />
     } @placeholder {
       <button
         type="button"

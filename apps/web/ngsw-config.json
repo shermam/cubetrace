@@ -11,8 +11,17 @@
           "/manifest.webmanifest",
           "/**/*.css",
           "/**/*.js",
+          "!/firebase-sdk-*.js",
           "/icons/icon.svg"
         ]
+      }
+    },
+    {
+      "name": "account",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": ["/firebase-sdk-*.js"]
       }
     },
     {

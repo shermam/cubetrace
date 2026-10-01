@@ -63,6 +63,12 @@ session with its clips; an attempt's clips are downloaded from its clip badge (R
 Clearing the site's data in Chrome deletes all of them. Phase 3 adds cloud storage, so that the
 sessions of every device end up in one dataset.
 
+**An account, if you want one.** Sign in, in the header or in Settings → Account, signs in with Google
+(in a popup; the app installed on Android goes to Google's page and comes back). For now the account
+only records your name, your email and each device's label; nothing is uploaded, and the sessions
+stay in the browser as above. It is there for what phase 3 adds next: a cloud index of every device's
+sessions, and their uploads. Signed out, the app works as before and never downloads Firebase.
+
 ## Recording
 
 **Turn the camera on** in Camera settings, below the Cube section of the Timer page: choose the
@@ -206,6 +212,7 @@ accepts 24.15 and later) with npm 10. Run the commands from the repository root.
 | `npm start` | dev server on http://localhost:4200 (`ng serve`) |
 | `npm run build` | production build into `apps/web/dist/web/browser` (`ng build`) |
 | `npm test` | package tests (Vitest), then the app's tests (`ng test`, single run, jsdom) |
+| `npm run test:rules` | the Firestore rules' tests against the Firestore emulator (needs Java 21; the Firebase CLI comes through npx) |
 | `npm run test:watch` | package tests in watch mode; for the app, `npm run test -w @cubetrace/web` |
 | `npm run e2e` | Playwright end-to-end tests in Chromium (starts `ng serve` on port 4200 and a production build on port 4300, unless servers already run there) |
 | `npm run lint` | type-check, `eslint .`, then `ng lint` for the app |
@@ -217,8 +224,9 @@ once with `npx playwright install chromium`. The versions and the reasons behind
 [`CLAUDE.md`](CLAUDE.md).
 
 Every push to `main` builds the app with `--base-href /cubetrace/` and publishes it to GitHub Pages
-(`.github/workflows/pages.yml`). Pull requests and pushes run `.github/workflows/ci.yml`: lint,
-format check, tests, build and the end-to-end tests.
+(`.github/workflows/pages.yml`), and deploys the Firestore rules when it changes them
+(`.github/workflows/firebase.yml`). Pull requests and pushes run `.github/workflows/ci.yml`: lint,
+format check, tests, the rules' tests, build and the end-to-end tests.
 
 ## Repository layout
 
@@ -233,6 +241,7 @@ packages/capture/  @cubetrace/capture: the camera and the recording
   src/capture-worker.ts, ring-buffer.ts, cut.ts   the capture worker: the encoders, the last 90 s in memory, the cuts
   src/clip-worker.ts, mux.ts, clip-writer.ts      the clip worker: MP4 muxing with mediabunny, the files written into OPFS
   src/motion.ts, clapperboard.ts            the sync check: the motion in the framing rectangle, and the lag it gives
+firebase/          the Firestore rules and their tests (firebase.json and .firebaserc at the root: the project cubetrace-cacd9)
 fixtures/          real solves, cube identities, the round 1 exports (hardware/) and a second of encoded video (media/): the tests' reference data (read-only)
 docs/              plan, architecture, data model, toolchain, manual tests, devices, owner's actions, changelog, screenshots
 ```
@@ -280,5 +289,5 @@ The packages are plain TypeScript, tested in Node, and never import Angular.
 ## Licence
 
 MIT ([`LICENSE`](LICENSE)), copyright 2026 shermam. The app bundles cubing.js (MPL-2.0 or
-GPL-3.0-or-later), the owner's fork of gan-web-bluetooth (MIT), Angular (MIT) and RxJS
-(Apache-2.0), each under its own licence.
+GPL-3.0-or-later), the owner's fork of gan-web-bluetooth (MIT), mediabunny (MPL-2.0), Angular (MIT),
+RxJS (Apache-2.0) and the Firebase JavaScript SDK (Apache-2.0), each under its own licence.

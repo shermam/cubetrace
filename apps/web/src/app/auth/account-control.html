@@ -1,0 +1,67 @@
+@if (place() === 'header') {
+  @if (auth.user(); as user) {
+    <button
+      type="button"
+      class="pill"
+      popovertarget="account-menu"
+      data-testid="account"
+      [attr.aria-label]="'Account: ' + name(user)"
+      [title]="user.email ?? name(user)"
+    >
+      <app-account-photo class="photo" [user]="user" />
+      <span class="label" data-testid="account-name">{{ name(user) }}</span>
+    </button>
+    <div id="account-menu" class="menu" popover data-testid="account-menu">
+      <p class="who">
+        <strong>{{ name(user) }}</strong>
+        @if (user.email && user.displayName) {
+          <span>{{ user.email }}</span>
+        }
+      </p>
+      <button type="button" data-testid="sign-out" (click)="signOut()">Sign out</button>
+    </div>
+  } @else {
+    <button
+      type="button"
+      class="pill"
+      data-testid="sign-in"
+      [attr.data-status]="auth.status()"
+      [attr.aria-label]="loading() ? 'Signing in…' : 'Sign in'"
+      [title]="auth.error() ?? 'Sign in with Google'"
+      [disabled]="loading()"
+      (click)="signIn()"
+    >
+      <span class="photo person" aria-hidden="true"></span>
+      <span class="label">{{ loading() ? 'Signing in…' : 'Sign in' }}</span>
+    </button>
+  }
+} @else {
+  @if (auth.user(); as user) {
+    <div class="account" data-testid="account">
+      <app-account-photo class="photo large" [user]="user" />
+      <p class="who">
+        <strong data-testid="account-name">{{ name(user) }}</strong>
+        @if (user.email && user.displayName) {
+          <span data-testid="account-email">{{ user.email }}</span>
+        }
+      </p>
+    </div>
+    <button type="button" data-testid="sign-out" (click)="signOut()">Sign out</button>
+  } @else {
+    <button
+      type="button"
+      class="primary"
+      data-testid="sign-in"
+      [disabled]="loading()"
+      (click)="signIn()"
+    >
+      {{ loading() ? 'Signing in…' : 'Sign in with Google' }}
+    </button>
+  }
+  @if (auth.error(); as error) {
+    <p class="error" role="alert" data-testid="account-error">{{ error }}</p>
+  }
+  @if (auth.recordError(); as error) {
+    <p class="error" data-testid="account-record-error">{{ error }}</p>
+  }
+}

@@ -37,7 +37,10 @@ export interface BrowserGlobals {
   /** Timers on the host clock, such as the cube's idle disconnection; the unit tests fake them. */
   readonly setTimeout?: (callback: () => void, ms: number) => number;
   readonly clearTimeout?: (handle: number) => void;
-  /** Media queries, for the Timer page's layout on a phone or a laptop (T2.13). */
+  /**
+   * Media queries: the Timer page's layout on a phone or a laptop (T2.13), and whether the app runs
+   * installed (`(display-mode: standalone)`, the account's sign-in, T3.0).
+   */
   readonly matchMedia?: (query: string) => MediaQueryState;
 }
 

@@ -330,6 +330,16 @@
   </p>
 </section>
 
+<section id="account" aria-labelledby="account-heading">
+  <h2 id="account-heading">Account</h2>
+  <app-account-control place="settings" />
+  <p class="hint" data-testid="account-hint">
+    For now, signing in with Google only records your name, your email and the label of this device,
+    “{{ settings.hostLabel() }}”, in your cubetrace account: nothing is uploaded yet. The account is
+    there for the cloud index of your sessions and their uploads, which come next.
+  </p>
+</section>
+
 @if (settings.saveError(); as error) {
   <p class="error" role="alert" data-testid="settings-save-error">{{ error }}</p>
 }

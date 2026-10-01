@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/user.schema.json",
+  "title": "users/{uid}",
+  "description": "A cubetrace account's record in Firestore, schema version 1 (docs/DATA-MODEL.md §10): what the app writes at each sign-in, merged into the document, so that devices accumulates every device's entry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "createdMs", "displayName", "email", "devices"],
+  "properties": {
+    "schema": { "const": 1 },
+    "createdMs": {
+      "description": "When the account was created: Firebase Authentication's creation time of the account, in ms since 1970-01-01 UTC. The same on every device, so every sign-in writes the value already there.",
+      "type": "number",
+      "minimum": 0
+    },
+    "displayName": {
+      "description": "The account's name, as Google gives it; null without one.",
+      "type": ["string", "null"]
+    },
+    "email": {
+      "description": "The account's email address, as Google gives it; null without one.",
+      "type": ["string", "null"]
+    },
+    "devices": {
+      "description": "The devices the account was used on, by host label (Settings → This device; session.json's host.label): each one's host clock, in ms, when it last signed in or started signed in.",
+      "type": "object",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": { "type": "number", "minimum": 0 }
+    }
+  }
+}

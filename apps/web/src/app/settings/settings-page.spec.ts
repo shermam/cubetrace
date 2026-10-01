@@ -1,5 +1,7 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { ACCOUNT_LOADER } from '../auth/account-backend';
+import { FakeAccountBackend } from '../auth/fake-account';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { FakeLocalStorage, FakeStorageManager, FakeWakeLock, settle } from '../device/fake-browser';
 import { SettingsPage } from './settings-page';
@@ -370,5 +372,29 @@ describe('SettingsPage', () => {
       'The speed must be a number from 0.1 to 100.',
     );
     expect(TestBed.inject(SettingsService).demoSpeed()).toBe(20);
+  });
+
+  it('ends with the account: Sign in with Google, what it does today, then the account and Sign out', async () => {
+    const backend = new FakeAccountBackend();
+    TestBed.overrideProvider(ACCOUNT_LOADER, { useValue: backend.loader });
+    const fixture = await render();
+    const sections = (fixture.nativeElement as HTMLElement).querySelectorAll('section');
+    const account = sections[sections.length - 1];
+    expect(account.id).toBe('account');
+    expect(account.querySelector('h2')?.textContent).toBe('Account');
+    expect(text(fixture, 'account-hint')).toBe(
+      'For now, signing in with Google only records your name, your email and the label of this ' +
+        'device, “Linux laptop”, in your cubetrace account: nothing is uploaded yet. The account ' +
+        'is there for the cloud index of your sessions and their uploads, which come next.',
+    );
+    expect(backend.loads).toBe(0);
+
+    buttonNamed(fixture, 'Sign in with Google').click();
+    await update(fixture);
+    expect(text(fixture, 'account-name')).toBe('Ada Lovelace');
+    expect(text(fixture, 'account-email')).toBe('ada@example.com');
+    buttonNamed(fixture, 'Sign out').click();
+    await update(fixture);
+    expect(buttonNamed(fixture, 'Sign in with Google')).toBeDefined();
   });
 });

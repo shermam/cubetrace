@@ -4,17 +4,17 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { APP_BUILD } from '../environments/version';
 import { ConnectDialog } from './connect/connect-dialog';
 import { ConnectDialogService } from './connect/connect-dialog-service';
-import { CubeStatusPill } from './connect/cube-status-pill';
 import { BrowserSupportService } from './device/browser-support-service';
 import { WAKE_LOCK_TEXT, WakeLockService } from './device/wake-lock-service';
+import { HeaderControls } from './header-controls';
 
 /**
- * The shell: the header (brand, navigation, wake lock status, cube status), a banner when the
- * browser lacks APIs the app needs, the routed page, the connect dialog, and the footer with this
- * build's version.
+ * The shell: the header (brand, navigation, wake lock status, cube status, account), a banner when
+ * the browser lacks APIs the app needs, the routed page, the connect dialog, and the footer with
+ * this build's version.
  */
 @Component({
-  imports: [ConnectDialog, CubeStatusPill, RouterLink, RouterLinkActive, RouterOutlet],
+  imports: [ConnectDialog, HeaderControls, RouterLink, RouterLinkActive, RouterOutlet],
   selector: 'app-root',
   styleUrl: './app.scss',
   templateUrl: './app.html',

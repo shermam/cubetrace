@@ -1288,6 +1288,25 @@ deploying rules (and later functions) on merge with the `FIREBASE_SERVICE_ACCOUN
 Owner actions: add `shermam.github.io` to Authentication → Settings → Authorized domains; paste
 the web config; create the two keys (`docs/USER-ACTIONS.md`).
 
+**Outcome (2026-10-01, PR #42).** Firebase 12.19.0, modular, in one lazy chunk
+(`firebase-sdk-<hash>.js`, 619 kB raw, 157 kB transferred) behind `ACCOUNT_LOADER`: loaded on Sign
+in, or as the app starts when `localStorage` remembers a sign-in (`cubetrace.account`); the service
+worker leaves it out of the prefetched shell (a lazy `account` group, told apart by `namedChunks`,
+whose longer chunk names add 64 bytes to the initial bundle, 264.53 kB raw against 264.46; its code
+is unchanged). `AuthService`: a popup, or a redirect in the app installed on Android, whose outcome
+the next start reads (a redirect that comes back without an account says so); `user`, `status`,
+`error`, and `recordError` for `users/{uid}`, which is merged at each sign-in and at each start
+signed in, never awaited, through Firestore's persistent cache. `createdMs` is Firebase
+Authentication's creation time of the account, the same on every device, so that the merge needs no
+read and the rules can keep it unchanged. The rules also keep the client to the record's fields
+(T3.2's quota will be out of its reach) and create an attempt only under a session of the same
+owner; for T3.1, attempts carry `owner` too, and queries must ask `where('owner', '==', uid)`. The
+Firebase CLI runs through npx, pinned (15.32.1), not as a devDependency. Open for manual round 3:
+whether the redirect completes in the installed app on the ThinkPhone, since Chrome's partitioned
+third-party storage can cut a redirect's outcome off on an app outside `firebaseapp.com`
+(`docs/ARCHITECTURE.md`, "Account"); the popup there, or Firebase's auth helper served from the
+app's own site, would be the fix.
+
 ### T3.1 — Firestore session index and the merged Sessions page
 
 When signed in, every `saveSession` also writes `sessions/{id}` (the record plus `owner`) and
