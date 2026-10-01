@@ -1,0 +1,62 @@
+name: Firebase
+
+# Deploys the Firestore rules of the Firebase project cubetrace-cacd9 (later its functions too) when
+# a merge to main changes them, signed in as a service account whose key is the repository secret
+# FIREBASE_SERVICE_ACCOUNT (docs/USER-ACTIONS.md, phase 3). CI tests the rules on every pull request.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firebase/**'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/firebase.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy the Firestore rules
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check that the service account's key is there
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT secret is missing: add the deploy key as a repository secret (docs/USER-ACTIONS.md, phase 3)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The Firebase CLI reads the key through Application Default Credentials; the file lives in the
+      # runner's temporary directory, which is emptied after the job, and is removed as soon as the
+      # deploy is done.
+      - name: Write the key for the Firebase CLI
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          key="$RUNNER_TEMP/firebase-service-account.json"
+          umask 077
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$key"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$key" >> "$GITHUB_ENV"
+
+      # `npm run firebase` is npx with the pinned firebase-tools (package.json); no npm ci needed.
+      - name: Deploy the rules
+        run: npm run firebase -- deploy --only firestore:rules --project cubetrace-cacd9 --non-interactive
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-service-account.json"
