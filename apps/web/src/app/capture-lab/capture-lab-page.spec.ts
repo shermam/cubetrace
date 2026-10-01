@@ -48,7 +48,7 @@ describe('CaptureLabPage', () => {
     expect(buttons(fixture)).toEqual([]);
   });
 
-  it('opens the camera at 1080p with audio, and says why when it is refused', async () => {
+  it('opens the camera at 1080p with the microphone raw, and says why when it is refused', async () => {
     const getUserMedia = vi.fn(() =>
       Promise.reject(new DOMException('Permission denied', 'NotAllowedError')),
     );
@@ -74,9 +74,17 @@ describe('CaptureLabPage', () => {
     await settle();
     await fixture.whenStable();
 
+    // As the recording asks for the microphone by default (T2.12): its voice processing off.
     expect(getUserMedia).toHaveBeenCalledWith({
       video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
-      audio: true,
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        voiceIsolation: false,
+        channelCount: { ideal: 1 },
+        sampleRate: { ideal: 48_000 },
+      },
     });
     expect(text(fixture, 'lab-status')).toBe('Could not start: Permission denied');
     expect(button(fixture, 'Start').disabled).toBe(false);

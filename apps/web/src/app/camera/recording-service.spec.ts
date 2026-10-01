@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { NO_AUDIO_DATA } from '@cubetrace/capture';
-import type { AttemptRecord } from '@cubetrace/core';
+import type { AttemptRecord, MicrophoneInfo } from '@cubetrace/core';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
 import {
@@ -27,6 +27,43 @@ import { FakeCaptureStarter, statsOf } from './recording-testing';
 
 /** How long after a segment's end its clip is saved. */
 const SAVE_AFTER_MS = CLIP_TAIL_MS + ENCODER_SETTLE_MS;
+
+/** The request for the microphone, raw (T2.12): every voice processing off, ideals for the rest. */
+const RAW_REQUEST = {
+  audio: {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    voiceIsolation: false,
+    channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48_000 },
+  },
+};
+
+/** The fake microphone opened raw, as the session keeps it: what the fake browser applied. */
+const RAW_MICROPHONE: MicrophoneInfo = {
+  label: 'Fake microphone',
+  processing: 'raw',
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  voiceIsolation: false,
+  sampleRate: 48_000,
+  channelCount: 1,
+};
+
+/** The fake microphone with the browser's defaults: its voice processing on. */
+const DEFAULT_SETTINGS = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  voiceIsolation: false,
+};
+
+/** The microphone requests made, the camera's left out. */
+function microphoneRequests(media: FakeMediaDevices): MediaStreamConstraints[] {
+  return media.requests.filter((request) => request.video === undefined);
+}
 
 interface Rig {
   readonly s: Setup;
@@ -117,19 +154,24 @@ describe('RecordingService', () => {
     expect(capture.video).toBe(r.camera.stream()?.getVideoTracks()[0]);
     expect(capture.audio).toBe(r.media.audioTracks[0]);
     expect(capture.config).toEqual({ audio: true, quality: 'standard' });
-    expect(r.media.requests.at(-1)).toEqual({ audio: true });
+    // The microphone raw (T2.12), once: what the browser applied is kept.
+    expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST]);
+    expect(r.recording.microphone()).toEqual(RAW_MICROPHONE);
+    expect(r.recording.notices()).toEqual([]);
     expect(r.recording.status()).toBe('starting');
 
     capture.emitStats(statsOf(0.5));
     expect(r.recording.status()).toBe('recording');
     expect(r.recording.stats()).toEqual(statsOf(0.5));
-    // The session holds the camera's entry, and says that it records audio.
+    // The session holds the camera's entry with its microphone, and says that it records audio.
     const session = r.s.service.session();
-    expect(session?.cameras).toEqual([r.camera.cameraInfo()]);
+    expect(session?.cameras).toEqual([{ ...r.camera.cameraInfo(), microphone: RAW_MICROPHONE }]);
     expect(session?.cameras[0]).toMatchObject({ label: 'laptop', deviceLabel: 'fake_device_0' });
     expect(session?.audio).toBe(true);
     await r.s.service.whenSaved();
-    expect((await r.s.store.exportSession(sessionId(r))).session.cameras).toHaveLength(1);
+    const stored = (await r.s.store.exportSession(sessionId(r))).session;
+    expect(stored.cameras).toHaveLength(1);
+    expect(stored.cameras[0].microphone).toEqual(RAW_MICROPHONE);
     expect(r.recording.storage()).toEqual({ usage: 0, quota: 1e9, percent: 0 });
 
     // The camera off: the pipeline stops and lets the microphone go.
@@ -159,8 +201,10 @@ describe('RecordingService', () => {
     expect(r.media.audioTracks.map((track) => track.readyState)).toEqual(['ended', 'live']);
     r.starter.last.emitStats(statsOf(1));
     TestBed.tick();
-    // One label, `laptop`: the entry is the camera recording now.
-    expect(r.s.service.session()?.cameras).toEqual([r.camera.cameraInfo()]);
+    // One label, `laptop`: the entry is the camera recording now, with its microphone.
+    expect(r.s.service.session()?.cameras).toEqual([
+      { ...r.camera.cameraInfo(), microphone: RAW_MICROPHONE },
+    ]);
     expect(r.s.service.session()?.cameras[0].deviceLabel).toBe('FaceTime HD Camera (3A71:F4B5)');
   });
 
@@ -170,8 +214,10 @@ describe('RecordingService', () => {
     await recording(r);
     expect(r.starter.last.audio).toBeNull();
     expect(r.starter.last.config).toEqual({ audio: false, quality: 'standard' });
-    expect(r.media.requests.some((request) => request.audio === true)).toBe(false);
+    expect(microphoneRequests(r.media)).toEqual([]);
     expect(r.s.service.session()?.audio).toBe(false);
+    expect(r.s.service.session()?.cameras[0].microphone).toBeNull();
+    expect(r.recording.microphone()).toBeNull();
 
     r.media.microphoneFailures.push(mediaError('NotAllowedError'));
     r.s.settings.setRecordAudio(true);
@@ -189,6 +235,106 @@ describe('RecordingService', () => {
     expect(r.s.service.session()?.notes).toBe(
       `notice: ${refused}\nnotice: The audio encoder failed.`,
     );
+    // Refused: no microphone, in the session too; a refusal is not asked again otherwise.
+    expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST]);
+    expect(r.recording.microphone()).toBeNull();
+    expect(r.s.service.session()?.cameras[0].microphone).toBeNull();
+  });
+
+  it('says when the browser kept its voice processing on although raw was asked for, and notes it once', async () => {
+    const r = rig();
+    r.media.microphoneSettings = { noiseSuppression: true, autoGainControl: true };
+    const { capture } = await recording(r);
+
+    const kept: MicrophoneInfo = {
+      ...RAW_MICROPHONE,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    expect(capture.audio).toBe(r.media.audioTracks[0]);
+    expect(r.recording.microphone()).toEqual(kept);
+    const notice =
+      'The microphone is not raw: the browser kept its noise suppression and automatic gain control ' +
+      "on although Raw was asked for, so the sound may lack the cube's clicks.";
+    expect(r.recording.notices()).toEqual([notice]);
+    await r.s.service.whenSaved();
+    const stored = (await r.s.store.exportSession(sessionId(r))).session;
+    expect(stored.notes).toBe(`notice: ${notice}`);
+    expect(stored.cameras[0].microphone).toEqual(kept);
+  });
+
+  it("asks again with the browser's defaults when the raw request is overconstrained, and says so", async () => {
+    const r = rig();
+    r.media.microphoneFailures.push(mediaError('OverconstrainedError', '', 'sampleRate'));
+    const { capture } = await recording(r);
+
+    expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST, { audio: true }]);
+    expect(capture.audio).toBe(r.media.audioTracks[0]);
+    expect(capture.config).toEqual({ audio: true, quality: 'standard' });
+    // Raw was asked for; the browser applied its defaults.
+    const fallback: MicrophoneInfo = { ...RAW_MICROPHONE, ...DEFAULT_SETTINGS };
+    expect(r.recording.microphone()).toEqual(fallback);
+    const notice =
+      'The microphone could not be opened raw: the browser refused the request (sampleRate), so it ' +
+      "is recorded with the browser's voice processing.";
+    expect(r.recording.notices()).toEqual([notice]);
+    await r.s.service.whenSaved();
+    expect(r.s.service.session()?.notes).toBe(`notice: ${notice}`);
+    expect(r.s.service.session()?.cameras[0].microphone).toEqual(fallback);
+  });
+
+  it('does not ask again after another refusal, nor when Voice is overconstrained', async () => {
+    const r = rig();
+    r.media.microphoneFailures.push(mediaError('NotReadableError'));
+    await recording(r);
+    expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST]);
+    expect(r.recording.notices()).toEqual([
+      'Recording without audio: the microphone is in use by another app.',
+    ]);
+
+    r.media.microphoneFailures.push(mediaError('OverconstrainedError', '', 'deviceId'));
+    r.s.settings.setMicrophoneProcessing('voice');
+    await sync(r);
+    expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST, { audio: true }]);
+    expect(r.starter.last.audio).toBeNull();
+    expect(r.recording.notices()).toEqual([
+      'Recording without audio: the microphone could not be opened (OverconstrainedError).',
+    ]);
+  });
+
+  it('starts again when the microphone setting changes while it records audio, and only then', async () => {
+    const r = rig();
+    const { capture } = await recording(r);
+    expect(r.recording.microphone()?.processing).toBe('raw');
+
+    // Voice: the recording starts again with the browser's defaults.
+    r.s.settings.setMicrophoneProcessing('voice');
+    await sync(r);
+    expect(capture.stopped).toBe(true);
+    expect(r.starter.started).toHaveLength(2);
+    expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST, { audio: true }]);
+    expect(r.media.audioTracks.map((track) => track.readyState)).toEqual(['ended', 'live']);
+    const voice: MicrophoneInfo = { ...RAW_MICROPHONE, processing: 'voice', ...DEFAULT_SETTINGS };
+    expect(r.recording.microphone()).toEqual(voice);
+    expect(r.recording.notices()).toEqual([]);
+    r.starter.last.emitStats(statsOf(1));
+    TestBed.tick();
+    expect(r.s.service.session()?.cameras[0].microphone).toEqual(voice);
+
+    // Without audio the microphone's setting changes nothing, until the audio is on again.
+    r.s.settings.setRecordAudio(false);
+    await sync(r);
+    expect(r.starter.started).toHaveLength(3);
+    r.s.settings.setMicrophoneProcessing('raw');
+    await sync(r);
+    expect(r.starter.started).toHaveLength(3);
+    expect(r.s.service.session()?.cameras[0].microphone).toBeNull();
+    r.s.settings.setRecordAudio(true);
+    await sync(r);
+    expect(r.starter.started).toHaveLength(4);
+    expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST, { audio: true }, RAW_REQUEST]);
+    expect(r.recording.microphone()).toEqual(RAW_MICROPHONE);
+    expect(r.s.service.session()?.cameras[0].microphone).toEqual(RAW_MICROPHONE);
   });
 
   it('says that the microphone sends nothing until its sound comes, and notes it', async () => {

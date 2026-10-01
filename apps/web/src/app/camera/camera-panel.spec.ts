@@ -232,13 +232,14 @@ describe('CameraPanel', () => {
     expect(camera.framingEditing()).toBe(false);
   });
 
-  it('has the resolution, frame rate, video quality and audio of Settings', async () => {
+  it('has the resolution, frame rate, video quality, audio and microphone of Settings', async () => {
     await render();
     const settings = TestBed.inject(SettingsService);
     const resolution = element('camera-panel-resolution') as HTMLSelectElement;
     const rate = element('camera-panel-frame-rate') as HTMLSelectElement;
     const quality = element('camera-panel-video-quality') as HTMLSelectElement;
     const audio = element('camera-panel-audio') as HTMLInputElement;
+    const microphone = element('camera-panel-microphone') as HTMLSelectElement;
     const options = (select: HTMLSelectElement): string[] =>
       Array.from(select.options, (option) => option.text.trim());
     expect(options(resolution)).toEqual(['1920×1080', '1280×720']);
@@ -251,6 +252,16 @@ describe('CameraPanel', () => {
     expect(rate.value).toBe('best');
     expect(quality.value).toBe('standard');
     expect(audio.checked).toBe(true);
+    // Raw by default (T2.12), with its line of help next to it.
+    expect(options(microphone)).toEqual(['Raw', 'Voice']);
+    expect(microphone.value).toBe('raw');
+    expect(microphone.closest('label')?.textContent).toContain('Microphone');
+    expect(text('camera-panel-microphone-hint')).toBe(
+      "Raw keeps the cube's clicks; Voice lets the browser suppress noise for speech.",
+    );
+    expect(microphone.getAttribute('aria-describedby')).toBe(
+      element('camera-panel-microphone-hint')?.id,
+    );
 
     resolution.value = '720p';
     resolution.dispatchEvent(new Event('change'));
@@ -259,11 +270,14 @@ describe('CameraPanel', () => {
     quality.value = 'maximum';
     quality.dispatchEvent(new Event('change'));
     audio.click();
+    microphone.value = 'voice';
+    microphone.dispatchEvent(new Event('change'));
     await update();
     expect(settings.cameraResolution()).toBe('720p');
     expect(settings.cameraFrameRate()).toBe('30');
     expect(settings.videoQuality()).toBe('maximum');
     expect(settings.recordAudio()).toBe(false);
+    expect(settings.microphoneProcessing()).toBe('voice');
     // The choices follow the resolution and frame rate.
     expect(options(quality)).toEqual([
       'Standard (1.8 Mbps, ≈ 9 MB per attempt)',

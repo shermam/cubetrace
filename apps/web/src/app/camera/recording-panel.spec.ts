@@ -6,7 +6,12 @@ import { ready, setup, turn } from '../session/session-harness';
 import { SettingsService } from '../settings/settings-service';
 import { CameraService } from './camera-service';
 import { RecordingPanel } from './recording-panel';
-import { CAPTURE_STARTER, CLIP_TAIL_MS, ENCODER_SETTLE_MS } from './recording-service';
+import {
+  CAPTURE_STARTER,
+  CLIP_TAIL_MS,
+  ENCODER_SETTLE_MS,
+  RecordingService,
+} from './recording-service';
 import { FakeCaptureStarter, statsOf } from './recording-testing';
 
 describe('RecordingPanel', () => {
@@ -25,7 +30,7 @@ describe('RecordingPanel', () => {
       await fixture.whenStable();
     };
     await update();
-    return { s, starter, element, update, camera: TestBed.inject(CameraService) };
+    return { s, media, starter, element, update, camera: TestBed.inject(CameraService) };
   }
 
   function text(element: HTMLElement, testId: string): string | undefined {
@@ -57,7 +62,7 @@ describe('RecordingPanel', () => {
     expect(stats?.getAttribute('data-dropped')).toBe('1');
     expect(stats?.textContent).toContain('30 per second in, 30 encoded, 1 dropped');
     expect(text(element, 'recording-buffer')).toBe('12.3 s, 1.5 MB');
-    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 4 Mbps, opus');
+    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 4 Mbps, opus, mic raw');
     expect(element.querySelector('[data-testid="storage-meter"]')).not.toBeNull();
   });
 
@@ -80,16 +85,16 @@ describe('RecordingPanel', () => {
     await update();
     starter.last.emitStats(statsOf(3, { codec: null, bitrate: null }));
     await update();
-    expect(text(element, 'recording-codecs')).toBe('choosing…, opus');
+    expect(text(element, 'recording-codecs')).toBe('choosing…, opus, mic raw');
     starter.last.emitStats(
       statsOf(3, { codec: 'avc1.640028', bitrate: 12_000_000, audioCodec: 'mp4a.40.2' }),
     );
     await update();
-    expect(text(element, 'recording-codecs')).toBe('avc1.640028 at 12 Mbps, mp4a.40.2');
+    expect(text(element, 'recording-codecs')).toBe('avc1.640028 at 12 Mbps, mp4a.40.2, mic raw');
     expect(text(element, 'recording-estimate')).toBe('≈ 60 MB per attempt at this quality');
     starter.last.emitStats(statsOf(4, { bitrate: 8_000_000, audioCodec: null }));
     await update();
-    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 8 Mbps, no audio');
+    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 8 Mbps, no audio, mic raw');
   });
 
   it('says where the audio is when it is not encoded, and what a clip saved short lacks until dismissed', async () => {
@@ -105,15 +110,15 @@ describe('RecordingPanel', () => {
     };
 
     expect(await audio({ audioState: 'waiting', audioChunks: 0, audioCodec: null })).toBe(
-      'vp09.00.40.08 at 4 Mbps, no audio yet (waiting for the microphone)',
+      'vp09.00.40.08 at 4 Mbps, no audio yet (waiting for the microphone), mic raw',
     );
     expect(await audio({ audioState: 'stopped', audioCodec: null })).toBe(
-      'vp09.00.40.08 at 4 Mbps, audio stopped',
+      'vp09.00.40.08 at 4 Mbps, audio stopped, mic raw',
     );
     expect(await audio({ audioState: 'off', audioChunks: 0, audioCodec: null })).toBe(
       'vp09.00.40.08 at 4 Mbps, no audio',
     );
-    expect(await audio({})).toBe('vp09.00.40.08 at 4 Mbps, opus');
+    expect(await audio({})).toBe('vp09.00.40.08 at 4 Mbps, opus, mic raw');
 
     // Two notices: both shown.
     starter.last.emitError({ message: 'Recording without audio: first.', fatal: false });
@@ -138,6 +143,44 @@ describe('RecordingPanel', () => {
       ?.click();
     await update();
     expect(element.querySelector('[data-testid="recording-clip-notice"]')).toBeNull();
+  });
+
+  it('says whether the microphone is raw, voice, or kept processing on by the browser', async () => {
+    const { s, media, starter, element, update, camera } = await render();
+    const settings = TestBed.inject(SettingsService);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    settings.setMicrophoneProcessing('voice');
+    await camera.start();
+    await ready(s);
+    await update();
+    starter.last.emitStats(statsOf(2));
+    await update();
+    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 4 Mbps, opus, mic voice');
+    expect(element.querySelector('[data-testid="recording-notice"]')).toBeNull();
+
+    // Raw asked, the browser keeps its echo cancellation on: said, and why, in a notice.
+    media.microphoneSettings = { echoCancellation: true };
+    settings.setMicrophoneProcessing('raw');
+    await update();
+    await TestBed.inject(RecordingService).settled();
+    await update();
+    starter.last.emitStats(statsOf(1));
+    await update();
+    expect(text(element, 'recording-codecs')).toBe(
+      'vp09.00.40.08 at 4 Mbps, opus, mic: the browser kept processing on',
+    );
+    expect(text(element, 'recording-notice')).toBe(
+      "The microphone is not raw: the browser kept its echo cancellation on although Raw was asked for, so the sound may lack the cube's clicks.",
+    );
+
+    // Without audio, no microphone.
+    settings.setRecordAudio(false);
+    await update();
+    await TestBed.inject(RecordingService).settled();
+    await update();
+    starter.last.emitStats(statsOf(1, { audioState: 'off', audioChunks: 0, audioCodec: null }));
+    await update();
+    expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 4 Mbps, no audio');
   });
 
   it('shows the last clip, a clip that failed until dismissed, and why recording stopped', async () => {

@@ -35,6 +35,34 @@ export interface SessionSummary {
   dnf: number;
 }
 
+/**
+ * How the recording asks for the microphone (docs/PLAN.md T2.12, Settings' "Microphone"): `raw`,
+ * with the browser's voice processing off (echo cancellation, noise suppression, automatic gain
+ * control, voice isolation), which takes a cube's clicks for noise; `voice`, with the browser's
+ * defaults, for speech.
+ */
+export type MicrophoneProcessing = 'raw' | 'voice';
+
+/**
+ * The microphone of a camera's clips: `microphone` of an entry of `cameras` in session.json
+ * (docs/DATA-MODEL.md §6). What the app asked for, and what the browser says it applied, from the
+ * microphone track's `getSettings()`: each field null when the browser does not report it. The
+ * device's id is not kept.
+ */
+export interface MicrophoneInfo {
+  /** The microphone's name as the browser gives it (`MediaStreamTrack.label`). */
+  label: string;
+  /** What the app asked for. */
+  processing: MicrophoneProcessing;
+  echoCancellation: boolean | null;
+  noiseSuppression: boolean | null;
+  autoGainControl: boolean | null;
+  voiceIsolation: boolean | null;
+  /** In hertz. */
+  sampleRate: number | null;
+  channelCount: number | null;
+}
+
 /** A camera of the session: an entry of `cameras` in session.json (docs/DATA-MODEL.md §6). */
 export interface CameraInfo {
   /**
@@ -58,6 +86,12 @@ export interface CameraInfo {
   crop: CropRect | null;
   /** `full`: whole frames are recorded (phase 2); `crop`: only the `crop` rectangle. */
   mode: 'full' | 'crop';
+  /**
+   * The microphone of the camera's sound when it last recorded (docs/PLAN.md T2.12); null when it
+   * recorded without one (Record audio off, the microphone refused). Optional in the files (those
+   * written before it existed have none); `parseSession` reads a missing one as null.
+   */
+  microphone: MicrophoneInfo | null;
 }
 
 /** One turn of the clapperboard matched to the motion it made in a camera's frames. */

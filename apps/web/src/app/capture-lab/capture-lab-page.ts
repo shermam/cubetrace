@@ -13,6 +13,7 @@ import {
 import type { FramesJson, VideoClip } from '@cubetrace/core';
 
 import { APP_BUILD } from '../../environments/version';
+import { microphoneConstraints } from '../camera/microphone';
 import {
   syncReport,
   syncReportFileName,
@@ -309,7 +310,8 @@ export class CaptureLabPage {
           height: { ideal: 1080 },
           frameRate: { ideal: 60 },
         },
-        audio: this.audio(),
+        // As the recording opens it by default (T2.12): raw, without the browser's voice processing.
+        audio: this.audio() && (microphoneConstraints('raw').audio ?? true),
       });
       this.stream = stream;
       const handle = startCapture(stream, { audio: this.audio() });

@@ -545,7 +545,13 @@ export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
   }
 }
 
-/** A microphone's audio track (for the recording's audio, T2.4); `stop()` ends it. */
+/** What a fake microphone's track says it applies: `MediaTrackSettings` and `voiceIsolation`. */
+export type FakeMicrophoneSettings = MediaTrackSettings & { voiceIsolation?: boolean };
+
+/**
+ * A microphone's audio track (for the recording's audio, T2.4), which reports `settings` (T2.12:
+ * the voice processing applied); `stop()` ends it.
+ */
 export class FakeAudioTrack extends EventTarget implements MediaStreamTrack {
   contentHint = '';
   enabled = true;
@@ -558,12 +564,18 @@ export class FakeAudioTrack extends EventTarget implements MediaStreamTrack {
   onunmute: MediaStreamTrack['onunmute'] = null;
   readyState: MediaStreamTrackState = 'live';
 
+  constructor(
+    private readonly settings: FakeMicrophoneSettings = { sampleRate: 48_000, channelCount: 1 },
+  ) {
+    super();
+  }
+
   applyConstraints(): Promise<void> {
     return Promise.resolve();
   }
 
   clone(): MediaStreamTrack {
-    return new FakeAudioTrack();
+    return new FakeAudioTrack(this.settings);
   }
 
   getCapabilities(): MediaTrackCapabilities {
@@ -574,13 +586,37 @@ export class FakeAudioTrack extends EventTarget implements MediaStreamTrack {
     return {};
   }
 
-  getSettings(): MediaTrackSettings {
-    return { sampleRate: 48_000, channelCount: 1 };
+  getSettings(): FakeMicrophoneSettings {
+    return { ...this.settings };
   }
 
   stop(): void {
     this.readyState = 'ended';
   }
+}
+
+/**
+ * What the fake microphone says it applies for the audio request `audio`, as Chrome does (T2.12):
+ * each voice processing as the request's boolean asks, else on (voice isolation off), one channel at
+ * 48 kHz, on the default device.
+ */
+function microphoneSettingsFor(
+  audio: boolean | MediaTrackConstraints | undefined,
+): FakeMicrophoneSettings {
+  const asked = typeof audio === 'object' ? audio : {};
+  const flag = (name: string, otherwise: boolean): boolean => {
+    const value: unknown = Reflect.get(asked, name);
+    return typeof value === 'boolean' ? value : otherwise;
+  };
+  return {
+    deviceId: 'default',
+    echoCancellation: flag('echoCancellation', true),
+    noiseSuppression: flag('noiseSuppression', true),
+    autoGainControl: flag('autoGainControl', true),
+    voiceIsolation: flag('voiceIsolation', false),
+    sampleRate: 48_000,
+    channelCount: 1,
+  };
 }
 
 /** A `MediaStream` of fake tracks. */
@@ -647,8 +683,9 @@ export function mediaError(name: string, message = '', constraint?: string): DOM
  * it opens the camera that `deviceId: {exact}` names (an unknown id: an OverconstrainedError on
  * deviceId) or the first, refusing `frameRate: {exact}` above the camera's rate (an
  * OverconstrainedError on frameRate). `hold` makes it wait (a permission prompt) until `release()`.
- * An audio-only request (`{audio: true}`, the recording's microphone) opens the microphone, or fails
- * with the errors queued in `microphoneFailures`, or as without one when `microphone` is false.
+ * An audio-only request (the recording's microphone) opens the microphone, whose track says it
+ * applies what the request asks for (`microphoneSettingsFor`) with `microphoneSettings` over it, or
+ * fails with the errors queued in `microphoneFailures`, or as without one when `microphone` is false.
  */
 export class FakeMediaDevices extends EventTarget implements MediaDevices {
   ondevicechange: MediaDevices['ondevicechange'] = null;
@@ -658,6 +695,11 @@ export class FakeMediaDevices extends EventTarget implements MediaDevices {
   readonly tracks: FakeVideoTrack[] = [];
   /** This device has a microphone. */
   microphone = true;
+  /**
+   * What the microphone's track reports over what the request asks for: a browser that keeps some
+   * processing on, or does not report a setting (undefined).
+   */
+  microphoneSettings: FakeMicrophoneSettings = {};
   readonly microphoneFailures: unknown[] = [];
   readonly audioTracks: FakeAudioTrack[] = [];
   private held: (() => void)[] | null = null;
@@ -703,7 +745,10 @@ export class FakeMediaDevices extends EventTarget implements MediaDevices {
       if (!this.microphone) {
         throw mediaError('NotFoundError', 'Requested device not found');
       }
-      const track = new FakeAudioTrack();
+      const track = new FakeAudioTrack({
+        ...microphoneSettingsFor(constraints.audio),
+        ...this.microphoneSettings,
+      });
       this.audioTracks.push(track);
       return new FakeMediaStream([track]);
     }

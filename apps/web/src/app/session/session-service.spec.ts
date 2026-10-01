@@ -6,6 +6,7 @@ import {
   parseMoves,
   type CameraClock,
   type CameraInfo,
+  type MicrophoneInfo,
   type VideoClip,
 } from '@cubetrace/core';
 import { FakeCube, type CubeConnection, type CubeEvent } from '@cubetrace/gan';
@@ -855,6 +856,18 @@ describe('SessionService', () => {
       s.service.putCamera(camera('FaceTime HD Camera'), false);
       s.service.putCamera({ ...camera('Phone'), label: 'phone-front' }, false);
       s.service.putCamera(camera('Studio Display Camera'), false);
+      // The microphone of its clips (T2.12) is written with the entry, and replaced with it.
+      const microphone: MicrophoneInfo = {
+        label: 'Studio Display Microphone',
+        processing: 'raw',
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        voiceIsolation: null,
+        sampleRate: 48_000,
+        channelCount: 1,
+      };
+      s.service.putCamera({ ...camera('Studio Display Camera'), microphone }, false);
       await s.service.addNote(session, 'clip failed: scramble of attempt 1: first');
       await s.service.addNote(session, 'clip failed: solve of attempt 1: second');
       await s.service.whenSaved();
@@ -865,6 +878,7 @@ describe('SessionService', () => {
         ['laptop', 'Studio Display Camera'],
         ['phone-front', 'Phone'],
       ]);
+      expect(stored.cameras.map((entry) => entry.microphone)).toEqual([microphone, null]);
       expect(stored.audio).toBe(false);
       expect(stored.notes).toBe(
         'clip failed: scramble of attempt 1: first\nclip failed: solve of attempt 1: second',
@@ -1189,5 +1203,6 @@ function camera(deviceLabel: string): CameraInfo {
     constraints: {},
     crop: null,
     mode: 'full',
+    microphone: null,
   };
 }

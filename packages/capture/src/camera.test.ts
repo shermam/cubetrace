@@ -388,6 +388,7 @@ describe('cameraInfo', () => {
       constraints: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { exact: 60 } },
       crop,
       mode: 'full',
+      microphone: null,
     });
     expect(JSON.stringify(info)).not.toContain('secret-id');
     expect(info.crop).not.toBe(crop);

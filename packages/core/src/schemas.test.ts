@@ -75,13 +75,15 @@ const SCHEMAS: [string, JsonSchema][] = [
 const SNAPSHOTS = /\/\$defs\/camera\/properties\/(settings|capabilities|constraints)$/;
 const BY_LABEL = '#/properties/clock/properties/cameras';
 /**
- * The only fields that may be absent: a phase's slot, a camera clock's samples, and a clip's
- * truncatedStart (the clips written before T2.9 have none).
+ * The only fields that may be absent: a phase's slot, a camera clock's samples, a clip's
+ * truncatedStart (the clips written before T2.9 have none) and a camera's microphone (the cameras
+ * written before T2.12 have none).
  */
 const OPTIONAL: Readonly<Record<string, string>> = {
   '#/$defs/phase': 'slot',
   '#/$defs/cameraClock': 'samples',
   '#/$defs/clip': 'truncatedStart',
+  '#/$defs/camera': 'microphone',
 };
 
 describe('the JSON Schemas of the records', () => {
@@ -109,13 +111,13 @@ describe('the JSON Schemas of the records', () => {
   });
 
   it.each([
-    ['session.json version 2', SESSION_SCHEMA, 16],
+    ['session.json version 2', SESSION_SCHEMA, 17],
     ['attempt.json version 2', ATTEMPT_SCHEMA, 8],
     ['session.json version 1', SESSION_SCHEMA_V1, 9],
     ['attempt.json version 1', ATTEMPT_SCHEMA_V1, 5],
     ['frames.json', FRAMES_SCHEMA, 2],
   ] as [string, JsonSchema, number][])(
-    'the schema of %s closes every record and requires every field but a slot, samples and truncatedStart',
+    'the schema of %s closes every record and requires every field but a slot, samples, truncatedStart and a microphone',
     (_, schema, count) => {
       const objects = objectSchemas(schema);
       expect(objects).toHaveLength(count);
@@ -291,6 +293,20 @@ describe('version 2', () => {
     ['a crop at source of another kind', ['cameras', 0, 'mode'], 'zoom'],
     ['a camera label with a capital', ['cameras', 0, 'label'], 'Laptop'],
     ['an unknown field in a camera', ['cameras', 0, 'torch'], true],
+    ['a microphone that is text', ['cameras', 0, 'microphone'], 'raw'],
+    ['an incomplete microphone', ['cameras', 0, 'microphone'], { label: 'Built-in' }],
+    ['a microphone asked for another way', ['cameras', 0, 'microphone', 'processing'], 'loud'],
+    ['a microphone without its label', ['cameras', 0, 'microphone', 'label'], undefined],
+    [
+      'a microphone without its noise suppression',
+      ['cameras', 0, 'microphone', 'noiseSuppression'],
+      undefined,
+    ],
+    ['echo cancellation as text', ['cameras', 0, 'microphone', 'echoCancellation'], 'all'],
+    ['a sample rate of 0', ['cameras', 0, 'microphone', 'sampleRate'], 0],
+    ['half a channel', ['cameras', 0, 'microphone', 'channelCount'], 1.5],
+    ['no channel', ['cameras', 0, 'microphone', 'channelCount'], 0],
+    ['an unknown field in a microphone', ['cameras', 0, 'microphone', 'deviceId'], 'default'],
     ['an incomplete camera clock', ['clock', 'cameras', 'phone-1'], { offsetMs: 3 }],
     [
       'a camera clock under another label',
@@ -333,6 +349,24 @@ describe('version 2', () => {
     expect(
       validateSession(changed(session, ['clock', 'cameras', 'laptop', 'samples'], undefined)),
     ).toBe(true);
+  });
+
+  it('accepts a camera without a microphone, one written before it was kept, and what a browser does not report', () => {
+    for (const [path, value] of [
+      [['cameras', 0, 'microphone'], null],
+      [['cameras', 0, 'microphone'], undefined],
+      [['cameras', 0, 'microphone', 'processing'], 'voice'],
+      [['cameras', 0, 'microphone', 'label'], ''],
+      [['cameras', 0, 'microphone', 'echoCancellation'], null],
+      [['cameras', 0, 'microphone', 'autoGainControl'], true],
+      [['cameras', 0, 'microphone', 'voiceIsolation'], false],
+      [['cameras', 0, 'microphone', 'sampleRate'], 44_100],
+      [['cameras', 0, 'microphone', 'sampleRate'], null],
+      [['cameras', 0, 'microphone', 'channelCount'], 2],
+      [['cameras', 0, 'microphone', 'channelCount'], null],
+    ] as [(string | number)[], unknown][]) {
+      expect(validateSession(changed(session, path, value)), path.join('.')).toBe(true);
+    }
   });
 
   const framesCases: [string, readonly (string | number)[], unknown][] = [

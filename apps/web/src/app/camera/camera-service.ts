@@ -426,7 +426,8 @@ export class CameraService {
   /**
    * The session's `cameras[]` entry for the open camera (@cubetrace/core's `CameraInfo`: label,
    * facing, device label, settings, capabilities, constraints, the framing rectangle as `crop`, null
-   * for the whole frame, and `mode: 'full'`); null while the camera is not on.
+   * for the whole frame, and `mode: 'full'`; its `microphone` is the recording's to put, T2.12);
+   * null while the camera is not on.
    */
   cameraInfo(): CameraInfo | null {
     const track = this.track;

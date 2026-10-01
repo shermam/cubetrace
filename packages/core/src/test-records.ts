@@ -6,6 +6,7 @@ import type {
   CameraClock,
   CameraInfo,
   FramesJson,
+  MicrophoneInfo,
   SessionRecord,
   VideoClip,
   VideoSegment,
@@ -93,7 +94,19 @@ export function sessionRecord(): SessionRecord {
   });
 }
 
-/** The laptop's camera as the camera panel (T2.1) will describe it. */
+/** The laptop's microphone, asked for raw, as the recording (T2.12) describes it. */
+export const MICROPHONE: MicrophoneInfo = {
+  label: 'MacBook Pro Microphone (Built-in)',
+  processing: 'raw',
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  voiceIsolation: null,
+  sampleRate: 48_000,
+  channelCount: 1,
+};
+
+/** The laptop's camera as the camera panel (T2.1) will describe it, with its microphone. */
 export const CAMERA: CameraInfo = {
   label: 'laptop',
   local: true,
@@ -104,6 +117,7 @@ export const CAMERA: CameraInfo = {
   constraints: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
   crop: { x: 480, y: 120, w: 960, h: 840 },
   mode: 'full',
+  microphone: MICROPHONE,
 };
 
 /** Its clock, as the clapperboard (T2.5) will measure it. */
@@ -119,12 +133,18 @@ export const CAMERA_CLOCK: CameraClock = {
   ],
 };
 
-/** The session with the laptop's camera and its clock. */
+/**
+ * The session with the laptop's camera and its clock, and a phone's rear camera that recorded
+ * without a microphone.
+ */
 export function sessionWithCamera(): SessionRecord {
   const s = sessionRecord();
   return {
     ...s,
-    cameras: [CAMERA, { ...CAMERA, label: 'phone-rear', facing: 'environment', crop: null }],
+    cameras: [
+      CAMERA,
+      { ...CAMERA, label: 'phone-rear', facing: 'environment', crop: null, microphone: null },
+    ],
     clock: { ...s.clock, cameras: { laptop: CAMERA_CLOCK, 'phone-rear': { ...CAMERA_CLOCK } } },
   };
 }

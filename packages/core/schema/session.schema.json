@@ -181,7 +181,43 @@
         "mode": {
           "description": "full: whole frames are recorded (phase 2); crop: only the crop rectangle.",
           "enum": ["full", "crop"]
-        }
+        },
+        "microphone": { "$ref": "#/$defs/microphone" }
+      }
+    },
+    "microphone": {
+      "description": "The microphone of the camera's sound when it last recorded (docs/DATA-MODEL.md §6): what the app asked for and what the browser says it applied (the track's getSettings()), each null when the browser does not report it; null when the camera recorded without a microphone. Absent from the files written before it existed (docs/PLAN.md T2.12), which read as null.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "processing",
+        "echoCancellation",
+        "noiseSuppression",
+        "autoGainControl",
+        "voiceIsolation",
+        "sampleRate",
+        "channelCount"
+      ],
+      "properties": {
+        "label": {
+          "description": "The microphone's name as the browser gives it (MediaStreamTrack.label).",
+          "type": "string"
+        },
+        "processing": {
+          "description": "What the app asked for: raw, the browser's voice processing off (echo cancellation, noise suppression, automatic gain control, voice isolation); voice, the browser's defaults.",
+          "enum": ["raw", "voice"]
+        },
+        "echoCancellation": { "type": ["boolean", "null"] },
+        "noiseSuppression": { "type": ["boolean", "null"] },
+        "autoGainControl": { "type": ["boolean", "null"] },
+        "voiceIsolation": { "type": ["boolean", "null"] },
+        "sampleRate": {
+          "description": "In hertz.",
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "channelCount": { "type": ["integer", "null"], "minimum": 1 }
       }
     },
     "cameraClock": {

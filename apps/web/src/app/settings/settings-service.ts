@@ -7,6 +7,7 @@ import type {
   StoredFraming,
   VideoQuality,
 } from '@cubetrace/capture';
+import type { MicrophoneProcessing } from '@cubetrace/core';
 import { normalizeMac } from '@cubetrace/gan';
 
 import { DEMO_SPEED_DEFAULT, isDemoSpeed } from '../cube/demo';
@@ -90,6 +91,24 @@ export const VIDEO_QUALITY_TEXT: Readonly<Record<VideoQuality, string>> = {
 };
 
 /**
+ * How the recording asks for the microphone (T2.12): Raw, the default, with the browser's voice
+ * processing off, so that the clips keep the cube's clicks (with Chrome's defaults the ThinkPhone's
+ * clips had a TV's voices and no click: docs/DEVICES.md, "Audio"); Voice, the browser's defaults,
+ * for speech.
+ */
+export const MICROPHONE_PROCESSINGS: readonly MicrophoneProcessing[] = ['raw', 'voice'];
+
+/** How the microphone's choices read in Settings and in the Timer page's Camera settings. */
+export const MICROPHONE_PROCESSING_TEXT: Readonly<Record<MicrophoneProcessing, string>> = {
+  raw: 'Raw',
+  voice: 'Voice',
+};
+
+/** The line of help next to the microphone's choice, in Settings and in Camera settings. */
+export const MICROPHONE_HINT =
+  "Raw keeps the cube's clicks; Voice lets the browser suppress noise for speech.";
+
+/**
  * The sharpness meter says "good" from this value up, by default: calibrated on Chrome's fake camera
  * (@cubetrace/capture's SHARPNESS_THRESHOLD_DEFAULT, repeated here so that this file imports no
  * camera code).
@@ -143,6 +162,7 @@ interface StoredSettings {
   readonly cameraFrameRate: CameraFrameRate;
   readonly sharpnessThreshold: number;
   readonly recordAudio: boolean;
+  readonly microphoneProcessing: MicrophoneProcessing;
   readonly videoQuality: VideoQuality;
   /** Whether the Timer page's Camera settings are open; null until they were opened or closed. */
   readonly cameraSettingsOpen: boolean | null;
@@ -164,6 +184,7 @@ const DEFAULTS: StoredSettings = {
   cameraFrameRate: 'best',
   sharpnessThreshold: SHARPNESS_THRESHOLD_DEFAULT,
   recordAudio: true,
+  microphoneProcessing: 'raw',
   videoQuality: 'standard',
   cameraSettingsOpen: null,
   cameraPicks: [],
@@ -186,11 +207,11 @@ export function macAddressProblem(text: string): string {
  * (T2.13); and the camera's (T2.1): on or off, the resolution and frame rate asked for, the
  * sharpness threshold, the camera chosen on each host (by host label), and per camera (by its
  * label) the manual controls chosen and the framing rectangles; and whether the recording has the
- * microphone's audio (T2.4, on by default, as the design has it), its video quality (T2.10,
- * Standard by default), and whether the Timer page's Camera settings are open (T2.7). Signals, kept
- * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
- * Where the browser blocks storage the settings last until the page closes, and `saveError` says
- * so.
+ * microphone's audio (T2.4, on by default, as the design has it), how it asks for the microphone
+ * (T2.12, Raw by default), its video quality (T2.10, Standard by default), and whether the Timer
+ * page's Camera settings are open (T2.7). Signals, kept in `localStorage` (through BROWSER_GLOBALS)
+ * as one JSON object that is written on every change. Where the browser blocks storage the settings
+ * last until the page closes, and `saveError` says so.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
@@ -231,6 +252,11 @@ export class SettingsService {
   readonly sharpnessThreshold = computed(() => this.stored().sharpnessThreshold);
   /** The clips have the microphone's audio with the video (T2.4); on by default. */
   readonly recordAudio = computed(() => this.stored().recordAudio);
+  /**
+   * How the recording asks for the microphone (T2.12): Raw by default, the browser's voice
+   * processing off; Voice, the browser's defaults.
+   */
+  readonly microphoneProcessing = computed(() => this.stored().microphoneProcessing);
   /** The recording's bitrate (T2.10); Standard, 4 Mbps at 1080p30, by default. */
   readonly videoQuality = computed(() => this.stored().videoQuality);
   /**
@@ -339,6 +365,12 @@ export class SettingsService {
   setRecordAudio(on: boolean): void {
     if (on !== this.stored().recordAudio) {
       this.update({ recordAudio: on });
+    }
+  }
+
+  setMicrophoneProcessing(processing: MicrophoneProcessing): void {
+    if (processing !== this.stored().microphoneProcessing) {
+      this.update({ microphoneProcessing: processing });
     }
   }
 
@@ -453,6 +485,7 @@ function readSettings(storage: Storage | null): StoredSettings {
   const cameraFrameRate = member(parsed, 'cameraFrameRate');
   const sharpnessThreshold = member(parsed, 'sharpnessThreshold');
   const recordAudio = member(parsed, 'recordAudio');
+  const microphoneProcessing = member(parsed, 'microphoneProcessing');
   const videoQuality = member(parsed, 'videoQuality');
   const cameraSettingsOpen = member(parsed, 'cameraSettingsOpen');
   return {
@@ -482,6 +515,10 @@ function readSettings(storage: Storage | null): StoredSettings {
         ? sharpnessThreshold
         : DEFAULTS.sharpnessThreshold,
     recordAudio: typeof recordAudio === 'boolean' ? recordAudio : DEFAULTS.recordAudio,
+    // Settings stored before T2.12 have none: Raw, as for a new device.
+    microphoneProcessing:
+      MICROPHONE_PROCESSINGS.find((p) => p === microphoneProcessing) ??
+      DEFAULTS.microphoneProcessing,
     // Settings stored before T2.10 have none: Standard, as for a new device.
     videoQuality: VIDEO_QUALITIES.find((q) => q === videoQuality) ?? DEFAULTS.videoQuality,
     cameraSettingsOpen:

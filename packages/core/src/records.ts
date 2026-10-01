@@ -25,6 +25,7 @@ import type {
   ClapperboardSample,
   CubeInfo,
   HostInfo,
+  MicrophoneInfo,
   SessionRecord,
   SessionSettings,
   SessionSummary,
@@ -174,7 +175,10 @@ interface Optional<T> {
   readonly optional: Reader<T>;
 }
 
-/** A field that may be absent, read as `absent` then (a clip's `truncatedStart`). */
+/**
+ * A field that may be absent, read as `absent` then (a clip's `truncatedStart`, a camera's
+ * `microphone`).
+ */
 interface Defaulted<T> extends Optional<T> {
   readonly absent: T;
 }
@@ -545,6 +549,19 @@ const ATTEMPT_V2 = object<AttemptRecord>({
 
 // ---- session.json (docs/DATA-MODEL.md §6) ----
 
+const microphone = nullable(
+  object<MicrophoneInfo>({
+    label: text(),
+    processing: oneOf('raw', 'voice'),
+    echoCancellation: nullable(bool),
+    noiseSuppression: nullable(bool),
+    autoGainControl: nullable(bool),
+    voiceIsolation: nullable(bool),
+    sampleRate: nullable(num({ above: 0 })),
+    channelCount: nullable(int(1)),
+  }),
+);
+
 const camera = object<CameraInfo>({
   label,
   local: oneOf(true),
@@ -555,6 +572,9 @@ const camera = object<CameraInfo>({
   constraints: snapshot,
   crop,
   mode: oneOf('full', 'crop'),
+  // Since T2.12; the cameras written before it have none: their microphone, if any, had the
+  // browser's defaults, and what it applied was not kept.
+  microphone: defaulted(microphone, null),
 });
 
 const cameraClock = object<CameraClock>({

@@ -66,6 +66,8 @@ export type {
   ClapperboardSample,
   CubeInfo,
   HostInfo,
+  MicrophoneInfo,
+  MicrophoneProcessing,
   SessionRecord,
   SessionSettings,
   SessionSummary,

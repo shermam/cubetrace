@@ -477,7 +477,8 @@ export interface CameraTrack extends SnapshotSource {
  * opened, on the host labelled `hostLabel`: a camera of this device (`local`), its facing, its
  * label and the browser's, its settings and capabilities (`snapshot`), the constraints it was asked
  * for (without the device id), `crop`, the framing rectangle in frame pixels (null for the whole
- * frame), and `mode: 'full'`: in phase 2 the video keeps the whole frame.
+ * frame), and `mode: 'full'`: in phase 2 the video keeps the whole frame. Its `microphone` is null:
+ * the recording, which opens the microphone, puts its own (T2.12).
  */
 export function cameraInfo(
   hostLabel: string,
@@ -497,6 +498,7 @@ export function cameraInfo(
     constraints: jsonObject(buildConstraints(choice).video),
     crop: crop === null ? null : { x: crop.x, y: crop.y, w: crop.w, h: crop.h },
     mode: 'full',
+    microphone: null,
   };
 }
 
