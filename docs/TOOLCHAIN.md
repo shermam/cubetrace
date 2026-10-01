@@ -1417,8 +1417,8 @@ emulator on other ports, 8181, so as not to meet another run's on 8080: two `npm
 once share that port, and the second one fails to start its emulator).
 
 **Sizes** (`ng build`, 2026-10-01, against `main` at e0b6417): the initial bundle is 264.63 kB raw,
-72.58 kB transferred (264.53 and 72.45 before): the only change in `main` is the route of `/qa`
+72.54 kB transferred (264.53 and 72.45 before): the only change in `main` is the route of `/qa`
 (104 bytes, its path, title and lazy import). The index's code (`SessionIndexService`, 13.6 kB raw) is
 a lazy chunk that the Timer, Sessions, session and QA pages share; the Sessions page's chunk is
-15.0 kB (8.2 before), the session page's 11.0 kB (9.1), the QA page's 8.6 kB; Firebase's chunk is
+15.1 kB (8.2 before), the session page's 11.0 kB (9.1), the QA page's 8.6 kB; Firebase's chunk is
 637.3 kB raw, 160.8 kB transferred (619.1 and 156.6 before), for the queries and batches.

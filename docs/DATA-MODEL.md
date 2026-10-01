@@ -225,8 +225,8 @@ and the app made it from the encoder's settings, `clip audio described: <segment
 or lost, no audio encoder; since T2.12, the browser's voice processing kept on although the
 microphone was asked for raw, `notice: The microphone is not raw: …`, or the raw request refused);
 and, since T3.1, once when the session index in the cloud refuses a write of the session's,
-`cloud: the session could not be indexed: <reason>` or `cloud: attempt <index> could not be indexed:
-<reason>` (§10). `summary` is counted from the attempts: each one is solved or a DNF.
+`cloud: the session could not be indexed: <reason>`, `cloud: attempt <index> could not be indexed:
+<reason>` or `cloud: attempt <index> could not be deleted from the index: <reason>` (§10). `summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in

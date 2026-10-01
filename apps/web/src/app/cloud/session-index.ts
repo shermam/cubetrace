@@ -267,7 +267,7 @@ export class SessionIndexService {
         this.changedSignedOut(session.id);
         return;
       }
-      this.send(account, session.id, 'the session', (backend) =>
+      this.send(account, session.id, 'the session could not be indexed', (backend) =>
         backend.saveSessionIndex(cloudSession(session, account.uid)),
       );
       this.markWritten(session.id);
@@ -295,7 +295,7 @@ export class SessionIndexService {
         return;
       }
       const document = cloudAttempt({ attempt, session, owner: account.uid, upload });
-      const what = `attempt ${String(attempt.index)}`;
+      const what = `attempt ${String(attempt.index)} could not be indexed`;
       if (this.isIndexed(account.uid, session.id)) {
         this.send(account, session.id, what, (backend) => backend.saveAttemptIndex(document));
       } else {
@@ -321,8 +321,11 @@ export class SessionIndexService {
       } else if (this.isIndexed(account.uid, sessionId)) {
         // A session not in the index yet has no attempt there to delete (the rules refuse to delete a
         // document that is not there).
-        this.send(account, sessionId, `attempt ${String(index)}`, (backend) =>
-          backend.deleteAttemptIndex(sessionId, index),
+        this.send(
+          account,
+          sessionId,
+          `attempt ${String(index)} could not be deleted from the index`,
+          (backend) => backend.deleteAttemptIndex(sessionId, index),
         );
       }
     });
@@ -364,7 +367,7 @@ export class SessionIndexService {
         if (this.auth.cloud()?.uid !== account.uid) {
           return;
         }
-        this.send(account, session.id, 'the session', (backend) =>
+        this.send(account, session.id, 'the session could not be indexed', (backend) =>
           backend.saveSessionIndex(cloudSession(session, account.uid), documents),
         );
         this.markWritten(session.id);
@@ -425,7 +428,7 @@ export class SessionIndexService {
 
   /**
    * Sends a write of the index, without waiting for it: the server's confirmation sets `lastSync`,
-   * and a refusal is said (`failed`).
+   * and a refusal is said (`failed`), `what` (`attempt 3 could not be indexed`) with the reason.
    */
   private send(
     account: CloudAccount,
@@ -447,11 +450,7 @@ export class SessionIndexService {
       },
       (error: unknown) => {
         this.wait(sessionId, -1);
-        this.failed(
-          account.uid,
-          sessionId,
-          `${what} could not be indexed: ${errorMessage(error).replace(/\.$/, '')}.`,
-        );
+        this.failed(account.uid, sessionId, `${what}: ${errorMessage(error).replace(/\.$/, '')}.`);
       },
     );
   }
