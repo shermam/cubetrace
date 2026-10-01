@@ -219,6 +219,7 @@ spread under the limit of 50 ms plus a frame interval (83 ms at 30 fps, 67 at 60
 | Camera | Date, Chrome | Check 1: offset / spread / turns | Check 2: offset / spread / turns | Per frame: median / p95 |
 |---|---|---|---|---|
 | MacBook Pro 2021, FaceTime HD, 1080p30 | 2026-09-27, Chrome 153 | 38.3 ms / 51.2 ms / 8 kept of 10 (T2.8: −85.8 ms / 341.4 ms, failed) | 18.7 ms / 70.9 ms / 7 kept of 9 (T2.8: −269 ms / 343.5 ms, failed) | 0.8 and 0.9 ms / 1.9 ms |
+| MacBook Pro 2021 (office), Logitech Webcam C930e, 1080p30 | 2026-10-01, Chrome 154 | 177.4 ms / 11.6 ms / 6 kept of 8 (T2.11, GAN 12 ui) | — | 0.3 ms / 0.4 ms |
 | ThinkPhone, front camera | | | | |
 | ThinkPhone, rear camera | | | | |
 
@@ -228,7 +229,10 @@ them from their data files. The cube was held in the air close to the camera, bo
 top face turned with the fingers, the framing rectangle around the cube and the hands (585×558 and
 816×703 of the 1920×1080 frame, measured on a plane 160 pixels wide). The two offsets agree within
 20 ms: the camera lags the cube by about 20 to 40 ms. Checks made as T2.11 asks (the cube held still,
-one face flicked with one finger) are still to come.
+one face flicked with one finger) are still to come. The Logitech row is the owner's check on the
+office MacBook with the GAN 12 ui (issue #40): a USB webcam, with its own compression on the way to
+the browser, lags about 140 ms more than the FaceTime camera; the lag is the camera's, not the cube's.
+Both cameras appear under the session label `laptop` (`docs/PLAN.md`, follow-up (e)).
 
 Chrome's fake camera cannot give a lag, since nothing in its test pattern turns with the cube, but
 it gives the cost: in Playwright's Chromium 141 on the containers' four CPUs, while the same worker

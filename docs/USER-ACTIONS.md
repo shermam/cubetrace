@@ -69,6 +69,10 @@ adds items; the owner ticks them when done (date and any detail that others need
       deploy without anyone's machine.
     Delete the downloaded files afterwards. Neither key is ever committed, printed in a PR or
     handed to an agent; `CLAUDE.md` will say so. Browser only, no Codespace, no local CLI.
+  - [x] 2026-10-01 — The Firestore rules of T3.0 are deployed, by the coordinator through the
+    Firebase Rules API with the environment's key (the Admin SDK account's: `firebase deploy` is
+    refused without **Service Usage Consumer**, so give that account the role, or put the `deploy`
+    account's key in the environment, before T3.2's functions).
   - [ ] **Add the repository secret `FIREBASE_SERVICE_ACCOUNT`** (T3.0), for
     `.github/workflows/firebase.yml`, which deploys the Firestore rules on every merge to `main`
     that changes them (`firebase/**`, `firebase.json`, `.firebaserc`) and, without the secret, fails

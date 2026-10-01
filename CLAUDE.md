@@ -50,7 +50,8 @@ readable at `/home/user/aulas-mestrado/random-research/cube-capture-app/DESIGN.m
   as a number; cube time is kept alongside as `cubeMs`, never substituted.
 - Cube state is a 54-character Kociemba facelet string (`docs/DATA-MODEL.md` §2); moves are
   face turns `U D R L F B` with `'` and `2`; nothing else in v1.
-- No secrets in the repo, ever: no Firebase config with keys, no MAC addresses, no tokens.
+- No secrets in the repo, ever: no service-account keys, no tokens, no MAC addresses. The Firebase
+  web config in `apps/web/src/environments/firebase.ts` is public by design and is committed (T3.0).
   Configuration that differs per deployment goes through `environment.ts` placeholders
   documented in `docs/USER-ACTIONS.md`.
 - Fixtures in `fixtures/` are real solves (scramble, raw move stream, Cubeast's phase

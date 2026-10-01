@@ -14,8 +14,8 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | Phase | Delivers | Status |
 |---|---|---|
 | **1. The timer, on any device** | cube connection, scrambles, state tracking, mis-scramble guidance, timer, colour-neutral CFOP breakdown validated against the Cubeast fixtures, session records staged in OPFS, PWA, probe page, fake cube, e2e suite, GitHub Pages deploy. Replaces Cubeast for daily practice. | ✅ v0.1.0 (2026-09-27) |
-| **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | 🟦 board below |
-| 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ⬜ board below; the Firebase project `cubetrace-cacd9` and the R2 decision exist |
+| **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ✅ 0.2.0 (2026-10-01: the fixes from the owner's first recordings, T2.8–T2.13, merged; the full round 2 skipped by the owner's decision; the tag from the GitHub UI pending) |
+| 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | 🟦 board below (T3.0 merged 2026-10-01) |
 | 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ⬜ |
 | 5. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
@@ -689,8 +689,8 @@ pipeline, §9 the data model).
 | T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ✅ #37 |
 | T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ✅ #36 |
 | T2.11 | `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread | T2.8 | ✅ #39 |
-| T2.12 | `web`+`core`: the microphone recorded raw, the processing applied kept in the record | T2.9 | ⬜ |
-| T2.13 | `web`: on a phone, the picture and the scramble in view together: the scramble over the pinned picture | T2.7 | ⬜ |
+| T2.12 | `web`+`core`: the microphone recorded raw, the processing applied kept in the record | T2.9 | ✅ #43 |
+| T2.13 | `web`: on a phone, the picture and the scramble in view together: the scramble over the pinned picture | T2.7 | ✅ #41 |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6 → {T2.8, T2.9, T2.10} (from the owner's
 first recordings, issues #33 and #34; all merged on 2026-09-27). Rules for every phase 2 task: nothing of
@@ -710,7 +710,12 @@ frames on top of the cube's Bluetooth jitter (T2.8)~~, moot since T2.11, whose e
 a turn's motion, falls between frames; (c) a quality, audio or microphone (T2.12) change
 mid-attempt restarts the pipeline and empties the buffer, so that attempt's clips begin late (flagged
 `truncatedStart` since T2.9): a guard could defer the restart to the end of the attempt;
-(d) crop-at-source (the design's later phase), the biggest lever left on clip size after T2.10.
+(d) crop-at-source (the design's later phase), the biggest lever left on clip size after T2.10;
+(e) camera labels unique per device within a session: `cameraLabel` derives `laptop`, `phone-front`
+and `phone-rear` from the host and the facing, so two cameras of a laptop (the FaceTime camera and a
+USB webcam, issue #40) share `laptop`, `putCamera` replaces the entry and `putCameraClock` the sync
+result, and earlier clips then point at the wrong device; a second device under a label should get
+`laptop-2`, or the clip should name the device.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -1263,7 +1268,7 @@ second key. Phase 3 starts after T2.4, because it changes the same `SessionServi
 
 | Id | Task | Depends on | Status |
 |---|---|---|---|
-| T3.0 | `web`: Firebase in the app: config, Google sign-in, `users/{uid}`, Firestore rules with emulator tests, deploy workflow | T2.4 | ⬜ |
+| T3.0 | `web`: Firebase in the app: config, Google sign-in, `users/{uid}`, Firestore rules with emulator tests, deploy workflow | T2.4 | ✅ #42 (rules deployed by the coordinator on 2026-10-01; the workflow waits for the `FIREBASE_SERVICE_ACCOUNT` secret) |
 | T3.1 | `web`: Firestore session index; the Sessions page merges local and cloud sessions; QA view | T3.0 | ⬜ |
 | T3.2 | `functions`: `signUpload` and `confirmUpload` with presigned URLs for R2 (S3 SigV4) or GCS by configuration, quotas, secrets, bucket CORS | T3.0 | ⬜ |
 | T3.3 | `upload`: the upload queue: per attempt JSON and clips, resumable, retried, throttled, persistent; local clips deleted after confirmation by policy | T3.1, T3.2 | ⬜ |
