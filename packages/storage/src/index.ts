@@ -1,8 +1,10 @@
-// Public API of @cubetrace/storage: where the app keeps sessions. Phase 1 has the session store over
-// the origin private file system (docs/DATA-MODEL.md §5); phase 3 adds the upload queue. Plain
-// TypeScript: no Angular, and no browser global is touched at import time.
+// Public API of @cubetrace/storage: where the app keeps sessions, the session store over the origin
+// private file system (docs/DATA-MODEL.md §5); the upload queue of phase 3 is @cubetrace/upload,
+// which reads the store's files and writes its own state beside them. Plain TypeScript: no Angular,
+// and no browser global is touched at import time.
 export type {
   OpfsDirectoryHandle,
+  OpfsFile,
   OpfsFileHandle,
   OpfsNavigator,
   OpfsSyncAccessHandle,
@@ -21,6 +23,7 @@ export {
   isTemporaryOf,
   recordJson,
   temporaryName,
+  writeTextFile,
 } from './opfs-session-store';
 export type { FakeOpfsOptions } from './fake-opfs';
 export { FakeDirectoryHandle, FakeFileHandle } from './fake-opfs';

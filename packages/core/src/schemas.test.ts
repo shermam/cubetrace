@@ -76,14 +76,15 @@ const SNAPSHOTS = /\/\$defs\/camera\/properties\/(settings|capabilities|constrai
 const BY_LABEL = '#/properties/clock/properties/cameras';
 /**
  * The only fields that may be absent: a phase's slot, a camera clock's samples, a clip's
- * truncatedStart (the clips written before T2.9 have none) and a camera's microphone (the cameras
- * written before T2.12 have none).
+ * truncatedStart (the clips written before T2.9 have none) and its local (only a clip whose MP4 was
+ * deleted after its upload has it, T3.3), and a camera's microphone (the cameras written before
+ * T2.12 have none).
  */
-const OPTIONAL: Readonly<Record<string, string>> = {
-  '#/$defs/phase': 'slot',
-  '#/$defs/cameraClock': 'samples',
-  '#/$defs/clip': 'truncatedStart',
-  '#/$defs/camera': 'microphone',
+const OPTIONAL: Readonly<Record<string, readonly string[]>> = {
+  '#/$defs/phase': ['slot'],
+  '#/$defs/cameraClock': ['samples'],
+  '#/$defs/clip': ['truncatedStart', 'local'],
+  '#/$defs/camera': ['microphone'],
 };
 
 describe('the JSON Schemas of the records', () => {
@@ -117,7 +118,7 @@ describe('the JSON Schemas of the records', () => {
     ['attempt.json version 1', ATTEMPT_SCHEMA_V1, 5],
     ['frames.json', FRAMES_SCHEMA, 2],
   ] as [string, JsonSchema, number][])(
-    'the schema of %s closes every record and requires every field but a slot, samples, truncatedStart and a microphone',
+    'the schema of %s closes every record and requires every field but a slot, samples, truncatedStart, local and a microphone',
     (_, schema, count) => {
       const objects = objectSchemas(schema);
       expect(objects).toHaveLength(count);
@@ -131,7 +132,7 @@ describe('the JSON Schemas of the records', () => {
         } else {
           expect(node['additionalProperties'], at).toBe(false);
           const properties = Object.keys(node['properties'] ?? {}).filter(
-            (k) => OPTIONAL[at] !== k,
+            (k) => !(OPTIONAL[at] ?? []).includes(k),
           );
           const required = (node['required'] ?? []) as string[];
           expect([...required].sort(), at).toEqual(properties.sort());
@@ -250,6 +251,8 @@ describe('version 2', () => {
     ['a sync residual that is text', 'syncResidualMs', '41.5'],
     ['a truncated start that is text', 'truncatedStart', 'true'],
     ['a truncated start of null', 'truncatedStart', null],
+    ['a local that is text', 'local', 'false'],
+    ['a local of null', 'local', null],
     ['an unknown field', 'rotation', 90],
   ];
 
@@ -264,7 +267,7 @@ describe('version 2', () => {
     expect(validateAttempt(changed(attempt, ['video', 1, field], value))).toBe(false);
   });
 
-  it('accepts a clip without audio, crop or sync check, one of a phone camera, and one written before truncatedStart', () => {
+  it('accepts a clip without audio, crop or sync check, one of a phone camera, one written before truncatedStart, and one whose MP4 is no longer on the device', () => {
     for (const [field, value] of [
       ['audio', null],
       ['crop', null],
@@ -273,6 +276,8 @@ describe('version 2', () => {
       ['camera', 'phone-2'],
       ['truncatedStart', false],
       ['truncatedStart', undefined],
+      ['local', false],
+      ['local', true],
     ] as [string, unknown][]) {
       expect(validateAttempt(changed(attempt, ['video', 0, field], value)), field).toBe(true);
     }

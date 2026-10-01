@@ -156,6 +156,11 @@ const REPLACEMENTS: unknown[] = [undefined, null, 'x', '', -1, 0, 1, 1.5, 2, tru
 
 const CORPUS: [Kind, string, unknown][] = [
   ['attempt', 'a solved attempt with its clips', attemptWithVideo()],
+  [
+    'attempt',
+    'a solved attempt whose solve clip was deleted after its upload',
+    changed(attemptWithVideo(), ['video', 1, 'local'], false),
+  ],
   ['attempt', 'a DNF', dnfAttempt()],
   ['attempt', 'a DNF without a move', untouchedAttempt()],
   ['attempt', 'a solved attempt of version 1', asVersion1Attempt(solvedAttempt())],
@@ -206,6 +211,24 @@ describe('parseAttempt and parseSession', () => {
     expect(read.video.map((clip) => clip.truncatedStart)).toEqual([false, false]);
     // In the order of the schema's fields, as the next save writes it.
     expect(Object.keys(read.video[0])).toEqual(Object.keys(attempt.video[0]));
+  });
+
+  it("keep a clip's local as it is written, and leave it out where it is not (T3.3)", () => {
+    const attempt = attemptWithVideo();
+    expect(attempt.video.every((clip) => !('local' in clip))).toBe(true);
+    expect(parseAttempt(structuredClone(attempt)).video.every((clip) => !('local' in clip))).toBe(
+      true,
+    );
+    const gone = changed(attempt, ['video', 1, 'local'], false);
+    expect(VALIDATE.attempt[2](gone)).toBe(true);
+    const read = parseAttempt(gone);
+    expect(read.video.map((clip) => clip.local)).toEqual([undefined, false]);
+    expect(read).toEqual(gone);
+    // In the order of the schema's fields, last.
+    expect(Object.keys(read.video[1]).at(-1)).toBe('local');
+    expect(() => parseAttempt(changed(attempt, ['video', 0, 'local'], 'no'))).toThrow(
+      'video[0].local must be true or false, got "no"',
+    );
   });
 
   it('read a camera written before its microphone was kept as one without, in the order of the schema', () => {

@@ -577,6 +577,9 @@ const clip = object<VideoClip>({
   syncResidualMs: nullable(num()),
   // Since T2.9; the clips written before it have none, and began where asked.
   truncatedStart: defaulted(bool, false),
+  // Since T3.3, and only once the clip's MP4 was deleted from the device after its upload: absent,
+  // the file is there.
+  local: optional(bool),
 });
 
 /** The fields both versions share up to the moves, in the order of the schemas. */
