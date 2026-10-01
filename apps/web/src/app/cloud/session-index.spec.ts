@@ -4,7 +4,6 @@ import {
   CLOUD_SESSION_SCHEMA,
   MemorySessionStore,
   cloudSession,
-  type AttemptRecord,
   type SessionRecord,
 } from '@cubetrace/core';
 import { recordJson } from '@cubetrace/storage';
@@ -66,9 +65,11 @@ describe('SessionIndexService', () => {
       ],
     });
     const index = TestBed.inject(SessionIndexService);
-    const tracked = index.track(store, (sessionId, line) => {
+    // As SessionService.addNote: the line in the session's notes, saved through the tracked store.
+    const tracked = index.track(store, async (sessionId, line) => {
       notes.push({ sessionId, line });
-      return Promise.resolve();
+      const { session } = await store.exportSession(sessionId);
+      await tracked.saveSession({ ...session, notes: `${session.notes}\n${line}`.trim() });
     });
     return { index, auth: TestBed.inject(AuthService), tracked };
   }
@@ -256,13 +257,23 @@ describe('SessionIndexService', () => {
     expect(warn.mock.calls.map(([text]) => String(text))).toEqual([`cubetrace: cloud: ${message}`]);
     expect(index.unconfirmed()).toBe(0);
 
-    // A later page load says it again, unless the session's notes already have the line.
+    expect((await store.exportSession(SESSION_A)).session.notes).toBe(`cloud: ${message}`);
+    // Refused, the session is not in the index: the next start tries it again, says it again, and
+    // does not note it twice.
+    expect(kept()[ADA.uid].sessions).toEqual([]);
     const reload = load();
     await settleIndex(reload.index);
-    await reload.tracked.saveSession({ ...realSession(), notes: `cloud: ${message}` });
-    await settleIndex(reload.index);
-    expect(notes).toHaveLength(1);
     expect(reload.index.failures().get(SESSION_A)).toBe(message);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(notes).toHaveLength(1);
+    expect((await store.exportSession(SESSION_A)).session.notes).toBe(`cloud: ${message}`);
+    // Allowed again (the rules fixed), its next save writes the session with its attempts.
+    backend.indexError = null;
+    const reloaded = load();
+    await settleIndex(reloaded.index);
+    expect(reloaded.index.failures().size).toBe(0);
+    expect(backend.sessionDocument(SESSION_A)?.notes).toBe(`cloud: ${message}`);
+    expect(backend.attemptDocuments(SESSION_A).map((doc) => doc.index)).toEqual([1, 2]);
     warn.mockRestore();
   });
 

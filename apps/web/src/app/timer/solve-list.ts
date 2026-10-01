@@ -2,6 +2,12 @@ import { Component, computed, inject, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type { AttemptRecord } from '@cubetrace/core';
 
+/**
+ * An attempt as the list shows it: its record, or its document in the session index (T3.1), which
+ * has everything but the moves.
+ */
+export type ListedAttempt = Omit<AttemptRecord, 'moves'>;
+
 import { sessionStats } from '../session/session-stats';
 import { formatBytes } from '../shared/format-bytes';
 import { formatTime } from '../shared/format-time';
@@ -37,7 +43,7 @@ export function lateText(segments: readonly string[]): string | null {
     : 'Both clips begin later than asked: their starts were older than the 90 s kept in memory.';
 }
 
-function solveRow(attempt: AttemptRecord): SolveRow {
+function solveRow(attempt: ListedAttempt): SolveRow {
   const { status, timeMs, scrambleCorrected, replayOk } = attempt.result;
   const phases = attemptPhases(attempt);
   const total = phases.reduce((sum, p) => sum + Math.max(0, p.ms), 0);
@@ -72,7 +78,8 @@ function solveRow(attempt: AttemptRecord): SolveRow {
  * mini bar, flags, and a badge with the attempt's clips (T2.4) that opens them (`ClipViewing`);
  * above them the session's count, mean, best, ao5 and ao12 (unless `showStats` is false). With a
  * `limit` (the Timer page's 12, T2.7), only the newest ones, and under them how many the session
- * has, with "See all", the session's page (`sessionId`).
+ * has, with "See all", the session's page (`sessionId`). A session of the cloud's index alone (T3.1)
+ * lists its attempts without their moves, and its clip badges open nothing (`playable` false).
  */
 @Component({
   selector: 'app-solve-list',
@@ -123,25 +130,34 @@ function solveRow(attempt: AttemptRecord): SolveRow {
                 <span class="flag" [class.dnf]="flag === 'DNF'">{{ flag }}</span>
               }
               @if (row.clips; as clips) {
-                <button
-                  type="button"
-                  class="clips"
-                  data-testid="clip-badge"
-                  [attr.aria-label]="
-                    'The clips of attempt ' +
-                    row.index +
-                    ': ' +
-                    clips +
-                    (row.late ? '. ' + row.late : '')
-                  "
-                  [attr.title]="row.late"
-                  (click)="viewer.open(row.index)"
-                >
-                  {{ clips }}
-                  @if (row.late) {
-                    <span class="late" data-testid="clip-late" aria-hidden="true">· late</span>
-                  }
-                </button>
+                @if (playable()) {
+                  <button
+                    type="button"
+                    class="clips"
+                    data-testid="clip-badge"
+                    [attr.aria-label]="
+                      'The clips of attempt ' +
+                      row.index +
+                      ': ' +
+                      clips +
+                      (row.late ? '. ' + row.late : '')
+                    "
+                    [attr.title]="row.late"
+                    (click)="viewer.open(row.index)"
+                  >
+                    {{ clips }}
+                    @if (row.late) {
+                      <span class="late" data-testid="clip-late" aria-hidden="true">· late</span>
+                    }
+                  </button>
+                } @else {
+                  <span
+                    class="clips elsewhere"
+                    data-testid="clip-badge"
+                    title="The clips are on the device that recorded them."
+                    >{{ clips }}</span
+                  >
+                }
               }
             </span>
           </li>
@@ -254,11 +270,20 @@ function solveRow(attempt: AttemptRecord): SolveRow {
     .late {
       color: var(--warn);
     }
+
+    .elsewhere {
+      color: var(--text-muted);
+    }
   `,
 })
 export class SolveList {
   /** The session's attempts, by index. */
-  readonly attempts = input.required<readonly AttemptRecord[]>();
+  readonly attempts = input.required<readonly ListedAttempt[]>();
+  /**
+   * The clip badges open the clip viewer: the clips are on this device. False for a session of the
+   * cloud's index alone (T3.1), whose clips are on the device that recorded them.
+   */
+  readonly playable = input(true);
   /** Show only the newest this many, with the footer; null (the default) shows them all. */
   readonly limit = input<number | null>(null);
   /** The session, whose page the footer's "See all" opens; no footer without it. */
@@ -283,10 +308,10 @@ export class SolveList {
 }
 
 /** The newest `limit` attempts (all of them for null), newest first. */
-export function newest(
-  attempts: readonly AttemptRecord[],
+export function newest<T extends ListedAttempt>(
+  attempts: readonly T[],
   limit: number | null,
-): readonly AttemptRecord[] {
+): readonly T[] {
   const shown = limit === null ? attempts : attempts.slice(Math.max(0, attempts.length - limit));
   return [...shown].reverse();
 }

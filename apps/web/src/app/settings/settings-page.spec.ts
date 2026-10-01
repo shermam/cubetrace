@@ -383,9 +383,11 @@ describe('SettingsPage', () => {
     expect(account.id).toBe('account');
     expect(account.querySelector('h2')?.textContent).toBe('Account');
     expect(text(fixture, 'account-hint')).toBe(
-      'For now, signing in with Google only records your name, your email and the label of this ' +
-        'device, “Linux laptop”, in your cubetrace account: nothing is uploaded yet. The account ' +
-        'is there for the cloud index of your sessions and their uploads, which come next.',
+      'Signing in with Google records your name, your email and the label of this device, ' +
+        '“Linux laptop”, in your cubetrace account, and keeps an index of your sessions there: ' +
+        'their records without the moves, so that the Sessions page of each of your devices lists ' +
+        'them all (demo sessions stay on the device), but nothing is uploaded yet: the clips stay ' +
+        'on the device that recorded them until the uploads, which come next.',
     );
     expect(backend.loads).toBe(0);
 

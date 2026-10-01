@@ -9,8 +9,10 @@ import {
   untracked,
 } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import type { AttemptRecord, SessionRecord } from '@cubetrace/core';
+import { sessionOfDocument, type AttemptRecord, type SessionRecord } from '@cubetrace/core';
 
+import { AuthService } from '../auth/auth-service';
+import { SessionIndexService, type CloudProblem } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
 import { SessionService } from '../session/session-service';
@@ -20,18 +22,34 @@ import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
 import { ClipViewer } from '../timer/clip-viewer';
 import { ClipViewing } from '../timer/clip-viewing';
-import { SolveList } from '../timer/solve-list';
+import { SolveList, type ListedAttempt } from '../timer/solve-list';
 import { exportFileName } from './session-export';
 
 const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-/** The session the page shows, with its attempts. */
-interface Shown {
+/** A session of this device, with its attempts as its files have them. */
+interface DeviceSession {
+  readonly source: 'device';
   readonly session: SessionRecord;
   readonly attempts: readonly AttemptRecord[];
+}
+
+/**
+ * A session of the cloud's index that this device does not have (T3.1): read-only, its attempts
+ * without their moves, and those whose documents could not be read.
+ */
+interface CloudOnlySession {
+  readonly source: 'cloud';
+  readonly session: SessionRecord;
+  readonly attempts: readonly ListedAttempt[];
+  readonly unreadable: readonly CloudProblem[];
+}
+
+/** The session the page shows. */
+type Shown = (DeviceSession | CloudOnlySession) & {
   /** The session the timer is recording: it changes as the attempts come. */
   readonly current: boolean;
-}
+};
 
 /** "laptop (FaceTime HD Camera), phone-front": the cameras of `session`; "none" without one. */
 export function camerasText(session: SessionRecord): string {
@@ -44,7 +62,7 @@ export function camerasText(session: SessionRecord): string {
 }
 
 /** "30 clips, 120.3 MB": the clips of `attempts` and their MP4s' bytes; "none" without one. */
-export function clipsText(attempts: readonly AttemptRecord[]): string {
+export function clipsText(attempts: readonly Pick<AttemptRecord, 'video'>[]): string {
   const clips = attempts.flatMap((attempt) => attempt.video);
   const bytes = clips.reduce((sum, clip) => sum + clip.bytes, 0);
   return clips.length === 0
@@ -59,7 +77,9 @@ export function clipsText(attempts: readonly AttemptRecord[]): string {
  * badge opens the clip viewer (with Download) on that attempt's files, in this session's folder;
  * Export and Delete as on the Sessions page (after a deletion, back to it). The session the timer is
  * recording is shown from `SessionService`'s signals, so the page follows its attempts as they come;
- * another one is read once from the store.
+ * another one is read once from the store. Since T3.1, a session this device does not have is read
+ * from the account's index in the cloud, signed in: read-only, its attempts without their moves, no
+ * clip to play and nothing to export or delete here, which the page says.
  */
 @Component({
   selector: 'app-session-page',
@@ -73,7 +93,17 @@ export function clipsText(attempts: readonly AttemptRecord[]): string {
         @if (shown.current) {
           <span class="current" data-testid="session-current">current</span>
         }
+        @if (shown.source === 'cloud') {
+          <span class="place" data-testid="session-place">cloud</span>
+        }
       </p>
+      @if (shown.source === 'cloud') {
+        <p class="note" data-testid="session-cloud-note">
+          Recorded on {{ shown.session.host.label }}: this session is in your cloud index, not on
+          this device. Its clips and its moves stay on the device that recorded it, so no clip plays
+          here and nothing can be exported.
+        </p>
+      }
       <dl class="facts">
         <div>
           <dt>Device</dt>
@@ -124,7 +154,13 @@ export function clipsText(attempts: readonly AttemptRecord[]): string {
           </div>
         </dl>
       }
-      @if (confirming()) {
+      @if (shown.source === 'cloud') {
+        @for (problem of shown.unreadable; track problem.id) {
+          <p class="warning" data-testid="session-cloud-unreadable">
+            Left out: attempt {{ problem.id }} of the cloud: {{ problem.reason }}
+          </p>
+        }
+      } @else if (confirming()) {
         <div class="actions" role="group" aria-label="Confirm the deletion">
           <p>Delete this session, its {{ attemptCount(shown.attempts.length) }} and its clips?</p>
           <button type="button" class="danger" (click)="remove()">Delete</button>
@@ -144,7 +180,11 @@ export function clipsText(attempts: readonly AttemptRecord[]): string {
         <p class="muted" role="status" data-testid="session-page-notice">{{ notice }}</p>
       }
       <section class="attempts" aria-label="Attempts">
-        <app-solve-list [attempts]="shown.attempts" [showStats]="false" />
+        <app-solve-list
+          [attempts]="shown.attempts"
+          [showStats]="false"
+          [playable]="shown.source === 'device'"
+        />
       </section>
     } @else if (loadError(); as error) {
       <p class="error" role="alert" data-testid="session-error">{{ error }}</p>
@@ -185,8 +225,29 @@ export function clipsText(attempts: readonly AttemptRecord[]): string {
       color: var(--danger);
     }
 
+    .warning {
+      margin: var(--space-2) 0;
+      color: var(--warn);
+    }
+
     .when {
       font-weight: 600;
+    }
+
+    .place {
+      margin-left: var(--space-2);
+      padding: 0 var(--space-2);
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 400;
+    }
+
+    .note {
+      margin: var(--space-2) 0;
+      color: var(--text-muted);
+      font-size: 0.875rem;
     }
 
     .current {
@@ -259,6 +320,8 @@ export function clipsText(attempts: readonly AttemptRecord[]): string {
 export class SessionPage {
   private readonly sessions = inject(SessionService);
   private readonly storage = inject(StorageService);
+  private readonly auth = inject(AuthService);
+  private readonly index = inject(SessionIndexService);
   private readonly router = inject(Router);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
@@ -266,11 +329,11 @@ export class SessionPage {
 
   /** The session's id, from the address. */
   protected readonly id = signal('');
-  /** The session as read from the store, when it is not the current one. */
-  private readonly loaded = signal<{
-    session: SessionRecord;
-    attempts: readonly AttemptRecord[];
-  } | null>(null);
+  /**
+   * The session as read from the store when it is not the current one, or, when this device does not
+   * have it, from the cloud's index (T3.1).
+   */
+  private readonly loaded = signal<DeviceSession | CloudOnlySession | null>(null);
   /** Why the session could not be read (it is gone, or unreadable). */
   protected readonly loadError = signal<string | null>(null);
   protected readonly confirming = signal(false);
@@ -283,7 +346,12 @@ export class SessionPage {
     const id = this.id();
     const current = this.sessions.session();
     if (current?.id === id) {
-      return { session: current, attempts: this.sessions.attempts(), current: true };
+      return {
+        source: 'device',
+        session: current,
+        attempts: this.sessions.attempts(),
+        current: true,
+      };
     }
     const loaded = this.loaded();
     return loaded?.session.id === id ? { ...loaded, current: false } : null;
@@ -300,11 +368,11 @@ export class SessionPage {
     const shown = this.shown();
     return shown === null ? '' : clipsText(shown.attempts);
   });
-  /** The attempt whose clips the viewer shows; null while it is closed. */
+  /** The attempt whose clips the viewer shows; null while it is closed (and for the cloud's). */
   protected readonly viewed = computed(() => {
     const index = this.viewing.index();
     const shown = this.shown();
-    return index === null || shown === null
+    return index === null || shown?.source !== 'device'
       ? null
       : (shown.attempts.find((attempt) => attempt.index === index) ?? null);
   });
@@ -322,11 +390,13 @@ export class SessionPage {
       this.viewing.close();
     });
     // A session other than the current one is read from the store, once the stored current
-    // session is known (and again if the current one becomes another).
+    // session is known (and again if the current one becomes another), and, when this device does
+    // not have it, from the cloud's index: again when an account signs in or out.
     effect(() => {
       const id = this.id();
       const ready = this.sessions.ready();
       const current = this.currentId();
+      this.auth.cloud();
       if (ready && id !== '' && current !== id && !this.deleting) {
         untracked(() => {
           void this.load(id);
@@ -377,16 +447,46 @@ export class SessionPage {
   private async load(id: string): Promise<void> {
     const read = ++this.reads;
     this.loadError.set(null);
+    let message: string;
     try {
       const { session, attempts } = await this.sessions.exportSession(id);
       if (read === this.reads) {
-        this.loaded.set({ session, attempts });
+        this.loaded.set({ source: 'device', session, attempts });
+      }
+      return;
+    } catch (error: unknown) {
+      message = `This session could not be read: ${errorMessage(error)}`;
+    }
+    // Not on this device (or unreadable here): the cloud's index has it, if an account does.
+    try {
+      const cloud = await this.loadCloud(id);
+      if (cloud !== null) {
+        if (read === this.reads) {
+          this.loaded.set(cloud);
+        }
+        return;
       }
     } catch (error: unknown) {
-      if (read === this.reads) {
-        this.loaded.set(null);
-        this.loadError.set(`This session could not be read: ${errorMessage(error)}`);
-      }
+      message = `${message} Nor from the cloud: ${errorMessage(error)}`;
     }
+    if (read === this.reads) {
+      this.loaded.set(null);
+      this.loadError.set(message);
+    }
+  }
+
+  /** Session `id` from the cloud's index, read-only; null signed out or when it is not there. */
+  private async loadCloud(id: string): Promise<CloudOnlySession | null> {
+    const entry = await this.index.cloudSession(id);
+    if (entry === null) {
+      return null;
+    }
+    const attempts = await this.index.cloudAttempts(id);
+    return {
+      source: 'cloud',
+      session: sessionOfDocument(entry.document),
+      attempts: attempts?.entries.map((attempt) => attempt.document) ?? [],
+      unreadable: attempts?.unreadable ?? [],
+    };
   }
 }

@@ -1,7 +1,10 @@
-import { Component, DOCUMENT, inject, signal } from '@angular/core';
+import { Component, DOCUMENT, computed, effect, inject, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { isSimulated, type CloudSession } from '@cubetrace/core';
 import { describeProblem, type StorageProblem } from '@cubetrace/storage';
 
+import { AuthService } from '../auth/auth-service';
+import { SessionIndexService, type CloudRead } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
 import { SessionService, type SessionList, type SessionListItem } from '../session/session-service';
@@ -10,8 +13,27 @@ import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
 import { StorageMeter } from '../shared/storage-meter';
 import { exportFileName } from './session-export';
+import {
+  PLACE_LABELS,
+  hostLabels,
+  mergeSessions,
+  withCurrent,
+  type MergedSession,
+} from './session-merge';
 
 const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+/** The cloud's sessions the page lists, the newest (T3.1). */
+export const CLOUD_SESSIONS_LISTED = 100;
+
+/** The latest line of `notes` that the session index wrote (`cloud: …`), without its prefix. */
+function lastCloudNote(notes: string): string | null {
+  const line = notes
+    .split('\n')
+    .reverse()
+    .find((text) => text.startsWith('cloud: '));
+  return line === undefined ? null : line.slice('cloud: '.length);
+}
 
 /**
  * `/sessions` (docs/PLAN.md, T1.6b): the stored sessions, newest first, with their date, host,
@@ -23,7 +45,12 @@ const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle
  * that failed; an export or a deletion that failed is said in its row. Since T2.4 each row says how
  * many clips its attempts have and their size, and the storage meter is above the list; the export
  * stays the JSON records only, and a note says where the clips are downloaded. Since T2.7 each
- * row's date opens the session's page (`SessionPage`), with all its attempts and their clips.
+ * row's date opens the session's page (`SessionPage`), with all its attempts and their clips. The
+ * current session's row follows the timer's attempts while the page is open. Since T3.1, with an
+ * account signed in, the page also lists the sessions of the account's index in the cloud, merged
+ * with this device's by id, each with a badge (this device, cloud, both), a filter by device (the
+ * host labels seen) and a link to the QA view; a session of the cloud alone opens a read-only page.
+ * Signed out, it is as before.
  */
 @Component({
   selector: 'app-sessions-page',
@@ -35,10 +62,34 @@ const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle
       Export saves a session's records as one JSON file, without its video. The clips of an attempt
       are downloaded from its clip badge on the session's page, which its date opens.
     </p>
+    @if (signedIn()) {
+      <div class="cloud" data-testid="sessions-cloud">
+        <p class="muted note">
+          Signed in, the sessions of this device go to your cloud index, without their files
+          (nothing is uploaded yet), and your other devices' sessions are listed here too.
+        </p>
+        <div class="tools">
+          <label for="device-filter">Device</label>
+          <select id="device-filter" data-testid="device-filter" (change)="filterBy($event)">
+            <option value="" [selected]="device() === null">All devices</option>
+            @for (label of devices(); track label) {
+              <option [value]="label" [selected]="device() === label">{{ label }}</option>
+            }
+          </select>
+          <a routerLink="/qa" data-testid="qa-link">QA view</a>
+        </div>
+        @if (cloudStatus(); as status) {
+          <p class="muted" data-testid="cloud-status">{{ status }}</p>
+        }
+        @if (cloudError(); as error) {
+          <p class="warning" role="alert" data-testid="cloud-error">{{ error }}</p>
+        }
+      </div>
+    }
     @if (error(); as message) {
       <p class="error" role="alert" data-testid="sessions-error">{{ message }}</p>
     } @else if (list(); as list) {
-      @if (list.sessions.length === 0 && list.unreadable.length === 0) {
+      @if (rows().length === 0 && list.unreadable.length === 0) {
         <p class="muted" data-testid="no-sessions">
           No sessions yet: the timer records one from the first solve.
         </p>
@@ -72,48 +123,86 @@ const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle
               }
             </li>
           }
-          @for (item of list.sessions; track item.session.id) {
-            <li data-testid="session-row" [attr.data-session]="item.session.id">
+          @for (row of shownRows(); track row.id) {
+            <li
+              data-testid="session-row"
+              [attr.data-session]="row.id"
+              [attr.data-place]="row.place"
+            >
               <div class="what">
                 <p class="when">
-                  <a [routerLink]="['/sessions', item.session.id]" data-testid="session-link">{{
-                    when(item.session.createdMs)
+                  <a [routerLink]="['/sessions', row.id]" data-testid="session-link">{{
+                    when(row.session.createdMs)
                   }}</a>
-                  @if (item.current) {
+                  @if (row.local?.current) {
                     <span class="current">current</span>
                   }
-                </p>
-                <p class="muted">
-                  {{ item.session.host.label }} · {{ item.session.cube.model }} ·
-                  <span data-testid="session-attempts">{{ attemptCount(item.attempts) }}</span> ·
-                  mean <span class="mono">{{ item.mean }}</span>
-                  @if (item.clips > 0) {
-                    ·
-                    <span data-testid="session-clips" [attr.data-bytes]="item.clipBytes">{{
-                      clipsText(item)
-                    }}</span>
+                  @if (signedIn()) {
+                    <span
+                      class="place"
+                      data-testid="session-place"
+                      [attr.data-place]="row.place"
+                      [attr.data-pending]="row.cloud?.pending ? '' : null"
+                      [title]="placeTitle(row)"
+                      >{{ placeLabel(row) }}</span
+                    >
                   }
                 </p>
-                @for (problem of item.unreadable; track problem.path) {
-                  <p class="warning path" data-testid="session-left-out">
-                    Left out: {{ describe(problem) }}
+                @if (row.local; as item) {
+                  <p class="muted">
+                    {{ item.session.host.label }} · {{ item.session.cube.model }} ·
+                    <span data-testid="session-attempts">{{ attemptCount(item.attempts) }}</span> ·
+                    mean <span class="mono">{{ item.mean }}</span>
+                    @if (item.clips > 0) {
+                      ·
+                      <span data-testid="session-clips" [attr.data-bytes]="item.clipBytes">{{
+                        clipsText(item)
+                      }}</span>
+                    }
+                  </p>
+                  @for (problem of item.unreadable; track problem.path) {
+                    <p class="warning path" data-testid="session-left-out">
+                      Left out: {{ describe(problem) }}
+                    </p>
+                  }
+                } @else {
+                  <p class="muted">
+                    {{ row.session.host.label }} · {{ row.session.cube.model }} ·
+                    <span data-testid="session-attempts">{{
+                      attemptCount(row.session.summary.attempts)
+                    }}</span>
+                    · recorded on another device
                   </p>
                 }
-                @if (failure()?.id === item.session.id) {
+                @if (cloudProblem(row); as problem) {
+                  <p class="warning" data-testid="session-cloud-problem">
+                    Not in the cloud: {{ problem }}
+                  </p>
+                }
+                @if (failure()?.id === row.id) {
                   <p class="error" role="alert" data-testid="row-error">{{ failure()?.message }}</p>
                 }
               </div>
-              @if (confirming() === item.session.id) {
-                <div class="actions" role="group" aria-label="Confirm the deletion">
-                  <p>Delete this session and its {{ attemptCount(item.attempts) }}?</p>
-                  <button type="button" class="danger" (click)="remove(item)">Delete</button>
-                  <button type="button" (click)="confirming.set(null)">Cancel</button>
-                </div>
-              } @else {
-                <div class="actions">
-                  <button type="button" (click)="download(item)">Export</button>
-                  <button type="button" (click)="confirming.set(item.session.id)">Delete…</button>
-                </div>
+              @if (row.local; as item) {
+                @if (confirming() === row.id) {
+                  <div class="actions" role="group" aria-label="Confirm the deletion">
+                    <p>
+                      Delete this session and its {{ attemptCount(item.attempts)
+                      }}{{
+                        row.place === 'both'
+                          ? ' from this device? Its index in the cloud stays.'
+                          : '?'
+                      }}
+                    </p>
+                    <button type="button" class="danger" (click)="remove(item)">Delete</button>
+                    <button type="button" (click)="confirming.set(null)">Cancel</button>
+                  </div>
+                } @else {
+                  <div class="actions">
+                    <button type="button" (click)="download(item)">Export</button>
+                    <button type="button" (click)="confirming.set(row.id)">Delete…</button>
+                  </div>
+                }
               }
             </li>
           }
@@ -194,6 +283,47 @@ const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle
       font-size: 0.75rem;
     }
 
+    .place {
+      margin-left: var(--space-2);
+      padding: 0 var(--space-2);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 400;
+
+      &[data-place='cloud'] {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      &[data-place='both'] {
+        border-color: var(--ok);
+        color: var(--ok);
+      }
+
+      &[data-pending] {
+        border-style: dashed;
+      }
+    }
+
+    .cloud {
+      display: grid;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+
+      .note {
+        margin: 0;
+      }
+    }
+
+    .tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2) var(--space-3);
+      align-items: center;
+    }
+
     .mono {
       font-family: var(--font-mono);
     }
@@ -215,6 +345,8 @@ const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle
 export class SessionsPage {
   private readonly session = inject(SessionService);
   private readonly storage = inject(StorageService);
+  private readonly auth = inject(AuthService);
+  private readonly index = inject(SessionIndexService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
 
@@ -227,9 +359,84 @@ export class SessionsPage {
   /** The last export or deletion that failed, and why, shown in the session's row. */
   protected readonly failure = signal<{ id: string; message: string } | null>(null);
   protected readonly notice = signal<string | null>(null);
+  /** The cloud's sessions, once read; null signed out and while they are read (T3.1). */
+  private readonly cloud = signal<CloudRead<CloudSession> | null>(null);
+  /** Why the cloud's sessions could not be read. */
+  protected readonly cloudError = signal<string | null>(null);
+  /** The host label the rows are filtered by; null for every device. */
+  protected readonly device = signal<string | null>(null);
+
+  /** An account is signed in: the cloud's sessions are listed too. */
+  protected readonly signedIn = computed(() => this.auth.cloud() !== null);
+  /** This device's sessions, the current one as the timer has it now. */
+  private readonly localItems = computed(() => {
+    const list = this.list();
+    return list === null
+      ? []
+      : withCurrent(list.sessions, this.session.session(), this.session.attempts());
+  });
+  /** Every session: this device's, and, signed in, the cloud's, merged by id, newest first. */
+  protected readonly rows = computed((): MergedSession[] => {
+    const local = this.localItems();
+    if (!this.signedIn()) {
+      return local.map((item) => ({
+        id: item.session.id,
+        session: item.session,
+        place: 'device',
+        local: item,
+        cloud: null,
+      }));
+    }
+    return mergeSessions(local, this.cloud()?.entries ?? [], this.index.written());
+  });
+  protected readonly devices = computed(() => hostLabels(this.rows()));
+  protected readonly shownRows = computed(() => {
+    const device = this.device();
+    return device === null
+      ? this.rows()
+      : this.rows().filter((row) => row.session.host.label === device);
+  });
+  /** What the page says of the cloud's listing, when there is something to say. */
+  protected readonly cloudStatus = computed(() => {
+    const cloud = this.cloud();
+    if (cloud === null) {
+      return this.cloudError() === null ? "Reading your cloud's sessions…" : null;
+    }
+    const parts: string[] = [];
+    if (cloud.fromCache) {
+      parts.push("Offline: your cloud's sessions as this device last read them.");
+    }
+    if (cloud.entries.length + cloud.unreadable.length >= CLOUD_SESSIONS_LISTED) {
+      parts.push(`The cloud's ${String(CLOUD_SESSIONS_LISTED)} newest sessions are listed.`);
+    }
+    if (cloud.unreadable.length > 0) {
+      const count = cloud.unreadable.length;
+      parts.push(
+        `${String(count)} of the cloud's sessions could not be read (${cloud.unreadable[0].reason})`,
+      );
+    }
+    return parts.length === 0 ? null : parts.join(' ');
+  });
+
+  /** Incremented by every read of the cloud: a slower, older one then knows it lost. */
+  private cloudReads = 0;
 
   constructor() {
     void this.load();
+    // The cloud's sessions, read again when an account signs in, and dropped when it signs out.
+    effect(() => {
+      const account = this.auth.cloud();
+      untracked(() => {
+        if (account === null) {
+          this.cloudReads++;
+          this.cloud.set(null);
+          this.cloudError.set(null);
+          this.device.set(null);
+        } else {
+          void this.loadCloud();
+        }
+      });
+    });
   }
 
   protected when(ms: number): string {
@@ -249,6 +456,42 @@ export class SessionsPage {
 
   protected describe(problem: StorageProblem): string {
     return describeProblem(problem);
+  }
+
+  protected placeLabel(row: MergedSession): string {
+    return PLACE_LABELS[row.place];
+  }
+
+  /** The badge's title: what the place means for the session. */
+  protected placeTitle(row: MergedSession): string {
+    switch (row.place) {
+      case 'device':
+        return isSimulated(row.session)
+          ? 'A demo session (the fake cube): it stays on this device.'
+          : 'On this device only: not in your cloud index yet.';
+      case 'cloud':
+        return `In your cloud index, recorded on ${row.session.host.label}: its clips and moves are on that device.`;
+      case 'both':
+        return row.cloud?.pending === true
+          ? 'On this device and in your cloud index; some of its changes wait to be sent.'
+          : 'On this device and in your cloud index.';
+    }
+  }
+
+  /**
+   * Why a session of this device is not in the cloud: the refusal of this page load, or the last
+   * one its notes keep (`cloud: …`); null when it is there, or signed out.
+   */
+  protected cloudProblem(row: MergedSession): string | null {
+    if (!this.signedIn() || row.place !== 'device') {
+      return null;
+    }
+    return this.index.failures().get(row.id) ?? lastCloudNote(row.session.notes);
+  }
+
+  protected filterBy(event: Event): void {
+    const value = event.target instanceof HTMLSelectElement ? event.target.value : '';
+    this.device.set(value === '' ? null : value);
   }
 
   protected async download(item: SessionListItem): Promise<void> {
@@ -300,6 +543,22 @@ export class SessionsPage {
       this.error.set(null);
     } catch (error: unknown) {
       this.error.set(`The sessions could not be read: ${errorMessage(error)}`);
+    }
+  }
+
+  private async loadCloud(): Promise<void> {
+    const read = ++this.cloudReads;
+    this.cloudError.set(null);
+    try {
+      const cloud = await this.index.cloudSessions(CLOUD_SESSIONS_LISTED);
+      if (read === this.cloudReads) {
+        this.cloud.set(cloud);
+      }
+    } catch (error: unknown) {
+      if (read === this.cloudReads) {
+        this.cloud.set(null);
+        this.cloudError.set(`Your cloud's sessions could not be read: ${errorMessage(error)}`);
+      }
     }
   }
 }

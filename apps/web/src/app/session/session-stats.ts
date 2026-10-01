@@ -24,7 +24,7 @@ export interface SessionStats {
   readonly ao100: string;
 }
 
-export function sessionStats(attempts: readonly AttemptRecord[]): SessionStats {
+export function sessionStats(attempts: readonly Pick<AttemptRecord, 'result'>[]): SessionStats {
   const times = attemptTimes(attempts);
   const average = mean(times);
   const fastest = best(times);
@@ -48,6 +48,6 @@ function averageOf(times: readonly number[], n: 5 | 12 | 100): string {
 }
 
 /** The mean shown for a session on the Sessions page: as {@link SessionStats.mean}. */
-export function sessionMean(attempts: readonly AttemptRecord[]): string {
+export function sessionMean(attempts: readonly Pick<AttemptRecord, 'result'>[]): string {
   return sessionStats(attempts).mean;
 }

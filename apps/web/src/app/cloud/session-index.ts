@@ -1,4 +1,4 @@
-import { Injectable, effect, inject, signal, untracked } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import {
   attemptFiles,
   cloudAttempt,
@@ -97,7 +97,8 @@ export class SessionIndexService {
   private readonly store = inject(SESSION_STORAGE).store;
 
   private readonly failuresSignal = signal<ReadonlyMap<string, string>>(new Map());
-  private readonly unconfirmedSignal = signal(0);
+  /** The writes of this page load that the server has not confirmed, by session. */
+  private readonly waitingSignal = signal<ReadonlyMap<string, number>>(new Map());
   private readonly lastSyncSignal = signal<number | null>(null);
   private readonly writtenSignal = signal<ReadonlySet<string>>(new Set());
   private readonly catchingUpSignal = signal(false);
@@ -108,7 +109,11 @@ export class SessionIndexService {
    */
   readonly failures = this.failuresSignal.asReadonly();
   /** The writes of this page load that the server has not confirmed yet: offline, they wait. */
-  readonly unconfirmed = this.unconfirmedSignal.asReadonly();
+  readonly unconfirmed = computed(() =>
+    [...this.waitingSignal().values()].reduce((sum, count) => sum + count, 0),
+  );
+  /** The sessions with writes of this page load that the server has not confirmed yet. */
+  readonly waiting = computed(() => new Set(this.waitingSignal().keys()));
   /**
    * When the server last confirmed a write of the index from this device for the account signed in
    * (host clock, kept across page loads); null before the first, and without an account.
@@ -350,6 +355,7 @@ export class SessionIndexService {
           break;
         }
         const session = this.sessions.get(listed.id) ?? listed;
+        this.sessions.set(session.id, session);
         const documents: CloudAttempt[] = [];
         for (const attempt of attempts) {
           const upload = await this.upload(attempt);
@@ -427,7 +433,7 @@ export class SessionIndexService {
     what: string,
     write: (backend: AccountBackend) => Promise<void>,
   ): void {
-    this.unconfirmedSignal.update((count) => count + 1);
+    this.wait(sessionId, 1);
     let sent: Promise<void>;
     try {
       sent = write(account.backend);
@@ -436,17 +442,31 @@ export class SessionIndexService {
     }
     void sent.then(
       () => {
-        this.unconfirmedSignal.update((count) => count - 1);
+        this.wait(sessionId, -1);
         this.confirmed(account.uid);
       },
       (error: unknown) => {
-        this.unconfirmedSignal.update((count) => count - 1);
+        this.wait(sessionId, -1);
         this.failed(
+          account.uid,
           sessionId,
           `${what} could not be indexed: ${errorMessage(error).replace(/\.$/, '')}.`,
         );
       },
     );
+  }
+
+  private wait(sessionId: string, change: 1 | -1): void {
+    this.waitingSignal.update((waiting) => {
+      const next = new Map(waiting);
+      const count = (next.get(sessionId) ?? 0) + change;
+      if (count > 0) {
+        next.set(sessionId, count);
+      } else {
+        next.delete(sessionId);
+      }
+      return next;
+    });
   }
 
   private confirmed(uid: string): void {
@@ -459,8 +479,25 @@ export class SessionIndexService {
     }
   }
 
-  /** Says once per session and page load that its documents could not be written, and why. */
-  private failed(sessionId: string, message: string): void {
+  /**
+   * A write of session `sessionId` was refused: the session is not all in the index, so its next
+   * writes carry its own document and the next catch-up writes it whole; and it is said once per
+   * session and page load, with why.
+   */
+  private failed(uid: string, sessionId: string, message: string): void {
+    if (this.writtenSignal().has(sessionId)) {
+      this.writtenSignal.update((written) => {
+        const next = new Set(written);
+        next.delete(sessionId);
+        return next;
+      });
+    }
+    this.editState((state) => {
+      const account = state[uid] as AccountState | undefined;
+      if (account !== undefined) {
+        account.sessions = account.sessions.filter((id) => id !== sessionId);
+      }
+    });
     if (this.reported.has(sessionId)) {
       return;
     }

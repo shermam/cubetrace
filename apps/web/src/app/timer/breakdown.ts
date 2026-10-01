@@ -85,7 +85,7 @@ function segmentTitle(phase: PhaseAmount): string {
 }
 
 /** The phases of an attempt as bar input: each phase's duration (`endMs − startMs`) and moves. */
-export function attemptPhases(attempt: AttemptRecord): PhaseAmount[] {
+export function attemptPhases(attempt: Pick<AttemptRecord, 'phases'>): PhaseAmount[] {
   return attempt.phases.map((p) =>
     p.slot === undefined
       ? { name: p.name, ms: p.endMs - p.startMs, moves: p.moves }
