@@ -1,21 +1,8 @@
 // Public API of @cubetrace/upload: the upload queue of phase 3 (docs/PLAN.md T3.3), over the device's
 // sessions (the session store and the origin private file system), the upload's functions and the
 // PUTs to signed URLs. Plain TypeScript: no Angular, and no browser global is touched at import time.
-export type {
-  ConfirmRequest,
-  ConfirmResult,
-  FileToSign,
-  SignRequest,
-  SignedFile,
-} from './api';
-export {
-  CloudError,
-  JSON_TYPE,
-  MP4_TYPE,
-  TRANSIENT_CODES,
-  cloudErrorOf,
-  resetsAtOf,
-} from './api';
+export type { ConfirmRequest, ConfirmResult, FileToSign, SignRequest, SignedFile } from './api';
+export { CloudError, JSON_TYPE, MP4_TYPE, TRANSIENT_CODES, cloudErrorOf, resetsAtOf } from './api';
 export { RETRY_FIRST_MS, RETRY_MAX_MS, retryDelay } from './backoff';
 export type { AttemptFile, UploadFileKind } from './files';
 export {
@@ -55,6 +42,8 @@ export type {
 export {
   INDEX_WAIT_MS,
   PARALLEL_UPLOADS,
+  QUOTA_PAUSE_MIN_MS,
+  SESSION_QUIET_MS,
   STORAGE_DELETE_FROM,
   STORAGE_DELETE_TO,
   URL_LIFETIME_MS,
@@ -75,12 +64,7 @@ export {
   parseQueueState,
   queueStateText,
 } from './state';
-export type { FakeCall, FakePut } from './testing';
-export {
-  FakeBucket,
-  FakeUploadCloud,
-  FakeUploadEnvironment,
-  FakeUploadHttp,
-} from './testing';
+export type { FakeCall, FakePut, FakeResponse } from './testing';
+export { FakeBucket, FakeUploadCloud, FakeUploadEnvironment, FakeUploadHttp } from './testing';
 export type { XhrLike } from './xhr';
 export { xhrHttp } from './xhr';

@@ -1,7 +1,9 @@
 // The upload queue (docs/PLAN.md T3.3, docs/ARCHITECTURE.md "Uploads"): every attempt of the
 // device's sessions, once its record is final, goes to the dataset's bucket through signed URLs:
 // its attempt.json, each clip's MP4 and frames file, and the session's session.json with the newest
-// of the session's attempts in the queue, again whenever it changed since it was last confirmed.
+// of the session's attempts in the queue, again whenever it changed since it was last confirmed, once
+// it has stayed the same for SESSION_QUIET_MS (every attempt changes its summary: a session being
+// recorded sends it in its pauses and at its end, not with every attempt).
 //
 // - Order: the oldest session first, its attempts by index, each attempt's files in their order
 //   (attempt.json, then each clip's MP4 and frames file, then session.json).
@@ -9,12 +11,12 @@
 //   files in one call (signUpload counts every signature against the day's quota), sent as a Blob
 //   with exactly the headers the signature asks for, then confirmed (confirmUpload), which makes it
 //   done.
-// - A try that the network or the server failed (no response, a 5xx, a function's transient code)
-//   is tried again after 1 s, 2 s, 4 s, … up to 5 min, with jitter; an attempt the index has not
-//   received yet (`not-found`) waits the same way. A 4xx is not tried again (the file is failed,
-//   until Retry), but for a URL that expired, which is signed again once. `resource-exhausted`, the
-//   day's quota, pauses the queue until it resets; offline, or off Wi-Fi with "Wi-Fi only", nothing
-//   is sent.
+// - A try that the network or the server failed (no response, a 5xx, a 408 or a 429, a function's
+//   transient code) is tried again after 1 s, 2 s, 4 s, … up to 5 min, with jitter; an attempt the
+//   index has not received yet (`not-found`) waits the same way. Any other 4xx is not tried again
+//   (the file is failed, until Retry), but for a URL that expired, which is signed again once.
+//   `resource-exhausted`, the day's quota, pauses the queue until it resets; offline, or off Wi-Fi
+//   with "Wi-Fi only", nothing is sent.
 // - The state is uploads.json (state.ts), so that a reload resumes: what is done stays done, a file
 //   that was being sent is confirmed first (its PUT may have finished) and sent again otherwise.
 //   Rebuilt without it (another device, or the file lost), the index's `upload` of each attempt says
@@ -43,6 +45,7 @@ import {
 import { networkHold, type NetworkHold } from './network';
 import type {
   AttemptRef,
+  StorageEstimate,
   UploadCloud,
   UploadEnvironment,
   UploadHttp,
@@ -75,6 +78,22 @@ export const URL_MARGIN_MS = 60 * 1000;
 /** How long the queue waits for the index's writes to reach the server before it signs anyway. */
 export const INDEX_WAIT_MS = 30 * 1000;
 
+/**
+ * A session.json that changed is sent once it has stayed the same this long: a session being
+ * recorded changes it with every attempt (its summary), and each upload of it counts a file against
+ * the day's quota.
+ */
+export const SESSION_QUIET_MS = 2 * 60 * 1000;
+
+/**
+ * A quota pause lasts at least this long, whatever the refusal says: a device whose clock runs ahead
+ * of the server's would otherwise ask again and again before the server's day resets.
+ */
+export const QUOTA_PAUSE_MIN_MS = 60 * 1000;
+
+/** The 4xx answers that say to come back later: tried again as a 5xx is. */
+const TRANSIENT_STATUSES: readonly number[] = [408, 429];
+
 /** The storage share from which uploaded clips are deleted, and the share it brings it down to. */
 export const STORAGE_DELETE_FROM = 0.7;
 export const STORAGE_DELETE_TO = 0.6;
@@ -83,7 +102,7 @@ export const STORAGE_DELETE_TO = 0.6;
 export const RESCAN_MS = 10 * 60 * 1000;
 
 /** uploads.json is written at most this long after a change. */
-export const STATE_WRITE_DELAY_MS = 500;
+export const STATE_WRITE_DELAY_MS = 1000;
 
 /** Progress is told at most this often. */
 export const PROGRESS_INTERVAL_MS = 200;
@@ -99,8 +118,7 @@ export type QueueStatus = 'stopped' | 'waiting' | 'starting' | 'running';
 
 /** What holds the queue: the day's quota until a time, or the network. */
 export type QueuePause =
-  | { readonly reason: 'quota'; readonly untilMs: number }
-  | { readonly reason: NetworkHold };
+  { readonly reason: 'quota'; readonly untilMs: number } | { readonly reason: NetworkHold };
 
 /**
  * An attempt's upload as the pages show it: `waiting` (its record is not final yet, a clip is still
@@ -215,6 +233,11 @@ interface SessionTask {
   text: string | null;
   hash: string | null;
   bytes: number;
+  /**
+   * When the app last saved a change of it in this page load (host clock): its session.json waits
+   * for {@link SESSION_QUIET_MS} after; −∞ for a session read from the device, at rest.
+   */
+  changedMs: number;
   /** The entry of uploads.json, changed in place. */
   stored: StoredSession;
   /** By index. */
@@ -260,6 +283,9 @@ export class UploadQueue {
   #wakeAtMs: number | null = null;
   #quotaTimer: unknown = null;
   #rescanTimer: unknown = null;
+  /** Plans the session.json of a session whose quiet time is over; when it is due. */
+  #riderTimer: unknown = null;
+  #riderAtMs: number | null = null;
   #writeTimer: unknown = null;
   #writing: Promise<void> | null = null;
   #dirty = false;
@@ -297,6 +323,8 @@ export class UploadQueue {
     this.#started = true;
     const stopping = new AbortController();
     this.#stopping = stopping;
+    /** `stop()` was called meanwhile (a function: each await may change it). */
+    const stopped = (): boolean => stopping.signal.aborted;
     this.#status = 'waiting';
     this.#notify();
     try {
@@ -304,7 +332,7 @@ export class UploadQueue {
     } catch {
       return; // Stopped while waiting for the lock.
     }
-    if (stopping.signal.aborted) {
+    if (stopped()) {
       this.#releaseLock?.();
       this.#releaseLock = null;
       return;
@@ -313,7 +341,7 @@ export class UploadQueue {
     this.#notify();
     await this.#readState();
     this.#open();
-    if (stopping.signal.aborted) {
+    if (stopped()) {
       return;
     }
     this.#unwatchNetwork = this.#env.watchNetwork(() => {
@@ -322,7 +350,7 @@ export class UploadQueue {
     this.#hold = networkHold(this.#env.network(), this.#policy.wifiOnly);
     this.#armQuotaTimer();
     await this.#enqueue(() => this.#scanAll());
-    if (stopping.signal.aborted) {
+    if (stopped()) {
       return;
     }
     this.#status = 'running';
@@ -354,14 +382,15 @@ export class UploadQueue {
       this.#rescanTimer,
       this.#progressTimer,
       this.#writeTimer,
+      this.#riderTimer,
     ]) {
       if (timer !== null) {
         this.#env.clearTimeout(timer);
       }
     }
     this.#wakeTimer = this.#quotaTimer = this.#rescanTimer = this.#progressTimer = null;
-    this.#writeTimer = null;
-    this.#wakeAtMs = null;
+    this.#writeTimer = this.#riderTimer = null;
+    this.#wakeAtMs = this.#riderAtMs = null;
     this.#unwatchNetwork?.();
     this.#unwatchNetwork = null;
     // The operations queued run (against a state that is not written if it was never read).
@@ -389,10 +418,13 @@ export class UploadQueue {
     }
   }
 
-  /** A session's record was saved: its session.json goes again when it changed. */
+  /**
+   * A session's record was saved: its session.json goes again when it changed, once it has stayed
+   * the same for {@link SESSION_QUIET_MS}.
+   */
   sessionSaved(session: SessionRecord): void {
     void this.#enqueue(() => {
-      this.#takeSession(session);
+      this.#takeSession(session, true);
       this.#pump();
     });
   }
@@ -412,7 +444,10 @@ export class UploadQueue {
     });
   }
 
-  /** An attempt was deleted from the device (Delete last): nothing of it is sent any more. */
+  /**
+   * An attempt was deleted from the device (Delete last): nothing of it is sent any more (what the
+   * bucket has of it stays, as its session's files do when a session is deleted).
+   */
   attemptDeleted(sessionId: string, index: number): void {
     void this.#enqueue(() => {
       const session = this.#sessions.get(sessionId);
@@ -421,6 +456,8 @@ export class UploadQueue {
         return;
       }
       this.#dropAttempt(session, attempt);
+      // The session.json it carried goes with another attempt.
+      this.#planRider(session);
       this.#persist();
       this.#pump();
     });
@@ -659,8 +696,11 @@ export class UploadQueue {
     this.#notify();
   }
 
-  /** The task of `record`'s session, made or brought up to date, with its session.json. */
-  #takeSession(record: SessionRecord): SessionTask {
+  /**
+   * The task of `record`'s session, made or brought up to date, with its session.json; `live`, a
+   * change the app has just saved, after which its session.json waits for {@link SESSION_QUIET_MS}.
+   */
+  #takeSession(record: SessionRecord, live = false): SessionTask {
     let session = this.#sessions.get(record.id);
     if (session === undefined) {
       session = {
@@ -670,6 +710,7 @@ export class UploadQueue {
         text: null,
         hash: null,
         bytes: 0,
+        changedMs: Number.NEGATIVE_INFINITY,
         stored: this.#storedSession(record.id),
         attempts: new Map(),
       };
@@ -687,8 +728,12 @@ export class UploadQueue {
       return session;
     }
     const text = sessionText(record);
+    const hash = textHash(text);
+    if (live && hash !== session.hash) {
+      session.changedMs = this.#env.now();
+    }
     session.text = text;
-    session.hash = textHash(text);
+    session.hash = hash;
     session.bytes = utf8Bytes(text);
     this.#planRider(session);
     return session;
@@ -897,9 +942,10 @@ export class UploadQueue {
   }
 
   /**
-   * session.json rides with one attempt of its session when it differs from the one confirmed: the
-   * newest attempt with files still to send (else the newest), so that a session of many attempts
-   * waiting sends it once, with the last. A rider not signed yet moves to the newest such attempt;
+   * session.json rides with one attempt of its session when it differs from the one confirmed, once
+   * it has stayed the same for {@link SESSION_QUIET_MS}: the newest attempt with files still to send
+   * (else the newest), so that a session of many attempts waiting sends it once, with the last. A
+   * rider not signed yet moves to the newest such attempt, or waits again when the session changed;
    * one signed, or being sent, stays (once it is confirmed, the next plan sends a newer text).
    */
   #planRider(session: SessionTask): void {
@@ -914,9 +960,14 @@ export class UploadQueue {
     );
     const begun = riders.find(({ file }) => file.active || file.signed !== null);
     const loose = riders.filter((rider) => rider !== begun);
-    if (session.stored.sessionJson?.hash === session.hash || begun !== undefined) {
+    const quietAtMs = session.changedMs + SESSION_QUIET_MS;
+    const waits = this.#env.now() < quietAtMs;
+    if (session.stored.sessionJson?.hash === session.hash || begun !== undefined || waits) {
       for (const { attempt } of loose) {
         this.#removeRider(attempt);
+      }
+      if (waits && session.stored.sessionJson?.hash !== session.hash) {
+        this.#armRiderTimer(quietAtMs);
       }
       return;
     }
@@ -950,6 +1001,35 @@ export class UploadQueue {
     attempt.files = attempt.files.filter((file) => file.path !== SESSION_JSON);
     Reflect.deleteProperty(attempt.stored.files, SESSION_JSON);
     this.#updateComplete(attempt);
+  }
+
+  /** Plans the session.json riders again at `atMs`, when a session's quiet time is over. */
+  #armRiderTimer(atMs: number): void {
+    if (this.#riderAtMs !== null && this.#riderAtMs <= atMs) {
+      return;
+    }
+    if (this.#riderTimer !== null) {
+      this.#env.clearTimeout(this.#riderTimer);
+    }
+    this.#riderAtMs = atMs;
+    this.#riderTimer = this.#env.setTimeout(
+      () => {
+        this.#riderTimer = null;
+        this.#riderAtMs = null;
+        if (this.#status === 'stopped') {
+          return;
+        }
+        void this.#enqueue(() => {
+          for (const session of this.#sessions.values()) {
+            this.#planRider(session);
+          }
+          this.#persist();
+          this.#notify();
+          this.#pump();
+        });
+      },
+      Math.max(0, atMs - this.#env.now()),
+    );
   }
 
   #dropAttempt(session: SessionTask, attempt: AttemptTask): void {
@@ -1029,9 +1109,11 @@ export class UploadQueue {
     const key = `${attempt.sessionId}/${attempt.folder}/${file.path}`;
     try {
       if (this.#confirmFirst.delete(key) || file.confirmFirst) {
+        // It may be in the bucket already (sent before a reload, or its confirmation failed): only
+        // a file the bucket does not have goes again.
         file.confirmFirst = false;
         file.stored.tries++;
-        if (await this.#confirm(attempt, file, true)) {
+        if ((await this.#confirm(attempt, file, true)) !== 'absent') {
           return;
         }
       }
@@ -1045,7 +1127,8 @@ export class UploadQueue {
       if (signed === null) {
         return;
       }
-      const body = file.body ?? (await this.#source.readFile(attempt.sessionId, attempt.index, file.path));
+      const body =
+        file.body ?? (await this.#source.readFile(attempt.sessionId, attempt.index, file.path));
       if (!this.#mayStart(file)) {
         return;
       }
@@ -1076,7 +1159,11 @@ export class UploadQueue {
       if (response.status >= 200 && response.status < 300) {
         file.sent = file.stored.bytes;
         await this.#confirm(attempt, file, false);
-      } else if (response.status === 0 || response.status >= 500) {
+      } else if (
+        response.status === 0 ||
+        response.status >= 500 ||
+        TRANSIENT_STATUSES.includes(response.status)
+      ) {
         this.#failed(
           file,
           'again',
@@ -1084,7 +1171,10 @@ export class UploadQueue {
             ? 'the upload did not reach the bucket (network error)'
             : `the bucket answered ${String(response.status)}${excerpt(response.body)}`,
         );
-      } else if (!file.resigned && (this.#env.now() >= file.usableUntilMs || /expired/i.test(response.body))) {
+      } else if (
+        !file.resigned &&
+        (this.#env.now() >= file.usableUntilMs || /expired/i.test(response.body))
+      ) {
         // The URL expired: signed again, once.
         file.resigned = true;
         this.#forgetSignature(file);
@@ -1240,10 +1330,16 @@ export class UploadQueue {
   }
 
   /**
-   * Confirms `file` in the bucket; true once it is done. `quietly`, for a file that may not have been
-   * sent (before a reload): not being there just means sending it.
+   * Confirms `file` in the bucket: `done` once it is; `absent` when the bucket does not have it as
+   * signed, which for a file that may not have been sent (`quietly`: before a reload, or after a
+   * confirmation that failed) just means sending it; `failed` when the call failed, the file then
+   * waiting for its next try (only the confirmation is tried again) or failed until Retry.
    */
-  async #confirm(attempt: AttemptTask, file: FileTask, quietly: boolean): Promise<boolean> {
+  async #confirm(
+    attempt: AttemptTask,
+    file: FileTask,
+    quietly: boolean,
+  ): Promise<'done' | 'absent' | 'failed'> {
     let result;
     try {
       result = await this.#cloud.confirmUpload({
@@ -1258,29 +1354,26 @@ export class UploadQueue {
         this.#forgetSignature(file);
         if (quietly) {
           file.stored.state = 'pending';
-        } else {
-          this.#failed(file, 'again', `the bucket did not confirm it: ${refusal.message}`);
+          return 'absent';
         }
-      } else if (refusal.code === 'resource-exhausted') {
-        this.#pauseForQuota(resetsAtOf(refusal) ?? nextUtcDay(this.#env.now()));
-        file.confirmFirst = true;
-        file.stored.state = 'pending';
+        this.#failed(file, 'again', `the bucket did not confirm it: ${refusal.message}`);
       } else if (TRANSIENT_CODES.includes(refusal.code)) {
-        // It is in the bucket; only the confirmation is tried again.
+        // It may be in the bucket: the confirmation is asked again first.
         file.confirmFirst = true;
         this.#failed(file, 'again', `confirmUpload: ${refusal.message}`);
       } else {
         this.#failed(file, 'refused', `confirmUpload: ${refusal.message}`);
       }
-      return false;
+      return 'failed';
     }
     const confirmed = result.confirmed.find((entry) => entry.path === file.path);
     if (confirmed === undefined) {
+      file.confirmFirst = true;
       this.#failed(file, 'again', 'confirmUpload did not confirm it');
-      return false;
+      return 'failed';
     }
     this.#done(attempt, file, confirmed.doneMs);
-    return true;
+    return 'done';
   }
 
   #done(attempt: AttemptTask, file: FileTask, doneMs: number): void {
@@ -1296,10 +1389,29 @@ export class UploadQueue {
     if (file.kind === 'session' && session !== undefined && file.stored.hash !== undefined) {
       session.stored.sessionJson = { hash: file.stored.hash, bytes: file.stored.bytes };
     }
+    if (file.kind === 'attempt' && attempt.record !== null) {
+      // The record changed while it was being sent (a clip attached meanwhile): the new one goes too.
+      const text = attemptText(attempt.record);
+      const hash = textHash(text);
+      if (hash !== file.stored.hash) {
+        const entry = pending(utf8Bytes(text), file.stored, hash);
+        attempt.stored.files[file.path] = entry;
+        attempt.files = attempt.files.map((task) =>
+          task === file ? this.#fileTask(file.path, entry) : task,
+        );
+      }
+    }
     const wasComplete = attempt.complete;
     this.#updateComplete(attempt);
     if (attempt.complete && !wasComplete && session !== undefined) {
-      this.#recent.unshift(this.#attemptView(session, attempt));
+      const view = this.#attemptView(session, attempt);
+      const again = this.#recent.findIndex(
+        (recent) => recent.sessionId === view.sessionId && recent.index === view.index,
+      );
+      if (again >= 0) {
+        this.#recent.splice(again, 1);
+      }
+      this.#recent.unshift(view);
       this.#recent.splice(RECENT_ATTEMPTS);
       this.#applyPolicySoon();
     }
@@ -1329,11 +1441,21 @@ export class UploadQueue {
     this.#notify();
   }
 
-  /** Wakes the queue when the first file waiting after a failure may go again. */
+  /**
+   * Wakes the queue when the first file waiting after a failure may go again. A file whose time has
+   * come already waits for something else (a slot, the network, the quota, its clips), each of which
+   * pumps the queue when it frees: it needs no wake.
+   */
   #armWake(): void {
+    const now = this.#env.now();
     let first: number | null = null;
     for (const file of this.#allFiles()) {
-      if (file.stored.state === 'pending' && file.retryAtMs !== null && !file.active) {
+      if (
+        file.stored.state === 'pending' &&
+        file.retryAtMs !== null &&
+        file.retryAtMs > now &&
+        !file.active
+      ) {
         first = first === null ? file.retryAtMs : Math.min(first, file.retryAtMs);
       }
     }
@@ -1359,8 +1481,9 @@ export class UploadQueue {
 
   // ---- What holds the queue ----
 
+  /** The day's quota is used up: nothing is signed until `untilMs` (at least a minute from now). */
   #pauseForQuota(untilMs: number): void {
-    this.#state.pausedUntilMs = untilMs;
+    this.#state.pausedUntilMs = Math.max(untilMs, this.#env.now() + QUOTA_PAUSE_MIN_MS);
     this.#persist();
     this.#armQuotaTimer();
     this.#notify();
@@ -1464,13 +1587,17 @@ export class UploadQueue {
         }
       }
     }
-    let storage = null;
+    let storage: StorageEstimate | null;
     try {
       storage = await this.#env.storage();
     } catch {
       storage = null;
     }
-    if (storage !== null && storage.quota > 0 && storage.usage > STORAGE_DELETE_FROM * storage.quota) {
+    if (
+      storage !== null &&
+      storage.quota > 0 &&
+      storage.usage > STORAGE_DELETE_FROM * storage.quota
+    ) {
       let toFree = storage.usage - STORAGE_DELETE_TO * storage.quota;
       for (const [attempt, files] of plan) {
         for (const path of files) {
@@ -1496,7 +1623,7 @@ export class UploadQueue {
         index: attempt.index,
         scrambleShown: attempt.stored.scrambleShown,
       };
-      let removed = false;
+      let removed: boolean;
       try {
         removed = await this.#source.removeClips(ref, files);
       } catch (error: unknown) {
@@ -1511,7 +1638,10 @@ export class UploadQueue {
         const file = attempt.files.find((candidate) => candidate.path === path);
         if (file !== undefined) {
           file.stored.local = false;
-          this.#freed = { clips: this.#freed.clips + 1, bytes: this.#freed.bytes + file.stored.bytes };
+          this.#freed = {
+            clips: this.#freed.clips + 1,
+            bytes: this.#freed.bytes + file.stored.bytes,
+          };
         }
       }
       if (attempt.record !== null) {
@@ -1554,18 +1684,16 @@ export class UploadQueue {
   }
 
   #attemptView(session: SessionTask, attempt: AttemptTask): AttemptView {
-    const files = attempt.files.map(
-      (file): FileView => ({
-        path: file.path,
-        bytes: file.stored.bytes,
-        state: file.stored.state,
-        sent: file.stored.state === 'done' ? file.stored.bytes : file.sent,
-        tries: file.stored.tries,
-        error: file.stored.state === 'done' ? null : file.stored.error,
-        retryAtMs: file.stored.state === 'pending' ? file.retryAtMs : null,
-        local: file.stored.local !== false,
-      }),
-    );
+    const files = attempt.files.map((file): FileView => ({
+      path: file.path,
+      bytes: file.stored.bytes,
+      state: file.stored.state,
+      sent: file.stored.state === 'done' ? file.stored.bytes : file.sent,
+      tries: file.stored.tries,
+      error: file.stored.state === 'done' ? null : file.stored.error,
+      retryAtMs: file.stored.state === 'pending' ? file.retryAtMs : null,
+      local: file.stored.local !== false,
+    }));
     let state: AttemptUploadState;
     if (files.some((file) => file.state === 'failed')) {
       state = 'failed';

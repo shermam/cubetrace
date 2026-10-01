@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { CloudError } from './api';
 import { RETRY_MAX_MS } from './backoff';
 import { datasetAttempt } from './files';
-import { URL_LIFETIME_MS } from './queue';
+import { QUOTA_PAUSE_MIN_MS, SESSION_QUIET_MS, URL_LIFETIME_MS } from './queue';
 import { parseQueueState } from './state';
+import { FakeUploadHttp } from './testing';
 import {
   A,
   B,
@@ -33,7 +34,19 @@ function key(s: string, path: string, index = 1): string {
 
 /** The PUTs made, by key and status (null while held). */
 function puts(d: Device): string[] {
-  return d.http.puts.map((put) => `${put.key.split('/').slice(-2).join('/')} ${String(put.status)}`);
+  return d.http.puts.map(
+    (put) => `${put.key.split('/').slice(-2).join('/')} ${String(put.status)}`,
+  );
+}
+
+/** The PUTs of the file named `name`, by key and status. */
+function putsOf(d: Device, name: string): string[] {
+  return puts(d).filter((put) => put.split(' ')[0].endsWith(`/${name}`));
+}
+
+/** The names of the files PUT, sorted. */
+function putNames(d: Device): string[] {
+  return d.http.puts.map((put) => put.key.split('/').at(-1) ?? '').sort();
 }
 
 /** uploads.json as the device has it now, for the account. */
@@ -118,10 +131,9 @@ describe('UploadQueue', () => {
     expect(d.http.held).toBe(2);
     expect(queue.view().counts.uploading).toBe(1);
     const [first] = queue.view().active;
-    expect(first.files.filter((file) => file.state === 'uploading').map((file) => file.sent)).toEqual([
-      expect.any(Number),
-      expect.any(Number),
-    ]);
+    expect(
+      first.files.filter((file) => file.state === 'uploading').map((file) => file.sent),
+    ).toEqual([expect.any(Number), expect.any(Number)]);
     for (let k = 0; k < 12 && d.http.held > 0; k++) {
       d.http.hold = true;
       d.http.release();
@@ -141,11 +153,16 @@ describe('UploadQueue', () => {
     const d = device();
     await record(d, session(A, 1_790_000_000_000), [attempt(A, 1)]);
     d.env.jitter = 0.5;
-    d.http.responses.push({ status: 0 }, { status: 503, body: 'Service Unavailable' });
+    d.http.responses.push(
+      { status: 0, path: 'attempt.json' },
+      { status: 503, body: 'Service Unavailable', path: 'attempt.json' },
+    );
     const queue = queueOf(d);
     await queue.start();
     await flush();
-    expect(puts(d)).toEqual(['0001/attempt.json 0']);
+    // session.json went beside it, in the other slot.
+    expect(putsOf(d, 'attempt.json')).toEqual(['0001/attempt.json 0']);
+    expect(putsOf(d, 'session.json')).toEqual([`${A}/session.json 200`]);
     const [waiting] = queue.view().active;
     expect(waiting.state).toBe('pending');
     expect(waiting.files[0]).toMatchObject({
@@ -157,10 +174,10 @@ describe('UploadQueue', () => {
     // The first retry after 1 s, less a quarter at this jitter.
     d.env.advance(749);
     await flush();
-    expect(d.http.puts).toHaveLength(1);
+    expect(putsOf(d, 'attempt.json')).toHaveLength(1);
     d.env.advance(1);
     await flush();
-    expect(puts(d)).toEqual(['0001/attempt.json 0', '0001/attempt.json 503']);
+    expect(putsOf(d, 'attempt.json')).toEqual(['0001/attempt.json 0', '0001/attempt.json 503']);
     expect(queue.view().active[0].files[0]).toMatchObject({
       tries: 2,
       error: 'the bucket answered 503: Service Unavailable',
@@ -168,7 +185,7 @@ describe('UploadQueue', () => {
     });
     d.env.advance(1500);
     await flush();
-    expect(puts(d).at(-1)).toBe('0001/attempt.json 200');
+    expect(putsOf(d, 'attempt.json').at(-1)).toBe('0001/attempt.json 200');
     expect(queue.view().counts.done).toBe(1);
     // The same URL was used again: it was still good.
     expect(d.cloud.calls.filter((call) => call.startsWith('sign'))).toHaveLength(1);
@@ -180,7 +197,7 @@ describe('UploadQueue', () => {
     await record(d, session(A, 1_790_000_000_000), [attempt(A, 1)]);
     d.env.jitter = 0;
     for (let k = 0; k < 12; k++) {
-      d.http.responses.push({ status: 0 });
+      d.http.responses.push({ status: 0, path: 'attempt.json' });
     }
     const queue = queueOf(d);
     await queue.start();
@@ -193,15 +210,81 @@ describe('UploadQueue', () => {
       await flush();
     }
     expect(waits).toEqual([
-      1000, 2000, 4000, 8000, 16_000, 32_000, 64_000, 128_000, 256_000, RETRY_MAX_MS, RETRY_MAX_MS,
+      1000,
+      2000,
+      4000,
+      8000,
+      16_000,
+      32_000,
+      64_000,
+      128_000,
+      256_000,
+      RETRY_MAX_MS,
+      RETRY_MAX_MS,
     ]);
+    await queue.stop();
+  });
+
+  it('tries a 408 and a 429 again, as a 5xx', async () => {
+    const d = device();
+    await record(d, session(A, 1_790_000_000_000), [attempt(A, 1)]);
+    d.env.jitter = 0;
+    d.http.responses.push(
+      { status: 429, body: 'SlowDown', path: 'attempt.json' },
+      { status: 408, path: 'attempt.json' },
+    );
+    const queue = queueOf(d);
+    await queue.start();
+    await flush();
+    expect(queue.view().active[0]).toMatchObject({
+      state: 'pending',
+      error: 'the bucket answered 429: SlowDown',
+    });
+    d.env.advance(1000);
+    await flush();
+    d.env.advance(2000);
+    await flush();
+    expect(putsOf(d, 'attempt.json')).toEqual([
+      '0001/attempt.json 429',
+      '0001/attempt.json 408',
+      '0001/attempt.json 200',
+    ]);
+    expect(queue.view().counts.done).toBe(1);
+    await queue.stop();
+  });
+
+  it('does not wake again and again for a file whose time to try again came while the network was down', async () => {
+    const d = device();
+    await oneAttempt(d);
+    d.env.jitter = 0;
+    d.http.responses.push({ status: 0, path: 'attempt.json' });
+    const queue = queueOf(d);
+    await queue.start();
+    await flush();
+    expect(queue.view().active[0].files[0]).toMatchObject({ path: 'attempt.json', tries: 1 });
+    d.env.setNetwork({ online: false });
+    await flush();
+    // Its time comes and goes while offline: one wake, which finds the network down, then none
+    // (a timer due at once, again and again, would never let this advance end).
+    d.env.advance(5000);
+    await flush();
+    expect(putsOf(d, 'attempt.json')).toEqual(['0001/attempt.json 0']);
+    expect(d.env.pendingTimers).toBeLessThanOrEqual(2);
+    d.env.setNetwork({ online: true });
+    await flush();
+    expect(putsOf(d, 'attempt.json')).toEqual(['0001/attempt.json 0', '0001/attempt.json 200']);
+    expect(queue.view().counts.done).toBe(1);
     await queue.stop();
   });
 
   it('does not try a refused upload (4xx) again: the file fails until Retry', async () => {
     const d = device();
     await record(d, session(A, 1_790_000_000_000), [attempt(A, 1)]);
-    d.http.responses.push({ status: 403, body: '<Error><Code>AccessDenied</Code></Error>' });
+    d.http.responses.push({
+      status: 403,
+      body: '<Error><Code>AccessDenied</Code></Error>',
+      path: 'attempt.json',
+    });
     const queue = queueOf(d);
     await queue.start();
     await flush();
@@ -213,11 +296,12 @@ describe('UploadQueue', () => {
     expect(queue.view().counts.failed).toBe(1);
     d.env.advance(RETRY_MAX_MS * 3);
     await flush();
-    expect(d.http.puts).toHaveLength(1);
+    expect(putsOf(d, 'attempt.json')).toEqual(['0001/attempt.json 403']);
 
     queue.retry(A, 1);
     await flush();
-    expect(puts(d)).toEqual(['0001/attempt.json 403', '0001/attempt.json 200', 'session.json 200']);
+    expect(putsOf(d, 'attempt.json')).toEqual(['0001/attempt.json 403', '0001/attempt.json 200']);
+    expect(putsOf(d, 'session.json')).toEqual([`${A}/session.json 200`]);
     expect(queue.view().counts).toMatchObject({ failed: 0, done: 1 });
     await queue.stop();
   });
@@ -225,9 +309,11 @@ describe('UploadQueue', () => {
   it('signs a URL that expired again, once', async () => {
     const d = device();
     await record(d, session(A, 1_790_000_000_000), [attempt(A, 1)]);
-    d.http.responses.push(
-      { status: 400, body: '<Error><Code>ExpiredToken</Code><Message>Request has expired</Message></Error>' },
-    );
+    d.http.responses.push({
+      status: 400,
+      body: '<Error><Code>ExpiredToken</Code><Message>Request has expired</Message></Error>',
+      path: 'attempt.json',
+    });
     const queue = queueOf(d);
     await queue.start();
     await flush();
@@ -240,7 +326,7 @@ describe('UploadQueue', () => {
     // A second expiry in a row is the URL's problem, not the clock's: the file fails.
     const e = device();
     await record(e, session(A, 1_790_000_000_000), [attempt(A, 1)]);
-    const expired = { status: 403, body: 'Request has expired' };
+    const expired = { status: 403, body: 'Request has expired', path: 'attempt.json' };
     e.http.responses.push(expired, expired);
     const again = queueOf(e);
     await again.start();
@@ -283,7 +369,8 @@ describe('UploadQueue', () => {
     const d = device();
     await oneAttempt(d);
     const resetsAtMs = d.env.now() + 3_600_000;
-    d.cloud.quota = { bytes: 0, files: 390, maxBytes: 2_000_000_000, maxFiles: 400, resetsAtMs };
+    // Four files to sign (attempt.json, the clip, its frames, session.json): 401 do not fit in 400.
+    d.cloud.quota = { bytes: 0, files: 397, maxBytes: 2_000_000_000, maxFiles: 400, resetsAtMs };
     const queue = queueOf(d);
     await queue.start();
     await flush();
@@ -314,6 +401,76 @@ describe('UploadQueue', () => {
     expect(stateOf(d)?.pausedUntilMs).toBeNull();
   });
 
+  it("pauses a minute at least when the quota's reset time has passed by this device's clock", async () => {
+    const d = device();
+    await oneAttempt(d);
+    // A device whose clock runs ahead of the server's: the server's day has not reset yet.
+    d.cloud.quota = {
+      bytes: 0,
+      files: 400,
+      maxBytes: 2_000_000_000,
+      maxFiles: 400,
+      resetsAtMs: d.env.now() - 5000,
+    };
+    const queue = queueOf(d);
+    await queue.start();
+    await flush();
+    const signs = (): number => d.cloud.calls.filter((call) => call.startsWith('sign')).length;
+    expect(signs()).toBe(1);
+    expect(queue.view().pause).toEqual({
+      reason: 'quota',
+      untilMs: d.env.now() + QUOTA_PAUSE_MIN_MS,
+    });
+    d.env.advance(QUOTA_PAUSE_MIN_MS - 1);
+    await flush();
+    expect(signs()).toBe(1);
+    d.cloud.quota.files = 0;
+    d.env.advance(1);
+    await flush();
+    expect(signs()).toBe(2);
+    expect(queue.view().pause).toBeNull();
+    expect(queue.view().counts.done).toBe(1);
+    await queue.stop();
+  });
+
+  it('after a reload, a file that may be in the bucket is confirmed, again after a failed confirmation, and not sent again', async () => {
+    const d = device();
+    await oneAttempt(d);
+    d.http.hold = true;
+    const queue = queueOf(d);
+    await queue.start();
+    await flush();
+    expect(d.http.held).toBe(2);
+    d.env.advance(1000);
+    await flush();
+    expect(stateOf(d)?.sessions[A].attempts['0001'].files['attempt.json'].state).toBe('uploading');
+    // The page goes away (its queue with it), after the two PUTs reached the bucket.
+    for (const put of d.http.puts) {
+      d.bucket.objects.set(put.key, { bytes: put.bytes, contentType: '', text: '' });
+    }
+    const next = { ...d, http: new FakeUploadHttp(d.bucket, () => d.env.now()) };
+    d.env.jitter = 0;
+    d.cloud.confirmError = {
+      error: new CloudError('unavailable', 'The service is unavailable.'),
+      once: true,
+      path: 'attempt.json',
+    };
+    const reloaded = queueOf(next);
+    await reloaded.start();
+    await flush();
+    expect(reloaded.view().active[0].files[0]).toMatchObject({
+      path: 'attempt.json',
+      state: 'pending',
+      error: 'confirmUpload: The service is unavailable.',
+    });
+    d.env.advance(1000);
+    await flush();
+    expect(reloaded.view().counts.done).toBe(1);
+    // Of the two, only their confirmations: the clip's frames file and session.json are sent.
+    expect(putNames(next)).toEqual(['laptop.solve.frames.json', 'session.json']);
+    await reloaded.stop();
+  });
+
   it('resumes after a reload from uploads.json: what is done stays done, a file being sent is confirmed first', async () => {
     const d = device();
     await record(d, session(A, 1_790_000_000_000), [
@@ -331,7 +488,9 @@ describe('UploadQueue', () => {
     d.env.advance(1000);
     await flush();
     const before = stateOf(d)?.sessions[A].attempts['0001'].files;
-    expect(Object.fromEntries(Object.entries(before ?? {}).map(([path, f]) => [path, f.state]))).toEqual({
+    expect(
+      Object.fromEntries(Object.entries(before ?? {}).map(([path, f]) => [path, f.state])),
+    ).toEqual({
       'attempt.json': 'done',
       'laptop.scramble.mp4': 'done',
       'laptop.scramble.frames.json': 'uploading',
@@ -347,8 +506,7 @@ describe('UploadQueue', () => {
     });
 
     // The next page load: a new queue on the same device; the old page's queue is gone.
-    const http = d.http;
-    const next = { ...d, http: new (http.constructor as typeof import('./testing').FakeUploadHttp)(d.bucket, () => d.env.now()) };
+    const next = { ...d, http: new FakeUploadHttp(d.bucket, () => d.env.now()) };
     const reloaded = queueOf(next);
     const calls = d.cloud.calls.length;
     await reloaded.start();
@@ -388,24 +546,29 @@ describe('UploadQueue', () => {
     await flush();
     expect(d.cloud.calls[0]).toBe(`uploads ${A}`);
     // The frames file of another size is sent; so is session.json, which the index does not say.
-    expect(d.http.puts.map((put) => put.key.split('/').at(-1))).toEqual([
-      'laptop.solve.frames.json',
-      'session.json',
-    ]);
+    expect(putNames(d)).toEqual(['laptop.solve.frames.json', 'session.json']);
     expect(queue.view().counts.done).toBe(1);
     await queue.stop();
   });
 
   it('never uploads a demo session', async () => {
     const d = device();
-    await record(d, session(DEMO, 1_790_000_000_000, true), [attempt(DEMO, 1, [clip('solve', 2000)])]);
+    await record(d, session(DEMO, 1_790_000_000_000, true), [
+      attempt(DEMO, 1, [clip('solve', 2000)]),
+    ]);
     const queue = queueOf(d);
     await queue.start();
     queue.attemptSaved(attempt(DEMO, 2));
     await flush();
     expect(d.cloud.calls).toEqual([]);
     expect(d.http.puts).toEqual([]);
-    expect(queue.view().counts).toEqual({ waiting: 0, pending: 0, uploading: 0, done: 0, failed: 0 });
+    expect(queue.view().counts).toEqual({
+      waiting: 0,
+      pending: 0,
+      uploading: 0,
+      done: 0,
+      failed: 0,
+    });
     await queue.stop();
     expect(stateOf(d)?.sessions).toEqual({});
   });
@@ -436,15 +599,28 @@ describe('UploadQueue', () => {
     await flush();
     expect(queue.view().counts.done).toBe(1);
 
-    // A new attempt.
+    // A new attempt, and its session's summary: the session.json changed waits until the session has
+    // stayed the same for two minutes.
     const a2 = attempt(A, 2, [clip('solve', 2000)]);
     await record(d, s, [attempt(A, 1), a2]);
     queue.attemptSaved(a2);
-    queue.sessionSaved((await d.store.exportSession(A)).session);
+    const summed = (await d.store.exportSession(A)).session;
+    queue.sessionSaved(summed);
     await flush();
-    expect(d.cloud.calls.filter((call) => call.startsWith('sign')).at(-1)).toBe(
-      `sign ${A}/2 attempt.json,laptop.solve.mp4,laptop.solve.frames.json,session.json`,
+    const signs = (): string[] => d.cloud.calls.filter((call) => call.startsWith('sign'));
+    expect(signs().at(-1)).toBe(
+      `sign ${A}/2 attempt.json,laptop.solve.mp4,laptop.solve.frames.json`,
     );
+    expect(queue.view().counts.done).toBe(2);
+    d.env.advance(SESSION_QUIET_MS - 1);
+    await flush();
+    expect(signs().at(-1)).toBe(
+      `sign ${A}/2 attempt.json,laptop.solve.mp4,laptop.solve.frames.json`,
+    );
+    d.env.advance(1);
+    await flush();
+    expect(signs().at(-1)).toBe(`sign ${A}/2 session.json`);
+    expect(d.bucket.objects.get(key(A, 'session.json'))?.text).toBe(recordJson(summed));
     expect(queue.view().counts.done).toBe(2);
 
     // A clip added to it after its upload: its attempt.json and the clip's files go.
@@ -505,7 +681,10 @@ describe('UploadQueue', () => {
     const d = device();
     await oneAttempt(d);
     d.env.jitter = 0;
-    d.cloud.signError = { error: new CloudError('unavailable', 'The service is unavailable.'), once: true };
+    d.cloud.signError = {
+      error: new CloudError('unavailable', 'The service is unavailable.'),
+      once: true,
+    };
     const queue = queueOf(d);
     await queue.start();
     await flush();
@@ -531,16 +710,24 @@ describe('UploadQueue', () => {
     const e = device();
     await oneAttempt(e);
     e.env.jitter = 0;
-    e.cloud.confirmError = { error: new CloudError('internal', 'confirmUpload failed.'), once: true };
+    e.cloud.confirmError = {
+      error: new CloudError('internal', 'confirmUpload failed.'),
+      once: true,
+      path: 'attempt.json',
+    };
     const again = queueOf(e);
     await again.start();
     await flush();
+    expect(again.view().active[0]).toMatchObject({
+      state: 'pending',
+      error: 'confirmUpload: confirmUpload failed.',
+    });
     e.env.advance(1000);
     await flush();
-    expect(e.http.puts.map((put) => put.key.split('/').at(-1))).toEqual([
+    expect(putNames(e)).toEqual([
       'attempt.json',
-      'laptop.solve.mp4',
       'laptop.solve.frames.json',
+      'laptop.solve.mp4',
       'session.json',
     ]);
     expect(e.cloud.calls.filter((call) => call === `confirm ${A}/1 attempt.json`)).toHaveLength(2);
@@ -559,6 +746,8 @@ describe('UploadQueue', () => {
     const noted = { ...(await d.store.exportSession(A)).session, notes: 'cloud: a note' };
     await d.store.saveSession(noted);
     queue.sessionSaved(noted);
+    await flush();
+    d.env.advance(SESSION_QUIET_MS);
     await flush();
     expect(d.cloud.calls.filter((call) => call.startsWith('sign')).at(-1)).toBe(
       `sign ${A}/2 session.json`,
@@ -658,33 +847,36 @@ describe('UploadQueue', () => {
   it('from 70% of the storage quota, deletes the oldest uploaded clips first, down to 60%', async () => {
     const d = device();
     await record(d, session(B, 1_789_000_000_000), [
-      attempt(B, 1, [clip('scramble', 1000), clip('solve', 3000)]),
+      attempt(B, 1, [clip('scramble', 30_000), clip('solve', 40_000)]),
     ]);
     await record(d, session(A, 1_790_000_000_000), [
-      attempt(A, 1, [clip('scramble', 1000), clip('solve', 3000)]),
-      attempt(A, 2, [clip('solve', 3000)]),
+      attempt(A, 1, [clip('scramble', 20_000), clip('solve', 30_000)]),
+      attempt(A, 2, [clip('solve', 30_000)]),
     ]);
     // 69%: nothing goes.
-    d.env.quota = 100_000;
-    d.env.usage = 69_000;
+    d.env.quota = 1_000_000;
+    d.env.usage = 690_000;
     const queue = queueOf(d);
     await queue.start();
     await flush();
     expect(queue.view().counts.done).toBe(3);
     expect(d.removed).toEqual([]);
-    // 66.5% to free 6.5 kB: B's two clips (4 kB), then A1's scramble (1 kB) and solve (3 kB).
-    d.env.usage = 72_500;
-    queue.rescan();
+    // 70.5%, 105 kB over 60%: B's two clips (70 kB), then A1's scramble (20 kB) and solve (30 kB);
+    // A2's stays.
+    d.env.usage = 705_000;
     d.env.advance(10 * 60 * 1000);
     await flush();
     expect(d.removed).toEqual([
       `${B}/1 laptop.scramble.mp4,laptop.solve.mp4`,
       `${A}/1 laptop.scramble.mp4,laptop.solve.mp4`,
     ]);
-    expect(fileText(d, `sessions/${A}/attempts/0002/laptop.solve.mp4`)).toBe('v'.repeat(3000));
+    expect(fileText(d, `sessions/${A}/attempts/0002/laptop.solve.mp4`)).toBe('v'.repeat(30_000));
+    expect(fileText(d, `sessions/${B}/attempts/0001/laptop.solve.mp4`)).toBeNull();
     expect(fileText(d, `sessions/${B}/attempts/0001/attempt.json`)).not.toBeNull();
     expect(fileText(d, `sessions/${B}/attempts/0001/laptop.solve.frames.json`)).not.toBeNull();
-    expect(queue.view().freed).toEqual({ clips: 4, bytes: 8000 });
+    expect(queue.view().freed).toEqual({ clips: 4, bytes: 120_000 });
+    const [b1] = (await d.store.exportSession(B)).attempts;
+    expect(b1.video.map((c) => c.local)).toEqual([false, false]);
     await queue.stop();
   });
 

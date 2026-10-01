@@ -48,7 +48,8 @@ export class FakeUploadCloud implements UploadCloud {
   quota = { bytes: 0, files: 0, maxBytes: 2_000_000_000, maxFiles: 400, resetsAtMs: 0 };
   /** Set: each signUpload is refused with it (and taken off once used when `once`). */
   signError: { error: CloudError; once: boolean } | null = null;
-  confirmError: { error: CloudError; once: boolean } | null = null;
+  /** Set: each confirmUpload (of the file `path`, when it is given) is refused with it. */
+  confirmError: { error: CloudError; once: boolean; path?: string } | null = null;
   /** How many times whenIndexed was asked. */
   waits = 0;
   #signatures = 0;
@@ -81,11 +82,16 @@ export class FakeUploadCloud implements UploadCloud {
       return Promise.reject(refusal);
     }
     if (!this.indexAll && !this.indexed.has(id)) {
-      return Promise.reject(new CloudError('not-found', `The attempt ${id} is not in the cloud index.`));
+      return Promise.reject(
+        new CloudError('not-found', `The attempt ${id} is not in the cloud index.`),
+      );
     }
     const bytes = request.files.reduce((sum, file) => sum + file.bytes, 0);
     const { quota } = this;
-    if (quota.bytes + bytes > quota.maxBytes || quota.files + request.files.length > quota.maxFiles) {
+    if (
+      quota.bytes + bytes > quota.maxBytes ||
+      quota.files + request.files.length > quota.maxFiles
+    ) {
       return Promise.reject(
         new CloudError('resource-exhausted', "The day's upload quota is used up.", {
           resetsAtMs: quota.resetsAtMs,
@@ -117,7 +123,11 @@ export class FakeUploadCloud implements UploadCloud {
   confirmUpload(request: ConfirmRequest): Promise<ConfirmResult> {
     const id = `${request.sessionId}/${String(request.attemptIndex)}`;
     this.calls.push(`confirm ${id} ${request.files.map((file) => file.path).join(',')}`);
-    const refusal = this.#take('confirmError');
+    const target = this.confirmError?.path;
+    const refusal =
+      target === undefined || request.files.some((file) => file.path === target)
+        ? this.#take('confirmError')
+        : null;
     if (refusal !== null) {
       return Promise.reject(refusal);
     }
@@ -128,7 +138,9 @@ export class FakeUploadCloud implements UploadCloud {
       if (upload === undefined || file === undefined) {
         return Promise.reject(new CloudError('failed-precondition', `${path} was not signed.`));
       }
-      const object = this.bucket.objects.get(this.key(request.sessionId, request.attemptIndex, path));
+      const object = this.bucket.objects.get(
+        this.key(request.sessionId, request.attemptIndex, path),
+      );
       if (object === undefined) {
         return Promise.reject(new CloudError('not-found', `${path} is not in the bucket.`));
       }
@@ -186,20 +198,31 @@ export interface FakePut {
 }
 
 /**
+ * An answer to give a PUT instead of the bucket's own: a status (0 for a network error) and a body,
+ * for the next PUT of the file named `path` (`attempt.json`, `laptop.solve.mp4`, `session.json`), or
+ * of any file without one.
+ */
+export interface FakeResponse {
+  readonly status: number;
+  readonly body?: string;
+  readonly path?: string;
+}
+
+/**
  * The PUTs into a {@link FakeBucket}: a URL of {@link FakeUploadCloud} with its headers and the size
  * it was signed for, before it expires, is stored (200), anything else refused as the bucket would
- * (400, 403). `respond` answers otherwise (a status, or 0 for a network error) for the next PUTs;
- * `hold` keeps them waiting until `release()`, to see how many go at once.
+ * (400, 403). `responses` answer otherwise, each once, the first that fits a PUT; `hold` keeps the
+ * PUTs waiting until `release()`, to see how many go at once.
  */
 export class FakeUploadHttp implements UploadHttp {
   readonly puts: FakePut[] = [];
-  /** The answers to give the next PUTs, in order, before the bucket's own. */
-  readonly responses: { status: number; body?: string }[] = [];
+  /** The answers to give the next PUTs, before the bucket's own: each the first PUT it fits. */
+  readonly responses: FakeResponse[] = [];
   hold = false;
   /** The PUTs under way now, and the most there were at once. */
   inFlight = 0;
   maxInFlight = 0;
-  readonly #held: (() => void)[] = [];
+  readonly #held = new Set<() => void>();
 
   constructor(
     readonly bucket: FakeBucket,
@@ -222,8 +245,13 @@ export class FakeUploadHttp implements UploadHttp {
       request.progress(Math.floor(request.body.size / 2));
       if (this.hold) {
         await new Promise<void>((resolve, reject) => {
-          this.#held.push(resolve);
+          const go = (): void => {
+            this.#held.delete(go);
+            resolve();
+          };
+          this.#held.add(go);
           request.signal.addEventListener('abort', () => {
+            this.#held.delete(go);
             reject(new DOMException('Cut off.', 'AbortError'));
           });
         });
@@ -233,7 +261,11 @@ export class FakeUploadHttp implements UploadHttp {
       if (request.signal.aborted) {
         throw new DOMException('Cut off.', 'AbortError');
       }
-      const scripted = this.responses.shift();
+      const name = put.key.split('/').at(-1);
+      const at = this.responses.findIndex(
+        (response) => response.path === undefined || response.path === name,
+      );
+      const scripted = at < 0 ? undefined : this.responses.splice(at, 1)[0];
       const response =
         scripted === undefined
           ? await this.#store(url, request)
@@ -251,14 +283,14 @@ export class FakeUploadHttp implements UploadHttp {
   /** Lets the held PUTs go. */
   release(): void {
     this.hold = false;
-    for (const go of this.#held.splice(0)) {
+    for (const go of [...this.#held]) {
       go();
     }
   }
 
   /** How many PUTs wait in `hold`. */
   get held(): number {
-    return this.#held.length;
+    return this.#held.size;
   }
 
   async #store(url: URL, request: PutRequest): Promise<PutResponse> {
