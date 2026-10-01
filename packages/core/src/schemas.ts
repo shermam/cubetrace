@@ -1,14 +1,16 @@
-// The JSON Schemas (draft 2020-12) of the records (docs/DATA-MODEL.md §6, §7 and §9): session.json
-// and attempt.json in schema version 2, which the app writes, and in version 1, which it still
-// reads, and the frames files of the video clips. They live as JSON files in packages/core/schema/,
-// imported here as JSON modules (TypeScript resolves them with the base tsconfig's
-// `moduleResolution: bundler`; the bundlers inline them). The app itself reads records with
-// records.ts, which checks the same rules without a validator.
+// The JSON Schemas (draft 2020-12) of the records (docs/DATA-MODEL.md §6, §7, §9 and §10):
+// session.json and attempt.json in schema version 2, which the app writes, and in version 1, which it
+// still reads, the frames files of the video clips, and users/{uid}, the account's record in
+// Firestore. They live as JSON files in packages/core/schema/, imported here as JSON modules
+// (TypeScript resolves them with the base tsconfig's `moduleResolution: bundler`; the bundlers inline
+// them). The app itself reads records with records.ts, which checks the same rules without a
+// validator.
 import attemptSchemaV1 from '../schema/attempt.v1.schema.json';
 import attemptSchema from '../schema/attempt.schema.json';
 import framesSchema from '../schema/frames.schema.json';
 import sessionSchemaV1 from '../schema/session.v1.schema.json';
 import sessionSchema from '../schema/session.schema.json';
+import userSchema from '../schema/user.schema.json';
 
 /**
  * A JSON Schema document, read-only. With ajv: `new Ajv2020({ allowUnionTypes: true })` from
@@ -33,3 +35,6 @@ export const ATTEMPT_SCHEMA_V1: JsonSchema = attemptSchemaV1;
 
 /** The schema of `<camera>.<segment>.frames.json`, the frame times of a clip (version 2). */
 export const FRAMES_SCHEMA: JsonSchema = framesSchema;
+
+/** The schema of users/{uid} in Firestore, the account's record (schema version 1, §10). */
+export const USER_SCHEMA: JsonSchema = userSchema;
