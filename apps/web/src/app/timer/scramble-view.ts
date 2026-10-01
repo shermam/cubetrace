@@ -4,6 +4,7 @@ import {
   InjectionToken,
   computed,
   inject,
+  input,
   signal,
 } from '@angular/core';
 import type { ScrambleMoveState } from '@cubetrace/core';
@@ -65,16 +66,19 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
  * and, when the cube leaves its path, the moves that undo the detour, greyed as they are made.
  * While the attempt is scrambling, each move is outlined as the cube makes it (T1.13, see
  * {@link scrambleTokens}): green once made, yellow while a half turn is half made, red where the
- * cube left the scramble; all green once the scramble is complete, until the solve starts.
+ * cube left the scramble; all green once the scramble is complete, until the solve starts. Over the
+ * camera's picture (`overPicture`, on a phone, T2.13) it has no picture of its own, and its heading
+ * is light, for the dark strip that the Timer page lays it on.
  */
 @Component({
   selector: 'app-scramble-view',
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
+  host: { '[class.over-picture]': 'overPicture()' },
   template: `
     <!-- The picture first: it floats at the top right, the heading and the moves beside it and
          then under it (T2.7), so that the scramble takes little height. -->
     @if (session.scramble(); as scramble) {
-      @if (pictureError() === null) {
+      @if (pictureError() === null && !overPicture()) {
         <twisty-player
           class="picture"
           data-testid="scramble-picture"
@@ -205,6 +209,24 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
       }
     }
 
+    /* Over the camera's picture, on a dark strip (T2.13): the heading light, its line tight, and the
+       undo guidance tinted rather than opaque, so that the picture still shows through it. */
+    :host(.over-picture) {
+      .head {
+        margin-bottom: var(--space-1);
+        line-height: 1.25;
+      }
+
+      h2,
+      .muted {
+        color: rgb(255 255 255 / 80%);
+      }
+
+      .undo {
+        background: color-mix(in srgb, var(--warn) 30%, transparent);
+      }
+    }
+
     .muted {
       color: var(--text-muted);
     }
@@ -239,6 +261,8 @@ export function scrambleTokens(scramble: string, attempt: AttemptView | null): S
   `,
 })
 export class ScrambleView {
+  /** On the camera's picture (the Timer page on a phone, T2.13): no picture of the cube. */
+  readonly overPicture = input(false);
   protected readonly session = inject(SessionService);
   protected readonly pictureError = signal<string | null>(null);
 

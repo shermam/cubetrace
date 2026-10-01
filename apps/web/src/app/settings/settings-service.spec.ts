@@ -39,6 +39,7 @@ describe('SettingsService', () => {
     expect(settings.demoSpeed()).toBe(1);
     expect(settings.inspection()).toBe(false);
     expect(settings.autoAdvance()).toBe(true);
+    expect(settings.scrambleOverPicture()).toBe(true);
     expect(settings.idleDisconnectMinutes()).toBe(5);
     expect(settings.cameraOn()).toBe(false);
     expect(settings.cameraResolution()).toBe('1080p');
@@ -61,6 +62,7 @@ describe('SettingsService', () => {
     expect(settings.setDemoSpeed(20)).toBe(true);
     settings.setInspection(true);
     settings.setAutoAdvance(false);
+    settings.setScrambleOverPicture(false);
     expect(settings.setIdleDisconnectMinutes(12)).toBe(true);
     settings.setCameraOn(true);
     settings.setCameraResolution('720p');
@@ -84,6 +86,7 @@ describe('SettingsService', () => {
       demoSpeed: 20,
       inspection: true,
       autoAdvance: false,
+      scrambleOverPicture: false,
       idleDisconnectMinutes: 12,
       cameraOn: true,
       cameraResolution: '720p',
@@ -111,6 +114,7 @@ describe('SettingsService', () => {
     expect(reloaded.demoSpeed()).toBe(20);
     expect(reloaded.inspection()).toBe(true);
     expect(reloaded.autoAdvance()).toBe(false);
+    expect(reloaded.scrambleOverPicture()).toBe(false);
     expect(reloaded.idleDisconnectMinutes()).toBe(12);
     expect(reloaded.cameraOn()).toBe(true);
     expect(reloaded.cameraResolution()).toBe('720p');
@@ -276,6 +280,35 @@ describe('SettingsService', () => {
     load().setVideoQuality('standard');
     expect(load().videoQuality()).toBe('standard');
     expect(stored()).toMatchObject({ videoQuality: 'standard' });
+  });
+
+  it('reads the settings stored before Scramble over the picture existed as on, and a value that is not a switch as on', () => {
+    // What 0.2.0 stored before T2.13: the timer's other settings, and the camera on.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        inspection: true,
+        autoAdvance: false,
+        cameraOn: true,
+        videoQuality: 'high',
+      }),
+    );
+    const settings = load();
+
+    expect(settings.scrambleOverPicture()).toBe(true);
+    expect(settings.inspection()).toBe(true);
+    expect(settings.autoAdvance()).toBe(false);
+    expect(settings.cameraOn()).toBe(true);
+
+    settings.setScrambleOverPicture(false);
+    expect(stored()).toMatchObject({ scrambleOverPicture: false, videoQuality: 'high' });
+    expect(load().scrambleOverPicture()).toBe(false);
+    load().setScrambleOverPicture(true);
+    expect(load().scrambleOverPicture()).toBe(true);
+
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ scrambleOverPicture: 'off' }));
+    expect(load().scrambleOverPicture()).toBe(true);
   });
 
   it('stores MAC addresses normalized, sorted by name, and refuses what is not one', () => {

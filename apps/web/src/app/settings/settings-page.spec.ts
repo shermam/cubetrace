@@ -294,6 +294,25 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('keeps Scramble over the picture, a switch of the Timer section, on by default', async () => {
+    const fixture = await render();
+    const box = input(fixture, '[data-testid="scramble-over-picture"]');
+    expect(box.closest('section')?.getAttribute('aria-labelledby')).toBe('timer-heading');
+    expect(box.closest('label')?.textContent.trim()).toBe('Scramble over the picture (phone)');
+    expect(box.checked).toBe(true);
+
+    box.click();
+    await update(fixture);
+    expect(TestBed.inject(SettingsService).scrambleOverPicture()).toBe(false);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
+      scrambleOverPicture: false,
+    });
+
+    box.click();
+    await update(fixture);
+    expect(TestBed.inject(SettingsService).scrambleOverPicture()).toBe(true);
+  });
+
   it('keeps the host label, inspection, auto-advance and the demo speed', async () => {
     const fixture = await render();
     const host = input(fixture, '#host-label');

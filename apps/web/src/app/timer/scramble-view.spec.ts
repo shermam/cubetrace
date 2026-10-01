@@ -209,6 +209,34 @@ describe('ScrambleView', () => {
     expect(await marks()).toEqual(['R pending', 'U pending', 'F pending']);
   });
 
+  it("over the camera's picture: no picture of the cube, the heading, progress and undo as before", async () => {
+    const s = setup({ providers: [noPicture] });
+    const fake = await ready(s);
+    const fixture = TestBed.createComponent(ScrambleView);
+    fixture.componentRef.setInput('overPicture', true);
+    await fixture.whenStable();
+    const element = fixture.nativeElement as HTMLElement;
+
+    expect(element.classList).toContain('over-picture');
+    expect(query(element, 'scramble-picture')).toBeNull();
+    expect(element.querySelector('h2')?.textContent).toBe('Scramble');
+    expect(query(element, 'scramble')?.textContent).toBe('R U F');
+    expect(query(element, 'scramble-progress')?.textContent.trim()).toBe('0 / 3');
+    turn(s, fake, 'R D');
+    await fixture.whenStable();
+    expect(query(element, 'scramble-progress')?.textContent.trim()).toBe('1 / 3');
+    expect(query(element, 'undo')?.textContent).toContain("D'");
+    expect(
+      Array.from(element.querySelectorAll('.move'), (move) => move.getAttribute('data-state')),
+    ).toEqual(['done', 'wrong', 'pending']);
+
+    // Back in the page's column (a wider window, or the setting off): the picture again.
+    fixture.componentRef.setInput('overPicture', false);
+    await fixture.whenStable();
+    expect(element.classList).not.toContain('over-picture');
+    expect(query(element, 'scramble-picture')?.tagName).toBe('TWISTY-PLAYER');
+  });
+
   it('keeps the text when the picture cannot load', async () => {
     const s = setup({
       providers: [{ provide: TWISTY_LOADER, useValue: () => Promise.reject(new Error('offline')) }],
