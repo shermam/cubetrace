@@ -24,7 +24,8 @@ T2.9; the readers take a missing one as false), and a camera in `session.json` g
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
-`attempt.v1.schema.json` for version 1.
+`attempt.v1.schema.json` for version 1, and `user.schema.json` for the account's record in Firestore
+(§10), whose version 1 is its own.
 
 **Reading older records.** Files of version 1 are never rewritten to upgrade them. The readers,
 `parseSession` and `parseAttempt` in `packages/core/src/records.ts` (the app's session store
@@ -424,3 +425,58 @@ jitter of a single arrival; `residualP95Ms` is the 95th percentile of the absolu
 jitter. These times are when the frames reached the browser, later than the light by the camera's
 own latency: that lag is the clip's `syncResidualMs` (§7), measured by the clapperboard (§6), for
 the training pipeline to subtract.
+
+## 10. Cloud records
+
+From phase 3 the app keeps an index of the dataset in Firestore, in the Firebase project
+`cubetrace-cacd9` (`docs/PLAN.md`, phase 3), beside the files of §5, which stay the records. A
+document is what Firestore stores (numbers, strings, booleans, null, maps, lists); each kind of
+document has its own schema version, as each file has. `firebase/firestore.rules` decides who may
+read and write which (below).
+
+### `users/{uid}`, schema version 1
+
+The record of an account, `{uid}` its Firebase Authentication user id (`docs/PLAN.md` T3.0). The app
+writes it at each sign-in, and at each start with an account signed in (once per page load), merged
+into the stored document (Firestore's `set` with `merge`), so that `devices` gathers every device:
+
+```jsonc
+{
+  "schema": 1,
+  "createdMs": 1790000000000,            // when the account was created
+  "displayName": "Ada Lovelace",         // null without one
+  "email": "ada@example.com",            // null without one
+  "devices": {"office-mbp": 1790000123456.7, "Android phone": 1790000200000.2}
+}
+```
+
+`createdMs` is Firebase Authentication's creation time of the account, in ms since 1970 (to the
+second): the same on every device, so that every sign-in writes the value already there, which the
+rules never let change. `displayName` and `email` are the Google account's. `devices` has an entry per
+host label (Settings → This device, `host.label` in §6): that device's host clock (§1) when it last
+signed in or started signed in. The app does not wait for the write: Firestore applies it to its
+cache in IndexedDB at once and sends it when it can, after the network is back or after a reload;
+when the server refuses it, Settings → Account says so and the console has
+`cubetrace: The account's record (users/{uid}) could not be saved: …`.
+`packages/core/schema/user.schema.json` (`USER_SCHEMA`) is this record in machine-readable form. The
+upload quota of T3.2 will be a field of this document that only the functions write.
+
+### `sessions/{id}` and `sessions/{id}/attempts/{index}`
+
+The session index of T3.1, which defines their fields. Each of these documents carries `owner`, the
+uid of the account that wrote it, which the rules require.
+
+### The rules
+
+`firebase/firestore.rules`, tested against the Firestore emulator by `firebase/rules.test.ts`
+(`npm run test:rules`, in CI) and deployed on merge by `.github/workflows/firebase.yml`:
+
+- `users/{uid}`: only the account `uid` reads, writes and deletes it; it writes only the record's
+  fields (`schema` 1, `createdMs` a number, `displayName` and `email` text or null, `devices` a map),
+  and never changes `createdMs` once set.
+- `sessions/{id}` and `sessions/{id}/attempts/{index}`: only the account that `owner` names reads,
+  updates and deletes one; a new one must name its writer as `owner`, an attempt only under a session
+  of the same `owner` (in the same batch or before); `owner` never changes. A query must ask for the
+  account's own documents (`where('owner', '==', uid)`).
+- Nothing else: no other collection, no subcollection of a user's record until a task opens it
+  (T3.4's cubes), and nothing for anyone signed out.

@@ -53,6 +53,8 @@ adds items; the owner ticks them when done (date and any detail that others need
     cents. Cloud Functions will run in `us-central1`, inside `nam5`.
   - [x] Web app registered (2026-09-27); its config object (public by design) goes into the
     repo when phase 3 lands.
+  - [x] 2026-10-01 — **Paste the web config** into the repo: done by the coordinator, from the
+    Firebase Management API, as `apps/web/src/environments/firebase.ts` (T3.0).
   - [x] 2026-09-27 — `shermam.github.io` added to Authentication → Settings → Authorized domains.
   - [ ] **No CLI login needed: one service account, two keys** (decided 2026-09-27). In the
     Google Cloud console of `cubetrace-cacd9`: IAM → Service accounts → create `deploy` with
@@ -67,6 +69,21 @@ adds items; the owner ticks them when done (date and any detail that others need
       deploy without anyone's machine.
     Delete the downloaded files afterwards. Neither key is ever committed, printed in a PR or
     handed to an agent; `CLAUDE.md` will say so. Browser only, no Codespace, no local CLI.
+  - [ ] **Add the repository secret `FIREBASE_SERVICE_ACCOUNT`** (T3.0), for
+    `.github/workflows/firebase.yml`, which deploys the Firestore rules on every merge to `main`
+    that changes them (`firebase/**`, `firebase.json`, `.firebaserc`) and, without the secret, fails
+    in its first step saying so (the coordinator deploys from its session meanwhile). The key:
+    Firebase console → Project settings → Service accounts → **Generate new private key** downloads
+    a JSON key of the Admin SDK's service account
+    (`firebase-adminsdk-…@cubetrace-cacd9.iam.gserviceaccount.com`). `firebase deploy` first checks
+    that the Firestore API is enabled, which that account's own role does not allow: in the Google
+    Cloud console → IAM, give it **Service Usage Consumer**, and **Firebase Rules Admin** if a deploy
+    then still says `PERMISSION_DENIED` about `firebaserules`. The `deploy` account of the item above
+    (key 2) needs neither, since Firebase Admin covers both, and it will also deploy T3.2's
+    functions: its key is the better one here. Then GitHub → Settings → Secrets and variables →
+    Actions → New repository secret, named `FIREBASE_SERVICE_ACCOUNT`, the whole JSON file as its
+    value; delete the downloaded file; Actions → Firebase → Run workflow deploys the rules once, to
+    check.
 - [x] 2026-09-27 — **Bucket decided: Google Cloud Storage first, Cloudflare R2 later.** The
   Firebase project's billing account is a Google Cloud free trial (R$ 1,761.10 of credit, until
   2026-12-27) and the credit applies to Cloud Storage's storage *and* internet egress as well as to

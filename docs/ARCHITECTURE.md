@@ -21,6 +21,8 @@ apps/web (Angular, PWA)
   timer UI · scramble view (cubing.js twisty-player) · CFOP chart · session list · settings · probe page
   device services: wake lock · storage persistence · browser support (read the browser through the
                    BROWSER_GLOBALS token; fakes in apps/web/src/app/device/fake-browser.ts)
+  account (phase 3): AuthService · Firebase (Authentication, Firestore) in a lazy chunk behind
+                   ACCOUNT_LOADER (fake in apps/web/src/app/auth/fake-account.ts)
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider
@@ -94,6 +96,48 @@ and the median lag of the turns kept (the fifth farthest from the median left ou
 becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
 Idle time is never stored. Remote cameras (phase 4) will cut the same way and ship their clips over
 the WebRTC data channel; phase 3 uploads them.
+
+## Account (phase 3)
+
+An account is optional: the app works signed out as before, and a device that never signs in never
+downloads Firebase. `AuthService` (`apps/web/src/app/auth/`) reaches Firebase through
+`ACCOUNT_LOADER`, a dynamic import of `firebase-sdk.ts`, the only file that imports the SDK (12.x,
+modular: `firebase/app`, `firebase/auth`, `firebase/firestore`): one lazy chunk,
+`firebase-sdk-<hash>.js`, which the service worker leaves out of the app's prefetched files and
+caches once it is used (the `account` group of `ngsw-config.json`). It loads on Sign in, and as the
+app starts when a sign-in is remembered (`localStorage` `cubetrace.account`, set on sign-in and
+removed on sign-out).
+
+```
+Sign in ─▶ ACCOUNT_LOADER (the lazy chunk) ─▶ Google's page: a popup (a laptop, a phone's browser tab)
+                                              or a redirect (the app installed on Android, read at
+                                              the next start) ─▶ the account
+start with a sign-in remembered ─▶ ACCOUNT_LOADER ─▶ the account kept in IndexedDB (offline too)
+the account ─▶ users/{uid} merged: the account, this device's host label and host clock (not awaited)
+```
+
+Firebase Authentication keeps the account in IndexedDB; Firestore keeps a persistent cache in
+IndexedDB, shared by the app's tabs, into which writes go first: offline they wait there, across
+reloads, until the network is back, and the page never waits for the server. The header shows the
+account (its photo or initial and its name, a menu with Sign out) or Sign in, and Settings → Account
+the same with what went wrong; a failure (the popup closed or blocked, no network, the chunk not
+available offline) is kept in `AuthService.status` and `error`, never thrown to the page. The unit
+tests give `AuthService` a fake of the backend; the end-to-end suite gives the dev server's app one
+through the window (development builds only), so that no test reaches Google.
+
+The rules (`firebase/firestore.rules`, `docs/DATA-MODEL.md` §10): an account reads and writes only
+its own `users/{uid}` and the sessions, and their attempts, whose `owner` is its uid; nothing is
+public. They are tested against the Firestore emulator in CI and deployed on merge by
+`.github/workflows/firebase.yml`. The service worker has no data group, so it caches nothing of
+Google's or Firebase's: it passes their requests through (one that fails reaches the SDK as a 504,
+which it reads as a network error), and Google's sign-in page and its helper frame are on
+`cubetrace-cacd9.firebaseapp.com`, outside its scope.
+
+A redirect comes back through that helper frame, on another site than the app's: browsers that
+partition third-party storage, Chrome since version 115 among them, can keep the outcome from the
+app, which then says that signing in did not finish. If the installed app on the phone meets it
+(manual round 3), the fix is to serve the helper from the app's own site (Firebase's
+"signInWithRedirect best practices") or to use the popup there too.
 
 ## Storage (phase 3)
 

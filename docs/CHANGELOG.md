@@ -5,7 +5,21 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-Nothing yet.
+Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
+
+### Added
+
+- A Google account, optional (T3.0): Sign in, in the header and in Settings → Account, signs in with
+  Google, in a popup (in the app installed on Android, the page goes to Google's and comes back), and
+  the header then shows the account's photo and name, with Sign out in its menu. For now the account
+  only records the name, the email and each device's label (`users/{uid}` in Firestore); nothing is
+  uploaded yet: it is there for the cloud index of the sessions and their uploads, which come next.
+  Signed out, the app works as before and never downloads Firebase, which loads once the account is
+  used; signed in, it opens offline too.
+- Development: the Firestore rules (`firebase/firestore.rules`: an account reads and writes only its
+  own record and its own sessions), tested against the Firestore emulator (`npm run test:rules`, in
+  CI with Java 21), and a workflow that deploys them when a merge changes them
+  (`.github/workflows/firebase.yml`).
 
 ## 0.2.0 — 2026-09-27
 
