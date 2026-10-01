@@ -346,6 +346,9 @@ describe('AuthService', () => {
     );
     expect(warn).toHaveBeenCalledWith(`cubetrace: ${auth.recordError() ?? ''}`);
     warn.mockRestore();
+
+    await auth.signOut();
+    expect(auth.recordError()).toBeNull();
   });
 
   it('writes no users/{uid} for an account without a creation time', async () => {

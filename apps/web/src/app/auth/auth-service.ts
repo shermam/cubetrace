@@ -78,7 +78,10 @@ export class AuthService {
   readonly status = this.statusSignal.asReadonly();
   /** Why the status is `error`; null otherwise. */
   readonly error = this.errorSignal.asReadonly();
-  /** Why users/{uid} could not be written at the last sign-in; null when it was (or is on its way). */
+  /**
+   * Why users/{uid} could not be written at the last sign-in; null when it was (or is on its way),
+   * and once signed out.
+   */
   readonly recordError = this.recordErrorSignal.asReadonly();
 
   constructor() {
@@ -133,6 +136,7 @@ export class AuthService {
       // The backend reports it too; the page need not wait for that.
       this.userSignal.set(null);
       this.recordedUid = null;
+      this.recordErrorSignal.set(null);
       this.errorSignal.set(null);
       this.statusSignal.set('signed-out');
       this.forget();
@@ -200,6 +204,7 @@ export class AuthService {
     if (user === null) {
       this.userSignal.set(null);
       this.recordedUid = null;
+      this.recordErrorSignal.set(null);
       if (this.pending === 0) {
         this.settleSignedOut();
       }
