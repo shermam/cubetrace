@@ -113,6 +113,27 @@ adds items; the owner ticks them when done (date and any detail that others need
     values (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`) as GitHub Actions
     secrets, never committed; the bucket's CORS rule is pasted from the repo.
 - [x] 2026-09-27 — Bucket provider decided: GCS during the free trial, R2 as the later option (see above); both stay supported by configuration.
+- [ ] **The bucket and the functions of T3.2**, by the coordinator with the environment's key, in this
+  order (`bucket/README.md` and `functions/README.md` have the commands):
+  1. The key's roles. The Admin SDK account (the environment's key since T3.0) needs, in Google
+     Cloud IAM, **Service Usage Consumer**, **Cloud Functions Developer**, **Service Account User**
+     and **Storage Admin**; or put the `deploy` account's key (key 1 of the item above) in the
+     environment instead, whose roles cover all of it. If the first deploy stops while making the
+     callable functions public (`setIamPolicy` on their Cloud Run services), the Admin SDK account also
+     needs **Cloud Run Admin**, which the `deploy` account has; with R2, later, **Secret Manager
+     Admin** too.
+  2. The bucket `cubetrace-data` (`us-central1`, Standard, uniform bucket-level access, public access
+     prevented) and its CORS policy from `bucket/cors.json`.
+  3. The functions' service account, the project's default compute one
+     (`60596954832-compute@developer.gserviceaccount.com`): **Storage Object Admin** on the bucket and
+     **Service Account Token Creator** on itself (it signs the URLs), and the **IAM Service Account
+     Credentials API** enabled in the project.
+  4. The first deploy of the functions: `npm ci`, then `npm run firebase -- deploy --only functions
+     --project cubetrace-cacd9 --non-interactive --force` (the `--force` sets, once, the cleanup policy
+     of the functions' container images, without which a deploy without prompts fails after
+     deploying), and the check of `docs/MANUAL-TESTS.md`, "T3.2". From then on
+     `.github/workflows/firebase.yml` deploys them with the rules on each merge that changes them, once
+     the `FIREBASE_SERVICE_ACCOUNT` secret is there (its account needs the roles of step 1).
 - [ ] Run `python ferramentas/banda.py` (private repo) at home and at the office and record
   the upstream in `docs/DEVICES.md`; it sets the upload queue's expectations.
 

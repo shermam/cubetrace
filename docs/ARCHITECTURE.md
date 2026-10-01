@@ -145,3 +145,48 @@ Cloud-first: every device stages sessions locally and uploads them; Firestore is
 that merges sessions from every host into one dataset; files live in an object-storage
 bucket reached through signed URLs minted by a Cloud Function. The bucket provider (Google
 Cloud Storage or Cloudflare R2) is a deployment configuration, not a code decision.
+
+## Uploads (phase 3)
+
+The browser puts the files straight into the bucket; two callable Cloud Functions in `us-central1`
+(`functions/`, `functions/README.md`) decide what it may put there and record what arrived, in
+Firestore through the Admin SDK:
+
+```
+upload queue (T3.3) ─▶ signUpload({sessionId, attemptIndex, files: [{path, bytes, contentType}]})
+                         a signed-in account; its session and attempt in the index; the dataset's file
+                         names, each with its content type, at most 512 MB; a PUT URL signed per file
+                         (15 min, the type and the exact size bound); then one transaction: the day's
+                         quota reserved in users/{uid}.quota, the intent in the attempt's upload
+                    ◀─ [{path, url, headers, expiresAt}]
+                    ─▶ PUT each file to its URL, with its headers ─▶ the bucket
+                    ─▶ confirmUpload({sessionId, attemptIndex, files: [{path}]})
+                         each object found with the size signed ─▶ upload.files[path].doneMs,
+                         upload.state done once every file is ◀─ {state, confirmed, pending}
+```
+
+Objects are keyed under the account, `users/{uid}/sessions/{id}/attempts/{index}/<file>` (and the
+session's `session.json` beside its attempts), so a URL can only ever write into its signer's own
+prefix; the bucket is private, and nothing but these URLs writes to it.
+
+**Providers.** `BUCKET_PROVIDER`, a parameter in `functions/.env`, picks the bucket behind one port
+(`ObjectStore`: sign a `PUT`, read an object's size): `gcs`, Google Cloud Storage, `cubetrace-data`
+in `us-central1`, during the free trial, with V4 signed URLs that the functions' service account
+signs through the IAM Credentials API; `r2`, Cloudflare R2, later, with S3 SigV4 presigned URLs
+against `https://<account>.r2.cloudflarestorage.com`, whose two keys are secrets bound to the
+functions only then. Either way the signature binds the content type and the exact size (GCS:
+`x-goog-content-length-range`; R2: `content-length`, which the browser sets from the body), so an
+upload can be neither of another type nor longer than what the quota counted, and the bucket's CORS
+policy (`bucket/`) lets the app's origins send those headers.
+
+**Quota.** Per account and UTC day, the bytes and the files signed (2 GB and 400 by default,
+parameters): `users/{uid}.quota = {day, bytes, files}`, reserved in the same transaction that records
+the intent, every signature counted, a call that does not fit refused whole with when the day resets.
+It is a ceiling on what a runaway client can cost while there is one solver, not the community quotas
+of phase 5. The URLs are signed before the transaction, so a bucket that cannot sign counts nothing.
+
+**What the index says.** The attempt's `upload` (`docs/DATA-MODEL.md` §10) goes `pending` (T3.1) →
+`uploading` (signUpload) → `done` (confirmUpload, every file there with its size); a file signed again
+starts its attempt again. Errors are `HttpsError` codes the queue can act on (`resource-exhausted`
+waits for the next UTC day, `not-found` for an attempt Firestore has not sent yet), and every call is
+one structured entry in Cloud Logging.

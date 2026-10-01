@@ -7,7 +7,7 @@ import {
   type RulesTestContext,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 // firebase/firestore.rules against the Firestore emulator that `npm run test:rules` starts (its
 // address comes from FIRESTORE_EMULATOR_HOST). The project id starts with "demo-", which the emulator
@@ -251,5 +251,52 @@ describe('everything else', () => {
       await assertFails(db.collection('public').get());
       await assertFails(db.doc('attempts/0001').set(owned('alice')));
     }
+  });
+});
+
+describe('users/{uid}.quota (T3.2)', () => {
+  // The day's upload quota, which only the functions write (signUpload, with the Admin SDK).
+  const quota = { day: '2026-10-01', bytes: 123_456_789, files: 12 };
+
+  it('lets the account read the quota the functions keep in its record', async () => {
+    await seed('users/alice', user({ quota }));
+    const snapshot = await assertSucceeds(alice().firestore().doc('users/alice').get());
+    expect(snapshot.get('quota')).toEqual(quota);
+    await assertFails(bob().firestore().doc('users/alice').get());
+  });
+
+  it('refuses the account any write of its quota: creating, changing or removing it', async () => {
+    const db = alice().firestore();
+    await assertFails(db.doc('users/alice').set(user({ quota })));
+    await assertFails(db.doc('users/alice').set(user({ quota }), { merge: true }));
+    await seed('users/alice', user({ quota }));
+    await assertFails(db.doc('users/alice').update({ 'quota.bytes': 0 }));
+    await assertFails(db.doc('users/alice').update({ quota: null }));
+    await assertFails(
+      db.doc('users/alice').set({ quota: { ...quota, files: 0 } }, { merge: true }),
+    );
+    // The whole record written over, without the quota: that would remove it.
+    await assertFails(db.doc('users/alice').set(user()));
+    // A sign-in's merge leaves the quota as it is.
+    await assertSucceeds(
+      db.doc('users/alice').set(user({ devices: { laptop: 1_790_000_300_000 } }), { merge: true }),
+    );
+    const snapshot = await assertSucceeds(db.doc('users/alice').get());
+    expect(snapshot.get('quota')).toEqual(quota);
+  });
+
+  it('keeps a record that holds a quota from being deleted, which would start the day again', async () => {
+    await seed('users/alice', user({ quota }));
+    await assertFails(alice().firestore().doc('users/alice').delete());
+    await seed('users/alice', user());
+    await assertSucceeds(alice().firestore().doc('users/alice').delete());
+  });
+
+  it('lets the first sign-in merge into a record that the functions created with the quota alone', async () => {
+    await seed('users/alice', { quota });
+    const db = alice().firestore();
+    await assertSucceeds(db.doc('users/alice').set(user(), { merge: true }));
+    const snapshot = await assertSucceeds(db.doc('users/alice').get());
+    expect(snapshot.data()).toEqual(user({ quota }));
   });
 });

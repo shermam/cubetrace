@@ -4,6 +4,7 @@ node_modules/
 # Build output and caches
 dist/
 out-tsc/
+functions/lib/
 .angular/
 .sass-cache/
 coverage/
@@ -31,6 +32,10 @@ apps/web/public/demo/
 # Local environment (never commit secrets)
 .env
 .env.*
+# ...except the functions' parameters, which are not secrets (functions/README.md)
+!functions/.env
+# The secrets the Functions emulator reads locally (functions/README.md)
+.secret.local
 
 # Editors
 .idea/

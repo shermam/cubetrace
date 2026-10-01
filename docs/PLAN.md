@@ -1337,6 +1337,28 @@ marks the attempt `upload.state = 'done'`. `bucket/cors.json` for R2 (PUT and GE
 `https://shermam.github.io` and `http://localhost:4200`); a `functions/README.md` for deploying; the
 coordinator deploys first with the session key, the workflow thereafter.
 
+**Outcome (2026-10-01, PR #44).** `functions/` is a workspace (ES modules, Node 22): firebase-functions
+7.4, firebase-admin 14.5, `@google-cloud/storage` 8.2, the AWS SDK 3.1145, pinned exactly because Cloud
+Build installs `functions/package.json` without the lockfile. The API as written, plus: the attempt's
+document id, and the `{index}` of its objects, is its folder's name (`0001`), which T3.1 must use;
+`session.json` rides with an attempt (a `files[].path`, recorded on that attempt, its object the
+session's); each URL binds the content type and the exact size (GCS `x-goog-content-length-range`, R2
+`content-length`), so the bucket never holds more than the quota counted; the quota counts every
+signature, a file signed again included (`users/{uid}.quota = {day, bytes, files}`, UTC, 2 GB and 400
+files; a call that does not fit is refused whole, with `resetsAtMs`); the attempt is checked before
+anything is signed, and the URLs are signed before the quota is counted, so a bucket that cannot sign
+records and counts nothing; `confirmUpload` answers
+`{state, confirmed, pending}`. The parameters are in `functions/.env`, committed, because a deploy
+without prompts needs a value for each (the CLI does not take the defaults then), and the R2 secrets
+are declared only when that file says `r2`, because a declared secret must exist in Secret Manager for
+any deploy. The rules keep the quota the functions': readable, never written by the client, and a
+record that holds one cannot be deleted. For T3.1: that id, and `upload` written only when the attempt
+is created (`{state: 'pending', files: {}}`), never again, or a later `saveAttempt` overwrites the
+functions' intent. For T3.3: sign once Firestore has sent the documents (`waitForPendingWrites`), else
+`not-found`; `PUT` a `Blob` with exactly the headers returned. The first deploy takes `--force` once,
+for Artifact Registry's cleanup policy (`functions/README.md`); the bucket, its CORS and the functions'
+account's roles are in `bucket/README.md` and `docs/USER-ACTIONS.md`.
+
 ### T3.3 — the upload queue
 
 `packages/upload` (plain TS over `SessionStore`, a `signUpload` port and a `fetch`/`XMLHttpRequest`

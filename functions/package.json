@@ -1,0 +1,24 @@
+{
+  "name": "@cubetrace/functions",
+  "version": "0.2.0",
+  "private": true,
+  "description": "The Firebase project's Cloud Functions: signed uploads into the dataset's bucket (Google Cloud Storage or Cloudflare R2) under a daily quota per account. Deployed on its own, so it imports no workspace package.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "gcp-build": ""
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1145.0",
+    "@aws-sdk/s3-request-presigner": "3.1145.0",
+    "@google-cloud/storage": "8.2.0",
+    "firebase-admin": "14.5.0",
+    "firebase-functions": "7.4.0"
+  }
+}

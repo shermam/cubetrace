@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://shermam.github.io", "http://localhost:4200"],
+    "method": ["PUT", "GET"],
+    "responseHeader": ["Content-Type", "x-goog-content-length-range"],
+    "maxAgeSeconds": 3600
+  }
+]

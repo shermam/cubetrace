@@ -29,12 +29,36 @@ service cloud.firestore {
         && user.devices is map;
     }
 
+    // users/{uid}.quota (T3.2): the account's upload quota of the day, {day, bytes, files}, which only
+    // the functions write (signUpload, through the Admin SDK, past these rules). The account reads it
+    // with its record; it never creates, changes or removes it, and cannot delete a record that holds
+    // it, which would start the day's count again. (The field list above keeps it out already; this
+    // says so, and holds should that list ever grow.)
+    function serverFields() {
+      return ['quota'];
+    }
+
+    function createsNoServerField() {
+      return !request.resource.data.keys().hasAny(serverFields());
+    }
+
+    function keepsServerFields() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(serverFields());
+    }
+
+    function holdsServerField() {
+      return resource != null && resource.data.keys().hasAny(serverFields());
+    }
+
     match /users/{uid} {
-      allow read, delete: if isOwnUid(uid);
+      allow read: if isOwnUid(uid);
+      allow delete: if isOwnUid(uid) && !holdsServerField();
       allow create: if isOwnUid(uid)
+        && createsNoServerField()
         && request.resource.data.keys().hasOnly(userFields())
         && validUser(request.resource.data);
       allow update: if isOwnUid(uid)
+        && keepsServerFields()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(userFields())
         && validUser(request.resource.data)
         && (!('createdMs' in resource.data)
