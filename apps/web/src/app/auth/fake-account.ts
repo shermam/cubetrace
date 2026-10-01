@@ -1,9 +1,26 @@
 // A fake of the account's backend for the unit tests (provide `loader` as ACCOUNT_LOADER): the
-// Firebase calls of AccountBackend over an in-memory account, without Firebase. Nothing in the app
-// imports this file, so it is not in the bundle.
-import type { UserRecord } from '@cubetrace/core';
+// Firebase calls of AccountBackend over an in-memory account and Firestore, without Firebase. Nothing
+// in the app imports this file, so it is not in the bundle.
+import {
+  attemptDocumentId,
+  type CloudAttempt,
+  type CloudSession,
+  type UserRecord,
+} from '@cubetrace/core';
 
-import type { AccountBackend, AccountLoader, BackendUser } from './account-backend';
+import type {
+  AccountBackend,
+  AccountLoader,
+  BackendUser,
+  CloudDocument,
+  CloudListing,
+} from './account-backend';
+
+/** A session of the fake's index: its document and its attempts' documents, by id (`0001`). */
+interface IndexedSession {
+  session: CloudSession | null;
+  readonly attempts: Map<string, CloudAttempt>;
+}
 
 /** The account the tests sign in with. */
 export const ADA: BackendUser = {
@@ -39,16 +56,40 @@ export class FakeAccountBackend implements AccountBackend {
   saveError: Error | null = null;
   /** Unset: the first report waits for `release()`, as Firebase reads its persistence first. */
   reportAtOnce = true;
+  /**
+   * Unset: the device is offline. As Firestore's, the index's writes are applied to the documents at
+   * once, and their promises wait for `online` to be set again (`goOnline()`); reads say they come
+   * from the cache, and the documents written meanwhile that they hold are pending.
+   */
+  online = true;
+  /** Set: the index's writes are refused with it, as the rules refuse a document. */
+  indexError: Error | null = null;
+  /** Set: the index's reads fail with it. */
+  readError: Error | null = null;
 
   /** The calls made, in order: `watch`, `popup`, `redirect`, `redirect-result`, `sign-out`. */
   readonly calls: string[] = [];
   /** Every users/{uid} written, in order. */
   readonly saved: { uid: string; record: UserRecord }[] = [];
+  /** The session index, by session id: the documents as written (the writes merged, as Firestore). */
+  readonly index = new Map<string, IndexedSession>();
+  /**
+   * The index's writes, in order: `sessions/<id>`, `sessions/<id>/attempts/0001`, `delete
+   * sessions/<id>/attempts/0001`; the documents of one batch in a row.
+   */
+  readonly indexWrites: string[] = [];
+  /** How many batches the writes came in (`saveSessionIndex` writes a session with its attempts). */
+  batches = 0;
+  /** The index's queries, in order: `sessions <uid> <limit>`, `session <id>`, `attempts <id> <uid>`. */
+  readonly reads: string[] = [];
   /** How many times the loader loaded this backend. */
   loads = 0;
 
   private readonly watchers = new Set<(user: BackendUser | null) => void>();
   private held: (() => void)[] = [];
+  /** The paths written while offline, and the writes waiting for the network. */
+  private readonly unsent = new Set<string>();
+  private waiting: (() => void)[] = [];
 
   readonly loader: AccountLoader = () => {
     this.loads++;
@@ -132,6 +173,155 @@ export class FakeAccountBackend implements AccountBackend {
     return Promise.resolve();
   }
 
+  saveSessionIndex(session: CloudSession, attempts: readonly CloudAttempt[] = []): Promise<void> {
+    this.batches++;
+    return this.write(() => {
+      this.put(session);
+      for (const attempt of attempts) {
+        this.putAttempt(attempt);
+      }
+    });
+  }
+
+  saveAttemptIndex(attempt: CloudAttempt): Promise<void> {
+    this.batches++;
+    return this.write(() => {
+      this.putAttempt(attempt);
+    });
+  }
+
+  deleteAttemptIndex(sessionId: string, index: number): Promise<void> {
+    this.batches++;
+    return this.write(() => {
+      const path = `sessions/${sessionId}/attempts/${attemptDocumentId(index)}`;
+      this.indexWrites.push(`delete ${path}`);
+      this.index.get(sessionId)?.attempts.delete(attemptDocumentId(index));
+    });
+  }
+
+  listSessions(uid: string, limit: number): Promise<CloudListing> {
+    this.reads.push(`sessions ${uid} ${String(limit)}`);
+    return this.read(() =>
+      [...this.index.values()]
+        .flatMap(({ session }) => (session?.owner === uid ? [session] : []))
+        .sort((p, q) => q.createdMs - p.createdMs)
+        .slice(0, limit)
+        .map((session) => this.document(session.id, `sessions/${session.id}`, session)),
+    );
+  }
+
+  getSession(sessionId: string): Promise<CloudDocument | null> {
+    this.reads.push(`session ${sessionId}`);
+    if (this.readError !== null) {
+      return Promise.reject(this.readError);
+    }
+    const session = this.index.get(sessionId)?.session ?? null;
+    return Promise.resolve(
+      session === null ? null : this.document(sessionId, `sessions/${sessionId}`, session),
+    );
+  }
+
+  listAttempts(uid: string, sessionId: string): Promise<CloudListing> {
+    this.reads.push(`attempts ${sessionId} ${uid}`);
+    return this.read(() =>
+      [...(this.index.get(sessionId)?.attempts ?? new Map<string, CloudAttempt>())]
+        .filter(([, attempt]) => attempt.owner === uid)
+        .sort(([p], [q]) => p.localeCompare(q))
+        .map(([id, attempt]) => this.document(id, `sessions/${sessionId}/attempts/${id}`, attempt)),
+    );
+  }
+
+  /** The network is back: the writes made offline reach the server, and their promises resolve. */
+  goOnline(): void {
+    this.online = true;
+    this.unsent.clear();
+    const waiting = this.waiting;
+    this.waiting = [];
+    for (const send of waiting) {
+      send();
+    }
+  }
+
+  /** The session's document in the index, or undefined. */
+  sessionDocument(sessionId: string): CloudSession | undefined {
+    return this.index.get(sessionId)?.session ?? undefined;
+  }
+
+  /** The documents of the session's attempts in the index, by index. */
+  attemptDocuments(sessionId: string): CloudAttempt[] {
+    return [...(this.index.get(sessionId)?.attempts.values() ?? [])].sort(
+      (p, q) => p.index - q.index,
+    );
+  }
+
+  /**
+   * A write of the index, applied to the documents at once as Firestore applies it to its cache; it
+   * settles when the server would have it (at once online), and rejects with `indexError`.
+   */
+  private write(apply: () => void): Promise<void> {
+    const refused = this.indexError;
+    if (refused === null) {
+      apply();
+    }
+    return new Promise<void>((resolve, reject) => {
+      const send = (): void => {
+        if (refused === null) {
+          resolve();
+        } else {
+          reject(refused);
+        }
+      };
+      if (this.online) {
+        queueMicrotask(send);
+      } else {
+        this.waiting.push(send);
+      }
+    });
+  }
+
+  private put(session: CloudSession): void {
+    const path = `sessions/${session.id}`;
+    this.indexWrites.push(path);
+    this.markUnsent(path);
+    const entry = this.entry(session.id);
+    entry.session = merged(entry.session, structuredClone(session));
+  }
+
+  private putAttempt(attempt: CloudAttempt): void {
+    const id = attemptDocumentId(attempt.index);
+    const path = `sessions/${attempt.session}/attempts/${id}`;
+    this.indexWrites.push(path);
+    this.markUnsent(path);
+    const attempts = this.entry(attempt.session).attempts;
+    attempts.set(id, merged(attempts.get(id) ?? null, structuredClone(attempt)));
+  }
+
+  private entry(sessionId: string): IndexedSession {
+    let entry = this.index.get(sessionId);
+    if (entry === undefined) {
+      entry = { session: null, attempts: new Map() };
+      this.index.set(sessionId, entry);
+    }
+    return entry;
+  }
+
+  private markUnsent(path: string): void {
+    if (!this.online) {
+      this.unsent.add(path);
+    }
+  }
+
+  private read(documents: () => CloudDocument[]): Promise<CloudListing> {
+    if (this.readError !== null) {
+      return Promise.reject(this.readError);
+    }
+    return Promise.resolve({ documents: documents(), fromCache: !this.online });
+  }
+
+  private document(id: string, path: string, data: unknown): CloudDocument {
+    return { id, data: structuredClone(data), pending: this.unsent.has(path) };
+  }
+
   private setUser(user: BackendUser | null): void {
     this.user = user;
     for (const watcher of this.watchers) {
@@ -140,4 +330,27 @@ export class FakeAccountBackend implements AccountBackend {
       });
     }
   }
+}
+
+/**
+ * `next` merged into `stored`, as Firestore's `set` with `merge` does: maps field by field, anything
+ * else (arrays too) replaced.
+ */
+function merged<T>(stored: T | null, next: T): T {
+  return stored === null ? next : (mergeValue(stored, next) as T);
+}
+
+function mergeValue(stored: unknown, next: unknown): unknown {
+  if (!isMap(stored) || !isMap(next)) {
+    return next;
+  }
+  const out: Record<string, unknown> = { ...stored };
+  for (const [key, value] of Object.entries(next)) {
+    out[key] = mergeValue(stored[key], value);
+  }
+  return out;
+}
+
+function isMap(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
