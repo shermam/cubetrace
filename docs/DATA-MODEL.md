@@ -226,7 +226,8 @@ or lost, no audio encoder; since T2.12, the browser's voice processing kept on a
 microphone was asked for raw, `notice: The microphone is not raw: …`, or the raw request refused);
 and, since T3.1, once when the session index in the cloud refuses a write of the session's,
 `cloud: the session could not be indexed: <reason>`, `cloud: attempt <index> could not be indexed:
-<reason>` or `cloud: attempt <index> could not be deleted from the index: <reason>` (§10). `summary` is counted from the attempts: each one is solved or a DNF.
+<reason>` or `cloud: attempt <index> could not be deleted from the index: <reason>` (§10).
+`summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in
@@ -521,9 +522,9 @@ attempt, a note, a camera, a sync check) writes its document, and every save of 
 ends, and again when a clip is attached) writes the attempt's, each merged into the stored one
 (Firestore's `set` with `merge`: a field the server added stays): the first write of an attempt's
 document carries its `upload`, the later ones every field but `upload`; the timer's Delete last
-deletes the attempt's document. Firestore applies the writes to its cache in IndexedDB at once and sends them
-when it can, offline after the network is back, across reloads; the saves of the records never wait
-for them. **Demo sessions are never written**: a session whose cube is the fake cube
+deletes the attempt's document. Firestore applies the writes to its cache in IndexedDB at once and
+sends them when it can, offline after the network is back, across reloads; the saves of the records
+never wait for them. **Demo sessions are never written**: a session whose cube is the fake cube
 (`cube.hardware` is `simulated`). A session saved while no account is signed in on the device (made
 signed out, or changed after a sign-out, or before a remembered account has loaded) is written whole,
 its document and its attempts' in one batch, by the catch-up that runs when an account signs in, and

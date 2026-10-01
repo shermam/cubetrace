@@ -83,16 +83,16 @@ export type TrackedStore = SessionStore & Partial<ProblemReporter>;
  * every attempt to `sessions/{id}/attempts/{index}`, with the account as their owner, through
  * Firestore's persistent cache: the saves never wait for them, and offline they wait in the cache,
  * across reloads. An attempt's document is created with its `upload`, all pending; its later writes
- * (a clip attached, the catch-up) leave `upload` out, since from then on the upload's functions (T3.2)
- * keep it and the rules refuse the app's changes to it. Demo sessions (a simulated cube) never go. A
- * session saved while no account is
- * signed in, created then or changed, is written whole by the catch-up that runs when an account signs
- * in, or starts signed in: the sessions of this device that are not in its index (`SESSION_INDEX_KEY`
- * says which are), the oldest first, a session and its attempts in one batch, at most
- * {@link CATCH_UP_DOCUMENTS} documents at a time. A write that the server refuses is said once per
- * session and page load: in `failures`, in the console, and in the session's notes (`cloud: …`); none
- * is thrown. Deleting a session deletes this device's copy only: its documents stay, as the uploads
- * will. It also reads the index for the Sessions page, a session's page and the QA view.
+ * (a clip attached, the catch-up) leave `upload` out, since from then on the upload's functions
+ * (T3.2) keep it and the rules refuse the app's changes to it. Demo sessions (a simulated cube)
+ * never go. A session saved while no account is signed in, created then or changed, is written
+ * whole by the catch-up that runs when an account signs in, or starts signed in: the sessions of
+ * this device that are not in its index (`SESSION_INDEX_KEY` says which are), the oldest first, a
+ * session and its attempts in one batch, at most {@link CATCH_UP_DOCUMENTS} documents at a time. A
+ * write that the server refuses is said once per session and page load: in `failures`, in the
+ * console, and in the session's notes (`cloud: …`); none is thrown. Deleting a session deletes this
+ * device's copy only: its documents stay, as the uploads will. It also reads the index for the
+ * Sessions page, a session's page and the QA view.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionIndexService {
