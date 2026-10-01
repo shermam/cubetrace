@@ -80,7 +80,7 @@ test.describe('on the dev server, with a fake of Firebase', () => {
       createdMs: ADA.createdMs,
       displayName: 'Ada Lovelace',
       email: 'ada@example.com',
-      devices: { 'e2e-laptop': expect.any(Number) as number },
+      devices: { 'e2e-laptop': expect.any(Number) },
     });
     expect(await page.evaluate(() => localStorage.getItem('cubetrace.account'))).toBe('signed-in');
 
