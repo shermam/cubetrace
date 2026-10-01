@@ -32,8 +32,9 @@ jobs:
       - run: npm run format:check
       - run: npm test
 
-      # The Firestore rules' tests run against the Firestore emulator: a Java program (Java 21 or
-      # later) that the Firebase CLI downloads once per version, into this cache.
+      # The Firestore rules' tests, and the functions' (signed uploads), run against the Firestore
+      # emulator: a Java program (Java 21 or later) that the Firebase CLI downloads once per version,
+      # into this cache.
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -44,6 +45,7 @@ jobs:
           key: firebase-emulators-${{ hashFiles('package.json') }}
           restore-keys: firebase-emulators-
       - run: npm run test:rules
+      - run: npm run test:functions
 
       - run: npm run build
       - run: npx playwright install --with-deps chromium

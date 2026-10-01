@@ -1,13 +1,14 @@
 name: Firebase
 
-# Deploys the Firestore rules of the Firebase project cubetrace-cacd9 (later its functions too) when
-# a merge to main changes them, signed in as a service account whose key is the repository secret
-# FIREBASE_SERVICE_ACCOUNT (docs/USER-ACTIONS.md, phase 3). CI tests the rules on every pull request.
+# Deploys the Firestore rules and the Cloud Functions of the Firebase project cubetrace-cacd9 when a
+# merge to main changes them, signed in as a service account whose key is the repository secret
+# FIREBASE_SERVICE_ACCOUNT (docs/USER-ACTIONS.md, phase 3). CI tests both on every pull request.
 on:
   push:
     branches: [main]
     paths:
       - 'firebase/**'
+      - 'functions/**'
       - 'firebase.json'
       - '.firebaserc'
       - '.github/workflows/firebase.yml'
@@ -22,9 +23,9 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy the Firestore rules
+    name: Deploy the Firestore rules and the functions
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check that the service account's key is there
         env:
@@ -40,6 +41,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: npm
+
+      # The functions' dependencies: the CLI builds them (the predeploy in firebase.json) and loads them
+      # to find the functions, their parameters (functions/.env) and the secrets they need.
+      - run: npm ci
 
       # The Firebase CLI reads the key through Application Default Credentials; the file lives in the
       # runner's temporary directory, which is emptied after the job, and is removed as soon as the
@@ -53,9 +59,9 @@ jobs:
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$key"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$key" >> "$GITHUB_ENV"
 
-      # `npm run firebase` is npx with the pinned firebase-tools (package.json); no npm ci needed.
-      - name: Deploy the rules
-        run: npm run firebase -- deploy --only firestore:rules --project cubetrace-cacd9 --non-interactive
+      # `npm run firebase` is npx with the pinned firebase-tools (package.json).
+      - name: Deploy the rules and the functions
+        run: npm run firebase -- deploy --only firestore:rules,functions --project cubetrace-cacd9 --non-interactive
 
       - name: Remove the key
         if: always()
