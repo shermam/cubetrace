@@ -1322,7 +1322,7 @@ every `saveAttempt` writes `sessions/{id}/attempts/{index}` (the record without 
 (this device, cloud, both) and a device filter; a QA view lists attempts per day per device with
 bytes uploaded and pending.
 
-**Outcome (2026-10-01, PR #TBD).** The documents are §10 of `docs/DATA-MODEL.md`: a session's is its
+**Outcome (2026-10-01, PR #45).** The documents are §10 of `docs/DATA-MODEL.md`: a session's is its
 session.json with `owner`; an attempt's its attempt.json without `moves`, with `owner`, `device` (its
 session's host label and camera labels) and `upload` (`pending`, each file of its folder by name with
 its size on the device, `doneMs` null), both of the records' schema version, 2, with JSON Schemas
