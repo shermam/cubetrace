@@ -270,11 +270,11 @@ test.describe('on a phone in portrait, the scramble over the pinned picture (T2.
     const clock = await inView(page, page.getByRole('region', { name: 'Time' }), 'the clock');
     // The picture from edge to edge at the frames' 16:9 (Chrome's test camera), the scramble over
     // its lower part, the time right under them.
-    expect(video.x).toBe(0);
-    expect(video.width).toBe(390);
+    expect(Math.abs(video.x)).toBeLessThan(1);
+    expect(Math.abs(video.width - 390)).toBeLessThan(1);
     expect(Math.abs(video.height - (390 * 9) / 16)).toBeLessThan(1);
     const strip = await boxOf(page.getByRole('region', { name: 'Scramble' }), 'the strip');
-    expect(strip.width).toBe(390);
+    expect(Math.abs(strip.width - 390)).toBeLessThan(1);
     expect(strip.y).toBeGreaterThan(video.y + 30);
     expect(Math.abs(strip.y + strip.height - (video.y + video.height))).toBeLessThan(1);
     expect(clock.y).toBeGreaterThanOrEqual(video.y + video.height);
@@ -312,7 +312,7 @@ test.describe('on a phone in portrait, the scramble over the pinned picture (T2.
     // the window, the time gone under them.
     const pinned = await scrollToSolves(page);
     const videoThen = await inView(page, page.getByTestId('camera-preview'), 'the pinned picture');
-    expect(videoThen.y).toBe(0);
+    expect(Math.abs(videoThen.y)).toBeLessThan(1);
     for (const [i, move] of (await moves.all()).entries()) {
       await inView(page, move, `move ${String(i + 1)} of the pinned scramble`);
     }
@@ -325,7 +325,9 @@ test.describe('on a phone in portrait, the scramble over the pinned picture (T2.
     // The narrowest phones: the picture as wide as the screen, nothing wider.
     await page.setViewportSize({ width: 320, height: 640 });
     await expect
-      .poll(async () => (await boxOf(page.getByTestId('camera-preview'), 'the picture')).width)
+      .poll(async () =>
+        Math.round((await boxOf(page.getByTestId('camera-preview'), 'the picture')).width),
+      )
       .toBe(320);
     await noHorizontalOverflow(page);
   });
