@@ -2,10 +2,11 @@
 // T3.3; docs/ARCHITECTURE.md, "Uploads"), as plain functions of their dependencies, so that the tests
 // run them against the Firestore emulator and a fake bucket. functions/src/index.ts deploys them.
 //
-// signUpload: the account's attempt, checked in Firestore; the day's quota reserved in users/{uid};
-// the intent recorded in the attempt's `upload`; a URL per file that lets the browser PUT exactly that
-// file, for 15 minutes. confirmUpload: each file found in the bucket with the size signed; `doneMs` set
-// per file, and the attempt's `upload.state` `done` once every file of the intent is there.
+// signUpload: the account's attempt, checked in Firestore; a URL per file that lets the browser PUT
+// exactly that file, for 15 minutes; then, in one transaction, the day's quota reserved in users/{uid}
+// and the intent recorded in the attempt's `upload`. confirmUpload: each file found in the bucket with
+// the size signed; `doneMs` set per file, and the attempt's `upload.state` `done` once every file of
+// its upload is there.
 import type { DocumentReference, DocumentSnapshot, Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/https';
 
@@ -65,11 +66,11 @@ export interface UploadFile {
 
 /** `confirmUpload`'s answer. */
 export interface ConfirmResult {
-  /** The attempt's `upload.state`: `done` once every file signed for it is confirmed. */
+  /** The attempt's `upload.state`: `done` once every file of its upload is confirmed. */
   readonly state: 'uploading' | 'done';
   /** The files of this call, each with its `doneMs`. */
   readonly confirmed: readonly (UploadFile & { readonly path: string })[];
-  /** The files signed for the attempt and not confirmed yet. */
+  /** The files of the attempt's upload (`upload.files`) not confirmed yet. */
   readonly pending: readonly string[];
 }
 

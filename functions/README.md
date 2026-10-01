@@ -47,10 +47,11 @@ confirmUpload({ sessionId, attemptIndex, files: [{ path }] })
   → { state: 'uploading' | 'done', confirmed: [{ path, bytes, doneMs }], pending: [path] }
 ```
 
-After the `PUT`s. Each file must have been signed for that attempt (`failed-precondition`) and be in
-the bucket with the size signed (`not-found` when it is not there, `failed-precondition` when its size
-differs). It sets each file's `doneMs` (the server's clock; one already set stays), and
-`upload.state = 'done'` once every file of `upload.files` has one. Calling it again changes nothing.
+After the `PUT`s. Each file must be one of the attempt's upload, `upload.files` (signed, or listed by
+the index when it created the attempt; `failed-precondition` otherwise), and be in the bucket with
+that size (`not-found` when it is not there, `failed-precondition` when its size differs). It sets
+each file's `doneMs` (the server's clock; one already set stays), and `upload.state = 'done'` once
+every file of `upload.files` has one. Calling it again changes nothing.
 
 ### Errors and logs
 
