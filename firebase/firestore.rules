@@ -80,17 +80,40 @@ service cloud.firestore {
       return request.resource.data.owner == resource.data.owner;
     }
 
+    // The session index (T3.1, docs/DATA-MODEL.md §10): a session's document is its session.json with
+    // owner, an attempt's its attempt.json without moves, with owner, device and upload. The rules
+    // check the fields that the queries, the other rules and the readers rely on: the schema version,
+    // the document's place (a session's id, an attempt's session and index, as its path has them:
+    // `0001` is index 1), that an attempt's moves stay on the device, and the owner, which ownsNew and
+    // keepsOwner hold to the writer's uid.
+    function validSession(data, sessionId) {
+      return data.schema is int
+        && data.id == sessionId;
+    }
+
+    function validAttempt(data, sessionId, index) {
+      return data.schema is int
+        && data.session == sessionId
+        && int(index) == data.index
+        && !('moves' in data)
+        && data.device is map
+        && data.upload is map;
+    }
+
     match /sessions/{sessionId} {
       allow read, delete: if ownsExisting();
-      allow create: if ownsNew();
-      allow update: if ownsExisting() && keepsOwner();
+      allow create: if ownsNew() && validSession(request.resource.data, sessionId);
+      allow update: if ownsExisting() && keepsOwner()
+        && validSession(request.resource.data, sessionId);
 
       match /attempts/{index} {
         allow read, delete: if ownsExisting();
         allow create: if ownsNew()
+          && validAttempt(request.resource.data, sessionId, index)
           && getAfter(/databases/$(database)/documents/sessions/$(sessionId)).data.owner
             == request.auth.uid;
-        allow update: if ownsExisting() && keepsOwner();
+        allow update: if ownsExisting() && keepsOwner()
+          && validAttempt(request.resource.data, sessionId, index);
       }
     }
   }

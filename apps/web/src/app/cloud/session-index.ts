@@ -552,12 +552,20 @@ export class SessionIndexService {
     return this.readState()[uid] ?? { sessions: [], lastSyncMs: null };
   }
 
-  /** Reads what the index keeps, changes it and writes it back, at once (other tabs write it too). */
+  /**
+   * Reads what the index keeps, changes it and writes it back, at once (other tabs write it too);
+   * nothing is written when nothing changed, so that a device never signed in keeps nothing.
+   */
   private editState(edit: (state: Record<string, AccountState>) => void): void {
     const state = this.readState();
+    const before = JSON.stringify(state);
     edit(state);
+    const after = JSON.stringify(state);
+    if (after === before) {
+      return;
+    }
     try {
-      this.globals.localStorage?.setItem(SESSION_INDEX_KEY, JSON.stringify(state));
+      this.globals.localStorage?.setItem(SESSION_INDEX_KEY, after);
     } catch {
       // Storage blocked: the next catch-up writes these sessions again, which changes nothing.
     }

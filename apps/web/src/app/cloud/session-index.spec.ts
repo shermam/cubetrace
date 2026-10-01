@@ -202,7 +202,7 @@ describe('SessionIndexService', () => {
     expect(index.written().size).toBe(0);
   });
 
-  it('writes nothing while signed out, and the store never waits for the index', async () => {
+  it('writes nothing while signed out, keeps nothing on a device never signed in, and the store never waits for the index', async () => {
     const { index, tracked } = load();
     await tracked.createSession(realSession());
     await tracked.saveAttempt(attemptWithClips(1));
@@ -211,6 +211,7 @@ describe('SessionIndexService', () => {
     expect(backend.loads).toBe(0);
     expect(backend.indexWrites).toEqual([]);
     expect((await store.exportSession(SESSION_A)).attempts).toHaveLength(1);
+    expect(storage.getItem(SESSION_INDEX_KEY)).toBeNull();
   });
 
   it('does not wait for the server: offline, the writes wait and are confirmed when the network is back', async () => {
