@@ -273,6 +273,23 @@ export class FakeDocument extends EventTarget {
   }
 }
 
+/**
+ * What `window.matchMedia(query)` answers, for a window that the test resizes: `set()` says whether
+ * the query matches now, and fires `change` when that changes.
+ */
+export class FakeMediaQuery extends EventTarget {
+  constructor(public matches = false) {
+    super();
+  }
+
+  set(matches: boolean): void {
+    if (matches !== this.matches) {
+      this.matches = matches;
+      this.dispatchEvent(new Event('change'));
+    }
+  }
+}
+
 /** `requestAnimationFrame`: callbacks wait until the test runs a frame with `frame()`. */
 export class FakeAnimationFrames {
   private nextHandle = 1;

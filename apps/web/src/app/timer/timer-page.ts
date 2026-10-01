@@ -3,25 +3,32 @@ import { ActivatedRoute } from '@angular/router';
 
 import { CameraPanel } from '../camera/camera-panel';
 import { CameraPreview } from '../camera/camera-preview';
+import { SyncCheck } from '../camera/sync-check';
 import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { CubeService } from '../cube/cube-service';
 import { demoRequestFrom } from '../cube/demo';
 import { LiveCubePanel } from '../cube/live-cube-panel';
 import { SessionService } from '../session/session-service';
+import { SettingsService } from '../settings/settings-service';
 import { BreakdownChart } from './breakdown-chart';
 import { ClipViewer } from './clip-viewer';
 import { ClipViewing } from './clip-viewing';
 import { ScrambleView } from './scramble-view';
 import { SolveList } from './solve-list';
 import { TimerClock } from './timer-clock';
+import { TWO_COLUMNS_QUERY, timerLayout, windowMatches } from './timer-layout';
 
 /** The Timer page lists this many solves, the newest; the session's page has them all (T2.7). */
 export const TIMER_SOLVES = 12;
 
 /**
- * `/`: the timer (docs/PLAN.md, T1.6b; laid out for the camera by T2.7). On a phone, one column:
- * the scramble, the time, the camera's preview under it, the breakdown, the last solves, then the
- * collapsible Cube section (T1.6a) and Camera settings (T2.1). On wider screens the scramble and,
+ * `/`: the timer (docs/PLAN.md, T1.6b; laid out for the camera by T2.7 and, on a phone, T2.13). On
+ * a phone, one column: the scramble, the time, the breakdown, the last solves, then the collapsible
+ * Cube section (T1.6a) and Camera settings (T2.1). With the camera on, its picture is pinned at the
+ * top of the window with the scramble over its lower part, so that both stay in view as the page
+ * scrolls, and the sync check comes under the time; with the camera off, the scramble alone is
+ * pinned; with Scramble over the picture off (Settings → Timer), nothing is pinned and the camera's
+ * preview comes under the time, as T2.7 had it (`TimerLayout`). On wider screens the scramble and,
  * under it, the time with the camera's preview beside it (so that the scramble, the time and the
  * picture are in view together), then the two sections; on the right the breakdown, the session's
  * statistics and its last {@link TIMER_SOLVES} solves, with "See all" to the session's page. The
@@ -42,25 +49,45 @@ export const TIMER_SOLVES = 12;
     LiveCubePanel,
     ScrambleView,
     SolveList,
+    SyncCheck,
     TimerClock,
   ],
   host: { '(document:keydown)': 'onKeydown($event)' },
   template: `
     <!-- The navigation says where this is; the space goes to the scramble, the time and the camera. -->
     <h1 class="visually-hidden">Timer</h1>
-    <div class="timer-layout">
-      <section class="scramble" aria-label="Scramble">
-        <app-scramble-view />
-      </section>
+    <div class="timer-layout" data-testid="timer-layout" [attr.data-layout]="layout()">
+      <!-- The scramble; on a phone, pinned at the top of the window, over the camera's picture
+           while the camera is on (T2.13). -->
+      <div class="stage" data-testid="timer-stage">
+        <section class="scramble" aria-label="Scramble">
+          <app-scramble-view [overPicture]="overlay()" />
+        </section>
+        @if (overlay()) {
+          @defer (on immediate) {
+            <app-camera-preview [overlay]="true" />
+          } @placeholder {
+            <div class="picture-placeholder"></div>
+          }
+        }
+      </div>
       <div class="live">
         <div class="live-row">
           <section class="clock" aria-label="Time">
             <app-timer-clock />
           </section>
-          @defer (on immediate) {
-            <app-camera-preview />
+          @if (!overlay()) {
+            @defer (on immediate) {
+              <app-camera-preview />
+            }
           }
         </div>
+        @if (overlay()) {
+          <!-- Under the time, out of the pinned part: elsewhere it is under the preview. -->
+          @defer (on immediate) {
+            <app-sync-check />
+          }
+        }
       </div>
       <section class="solves" aria-label="Breakdown and solves">
         <app-breakdown-chart [attempts]="session.attempts()" />
@@ -138,8 +165,63 @@ export const TIMER_SOLVES = 12;
       background: var(--surface);
     }
 
-    .scramble {
+    .stage {
       grid-area: scramble;
+      min-width: 0;
+    }
+
+    /* On a phone (T2.13), the scramble stays in view: pinned at the top of the window, over the rest,
+       from edge to edge on the page's background, so that nothing shows through beside it. */
+    [data-layout='pinned'] > .stage,
+    [data-layout='overlay'] > .stage {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      margin-inline: calc(-1 * var(--gutter));
+      background: var(--bg);
+    }
+
+    /* The scramble's card where T2.7 has it; pinned, with a band of the background above and under
+       it. */
+    [data-layout='pinned'] > .stage {
+      margin-block: calc(-1 * var(--gutter)) calc(-1 * var(--space-2));
+      padding: var(--gutter) var(--gutter) var(--space-2);
+    }
+
+    /* The camera's picture from edge to edge, the scramble over its lower part on a dark strip
+       through which the picture still shows, as tall as its lines. */
+    [data-layout='overlay'] > .stage {
+      display: grid;
+
+      > * {
+        grid-area: 1 / 1;
+        min-width: 0;
+      }
+
+      > .scramble {
+        z-index: 1;
+        align-self: end;
+        padding: var(--space-2) var(--gutter);
+        border: 0;
+        border-top: 1px solid rgb(255 255 255 / 35%);
+        border-radius: 0;
+        background: rgb(0 0 0 / 60%);
+        color: #fff;
+        text-shadow: 0 1px 2px rgb(0 0 0 / 90%);
+      }
+    }
+
+    /* Where the picture comes once its code has loaded: the box it opens in. */
+    .picture-placeholder {
+      aspect-ratio: 16 / 9;
+      max-height: 42svh;
+      background: #000;
+    }
+
+    /* Only while it shows something (empty, it holds comments alone). */
+    .live app-sync-check:not(:empty) {
+      display: block;
+      margin-top: var(--section-gap);
     }
 
     /* The time and, beside it where the column is wide enough (under it otherwise), the camera's
@@ -223,6 +305,17 @@ export const TIMER_SOLVES = 12;
 export class TimerPage {
   protected readonly session = inject(SessionService);
   protected readonly solves = TIMER_SOLVES;
+  private readonly settings = inject(SettingsService);
+  private readonly wide = windowMatches(TWO_COLUMNS_QUERY);
+  /**
+   * T2.7's columns on a wide window; on a phone, the scramble pinned, over the camera's picture
+   * while the camera is on (T2.13). "Camera on" is the setting, which the camera follows as soon as
+   * its code has loaded, so that the layout does not wait for that code.
+   */
+  protected readonly layout = computed(() =>
+    timerLayout(this.wide(), this.settings.cameraOn(), this.settings.scrambleOverPicture()),
+  );
+  protected readonly overlay = computed(() => this.layout() === 'overlay');
   private readonly cube = inject(CubeService);
   private readonly dialogs = inject(ConnectDialogService);
   private readonly viewing = inject(ClipViewing);

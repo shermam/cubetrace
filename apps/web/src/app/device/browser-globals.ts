@@ -7,6 +7,13 @@ export interface PageVisibility {
   removeEventListener(type: 'visibilitychange', listener: () => void): void;
 }
 
+/** Whether the window matches a media query (`window.matchMedia(query)`), and its `change` event. */
+export interface MediaQueryState {
+  readonly matches: boolean;
+  addEventListener(type: 'change', listener: () => void): void;
+  removeEventListener(type: 'change', listener: () => void): void;
+}
+
 /**
  * The parts of the browser's global object that the device services read. Every API is
  * optional because the app also runs, with a warning, on browsers that lack them.
@@ -30,6 +37,8 @@ export interface BrowserGlobals {
   /** Timers on the host clock, such as the cube's idle disconnection; the unit tests fake them. */
   readonly setTimeout?: (callback: () => void, ms: number) => number;
   readonly clearTimeout?: (handle: number) => void;
+  /** Media queries, for the Timer page's layout on a phone or a laptop (T2.13). */
+  readonly matchMedia?: (query: string) => MediaQueryState;
 }
 
 /**

@@ -3,13 +3,15 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { MemorySessionStore } from '@cubetrace/core';
 import type { MockInstance } from 'vitest';
 
+import { CameraService } from '../camera/camera-service';
 import { ConnectDialogService } from '../connect/connect-dialog-service';
 import { CubeService } from '../cube/cube-service';
-import { BROWSER_GLOBALS } from '../device/browser-globals';
-import { FakeLocalStorage, settle } from '../device/fake-browser';
+import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
+import { FakeLocalStorage, FakeMediaQuery, settle } from '../device/fake-browser';
 import { CURRENT_SESSION_KEY, SCRAMBLE_SOURCE, SessionService } from '../session/session-service';
 import { SESSION_STORAGE } from '../session/session-storage';
 import { SESSION_A, testAttempt, testSession } from '../session/session-testing';
+import { SettingsService } from '../settings/settings-service';
 import { TWISTY_LOADER } from './scramble-view';
 import { TimerPage } from './timer-page';
 
@@ -20,6 +22,7 @@ describe('TimerPage', () => {
     query: Record<string, string> = {},
     store = new MemorySessionStore(),
     localStorage = new FakeLocalStorage(),
+    globals: BrowserGlobals = {},
   ): void {
     TestBed.configureTestingModule({
       providers: [
@@ -30,7 +33,7 @@ describe('TimerPage', () => {
         },
         {
           provide: BROWSER_GLOBALS,
-          useValue: { navigator: {}, localStorage },
+          useValue: { navigator: {}, localStorage, ...globals },
         },
         { provide: SESSION_STORAGE, useValue: { store, kind: 'opfs' } },
         { provide: SCRAMBLE_SOURCE, useValue: () => Promise.resolve("R U2 F'") },
@@ -50,6 +53,14 @@ describe('TimerPage', () => {
 
   function query(fixture: ComponentFixture<TimerPage>, selector: string): HTMLElement | null {
     return (fixture.nativeElement as HTMLElement).querySelector(selector);
+  }
+
+  /** The page once the deferred parts that a change brings have come. */
+  async function update(fixture: ComponentFixture<TimerPage>): Promise<void> {
+    for (let i = 0; i < 2; i++) {
+      await settle();
+      await fixture.whenStable();
+    }
   }
 
   it('lays out the scramble, the time and the preview, the breakdown and the solves, the Cube section and Camera settings', async () => {
@@ -85,6 +96,83 @@ describe('TimerPage', () => {
     expect(camera?.querySelector('summary')?.textContent).toContain('Off');
     expect(cube?.nextElementSibling?.tagName).toBe('APP-CAMERA-PANEL');
     expect(autoStartDemo).not.toHaveBeenCalled();
+  });
+
+  it("on a phone, pins the scramble, over the camera's picture while the camera is on; T2.7's layout with the setting off or on a wide window", async () => {
+    const wide = new FakeMediaQuery(false);
+    const asked: string[] = [];
+    setup({}, new MemorySessionStore(), new FakeLocalStorage(), {
+      matchMedia: (media) => {
+        asked.push(media);
+        return wide;
+      },
+    });
+    const settings = TestBed.inject(SettingsService);
+    const camera = TestBed.inject(CameraService);
+    const fixture = await render();
+    await update(fixture);
+    const layout = (): string | null | undefined =>
+      query(fixture, '[data-testid="timer-layout"]')?.getAttribute('data-layout');
+    const stage = (): string[] =>
+      Array.from(query(fixture, '[data-testid="timer-stage"]')?.children ?? [], (child) =>
+        [child.tagName.toLowerCase(), ...Array.from(child.classList)].join('.'),
+      );
+    const previews = (): number =>
+      (fixture.nativeElement as HTMLElement).querySelectorAll('app-camera-preview').length;
+    const scrambleView = (): HTMLElement | null => query(fixture, 'app-scramble-view');
+    expect(asked).toEqual(['(min-width: 60rem)']);
+
+    // The camera off: the scramble's card alone in the pinned part, the preview's place under the
+    // time (where it shows nothing).
+    expect(layout()).toBe('pinned');
+    expect(stage()).toEqual(['section.scramble']);
+    expect(query(fixture, '.live section.clock + app-camera-preview')).not.toBeNull();
+    expect(scrambleView()?.classList).not.toContain('over-picture');
+    expect(query(fixture, '[data-testid="scramble-picture"]')).not.toBeNull();
+
+    // The camera on: its picture in the pinned part, the scramble over it without its own picture,
+    // nothing beside the time, and the sync check under the time.
+    await camera.start();
+    await update(fixture);
+    expect(settings.cameraOn()).toBe(true);
+    expect(layout()).toBe('overlay');
+    expect(stage()).toEqual(['section.scramble', 'app-camera-preview.shown.overlay']);
+    expect(previews()).toBe(1);
+    expect(query(fixture, '.live-row app-camera-preview')).toBeNull();
+    expect(query(fixture, '.live > .live-row + app-sync-check')).not.toBeNull();
+    expect(scrambleView()?.classList).toContain('over-picture');
+    expect(query(fixture, '[data-testid="scramble-picture"]')).toBeNull();
+    expect(query(fixture, '[data-testid="scramble"]')?.textContent).toBe("R U2 F'");
+
+    // Scramble over the picture off: T2.7's column, the preview under the time with its sync check.
+    settings.setScrambleOverPicture(false);
+    await update(fixture);
+    expect(layout()).toBe('stacked');
+    expect(stage()).toEqual(['section.scramble']);
+    expect(previews()).toBe(1);
+    expect(query(fixture, '.live section.clock + app-camera-preview')?.className).toBe('shown');
+    expect(query(fixture, '.live > app-sync-check')).toBeNull();
+    expect(scrambleView()?.classList).not.toContain('over-picture');
+
+    // On again, then a wide window: T2.7's columns, whatever the setting.
+    settings.setScrambleOverPicture(true);
+    await update(fixture);
+    expect(layout()).toBe('overlay');
+    wide.set(true);
+    await update(fixture);
+    expect(layout()).toBe('columns');
+    expect(stage()).toEqual(['section.scramble']);
+    expect(query(fixture, '.live section.clock + app-camera-preview')?.className).toBe('shown');
+    expect(previews()).toBe(1);
+
+    // A phone again, the camera off: the scramble pinned alone.
+    wide.set(false);
+    camera.stop();
+    await update(fixture);
+    expect(layout()).toBe('pinned');
+    expect(stage()).toEqual(['section.scramble']);
+    expect(previews()).toBe(1);
+    fixture.destroy();
   });
 
   it('lists the last 12 solves of the session, with "See all" to its page', async () => {

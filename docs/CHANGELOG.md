@@ -20,9 +20,9 @@ Deployed at https://shermam.github.io/cubetrace/.
   balance, zoom, torch) with Reset to auto, the framing rectangle (Framing → Edit, kept per camera) and
   a sharpness meter (good or soft); in Settings, the resolution, the frame rate, the sharpness
   threshold and Record audio.
-- The camera's picture beside the time (under it on a phone), mirrored for a front camera, with the
-  framing rectangle drawn on it and one line under it: the frame rate, the sharpness, what the
-  recording does and how full storage is (T2.7).
+- The camera's picture beside the time (on a phone, at the top of the page with the scramble over it,
+  T2.13), mirrored for a front camera, with the framing rectangle drawn on it and one line with it:
+  the frame rate, the sharpness, what the recording does and how full storage is (T2.7).
 - Recording (T2.2, T2.3, T2.4, T2.9): with the camera on and a session under way, the camera and the
   microphone are encoded into the last 90 s kept in memory (H.264 and AAC where Chrome has encoders
   for them, VP9 and Opus otherwise), and every attempt gets two MP4 clips cut from it without
@@ -72,6 +72,14 @@ Deployed at https://shermam.github.io/cubetrace/.
 - The Timer page (T2.7): the last 12 solves, with "N solves in this session · See all"; the scramble's
   picture beside its moves, and the result on the line of the attempt's number; wider on a laptop and
   tighter on a phone, so that the scramble, the time and the camera's picture are in view together.
+- On a phone, the Timer page keeps the camera's picture and the scramble in view together while it
+  scrolls (T2.13): with the camera on, the picture is pinned at the top of the window, as wide as the
+  screen, with the scramble over its lower part on a dark strip through which the picture shows (its
+  moves as large and in the same colours as before; its progress and undo moves there too), the time
+  right under it and the sync check under the time; with the camera off, the scramble's card is pinned
+  at the top. On the ThinkPhone the scramble was out of view whenever the picture was in view, and
+  the hands drifted out of the frame unnoticed. Settings → Timer → "Scramble over the picture (phone)",
+  on by default, turned off brings back the column of T2.7, with the picture under the time.
 - The records are schema version 2 (T2.0, `docs/DATA-MODEL.md`): `attempt.json` gains `clock` and
   lists its clips in `video`, `session.json` lists its `cameras` and their `clock.cameras`, and every
   clip has a `frames.json`; sessions recorded by 0.1.0 are still read, resumed and exported, as

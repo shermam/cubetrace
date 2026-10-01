@@ -158,6 +158,40 @@ describe('CameraPreview', () => {
     expect(element('camera-preview-framing')).not.toBeNull();
   });
 
+  it("over a phone's Timer page: the frames' proportions, the line over the picture, no sync check", async () => {
+    const camera = await render([FAKE_PHONE_FRONT]);
+    // The Timer page's own sync check, which then shows the checks.
+    const sync = TestBed.inject(SyncService);
+    fixture.componentRef.setInput('overlay', true);
+    await camera.start();
+    await update();
+    expect(host().classList).toContain('overlay');
+    expect(host().classList).toContain('shown');
+    const box = element('camera-preview-box');
+    expect(box?.querySelector('.frame')?.classList).toContain('mirrored');
+    // 16:9 until a frame says otherwise; the ThinkPhone's frames are upright.
+    expect(Number(box?.style.getPropertyValue('--aspect'))).toBeCloseTo(16 / 9, 6);
+    frames.present(2, 50, 1080, 1920);
+    await update();
+    expect(Number(box?.style.getPropertyValue('--aspect'))).toBeCloseTo(9 / 16, 6);
+    expect(text('camera-status')).toMatch(/ fps · sharpness \S+ · idle · storage 0%$/);
+    expect(element('camera-preview-framing')).not.toBeNull();
+
+    // Recording, the sync check is due: the Timer page shows it, under the time, not this.
+    await ready(s);
+    await update();
+    starter.last.emitStats(statsOf(5));
+    await update();
+    expect(sync.visible()).toBe(true);
+    expect(host().querySelector('app-sync-check')).toBeNull();
+
+    // Back beside or under the time: the sync check under the line again.
+    fixture.componentRef.setInput('overlay', false);
+    await update();
+    expect(host().classList).not.toContain('overlay');
+    expect(element('sync-check')?.getAttribute('data-state')).toBe('framing');
+  });
+
   it('holds the sharpness meter while an attempt is armed or solving', async () => {
     const camera = await render();
     await camera.start();

@@ -135,6 +135,8 @@ interface StoredSettings {
   readonly demoSpeed: number;
   readonly inspection: boolean;
   readonly autoAdvance: boolean;
+  /** On a phone, the scramble over the camera's picture, both pinned at the top (T2.13). */
+  readonly scrambleOverPicture: boolean;
   readonly idleDisconnectMinutes: number;
   readonly cameraOn: boolean;
   readonly cameraResolution: CameraResolution;
@@ -155,6 +157,7 @@ const DEFAULTS: StoredSettings = {
   demoSpeed: DEMO_SPEED_DEFAULT,
   inspection: false,
   autoAdvance: true,
+  scrambleOverPicture: true,
   idleDisconnectMinutes: IDLE_DISCONNECT_DEFAULT_MINUTES,
   cameraOn: false,
   cameraResolution: '1080p',
@@ -179,14 +182,15 @@ export function macAddressProblem(text: string): string {
 /**
  * The settings the timer and the cube connection need (docs/PLAN.md, T1.6a): the host label that
  * sessions record, the cubes' MAC addresses by Bluetooth name, the idle disconnection (T1.14), the
- * demo speed, inspection and auto-advance; and the camera's (T2.1): on or off, the resolution and
- * frame rate asked for, the sharpness threshold, the camera chosen on each host (by host label),
- * and per camera (by its label) the manual controls chosen and the framing rectangles; and whether
- * the recording has the microphone's audio (T2.4, on by default, as the design has it), its video
- * quality (T2.10, Standard by default), and whether the Timer page's Camera settings are open
- * (T2.7). Signals, kept in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is
- * written on every change. Where the browser blocks storage the settings last until the page
- * closes, and `saveError` says so.
+ * demo speed, inspection, auto-advance and, on a phone, the scramble over the camera's picture
+ * (T2.13); and the camera's (T2.1): on or off, the resolution and frame rate asked for, the
+ * sharpness threshold, the camera chosen on each host (by host label), and per camera (by its
+ * label) the manual controls chosen and the framing rectangles; and whether the recording has the
+ * microphone's audio (T2.4, on by default, as the design has it), its video quality (T2.10,
+ * Standard by default), and whether the Timer page's Camera settings are open (T2.7). Signals, kept
+ * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
+ * Where the browser blocks storage the settings last until the page closes, and `saveError` says
+ * so.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
@@ -209,6 +213,11 @@ export class SettingsService {
   readonly inspection = computed(() => this.stored().inspection);
   /** The next scramble appears by itself after a solve. */
   readonly autoAdvance = computed(() => this.stored().autoAdvance);
+  /**
+   * On a phone, the camera's picture and the scramble over it stay pinned at the top of the Timer
+   * page, the scramble alone while the camera is off (T2.13); on by default. Off: T2.7's layout.
+   */
+  readonly scrambleOverPicture = computed(() => this.stored().scrambleOverPicture);
   /**
    * A connected cube is disconnected after this many minutes without a turn, to save its battery;
    * 0: never. A whole number from 0 to 60, 5 by default.
@@ -296,6 +305,12 @@ export class SettingsService {
 
   setAutoAdvance(on: boolean): void {
     this.update({ autoAdvance: on });
+  }
+
+  setScrambleOverPicture(on: boolean): void {
+    if (on !== this.stored().scrambleOverPicture) {
+      this.update({ scrambleOverPicture: on });
+    }
   }
 
   /** Sets the idle disconnection; returns false, changing nothing, unless it is 0 to 60 minutes. */
@@ -431,6 +446,7 @@ function readSettings(storage: Storage | null): StoredSettings {
   const demoSpeed = member(parsed, 'demoSpeed');
   const inspection = member(parsed, 'inspection');
   const autoAdvance = member(parsed, 'autoAdvance');
+  const scrambleOverPicture = member(parsed, 'scrambleOverPicture');
   const idleDisconnectMinutes = member(parsed, 'idleDisconnectMinutes');
   const cameraOn = member(parsed, 'cameraOn');
   const cameraResolution = member(parsed, 'cameraResolution');
@@ -449,6 +465,9 @@ function readSettings(storage: Storage | null): StoredSettings {
       typeof demoSpeed === 'number' && isDemoSpeed(demoSpeed) ? demoSpeed : DEFAULTS.demoSpeed,
     inspection: typeof inspection === 'boolean' ? inspection : DEFAULTS.inspection,
     autoAdvance: typeof autoAdvance === 'boolean' ? autoAdvance : DEFAULTS.autoAdvance,
+    // Settings stored before T2.13 have none: on, as for a new device.
+    scrambleOverPicture:
+      typeof scrambleOverPicture === 'boolean' ? scrambleOverPicture : DEFAULTS.scrambleOverPicture,
     idleDisconnectMinutes:
       typeof idleDisconnectMinutes === 'number' && isIdleDisconnectMinutes(idleDisconnectMinutes)
         ? idleDisconnectMinutes

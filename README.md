@@ -69,13 +69,18 @@ sessions of every device end up in one dataset.
 camera ("Front camera" or "Rear camera" on a phone) and click Turn on. Chrome asks for the camera
 once, and for the microphone when recording starts (Record audio, in Camera settings and in Settings
 → Camera, leaves the sound out). The camera stays on across reloads until Turn off. Its picture then
-stays beside the time (under it on a phone), mirrored for a front camera, so that the cube can be
-kept in frame while scrambling and solving, with one line under it: the frame rate measured, the
-sharpness (green when good, amber when soft), what the recording does (idle, recording, saving) and
-how full storage is. Camera settings also show what the camera claims next to what it delivers (a
-phone may claim 60 fps and deliver 30), and the manual controls it has: exposure and ISO, focus,
-white balance, zoom and torch, with Reset to auto. Settings → Camera has the resolution (1920×1080
-or 1280×720), the frame rate asked for, the video quality (below) and the sharpness meter's threshold.
+stays beside the time, mirrored for a front camera, so that the cube can be kept in frame while
+scrambling and solving, with one line under it: the frame rate measured, the sharpness (green when
+good, amber when soft), what the recording does (idle, recording, saving) and how full storage is.
+On a phone the picture is at the top of the page instead, as wide as the screen, with that line over
+its top left corner and the scramble over its lower part, on a dark strip through which the picture
+shows; both stay at the top of the window while the page scrolls, and with the camera off the
+scramble stays there alone. Settings → Timer → "Scramble over the picture (phone)", turned off, puts
+the picture under the time and pins nothing. Camera settings also show what the camera claims next
+to what it delivers (a phone may claim 60 fps and deliver 30), and the manual controls it has:
+exposure and ISO, focus, white balance, zoom and torch, with Reset to auto. Settings → Camera has
+the resolution (1920×1080 or 1280×720), the frame rate asked for, the video quality (below) and the
+sharpness meter's threshold.
 
 **The framing rectangle** is the part of the picture the model will learn from, drawn on the
 camera's picture. Framing → Edit, in Camera settings, shows a larger picture on which it is dragged
@@ -164,11 +169,11 @@ CFOP breakdown and the solve list.
 
 ![The Timer page on a laptop: a scramble with its picture at the top left, under it the time 14.99 with "#2 · Saved · Attempt 3" and, beside it, the camera's picture (Chrome's green test pattern) with its frame rate, sharpness, recording and storage under it; on the right the CFOP breakdown of the last solve and of the session average, and the solve list with its statistics and "2 solves in this session · See all"](docs/screenshots/timer-laptop.png)
 
-The same on a phone in portrait, 390 px wide, and the connect dialog in Chrome without the MAC
-address flag, once the cube is chosen:
+The same on a phone in portrait, 390 px wide, the camera's picture at the top with the scramble over
+it, and the connect dialog in Chrome without the MAC address flag, once the cube is chosen:
 
 <p>
-  <img src="docs/screenshots/timer-phone.png" width="260" alt="The Timer page on a phone: the scramble with its picture, the time, and the camera's picture under it, in one screen">
+  <img src="docs/screenshots/timer-phone.png" width="260" alt="The Timer page on a phone: at the top, the camera's picture (Chrome's green test pattern) as wide as the screen, with its frame rate, sharpness, recording and storage over its top left corner and the next scramble over its lower part on a dark strip; under it the time 14.98 with “#2 · Saved · Attempt 3”, the line of the sync check and the start of the breakdown, in one screen">
   <img src="docs/screenshots/connect-dialog.png" width="400" alt="The connect dialog asking for the cube's MAC address, with an address typed, Connect and Cancel, and under it, unfolded, the flag that lets Chrome read the address: its address with a Copy button and the three steps to enable it">
 </p>
 

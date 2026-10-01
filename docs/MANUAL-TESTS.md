@@ -42,12 +42,12 @@ to create the `v0.2.0` release from GitHub after it.
    it is connected); the camera is the one chosen in Camera settings; the app's version and commit
    are in the page footer.
 2. Go through the sections below in this order: **T2.1** (camera panel), **T2.4** (recording),
-   **T2.10** (video quality), **T2.5** (sync check), **T2.7** (layout), **T2.9** (a long scramble, a
-   reconnection, the sound), then **T2.3** (clips, in the capture lab). Since T2.7, the "Camera
-   section" of the T2.1 and T2.4 items is Camera settings, a disclosure below the Cube section, and
-   the framing rectangle is moved after Framing → Edit. Tick an item when it passes on every row.
-   When it fails or does something unexpected on a row, write the row (such as "ThinkPhone, rear")
-   and what happened next to it.
+   **T2.10** (video quality), **T2.5** (sync check), **T2.7** (layout), **T2.13** (the phone's
+   scramble over the picture), **T2.9** (a long scramble, a reconnection, the sound), then **T2.3**
+   (clips, in the capture lab). Since T2.7, the "Camera section" of the T2.1 and T2.4 items is
+   Camera settings, a disclosure below the Cube section, and the framing rectangle is moved after
+   Framing → Edit. Tick an item when it passes on every row. When it fails or does something
+   unexpected on a row, write the row (such as "ThinkPhone, rear") and what happened next to it.
 3. Every failure becomes a GitHub issue with the row's device, Chrome version, camera and cube, the
    steps, what happened and what was expected (a screenshot, or the console line, when it shows it).
    The known limitations below are expected: report one only if it behaves otherwise than said.
@@ -383,23 +383,24 @@ and what the app said. Export the session at the end (Sessions → Export) and a
 
 ## T2.7 — layout
 
-On https://shermam.github.io/cubetrace/, Timer page, with a cube connected and the camera on, on
-the MacBook (Chrome at the size its window opens with, not full screen) and on the ThinkPhone
-(Chrome, then the installed app). Since T2.7 the Camera section of the T2.1 and T2.4 items above is
-**Camera settings**, a disclosure below the Cube section: the camera's picture is beside the time
-(under it on the phone), and the framing rectangle is dragged after Framing → Edit. Next to each
-item, write the device, Chrome's version and the window's size (`innerWidth` × `innerHeight` in the
-console, or `chrome://inspect` on the phone).
+On https://shermam.github.io/cubetrace/, Timer page, with a cube connected and the camera on, on the
+MacBook (Chrome at the size its window opens with, not full screen) and on the ThinkPhone (Chrome,
+then the installed app). Since T2.7 the Camera section of the T2.1 and T2.4 items above is **Camera
+settings**, a disclosure below the Cube section: the camera's picture is beside the time (on the
+phone, at the top with the scramble over it since T2.13, or under the time with Scramble over the
+picture off), and the framing rectangle is dragged after Framing → Edit. Next to each item, write
+the device, Chrome's version and the window's size (`innerWidth` × `innerHeight` in the console, or
+`chrome://inspect` on the phone).
 
 - [ ] MacBook: the scramble (moves and picture), the time and the camera's preview are all in view
   together without scrolling, the preview beside the time, about 240 px high, and under it one line:
   the frame rate (about 30 fps), the sharpness (green when good, amber when soft), "recording" with
   a red dot during a session ("saving" for a moment after each scramble and solve), and storage in
   percent.
-- [ ] ThinkPhone in portrait, in Chrome and in the installed app: scramble, time and preview (under
-  the time, the width of the screen) in view together without scrolling, and nothing scrolls
-  sideways. If the bottom of the preview is cut off in Chrome (with its address bar), write down by
-  how much.
+- [ ] ThinkPhone in portrait, in Chrome and in the installed app, with Settings → Timer → Scramble
+  over the picture off (T2.13 has it on by default): scramble, time and preview (under the time, the
+  width of the screen) in view together without scrolling, and nothing scrolls sideways. If the
+  bottom of the preview is cut off in Chrome (with its address bar), write down by how much.
 - [ ] The preview stays in view through a whole attempt, the page not moving: scrambling, armed,
   solving, and after the solve. It shows the framing rectangle; a front camera's preview is mirrored
   like a mirror.
@@ -416,6 +417,26 @@ console, or `chrome://inspect` on the phone).
   by hand, they stay closed across a reload, and opened, open. The camera picker, Turn on and off,
   the resolution, the frame rate, Record audio, the exposure, focus, white balance, zoom and torch
   (the ThinkPhone), and the framing (Edit, Full frame) are all in them.
+
+## T2.13 — the scramble over the picture (phone)
+
+On https://shermam.github.io/cubetrace/, Timer page, on the ThinkPhone in portrait (Chrome, then the
+installed app), the phone on its stand as the owner solves, with the GAN 12 ui FreePlay connected
+and the front camera on, and Settings → Timer → Scramble over the picture (phone) on, as it is by
+default. Next to the item, write Chrome's version, the window's size (`innerWidth` × `innerHeight`
+through `chrome://inspect`) and anything hard to read.
+
+- [ ] The camera's picture is at the top of the page, as wide as the screen (the upright frames
+  between black bars), with the framing rectangle, its line (frame rate, sharpness, recording,
+  storage) over its top left corner, and the scramble over its lower part on a dark strip; the time
+  is right under it. Scramble and solve a few times while reading the scramble from the strip: the
+  hands stay in view while reading the scramble, and the moves are easy to read over the picture
+  (green once made, yellow half made, red where the cube left the scramble, and the undo moves when
+  it does). Scroll down to the solves: the picture and the scramble stay at the top, the rest goes
+  under them. Turn Scramble over the picture off: the preview is back under the time (the T2.7 item
+  above); on again, the picture at the top. With the camera off, the scramble's card stays at the
+  top as the page scrolls. If the strip hides the cube or the hands, write down where they were in
+  the picture.
 
 ## T2.5 — sync check
 

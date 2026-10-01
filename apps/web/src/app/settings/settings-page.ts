@@ -25,9 +25,9 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
 /**
  * `/settings`: the screen wake lock and storage persistence (T1.7), then what the timer and the
  * cube connection use (T1.6a): the host label, the cubes' MAC addresses, the idle disconnection
- * (T1.14), inspection, auto-advance, the camera's resolution, frame rate and sharpness threshold
- * (T2.1), Record audio (T2.4), the video quality (T2.10) and the demo speed, all kept by
- * `SettingsService`.
+ * (T1.14), inspection, auto-advance, the scramble over the picture on a phone (T2.13), the camera's
+ * resolution, frame rate and sharpness threshold (T2.1), Record audio (T2.4), the video quality
+ * (T2.10) and the demo speed, all kept by `SettingsService`.
  */
 @Component({
   selector: 'app-settings-page',

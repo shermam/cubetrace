@@ -178,6 +178,21 @@
     Inspection counts 15 s down on the timer once the cube matches the scramble (no penalty is
     applied). A new session records the values it starts with.
   </p>
+  <label class="switch">
+    <input
+      #overPictureBox
+      type="checkbox"
+      data-testid="scramble-over-picture"
+      [checked]="settings.scrambleOverPicture()"
+      (change)="settings.setScrambleOverPicture(overPictureBox.checked)"
+    />
+    Scramble over the picture (phone)
+  </label>
+  <p class="hint">
+    On a phone, the camera's picture stays at the top of the Timer page with the scramble over it,
+    and the scramble alone while the camera is off, so that both stay in view as the page scrolls.
+    Off, the scramble, the time and the picture come one under the other, as before.
+  </p>
 </section>
 
 <section aria-labelledby="camera-heading">

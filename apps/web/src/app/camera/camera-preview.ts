@@ -1,4 +1,12 @@
-import { Component, computed, effect, inject, viewChild, type ElementRef } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  viewChild,
+  type ElementRef,
+} from '@angular/core';
 import { framingPercent } from '@cubetrace/capture';
 
 import { StorageService } from '../device/storage-service';
@@ -23,17 +31,26 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
  * is. It measures the frames for `CameraService` (`watchPreview`), holding the sharpness meter while
  * an attempt is armed or solving, so that drawing a frame never delays a move of the solve. Under
  * them, the sync check (T2.5, `SyncCheck`): its countdown and its result are where the solver looks
- * while turning the cube in front of the camera.
+ * while turning the cube in front of the camera. On a phone with the scramble over the picture
+ * (`overlay`, T2.13), the Timer page pins it at the top of the window: the picture fills the width
+ * it is given at the frames' proportions, up to 42% of the window's height, its line sits over its
+ * top left corner, and the sync check is the Timer page's to show, under the time, out of the
+ * pinned part.
  */
 @Component({
   selector: 'app-camera-preview',
   imports: [SyncCheck],
-  host: { '[class.shown]': 'shown()' },
+  host: { '[class.shown]': 'shown()', '[class.overlay]': 'overlay()' },
   template: `
     @if (shown()) {
-      <div class="box" data-testid="camera-preview-box" [attr.data-status]="camera.status()">
+      <div
+        class="box"
+        data-testid="camera-preview-box"
+        [attr.data-status]="camera.status()"
+        [style.--aspect]="aspect()"
+      >
         @if (camera.stream()) {
-          <div class="frame" [class.mirrored]="camera.mirrored()" [style.--aspect]="aspect()">
+          <div class="frame" [class.mirrored]="camera.mirrored()">
             <video
               #video
               muted
@@ -87,7 +104,9 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
           }
         </p>
       }
-      <app-sync-check />
+      @if (!overlay()) {
+        <app-sync-check />
+      }
     }
   `,
   styles: `
@@ -200,9 +219,44 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
     [data-level='full'] {
       color: var(--danger);
     }
+
+    /* Pinned at the top of a phone's Timer page, the scramble over its lower part (T2.13): the
+       frames' proportions rather than 16:9, so that nothing but a phone's upright frames needs bars,
+       and the line over the picture, small and on a dark ground of its own. */
+    :host(.overlay.shown) {
+      display: block;
+      position: relative;
+    }
+
+    :host(.overlay) {
+      .box {
+        aspect-ratio: var(--aspect);
+        max-height: 42svh;
+        border-radius: 0;
+      }
+
+      /* Above the scramble. */
+      .message {
+        align-self: start;
+      }
+
+      .status {
+        position: absolute;
+        top: var(--space-2);
+        left: var(--space-2);
+        max-width: calc(100% - 2 * var(--space-2));
+        padding: 0 var(--space-2);
+        border-radius: var(--radius);
+        background: rgb(0 0 0 / 55%);
+        color: rgb(255 255 255 / 85%);
+        font-size: 0.75rem;
+      }
+    }
   `,
 })
 export class CameraPreview {
+  /** Pinned at the top of a phone's Timer page with the scramble over it (T2.13). */
+  readonly overlay = input(false);
   protected readonly camera = inject(CameraService);
   protected readonly storage = inject(StorageService);
   private readonly recorder = inject(RecordingService);
