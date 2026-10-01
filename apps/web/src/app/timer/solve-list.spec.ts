@@ -2,13 +2,19 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { AttemptRecord } from '@cubetrace/core';
 
+import { clipOf } from '../cloud/cloud-testing';
 import { SESSION_A, testAttempt } from '../session/session-testing';
 import { ClipViewing } from './clip-viewing';
-import { SolveList, newest } from './solve-list';
+import { SolveList, newest, type UploadBadge } from './solve-list';
 
 async function render(
   attempts: readonly AttemptRecord[],
-  inputs: { limit?: number | null; sessionId?: string | null; showStats?: boolean } = {},
+  inputs: {
+    limit?: number | null;
+    sessionId?: string | null;
+    showStats?: boolean;
+    uploads?: ReadonlyMap<number, UploadBadge> | null;
+  } = {},
 ): Promise<HTMLElement> {
   TestBed.configureTestingModule({ providers: [provideRouter([])] });
   const fixture = TestBed.createComponent(SolveList);
@@ -145,6 +151,44 @@ describe('SolveList', () => {
       'Both clips begin later than asked: their starts were older than the 90 s kept in memory.',
     );
     expect(badges[1].getAttribute('title')).toBeNull();
+  });
+
+  it('says which clips are in the cloud, and with `uploads` each attempt’s upload', async () => {
+    const element = await render(
+      [
+        {
+          ...testAttempt(1, 12_340),
+          video: [clipOf('scramble', 800_000), { ...clipOf('solve', 3_450_000), local: false }],
+        },
+        {
+          ...testAttempt(2, 10_000),
+          video: [
+            { ...clipOf('scramble', 800_000), local: false },
+            { ...clipOf('solve', 3_450_000), local: false },
+          ],
+        },
+        testAttempt(3, 11_000),
+      ],
+      {
+        uploads: new Map<number, UploadBadge>([
+          [1, { state: 'done', text: 'uploaded' }],
+          [2, { state: 'uploading', text: 'uploading 40%' }],
+        ]),
+      },
+    );
+    const badges = Array.from(
+      element.querySelectorAll<HTMLButtonElement>('[data-testid="clip-badge"]'),
+    );
+    expect(badges.map((badge) => badge.textContent.trim())).toEqual([
+      '2 clips in the cloud',
+      '2 clips, 800.0 kB, 1 in the cloud',
+    ]);
+    expect(badges.map((badge) => badge.hasAttribute('data-cloud'))).toEqual([true, false]);
+    const uploads = Array.from(element.querySelectorAll('[data-testid="solve-row"]'), (row) => {
+      const badge = row.querySelector('[data-testid="upload-badge"]');
+      return badge === null ? null : [badge.textContent.trim(), badge.getAttribute('data-state')];
+    });
+    expect(uploads).toEqual([null, ['uploading 40%', 'uploading'], ['uploaded', 'done']]);
   });
 
   it('has no rows before the first attempt', async () => {

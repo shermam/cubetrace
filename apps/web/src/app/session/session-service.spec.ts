@@ -25,6 +25,7 @@ import {
   UNKNOWN_CUBE,
   type AttemptMilestone,
 } from './session-service';
+import { SessionChanges } from './session-changes';
 import { SESSION_A, testAttempt, testSession } from './session-testing';
 
 describe('SessionService', () => {
@@ -954,6 +955,66 @@ describe('SessionService', () => {
       s.settings.setRecordAudio(false);
       await ready(s);
       expect(s.service.session()?.audio).toBe(false);
+    });
+  });
+
+  describe('for the upload queue (T3.3)', () => {
+    it("tells SessionChanges of each write, once it is done; marks an attempt's clips gone, here and in the store", async () => {
+      const s = setup();
+      const changes: string[] = [];
+      TestBed.inject(SessionChanges).changes$.subscribe((change) => {
+        changes.push(
+          change.type === 'session'
+            ? `session ${String(change.session.summary.attempts)}`
+            : change.type === 'attempt'
+              ? `attempt ${String(change.attempt.index)} ${change.attempt.video.map((c) => String(c.local ?? true)).join(',')}`
+              : change.type,
+        );
+      });
+      const fake = await ready(s);
+      const session = s.service.session()?.id ?? '';
+      const attempt = {
+        session,
+        index: 1,
+        scrambleShown: s.service.attempt()?.events.scrambleShown ?? 0,
+      };
+      turn(s, fake, 'R U F');
+      expect(await s.service.attachClip(attempt, clip('scramble', 10))).toBe('kept');
+      turn(s, fake, inverse('R U F'), 500);
+      expect(await s.service.attachClip(attempt, clip('solve', 20))).toBe('saved');
+      await s.service.whenSaved();
+      expect(changes).toEqual(['session 0', 'attempt 1 true', 'session 1', 'attempt 1 true,true']);
+
+      // The current session: its record here and in the store, the last result too.
+      expect(await s.service.markClipsGone(attempt, ['laptop.solve.mp4'])).toBe(true);
+      expect(s.service.attempts()[0].video.map((c) => c.local)).toEqual([undefined, false]);
+      expect(s.service.lastResult()?.video.map((c) => c.local)).toEqual([undefined, false]);
+      const [stored] = (await s.store.exportSession(session)).attempts;
+      expect(stored.video.map((c) => c.local)).toEqual([undefined, false]);
+      expect(changes.at(-1)).toBe('attempt 1 true,false');
+      const listed = (await s.service.listSessions()).sessions[0];
+      expect(listed).toMatchObject({ clips: 2, clipBytes: 10, cloudClips: 1 });
+
+      // Another attempt with that index, or none: nothing changes.
+      expect(await s.service.markClipsGone({ ...attempt, scrambleShown: 1 }, [])).toBe(false);
+      expect(await s.service.markClipsGone({ ...attempt, index: 7 }, [])).toBe(false);
+
+      // After New session, the earlier session's record in the store.
+      s.service.newSession();
+      expect(await s.service.markClipsGone(attempt, ['laptop.scramble.mp4'])).toBe(true);
+      const [earlier] = (await s.store.exportSession(session)).attempts;
+      expect(earlier.video.map((c) => c.local)).toEqual([false, false]);
+      expect(await s.service.markClipsGone({ ...attempt, index: 2 }, [])).toBe(false);
+      // A session that is not there.
+      expect(
+        await s.service.markClipsGone(
+          { session: '4b0f3c2a-0000-4000-8000-000000000000', index: 1, scrambleShown: 0 },
+          [],
+        ),
+      ).toBe(false);
+      expect(s.service.saveError()).toBeNull();
+      await s.service.deleteSession(session);
+      expect(changes.at(-1)).toBe('session-deleted');
     });
   });
 

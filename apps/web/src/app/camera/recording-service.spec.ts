@@ -11,6 +11,7 @@ import {
   settle,
 } from '../device/fake-browser';
 import { StorageService } from '../device/storage-service';
+import { ClipsInFlight } from '../session/clips-in-flight';
 import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
 import { CameraService } from './camera-service';
 import {
@@ -389,9 +390,12 @@ describe('RecordingService', () => {
     r.camera.setFraming({ x: 480, y: 270, w: 960, h: 540 });
     TestBed.tick();
 
+    const inFlight = TestBed.inject(ClipsInFlight);
     turn(r.s, fake, 'R U F');
     const armed = r.s.service.attempt()?.events;
     expect(armed?.scrambleDone).not.toBeNull();
+    // Its clip is to come (T3.3: its upload waits for it).
+    expect(inFlight.has(sessionId(r), 1)).toBe(true);
     await wait(r, SAVE_AFTER_MS - 1);
     expect(capture.saves).toEqual([]);
     await wait(r, 1);
@@ -407,12 +411,14 @@ describe('RecordingService', () => {
       },
     ]);
     // Saved while the attempt is under way: kept for its record.
+    expect(inFlight.has(sessionId(r), 1)).toBe(true);
     const scrambleClip = capture.saveNext();
     await settle();
     expect(r.recording.lastClip()).toEqual({
       index: 1,
       clip: { ...scrambleClip, crop: { x: 480, y: 270, w: 960, h: 540 } },
     });
+    expect(inFlight.has(sessionId(r), 1)).toBe(false);
 
     turn(r.s, fake, "F'", 1000);
     turn(r.s, fake, "U' R'", 400);
@@ -420,6 +426,8 @@ describe('RecordingService', () => {
     expect(record.result.status).toBe('solved');
     expect(record.video.map((clip) => clip.segment)).toEqual(['scramble']);
     const { solveStart, solveEnd } = record.events;
+    // Its record is saved, its solve clip still to come: not final yet.
+    expect(inFlight.has(sessionId(r), 1)).toBe(true);
 
     await wait(r, SAVE_AFTER_MS);
     expect(capture.saves.map((save) => save.params)).toEqual([
@@ -436,6 +444,7 @@ describe('RecordingService', () => {
     const solveClip = capture.saveNext();
     await settle();
     await r.s.service.whenSaved();
+    expect(inFlight.has(sessionId(r), 1)).toBe(false);
 
     // The record, saved again with both clips; nothing else changed.
     const [stored] = (await r.s.store.exportSession(sessionId(r))).attempts;
@@ -635,9 +644,12 @@ describe('RecordingService', () => {
       },
     ]);
 
-    // Again, reset before its scramble clip's time: that clip is never asked for.
+    // Again, reset before its scramble clip's time: that clip is never asked for, nor waited for.
     turn(r.s, fake, 'R U F');
+    const inFlight = TestBed.inject(ClipsInFlight);
+    expect(inFlight.has(sessionId(r), 1)).toBe(true);
     await r.s.cube.resetToSolved();
+    expect(inFlight.has(sessionId(r), 1)).toBe(false);
     await wait(r, SAVE_AFTER_MS);
     expect(capture.saves).toEqual([]);
     expect(r.s.service.attempts()).toEqual([]);

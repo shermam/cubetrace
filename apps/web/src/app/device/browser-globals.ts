@@ -46,7 +46,10 @@ export interface BrowserGlobals {
    * The window's `online` and `offline` events, when the upload queue may send again, and
    * `pagehide`, when it writes its state at once (T3.3).
    */
-  readonly addEventListener?: (type: 'online' | 'offline' | 'pagehide', listener: () => void) => void;
+  readonly addEventListener?: (
+    type: 'online' | 'offline' | 'pagehide',
+    listener: () => void,
+  ) => void;
   readonly removeEventListener?: (
     type: 'online' | 'offline' | 'pagehide',
     listener: () => void,

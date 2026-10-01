@@ -36,6 +36,8 @@ import { CURRENT_SESSION_KEY } from '../session/session-service';
 import { SESSION_STORAGE } from '../session/session-storage';
 import { SESSION_A, SESSION_B, testAttempt, testSession } from '../session/session-testing';
 import { ClipViewing } from '../timer/clip-viewing';
+import { UploadService } from '../upload/upload-service';
+import { FakeUploads, attemptView } from '../upload/upload-testing';
 import { SessionPage, camerasText, clipsText } from './session-page';
 
 function clip(segment: 'scramble' | 'solve', bytes: number): VideoClip {
@@ -101,6 +103,7 @@ describe('SessionPage', () => {
     id: string,
     current: string | null = null,
     backend: FakeAccountBackend | null = null,
+    uploads: FakeUploads | null = null,
   ): Promise<HTMLElement> {
     const localStorage = new FakeLocalStorage();
     if (current !== null) {
@@ -122,6 +125,7 @@ describe('SessionPage', () => {
         },
         { provide: SESSION_STORAGE, useValue: { store, kind: 'opfs' } },
         ...(backend === null ? [] : [{ provide: ACCOUNT_LOADER, useValue: backend.loader }]),
+        ...(uploads === null ? [] : [{ provide: UploadService, useValue: uploads }]),
       ],
     });
     fixture = TestBed.createComponent(SessionPage);
@@ -284,6 +288,26 @@ describe('SessionPage', () => {
     expect(navigate).toHaveBeenCalledWith(['/sessions']);
   });
 
+  it("says each attempt's upload, as this device's queue has it (T3.3)", async () => {
+    const uploads = new FakeUploads();
+    uploads.attempts.set(`${SESSION_A}/15`, attemptView(15, { state: 'done' }));
+    uploads.attempts.set(
+      `${SESSION_A}/14`,
+      attemptView(14, { state: 'uploading', bytes: 10, sent: 4 }),
+    );
+    uploads.attempts.set(`${SESSION_A}/13`, attemptView(13, { state: 'failed' }));
+    const element = await render(SESSION_A, SESSION_B, null, uploads);
+    const badges = Array.from(element.querySelectorAll('[data-testid="solve-row"]'))
+      .slice(0, 4)
+      .map((row) => row.querySelector('[data-testid="upload-badge"]')?.textContent.trim() ?? null);
+    expect(badges).toEqual(['uploaded', 'uploading 40%', 'upload failed', null]);
+
+    // Without a queue (signed out, uploads off), the rows say nothing of it.
+    TestBed.resetTestingModule();
+    const none = await render(SESSION_A, SESSION_B, null, new FakeUploads());
+    expect(none.querySelector('[data-testid="upload-badge"]')).toBeNull();
+  });
+
   it('says so when the session is not there', async () => {
     const element = await render('4b0f3c2a-0000-4000-8000-000000000000');
     expect(text(element, 'session-error')).toMatch(/^This session could not be read: /);
@@ -338,6 +362,20 @@ describe('SessionPage', () => {
       expect(text(element, 'session-error')).toBeUndefined();
     });
 
+    it("says each attempt's upload as its document has it", async () => {
+      backend.serverSetsUpload(PHONE, 1, {
+        state: 'done',
+        files: { 'attempt.json': { bytes: 5_000, doneMs: 1_790_000_300_000 } },
+      });
+      const element = await render(PHONE, SESSION_B, backend);
+      expect(
+        Array.from(
+          element.querySelectorAll('[data-testid="upload-badge"]'),
+          (badge) => `${badge.textContent.trim()} ${String(badge.getAttribute('data-state'))}`,
+        ),
+      ).toEqual(['to upload pending', 'uploaded done']);
+    });
+
     it('shows a session of this device from this device, signed in too', async () => {
       const element = await render(SESSION_A, SESSION_B, backend);
       expect(text(element, 'session-place')).toBeUndefined();
@@ -387,5 +425,18 @@ describe('SessionPage', () => {
     expect(clipsText([{ ...testAttempt(1, 10_000), video: [clip('solve', 999)] }])).toBe(
       '1 clip, 999 B',
     );
+    // Clips deleted from the device once uploaded (T3.3).
+    expect(
+      clipsText([
+        {
+          ...testAttempt(1, 10_000),
+          video: [clip('scramble', 1_000), { ...clip('solve', 999), local: false }],
+        },
+        { ...testAttempt(2, 10_000), video: [{ ...clip('solve', 5_000), local: false }] },
+      ]),
+    ).toBe('3 clips, 1.0 kB, 2 in the cloud');
+    expect(
+      clipsText([{ ...testAttempt(1, 10_000), video: [{ ...clip('solve', 999), local: false }] }]),
+    ).toBe('1 clip in the cloud');
   });
 });
