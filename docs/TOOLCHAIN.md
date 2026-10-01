@@ -890,6 +890,68 @@ kB), the preview, 6.1 kB (2.4 kB), and `CameraService` with `RecordingService`, 
 kB (6.9 kB), against one chunk of 42.2 kB (13.2 kB). The session's page, new, is 9.1 kB (3.3 kB); the
 Sessions page 8.3 kB (2.8 kB), against 8.1 (2.8).
 
+## Phone layout (T2.13)
+
+Added by T2.13 on 2026-10-01.
+
+**The choice.** `timerLayout()` (`apps/web/src/app/timer/timer-layout.ts`) gives the Timer page's
+layout from three things: whether the window is 60rem wide or more (`matchMedia('(min-width:
+60rem)')`, `$two-columns` of `styles/_layout.scss`, read through `BROWSER_GLOBALS` and followed on
+`change`), the camera setting (`cameraOn`, which `CameraService` follows as soon as its code has
+loaded, so that the layout waits for no camera code) and Scramble over the picture: `columns` (a
+wide window), `stacked` (T2.7's column), `pinned` (the scramble's card pinned) or `overlay` (the
+picture and the scramble over it, pinned). The page's elements follow it, since one
+`<app-camera-preview>` cannot be both beside the time and in the pinned part: in `overlay` the
+preview is rendered in the pinned part (`.stage`, after the scramble's section) with its `overlay`
+input, and the Timer page renders the sync check under the time; otherwise both are where T2.7 has
+them. A change of layout makes a new preview (a new `<video>` on the same stream: the camera, the
+recording and the sync check live in root services), never a new scramble view, whose `overPicture`
+input changes.
+
+**Pinning.** `position: sticky; top: 0` on `.stage`, a grid item of the page's one-column grid:
+Chromium keeps a sticky grid item within its grid container, not within its grid area (checked on
+Chromium 141 with a sticky first row, which stays at the top while the grid scrolls by). The stage
+has the page's background and bleeds over the gutters (`margin-inline: -1rem`), so that nothing
+shows through beside it; with the camera off, bands of background above the card (16 px, against a
+margin as negative, so that the card does not move until it is pinned) and under it (8 px).
+`z-index: 2` puts it over the rest of the page; the two dialogs are modal, in the top layer. The
+header scrolls away as before.
+
+**The picture.** In the pinned part the preview's box takes the frames' proportions (`aspect-ratio:
+var(--aspect)`, 16:9 until a frame is measured) up to `max-height: 42svh` (the small viewport:
+Chrome's address bar shown), and the frames fit inside it as T2.7 has them, so upright frames come
+between bars. Measured on the production build with Chrome's test camera, the banner about Web
+Bluetooth dismissed: at 390×844 the picture is 390×219, the strip 119 px high (the heading and three
+lines of moves) and the time's section runs from 368 to 608; scrolled to the solves, the picture is
+at 0 and the time's section at −86; at 320×640 the picture is 180 px high; at 412×818 (the
+ThinkPhone in Chrome with its address bar) with upright 1080×1920 frames (the test camera turned a
+quarter turn in a canvas) the picture is 412×344 with the frames 193 px wide between bars, the strip
+122 px, and the time's section runs from 493 to 737. The page's boxes at 1280×800 (camera on and
+off) and at 390×844 with the setting off, or with the camera off before scrolling, are those of
+`main` to the pixel.
+
+**The strip.** Black at 60% (the task asked about 55%): over a mid-grey picture the moves (white)
+have a contrast of 12.6:1, the heading (white at 80%) 8.7:1 and a move made (`--ok`, #3fb950) 5.0:1;
+over a white picture the moves still have 5.7:1. At 55% a move made had 4.5:1 over the grey and the
+moves 4.8:1 over white. A move where the cube left the scramble (`--danger`) has 3.8:1 over the
+grey, with its red outline; the text has a dark shadow. The undo guidance is tinted (`--warn` at
+30%) rather than the opaque box it has elsewhere, so that the picture shows through it; while it
+shows, at 390 px with 16:9 frames, the strip is as tall as the picture and covers the status line.
+
+**Sizes** (`ng build`, 2026-10-01, against `main` at b0c908a): the initial bundle is 264.47 kB raw
+against 264.46 (the chunks' names in `main`). The Timer page's chunk is 31.2 kB raw against 28.3
+(the layout, the second places of the preview and of the sync check, the styles); the sync check's
+panel and `SyncService` left the preview's chunk for one that it shares with the Timer page, 14.5 kB
+raw (the preview's is 6.9 kB, against 20.3 with them); the Settings page's chunk is 17.0 kB (16.4)
+and `SettingsService`'s 46.8 kB (46.6).
+
+**E2E.** `timer-layout.spec.ts` checks the phone's layout with bounding boxes at 390×844 after a
+load with the camera on, then scrolled until the breakdown and the solves come under the pinned
+part, and at 320×640; the strip's legibility from its computed colours composited over a mid-grey
+picture (WCAG 2's contrast); the camera off (with the Cube section open, so that a session of one
+solve is long enough to scroll the time away); and T2.7's phone test with the setting off. The suite
+has 62 tests and took 3.3 min locally (3 min 20 s with the servers) on 2026-10-01.
+
 ## The sync check (T2.5, T2.8, T2.11)
 
 Added by T2.5 on 2026-09-27: the motion of the frames in the capture worker

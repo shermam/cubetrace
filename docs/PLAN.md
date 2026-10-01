@@ -689,6 +689,7 @@ pipeline, §9 the data model).
 | T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ✅ #37 |
 | T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ✅ #36 |
 | T2.11 | `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread | T2.8 | ✅ #39 |
+| T2.13 | `web`: on a phone, the picture and the scramble in view together: the scramble over the pinned picture | T2.7 | ⬜ |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6 → {T2.8, T2.9, T2.10} (from the owner's
 first recordings, issues #33 and #34; all merged on 2026-09-27). Rules for every phase 2 task: nothing of
@@ -1134,6 +1135,56 @@ texts.
 - [ ] CI green; the two checks of issue #38 pass in `clapperboard-hardware.test.ts`, and T2.8's
   estimator fails them there as it did on the day.
 - [ ] Owner, on the MacBook: two checks on the FaceTime camera pass and agree within 25 ms.
+
+### T2.13 — `web`: on a phone, the picture and the scramble in view together: the scramble over the pinned picture
+
+**Goal.** What the owner found solving on the ThinkPhone in portrait: the scramble and the camera's
+picture cannot be seen at the same time. T2.7's column puts the picture under the time, so with the
+page scrolled to the scramble the picture is out of view, and the hands drift out of the frame
+unnoticed. His suggestion: the picture behind the scramble, the scramble on a transparent ground.
+
+**Scope.** `apps/web/src/app/timer/*` (the page's layout, `timer-layout.ts` for its choice, the
+scramble over the picture), `apps/web/src/app/camera/camera-preview.ts` (its form over a phone's
+page), `apps/web/src/app/settings/*` (one setting), `matchMedia` in `BROWSER_GLOBALS`, e2e
+`timer-layout.spec.ts`, README, `docs/{MANUAL-TESTS,CHANGELOG,TOOLCHAIN}.md`.
+
+**Behaviour.**
+- **A phone with the camera on** (a window narrower than 60rem, T2.7's breakpoint): one part pinned at
+  the top of the window (`position: sticky; top: 0`, over the rest, on the page's background so that
+  nothing shows through beside it): the camera's picture from edge to edge at the frames' proportions,
+  at most 42% of the window's height (16:9 at 390 px wide is 219 px high; a phone's upright frames
+  come between bars), with the framing rectangle, the preview's line over its top left corner on a
+  dark ground of its own, and the scramble over its lower part on a dark strip (black at 60%, a thin
+  light top edge; the moves white, as large as elsewhere and in the same colours, with a shadow; the
+  heading, "Scramble" or "Next scramble", the progress, "0 / 21", and the undo guidance there as
+  before, the guidance tinted rather than opaque; no picture of the cube), as tall as its lines. The
+  time right under the pinned part, the sync check under the time (out of the pinned part), then the
+  breakdown, the last solves and the two sections. While the picture's code loads, a black box of
+  16:9 holds its place.
+- **A phone with the camera off:** T2.7's column, with the scramble's card pinned the same way and a
+  band of the page's background above and under it.
+- **Setting** `scrambleOverPicture`, "Scramble over the picture (phone)" in Settings → Timer, on by
+  default; settings stored without it read on. Off: T2.7's column, nothing pinned.
+- **Wide windows** (from 60rem): unchanged. The header scrolls away as before.
+
+**Tests.** Unit: the layout's choice (`timerLayout`) in every case, and the media query's signal
+(it follows `change`, stops with its component, and is false without `matchMedia`); the setting's
+default, persistence and the settings stored before it; its switch in Settings → Timer; the scramble
+over the picture (no picture of the cube; the progress and the undo guidance); the preview's form over
+the page (the frames' proportions, no sync check); the Timer page's elements in each layout, as the
+camera, the setting and the window change. Playwright at 390×844 with Chrome's fake camera and the
+demo cube: every move of the scramble, the picture and the time in the window after a load; scrolled
+until the breakdown and the solves come under the pinned part, the picture and every move still at
+the top, and the time gone under them; the strip's ground at least 50% black, its moves white, and at
+least 4.5:1 over a mid-grey picture for the moves, the heading and the green of a move made; nothing
+wider than the screen at 320 px; the camera off, the scramble's card pinned; with the setting off,
+T2.7's assertions (the preview under the time); at 1280×800, T2.7's assertions and nothing pinned.
+Screenshots in the PR.
+
+**Acceptance.**
+- [ ] CI green; the initial bundle within 2 kB of `main`'s.
+- [ ] Settings stored before this change read on.
+- [ ] Owner, on the ThinkPhone: the hands stay in view while reading the scramble.
 
 ## Phase 3 task board — cloud
 
