@@ -10,7 +10,8 @@ const inCi = Boolean(process.env['CI']);
 // one at a time, in a project of their own. Two encoders at once on four CPUs cost the camera frames
 // and hold back the demo cube's timers, which recording.spec.ts and capture.spec.ts measure (lost
 // frames, the timing with the camera on and off). The other specs run beside them.
-const encoding = /\/(capture|recording|session-clips|sync-check|video-quality)\.spec\.ts$/;
+const encoding =
+  /\/(capture|microphone|recording|session-clips|sync-check|video-quality)\.spec\.ts$/;
 
 export default defineConfig({
   testDir: '.',

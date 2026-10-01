@@ -215,7 +215,28 @@
         />
         Record audio
       </label>
+      <label>
+        <span>Microphone</span>
+        <select
+          #microphoneSelect
+          data-testid="camera-panel-microphone"
+          aria-describedby="camera-panel-microphone-hint"
+          (change)="setMicrophoneProcessing(microphoneSelect.value)"
+        >
+          @for (option of microphoneProcessings; track option.value) {
+            <option
+              [value]="option.value"
+              [selected]="option.value === prefs.microphoneProcessing()"
+            >
+              {{ option.label }}
+            </option>
+          }
+        </select>
+      </label>
     </div>
+    <p class="hint" id="camera-panel-microphone-hint" data-testid="camera-panel-microphone-hint">
+      {{ microphoneHint }}
+    </p>
 
     <app-recording-panel />
   </div>

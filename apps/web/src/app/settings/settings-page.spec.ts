@@ -313,6 +313,33 @@ describe('SettingsPage', () => {
     expect(TestBed.inject(SettingsService).scrambleOverPicture()).toBe(true);
   });
 
+  it('keeps the microphone, Raw by default, and says what each choice does', async () => {
+    const fixture = await render();
+    const root = fixture.nativeElement as HTMLElement;
+    const microphone = root.querySelector<HTMLSelectElement>('#microphone-processing');
+    expect(Array.from(microphone?.options ?? [], (option) => option.text.trim())).toEqual([
+      'Raw',
+      'Voice',
+    ]);
+    expect(microphone?.value).toBe('raw');
+    expect(root.querySelector('label[for="microphone-processing"]')?.textContent.trim()).toBe(
+      'Microphone',
+    );
+    expect(text(fixture, 'microphone-hint')).toMatch(
+      /^Raw keeps the cube's clicks; Voice lets the browser suppress noise for speech\. /,
+    );
+
+    if (microphone) {
+      microphone.value = 'voice';
+      microphone.dispatchEvent(new Event('change'));
+    }
+    await update(fixture);
+    expect(TestBed.inject(SettingsService).microphoneProcessing()).toBe('voice');
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
+      microphoneProcessing: 'voice',
+    });
+  });
+
   it('keeps the host label, inspection, auto-advance and the demo speed', async () => {
     const fixture = await render();
     const host = input(fixture, '#host-label');

@@ -22,7 +22,13 @@ import {
   type MotionSample,
   type VideoQuality,
 } from '@cubetrace/capture';
-import type { CameraInfo, VideoClip, VideoSegment } from '@cubetrace/core';
+import type {
+  CameraInfo,
+  MicrophoneInfo,
+  MicrophoneProcessing,
+  VideoClip,
+  VideoSegment,
+} from '@cubetrace/core';
 
 import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
@@ -31,6 +37,12 @@ import { SessionService, type AttemptMilestone, type AttemptRef } from '../sessi
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { CameraService } from './camera-service';
+import {
+  DEFAULT_MICROPHONE,
+  microphoneConstraints,
+  microphoneInfo,
+  processingNotice,
+} from './microphone';
 
 /**
  * Starts the capture pipeline (@cubetrace/capture's `startCapture`) on a video track and, when there
@@ -115,23 +127,33 @@ interface PlannedClip {
 }
 
 /**
- * What the pipeline is to run on: the camera's stream, with or without the microphone, at a video
- * quality.
+ * What the pipeline is to run on: the camera's stream, with or without the microphone (raw or with
+ * the browser's voice processing), at a video quality.
  */
 interface Target {
   readonly stream: MediaStream;
   readonly audio: boolean;
+  /** How the microphone is asked for (T2.12); it matters only with `audio`. */
+  readonly processing: MicrophoneProcessing;
   readonly quality: VideoQuality;
+}
+
+/** The microphone open for a run of the pipeline, and what the browser applied to it. */
+interface OpenMicrophone {
+  readonly stream: MediaStream;
+  /** Null when the stream has no audio track. */
+  readonly info: MicrophoneInfo | null;
 }
 
 /**
  * The recording in the timer (docs/PLAN.md, T2.4). While the camera is on (`CameraService.stream`)
  * and a session is under way (or a cube is connected, so that the first attempt of a session has its
  * margin), the capture pipeline runs on the camera's stream, with the microphone's audio when
- * Settings says so ("Record audio"), at the video quality Settings says (T2.10); it starts again
- * when the stream changes (another camera, another resolution) or either setting does, and stops
- * when the camera goes off, no session is under way, or storage is {@link STORAGE_STOP_PERCENT}%
- * full (the timer goes on).
+ * Settings says so ("Record audio"), the microphone raw unless Settings say Voice (T2.12: the
+ * browser's voice processing takes the cube's clicks for noise), at the video quality Settings says
+ * (T2.10); it starts again when the stream changes (another camera, another resolution) or one of
+ * those settings does, and stops when the camera goes off, no session is under way, or storage is
+ * {@link STORAGE_STOP_PERCENT}% full (the timer goes on).
  *
  * Every attempt gets two clips, cut from the last 90 s the pipeline keeps in memory, as
  * `SessionService.milestones$` says: once the scramble is done, the scramble clip
@@ -142,10 +164,12 @@ interface Target {
  * (`SessionService.attachClip`, which saves the record again: its timing never changes). A clip whose
  * start is older than the buffer begins at its oldest keyframe instead (`truncatedStart`, T2.9): it
  * is saved, said (`clipNotice`) and noted in the session's `notes`, as is a clip without sound while
- * audio is recorded, with why. The session's `cameras` holds the camera's entry while it records. A
- * clip that fails is said once (`failure`, the console) and noted in the session's `notes`; the
- * attempt is untouched. A clip of an attempt that went meanwhile (a reset, Delete last) is removed
- * again. Stopping saves the clips still waiting for their time at once, with what the buffer has.
+ * audio is recorded, with why. The session's `cameras` holds the camera's entry while it records,
+ * with its microphone and what the browser applied to it (`microphone`, T2.12; a notice says when
+ * the browser kept its voice processing on although Raw was asked for). A clip that fails is said
+ * once (`failure`, the console) and noted in the session's `notes`; the attempt is untouched. A
+ * clip of an attempt that went meanwhile (a reset, Delete last) is removed again. Stopping saves
+ * the clips still waiting for their time at once, with what the buffer has.
  */
 @Injectable({ providedIn: 'root' })
 export class RecordingService {
@@ -165,6 +189,7 @@ export class RecordingService {
   private readonly failureSignal = signal<string | null>(null);
   private readonly clipNoticeSignal = signal<string | null>(null);
   private readonly savingSignal = signal(0);
+  private readonly microphoneSignal = signal<MicrophoneInfo | null>(null);
 
   /** See {@link RecordingStatus}. */
   readonly status = this.statusSignal.asReadonly();
@@ -191,6 +216,13 @@ export class RecordingService {
   readonly clipNotice = this.clipNoticeSignal.asReadonly();
   /** How many clips are being saved (cut, muxed and written) now: the Camera preview says so. */
   readonly savingClips = this.savingSignal.asReadonly();
+  /**
+   * The microphone of the recording (T2.12): how it was asked for and what the browser says it
+   * applied, from the last start of the pipeline; null when that recording has no microphone
+   * (Record audio off, the microphone refused). The session's camera entry holds it as its
+   * `microphone`.
+   */
+  readonly microphone = this.microphoneSignal.asReadonly();
   /** The origin's storage: usage, quota and the share in use; null until read. */
   readonly storage = computed<StorageMeterValue | null>(() => {
     const usage = this.storageService.usage();
@@ -207,7 +239,7 @@ export class RecordingService {
   private handle: CaptureHandle | null = null;
   /** What the pipeline runs on, or is starting on; null when it is to be stopped. */
   private target: Target | null = null;
-  private microphone: MediaStream | null = null;
+  private microphoneStream: MediaStream | null = null;
   /** The camera's entry while it records: the label and framing of its clips. */
   private cameraEntry: CameraInfo | null = null;
   /** Incremented by every start and stop: a slower, older start then knows it lost. */
@@ -240,26 +272,29 @@ export class RecordingService {
       const active = this.session.session() !== null || this.cube.status() === 'connected';
       const full = this.storageService.level() === 'full';
       const audio = this.settings.recordAudio();
+      const processing = this.settings.microphoneProcessing();
       const quality = this.settings.videoQuality();
       untracked(() => {
-        this.reconcile(stream, active, full, audio, quality);
+        this.reconcile(stream, active, full, { audio, processing, quality });
       });
     });
-    // The session's `cameras` holds the camera's entry while it records.
+    // The session's `cameras` holds the camera's entry while it records, with its microphone.
     effect(() => {
       const status = this.statusSignal();
       const session = this.session.session();
       this.camera.settings();
       this.camera.framing();
       const audio = this.settings.recordAudio();
+      const microphone = this.microphoneSignal();
       if (session === null || (status !== 'starting' && status !== 'recording')) {
         return;
       }
       untracked(() => {
         const info = this.camera.cameraInfo();
         if (info !== null) {
-          this.cameraEntry = info;
-          this.session.putCamera(info, audio);
+          const entry: CameraInfo = { ...info, microphone };
+          this.cameraEntry = entry;
+          this.session.putCamera(entry, audio);
         }
       });
     });
@@ -301,22 +336,22 @@ export class RecordingService {
 
   /**
    * Starts, restarts or stops the pipeline as the camera, the session and the settings say. A
-   * restart, like a stop, saves the clips waiting for their time with what the buffer has.
+   * restart, like a stop, saves the clips waiting for their time with what the buffer has. How the
+   * microphone is asked for restarts it only while the audio is recorded.
    */
   private reconcile(
     stream: MediaStream | null,
     active: boolean,
     full: boolean,
-    audio: boolean,
-    quality: VideoQuality,
+    wanted: Omit<Target, 'stream'>,
   ): void {
     if (stream === null) {
       this.stopRefreshing();
     } else {
       this.startRefreshing();
     }
-    const wanted = stream !== null && active && !full && this.support.supported;
-    if (!wanted) {
+    const recording = stream !== null && active && !full && this.support.supported;
+    if (!recording) {
       if (this.target === null && this.handle === null) {
         this.showIdle(stream, full);
         return;
@@ -332,15 +367,21 @@ export class RecordingService {
       return;
     }
     const target = this.target;
-    if (target?.stream === stream && target.audio === audio && target.quality === quality) {
+    if (
+      target?.stream === stream &&
+      target.audio === wanted.audio &&
+      target.quality === wanted.quality &&
+      (!wanted.audio || target.processing === wanted.processing)
+    ) {
       return;
     }
     const generation = ++this.generation;
-    this.target = { stream, audio, quality };
+    const next: Target = { stream, ...wanted };
+    this.target = next;
     void this.serially(async () => {
       await this.stopPipeline();
       if (generation === this.generation) {
-        await this.startPipeline(generation, stream, audio, quality);
+        await this.startPipeline(generation, next);
       }
     });
   }
@@ -363,12 +404,8 @@ export class RecordingService {
     this.noticesSignal.set([]);
   }
 
-  private async startPipeline(
-    generation: number,
-    stream: MediaStream,
-    audio: boolean,
-    quality: VideoQuality,
-  ): Promise<void> {
+  private async startPipeline(generation: number, target: Target): Promise<void> {
+    const { stream, audio, processing, quality } = target;
     this.statusSignal.set('starting');
     this.errorSignal.set(null);
     this.noticesSignal.set([]);
@@ -379,13 +416,14 @@ export class RecordingService {
       this.fail(generation, 'The camera sends no video.');
       return;
     }
-    const microphone = audio ? await this.openMicrophone(generation) : null;
+    const microphone = audio ? await this.openMicrophone(generation, processing) : null;
     if (generation !== this.generation) {
-      stopStream(microphone);
+      stopStream(microphone?.stream ?? null);
       return;
     }
-    this.microphone = microphone;
-    const audioTrack = microphone?.getAudioTracks().at(0) ?? null;
+    this.microphoneStream = microphone?.stream ?? null;
+    this.microphoneSignal.set(microphone?.info ?? null);
+    const audioTrack = microphone?.stream.getAudioTracks().at(0) ?? null;
     let handle: CaptureHandle;
     try {
       handle = this.starter.start(video, audioTrack, { audio: audioTrack !== null, quality });
@@ -422,21 +460,49 @@ export class RecordingService {
     void this.storageService.refresh();
   }
 
-  /** The microphone, or null with a notice when it cannot be had: the video is recorded anyway. */
-  private async openMicrophone(generation: number): Promise<MediaStream | null> {
+  /**
+   * The microphone, asked for as `processing` says (T2.12: raw, every voice processing off; voice,
+   * the browser's defaults), with what the browser says it applied; a notice says when the browser
+   * kept some processing on although Raw was asked for. Should the browser refuse the raw request
+   * (an `OverconstrainedError`, which its booleans and ideals ought never to cause), the microphone
+   * is asked for again with the browser's defaults, and the notice says so instead. Null, with a
+   * notice, when it cannot be had: the video is recorded anyway.
+   */
+  private async openMicrophone(
+    generation: number,
+    processing: MicrophoneProcessing,
+  ): Promise<OpenMicrophone | null> {
     const media = this.globals.navigator?.mediaDevices;
     if (typeof media?.getUserMedia !== 'function') {
       this.addNotice('Recording without audio: this browser gives no microphone.');
       return null;
     }
+    let stream: MediaStream;
+    let refusal: { readonly error: unknown } | null = null;
     try {
-      return await media.getUserMedia({ audio: true });
+      try {
+        stream = await media.getUserMedia(microphoneConstraints(processing));
+      } catch (error: unknown) {
+        if (processing !== 'raw' || errorName(error) !== 'OverconstrainedError') {
+          throw error;
+        }
+        refusal = { error };
+        stream = await media.getUserMedia(DEFAULT_MICROPHONE);
+      }
     } catch (error: unknown) {
       if (generation === this.generation) {
         this.addNotice(`Recording without audio: ${microphoneProblem(error)}`);
       }
       return null;
     }
+    const track = stream.getAudioTracks().at(0);
+    const info = track === undefined ? null : microphoneInfo(track, processing);
+    const notice =
+      refusal !== null ? rawRefused(refusal.error) : info === null ? null : processingNotice(info);
+    if (notice !== null && generation === this.generation) {
+      this.addNotice(notice);
+    }
+    return { stream, info };
   }
 
   /**
@@ -459,9 +525,9 @@ export class RecordingService {
    */
   private async stopPipeline(): Promise<void> {
     const handle = this.handle;
-    const microphone = this.microphone;
+    const microphone = this.microphoneStream;
     this.handle = null;
-    this.microphone = null;
+    this.microphoneStream = null;
     for (const [key, planned] of this.planned) {
       this.planned.delete(key);
       this.clearTimer(planned.timer);
@@ -744,11 +810,25 @@ function sameAttempt(p: AttemptRef, q: AttemptRef): boolean {
   return p.session === q.session && p.index === q.index && p.scrambleShown === q.scrambleShown;
 }
 
+/** The `name` of what was thrown, such as `NotAllowedError`; null when it has none. */
+function errorName(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : null;
+}
+
+/** The notice when the browser refused the raw microphone, naming the constraint it refused. */
+function rawRefused(error: unknown): string {
+  const constraint: unknown =
+    typeof error === 'object' && error !== null ? Reflect.get(error, 'constraint') : undefined;
+  const refused = typeof constraint === 'string' && constraint !== '' ? ` (${constraint})` : '';
+  return (
+    `The microphone could not be opened raw: the browser refused the request${refused}, so it ` +
+    "is recorded with the browser's voice processing."
+  );
+}
+
 /** Why the microphone could not be had, in plain words. */
 function microphoneProblem(error: unknown): string {
-  const name =
-    typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : null;
-  switch (name) {
+  switch (errorName(error)) {
     case 'NotAllowedError':
       return 'the microphone was not allowed (Chrome asks once; the site settings can change it).';
     case 'NotFoundError':

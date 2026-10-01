@@ -146,8 +146,9 @@ test('demo solves with the camera on get their two clips, which play and downloa
   await expect
     .poll(async () => Number(await stats.getAttribute('data-buffer-seconds')), { timeout: 20_000 })
     .toBeGreaterThanOrEqual(4);
+  // The fake microphone recorded raw (T2.12), as it is by default.
   await expect(page.getByTestId('recording-codecs')).toHaveText(
-    /^vp09\.00\.40\.08 at 4 Mbps, opus$/,
+    /^vp09\.00\.40\.08 at 4 Mbps, opus, mic raw$/,
   );
 
   // The same replays with the camera on: each attempt gets both clips, the solve's a second after

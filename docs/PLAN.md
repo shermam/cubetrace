@@ -689,6 +689,7 @@ pipeline, §9 the data model).
 | T2.9 | `capture`+`core`+`web`: clips clipped, never refused, for a start older than the buffer; the scramble clip's 60 s window; the clock fit restarts with the cube; audio never silently absent | T2.5 | ✅ #37 |
 | T2.10 | `capture`+`web`: video quality setting, 4 Mbps by default | T2.4 | ✅ #36 |
 | T2.11 | `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread | T2.8 | ✅ #39 |
+| T2.12 | `web`+`core`: the microphone recorded raw, the processing applied kept in the record | T2.9 | ⬜ |
 | T2.13 | `web`: on a phone, the picture and the scramble in view together: the scramble over the pinned picture | T2.7 | ⬜ |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6 → {T2.8, T2.9, T2.10} (from the owner's
@@ -706,8 +707,8 @@ created after a sleep could be off by the sleep, which the sync check's frame-cl
 (T2.8) would report as "the frame clock is wrong"; the fix measures the worker–page offset and
 corrects frame and clip times; (b) ~~sub-frame onsets in the sync check: the spread is quantized to
 frames on top of the cube's Bluetooth jitter (T2.8)~~, moot since T2.11, whose event, the centroid of
-a turn's motion, falls between frames; (c) a quality or audio change mid-attempt
-restarts the pipeline and empties the buffer, so that attempt's clips begin late (flagged
+a turn's motion, falls between frames; (c) a quality, audio or microphone (T2.12) change
+mid-attempt restarts the pipeline and empties the buffer, so that attempt's clips begin late (flagged
 `truncatedStart` since T2.9): a guard could defer the restart to the end of the attempt;
 (d) crop-at-source (the design's later phase), the biggest lever left on clip size after T2.10.
 
@@ -1135,6 +1136,70 @@ texts.
 - [ ] CI green; the two checks of issue #38 pass in `clapperboard-hardware.test.ts`, and T2.8's
   estimator fails them there as it did on the day.
 - [ ] Owner, on the MacBook: two checks on the FaceTime camera pass and agree within 25 ms.
+
+### T2.12 — `web`+`core`: the microphone recorded raw, the processing applied kept in the record
+
+**Goal.** Clips whose sound has the cube's clicks. The owner's ThinkPhone clips of round 2 (Android
+16, Chrome 155) have sound, and a TV's voices came through clearly, but the cube's own sounds were
+missing: the recording opened the microphone with `getUserMedia({audio: true})`, so Chrome applied
+its voice processing (echo cancellation, noise suppression, automatic gain control; on Android the
+platform's voice pipeline too), which takes a turn's click for noise. For the dataset the clicks are
+signal (each turn clicks; the sound can time the moves), so the microphone is recorded raw, and the
+record says what the browser applied. The MacBook's export of the same round (issue #40) explained
+the clips without sound before T2.9, which this task writes down: its microphone's timestamps count
+on a clock of their own (`docs/DEVICES.md`, "Audio").
+
+**Scope.** `apps/web/src/app/camera/` (a new `microphone.ts`: the request, the record of what the
+browser applied and the texts; `recording-service`, `recording-panel`, Camera settings),
+`apps/web/src/app/settings/*` (the setting), the capture lab's request, the fake browser's
+microphone; `packages/core/src/{session,records}.ts` and `packages/core/schema/session.schema.json`
+(`cameras[].microphone`), with the test records and the tests that read them; e2e; README,
+`docs/{DATA-MODEL,DEVICES,MANUAL-TESTS,TOOLCHAIN,CHANGELOG}.md`.
+
+**Behaviour.**
+- **Raw by default.** The recording asks for `{audio: {echoCancellation: false, noiseSuppression:
+  false, autoGainControl: false, voiceIsolation: false, channelCount: {ideal: 1}, sampleRate: {ideal:
+  48000}}}` (`voiceIsolation`, a newer constraint, through a typed extension of TypeScript's DOM lib,
+  which lacks it). Should the browser refuse it with an `OverconstrainedError` (booleans and ideals
+  never should), it asks again with `{audio: true}`, and a notice says so. The capture lab asks for
+  the microphone raw too.
+- **Setting** `microphoneProcessing`: `raw`, the default, or `voice`, the browser's defaults (for
+  someone who wants speech), kept with the other settings; settings stored without it read `raw`. In
+  Settings → Camera and in the Timer's Camera settings, next to Record audio, with one line of help:
+  "Raw keeps the cube's clicks; Voice lets the browser suppress noise for speech." A change starts the
+  recording again as one of Record audio does, while the sound is recorded (without it, a change
+  waits for Record audio).
+- **What the browser applied, in the record.** After `getUserMedia`, the track's `getSettings()`:
+  `session.cameras[].microphone = {label, processing, echoCancellation, noiseSuppression,
+  autoGainControl, voiceIsolation, sampleRate, channelCount}`, `processing` what was asked for, each
+  setting null when the browser does not report it, the device's id not kept; null when the camera
+  records without a microphone. Optional in the JSON (schema 2 is otherwise unchanged and
+  `additionalProperties: false` stays): `parseSession` reads a missing one as null, and `putCamera`
+  writes it with the camera's entry.
+- **Recording panel.** The codecs line ends with "mic raw" or "mic voice", and with "mic: the browser
+  kept processing on" when Raw was asked for and `getSettings()` reports any processing on; a notice
+  then names it ("The microphone is not raw: the browser kept its noise suppression on …"), noted
+  once in the session as T2.9's notices are.
+
+**Tests.** Unit: the request, raw and voice; the fallback after an `OverconstrainedError`, and none
+after another refusal or for Voice; what the record keeps of `getSettings()` (a setting not reported
+or not a switch or a count is null; Chrome's echo cancellation modes are on; no device id); the
+setting's default, persistence and migration; the restart on a change, only while the sound is
+recorded; `putCamera` writing `microphone`; the reader and the schema on it (the mutation corpus:
+absent and null valid, wrong types invalid); the panel's texts and the notice. Playwright (`encoding`
+project), with Chrome's fake microphone: the codecs line says "mic raw" and the export's
+`cameras[0].microphone` says `processing: 'raw'` with every processing off, as the fake device
+reports it (at 44.1 kHz in two channels: its own format); Voice in Camera settings starts the
+recording again, which says "mic voice", and the export says the processing on; the setting survives
+a reload.
+
+**Acceptance.**
+- [ ] CI green; the export of a session recorded with Chrome's fake microphone has
+  `cameras[0].microphone.processing` `raw` and the processing off.
+- [ ] Settings stored before this change read Raw; sessions written before it read with no microphone.
+- [ ] Owner, on the ThinkPhone (round 2): cube clicks audible in a ThinkPhone clip, and the panel says
+  "mic raw" (`docs/MANUAL-TESTS.md`, T2.12).
+- [ ] Owner: each device's `cameras[].microphone` in `docs/DEVICES.md`, "Audio".
 
 ### T2.13 — `web`: on a phone, the picture and the scramble in view together: the scramble over the pinned picture
 

@@ -10,6 +10,9 @@ import {
   CAMERA_RESOLUTIONS,
   CAMERA_RESOLUTION_TEXT,
   type CubeMac,
+  MICROPHONE_HINT,
+  MICROPHONE_PROCESSINGS,
+  MICROPHONE_PROCESSING_TEXT,
   SHARPNESS_THRESHOLD_DEFAULT,
   SettingsService,
   VIDEO_QUALITIES,
@@ -26,8 +29,8 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
  * `/settings`: the screen wake lock and storage persistence (T1.7), then what the timer and the
  * cube connection use (T1.6a): the host label, the cubes' MAC addresses, the idle disconnection
  * (T1.14), inspection, auto-advance, the scramble over the picture on a phone (T2.13), the camera's
- * resolution, frame rate and sharpness threshold (T2.1), Record audio (T2.4), the video quality
- * (T2.10) and the demo speed, all kept by `SettingsService`.
+ * resolution, frame rate and sharpness threshold (T2.1), Record audio (T2.4), the microphone, raw or
+ * voice (T2.12), the video quality (T2.10) and the demo speed, all kept by `SettingsService`.
  */
 @Component({
   selector: 'app-settings-page',
@@ -67,6 +70,11 @@ export class SettingsPage {
     videoQualityOptions(this.settings.cameraResolution(), this.settings.cameraFrameRate()),
   );
   protected readonly sharpnessDefault = SHARPNESS_THRESHOLD_DEFAULT;
+  protected readonly microphoneProcessings = MICROPHONE_PROCESSINGS.map((value) => ({
+    value,
+    label: MICROPHONE_PROCESSING_TEXT[value],
+  }));
+  protected readonly microphoneHint = MICROPHONE_HINT;
 
   constructor() {
     void this.storage.refresh();
@@ -151,6 +159,13 @@ export class SettingsPage {
     const quality = VIDEO_QUALITIES.find((option) => option === value);
     if (quality !== undefined) {
       this.settings.setVideoQuality(quality);
+    }
+  }
+
+  protected setMicrophoneProcessing(value: string): void {
+    const processing = MICROPHONE_PROCESSINGS.find((option) => option === value);
+    if (processing !== undefined) {
+      this.settings.setMicrophoneProcessing(processing);
     }
   }
 

@@ -15,6 +15,7 @@ import {
   parseAttempt,
   parseSession,
   type AttemptRecord,
+  type SessionRecord,
 } from './index';
 import {
   asVersion1Attempt,
@@ -207,6 +208,28 @@ describe('parseAttempt and parseSession', () => {
     expect(Object.keys(read.video[0])).toEqual(Object.keys(attempt.video[0]));
   });
 
+  it('read a camera written before its microphone was kept as one without, in the order of the schema', () => {
+    const session = sessionWithCamera();
+    expect(session.cameras.map((entry) => entry.microphone?.processing ?? null)).toEqual([
+      'raw',
+      null,
+    ]);
+    const older = changed(
+      changed(session, ['cameras', 0, 'microphone'], undefined),
+      ['cameras', 1, 'microphone'],
+      undefined,
+    );
+    expect(VALIDATE.session[2](older)).toBe(true);
+    const read = parseSession(older);
+    expect(read.cameras.map((entry) => entry.microphone)).toEqual([null, null]);
+    // In the order of the schema's fields, as the next save writes it.
+    expect(Object.keys(read.cameras[0])).toEqual(Object.keys(session.cameras[0]));
+    // A microphone is copied, not shared with the input.
+    const input = structuredClone(session);
+    expect(parseSession(input).cameras[0].microphone).toEqual(input.cameras[0].microphone);
+    expect(parseSession(input).cameras[0].microphone).not.toBe(input.cameras[0].microphone);
+  });
+
   it('upgrade a record of version 1 in memory: no clock, no clip, no camera', () => {
     for (const record of [solvedAttempt(), dnfAttempt(), untouchedAttempt()]) {
       const v1 = asVersion1Attempt(record);
@@ -253,7 +276,12 @@ describe('parseAttempt and parseSession', () => {
     for (const { file, session, attempts } of i3) {
       expect(VALIDATE.session[2](session), JSON.stringify(VALIDATE.session[2].errors)).toBe(true);
       const s = parseSession(session);
-      expect(s, file).toEqual(session);
+      // Written before the microphone was kept (T2.12), its camera reads as having none.
+      const written = session as SessionRecord;
+      expect(s, file).toEqual({
+        ...written,
+        cameras: written.cameras.map((entry) => ({ ...entry, microphone: null })),
+      });
       expect(s.cameras.map(({ label }) => label)).toEqual(['laptop']);
       // Attempt 6's scramble clip was refused on the day (its start was older than the buffer, issue
       // #34), and the session's notes say so.
@@ -373,6 +401,30 @@ describe('parseAttempt and parseSession', () => {
       'session',
       changed(session, ['clock', 'cameras', 'laptop', 'rttMs'], -1),
       'session.json (schema 2): clock.cameras.laptop.rttMs must be a number ≥ 0, got -1.',
+    ],
+    [
+      'a microphone that was asked for loud',
+      'session',
+      changed(session, ['cameras', 0, 'microphone', 'processing'], 'loud'),
+      'session.json (schema 2): cameras[0].microphone.processing must be one of "raw", "voice", got "loud".',
+    ],
+    [
+      'a microphone that reports echo cancellation as text',
+      'session',
+      changed(session, ['cameras', 0, 'microphone', 'echoCancellation'], 'remote-only'),
+      'session.json (schema 2): cameras[0].microphone.echoCancellation must be true or false or null, got "remote-only".',
+    ],
+    [
+      'a microphone of half a channel',
+      'session',
+      changed(session, ['cameras', 0, 'microphone', 'channelCount'], 1.5),
+      'session.json (schema 2): cameras[0].microphone.channelCount must be an integer ≥ 1 or null, got 1.5.',
+    ],
+    [
+      'a microphone that is text',
+      'session',
+      changed(session, ['cameras', 1, 'microphone'], 'raw'),
+      'session.json (schema 2): cameras[1].microphone must be an object or null, got "raw".',
     ],
     [
       'a camera in version 1',

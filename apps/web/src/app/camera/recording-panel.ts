@@ -6,16 +6,18 @@ import { SettingsService } from '../settings/settings-service';
 import { formatBytes } from '../shared/format-bytes';
 import { StorageMeter } from '../shared/storage-meter';
 import { CameraService } from './camera-service';
+import { microphoneText } from './microphone';
 import { RecordingService, STORAGE_FULL } from './recording-service';
 import { attemptSizeText, bitrateText, expectedBitrate } from './video-quality';
 
 /**
  * The recording's part of Camera settings (docs/PLAN.md, T2.4): whether it records and why not,
  * the pipeline's counters (frames in, encoded and dropped, the buffer, the codecs and the video's
- * bitrate, and where the audio is when it is not being encoded, T2.9), the notices of this recording
- * (no audio, and why), the last clip saved, a clip that failed or was saved short of what was asked
- * (once, until dismissed), and the storage meter with what an attempt takes at the video quality
- * (T2.10). The logic is the `RecordingService`'s; this only shows it.
+ * bitrate, where the audio is when it is not being encoded, T2.9, and whether the microphone is
+ * raw, T2.12), the notices of this recording (no audio, and why; the browser's voice processing
+ * kept on), the last clip saved, a clip that failed or was saved short of what was asked (once,
+ * until dismissed), and the storage meter with what an attempt takes at the video quality (T2.10).
+ * The logic is the `RecordingService`'s; this only shows it.
  */
 @Component({
   selector: 'app-recording-panel',
@@ -76,8 +78,8 @@ import { attemptSizeText, bitrateText, expectedBitrate } from './video-quality';
         While the camera is on and a session is under way, the last 90 s are kept in memory, and
         every attempt gets two clips in its folder: its scramble from 2 s before the first turn (at
         most a minute before it is done) to 1 s after, and its solve from 3 s before the first turn
-        to 1 s after. The solve list shows them. Their sound and size: Record audio and Video
-        quality, above.
+        to 1 s after. The solve list shows them. Their sound and size: Record audio, Microphone and
+        Video quality, above.
       </p>
     </section>
   `,
@@ -198,8 +200,9 @@ export class RecordingPanel {
       : `${stats.bufferSeconds.toFixed(1)} s, ${formatBytes(stats.bufferBytes)}`;
   });
   /**
-   * "avc1.640028 at 4 Mbps, mp4a.40.2": the video's codec and bitrate, then the audio's codec, or
-   * where the audio is when it is not being encoded (T2.9).
+   * "avc1.640028 at 4 Mbps, mp4a.40.2, mic raw": the video's codec and bitrate, then the audio's
+   * codec, or where the audio is when it is not being encoded (T2.9), then, with a microphone, how
+   * it records (T2.12): "mic raw", "mic voice", or "mic: the browser kept processing on".
    */
   protected readonly codecs = computed(() => {
     const stats = this.recording.stats();
@@ -212,7 +215,10 @@ export class RecordingPanel {
         : stats.bitrate === null
           ? stats.codec
           : `${stats.codec} at ${bitrateText(stats.bitrate)}`;
-    return `${video}, ${audioText(stats)}`;
+    const microphone = this.recording.microphone();
+    const mic =
+      microphone === null || stats.audioState === 'off' ? '' : `, ${microphoneText(microphone)}`;
+    return `${video}, ${audioText(stats)}${mic}`;
   });
   /**
    * What an attempt's clips take at the video quality: at the bitrate recording now, else at the

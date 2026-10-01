@@ -46,6 +46,7 @@ describe('SettingsService', () => {
     expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.sharpnessThreshold()).toBe(20);
     expect(settings.recordAudio()).toBe(true);
+    expect(settings.microphoneProcessing()).toBe('raw');
     expect(settings.videoQuality()).toBe('standard');
     expect(settings.cameraSettingsOpen()).toBeNull();
     expect(settings.cameraPickFor('macOS laptop')).toBeNull();
@@ -69,6 +70,7 @@ describe('SettingsService', () => {
     settings.setCameraFrameRate('60');
     expect(settings.setSharpnessThreshold(35.5)).toBe(true);
     settings.setRecordAudio(false);
+    settings.setMicrophoneProcessing('voice');
     settings.setVideoQuality('high');
     settings.setCameraSettingsOpen(false);
     settings.setCameraPick('office-mbp', 'id-1', 'FaceTime HD Camera');
@@ -93,6 +95,7 @@ describe('SettingsService', () => {
       cameraFrameRate: '60',
       sharpnessThreshold: 35.5,
       recordAudio: false,
+      microphoneProcessing: 'voice',
       videoQuality: 'high',
       cameraSettingsOpen: false,
       cameraPicks: [{ host: 'office-mbp', deviceId: 'id-1', label: 'FaceTime HD Camera' }],
@@ -121,6 +124,7 @@ describe('SettingsService', () => {
     expect(reloaded.cameraFrameRate()).toBe('60');
     expect(reloaded.sharpnessThreshold()).toBe(35.5);
     expect(reloaded.recordAudio()).toBe(false);
+    expect(reloaded.microphoneProcessing()).toBe('voice');
     expect(reloaded.videoQuality()).toBe('high');
     expect(reloaded.cameraSettingsOpen()).toBe(false);
     expect(reloaded.cameraPickFor('office-mbp')).toEqual({
@@ -220,6 +224,7 @@ describe('SettingsService', () => {
         cameraFrameRate: 120,
         sharpnessThreshold: -1,
         recordAudio: 'no',
+        microphoneProcessing: 'studio',
         videoQuality: 'ultra',
         cameraSettingsOpen: 'open',
         cameraPicks: [{ host: 'a', deviceId: '' }, { host: 'b', deviceId: 'id' }, 'c'],
@@ -243,6 +248,7 @@ describe('SettingsService', () => {
     expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.sharpnessThreshold()).toBe(20);
     expect(settings.recordAudio()).toBe(true);
+    expect(settings.microphoneProcessing()).toBe('raw');
     expect(settings.videoQuality()).toBe('standard');
     expect(settings.cameraSettingsOpen()).toBeNull();
     expect(settings.cameraPickFor('a')).toBeNull();
@@ -309,6 +315,35 @@ describe('SettingsService', () => {
 
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ scrambleOverPicture: 'off' }));
     expect(load().scrambleOverPicture()).toBe(true);
+  });
+
+  it('reads the settings stored before the microphone setting existed as Raw, the rest as stored', () => {
+    // What 0.2.0 stored before T2.12: the video quality, but no microphone setting.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        cameraOn: true,
+        recordAudio: true,
+        videoQuality: 'high',
+        cameraSettingsOpen: true,
+      }),
+    );
+    const settings = load();
+
+    expect(settings.microphoneProcessing()).toBe('raw');
+    expect(settings.recordAudio()).toBe(true);
+    expect(settings.videoQuality()).toBe('high');
+    expect(settings.cameraOn()).toBe(true);
+    // Nothing is written by reading.
+    expect(stored()).not.toHaveProperty('microphoneProcessing');
+
+    settings.setMicrophoneProcessing('voice');
+    expect(stored()).toMatchObject({ microphoneProcessing: 'voice', videoQuality: 'high' });
+    expect(load().microphoneProcessing()).toBe('voice');
+    load().setMicrophoneProcessing('raw');
+    expect(load().microphoneProcessing()).toBe('raw');
+    expect(stored()).toMatchObject({ microphoneProcessing: 'raw' });
   });
 
   it('stores MAC addresses normalized, sorted by name, and refuses what is not one', () => {

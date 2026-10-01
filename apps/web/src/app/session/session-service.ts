@@ -752,7 +752,8 @@ export class SessionService {
   }
 
   /**
-   * Puts `camera` in the current session's `cameras` (T2.4), replacing the entry with its label, and
+   * Puts `camera` in the current session's `cameras` (T2.4), replacing the entry with its label,
+   * its `microphone` included (T2.12: what the browser applied to the microphone of its clips), and
    * `audio` in its `audio`, and saves session.json; nothing without a session, or when both are
    * already so.
    */

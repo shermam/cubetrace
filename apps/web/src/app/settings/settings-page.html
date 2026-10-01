@@ -286,6 +286,24 @@
     Chrome asks once for the microphone. Off, they are silent. A recording under way starts again
     with the change.
   </p>
+  <label for="microphone-processing">Microphone</label>
+  <select
+    #microphoneSelect
+    id="microphone-processing"
+    data-testid="microphone-processing"
+    (change)="setMicrophoneProcessing(microphoneSelect.value)"
+  >
+    @for (option of microphoneProcessings; track option.value) {
+      <option [value]="option.value" [selected]="option.value === settings.microphoneProcessing()">
+        {{ option.label }}
+      </option>
+    }
+  </select>
+  <p class="hint" data-testid="microphone-hint">
+    {{ microphoneHint }} Raw turns the browser's voice processing off (echo cancellation, noise
+    suppression, automatic gain control); Camera settings say whether the browser did. A recording
+    under way starts again with the change.
+  </p>
 </section>
 
 <section aria-labelledby="demo-heading">

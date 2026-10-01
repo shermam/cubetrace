@@ -430,6 +430,7 @@ cube.
 | Sync check (T2.5, T2.8, T2.11) | `sync-check.spec.ts` | Chrome's fake camera at 30 fps, demo solve 0 at speed 20: once the solve is recorded, the camera on; when it records, the check is due and, the whole frame being framed, asks for a rectangle around the cube first ("Edit the framing"; the timer goes on); "Start anyway" starts it: it asks to hold still for a second, then counts down for the first turn (the capture worker's frames counted), the timer's status says `sync-check`, the scramble and "Attempt 2" stay; after 20 s without a turn it fails with "the cube did not move" (the demo has finished: the same outcome every run), with Retry and "Download check data", whose file has the whole motion series, the camera, how its frames were read and the frames' clock within 1 s of the page's; attempt 2 is back with its scramble; Retry, Later and "Sync check" start and hide it; the export has no `clock.cameras` entry and the one attempt of the solve. A second test draws the rectangle with the keyboard in the editor that "Edit the framing" opens: the hint goes, Start starts the check, and Full frame brings the hint back. In the capture lab, a 6 s check with the demo cube's turns shows the latest frame's motion in its bars (the mean difference above 0), the frames' format and "copied out", reports its outcome and the capture worker's time per frame, which it prints, and saves its data. |
 | Session with clips (T2.6) | `session-clips.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: the solve that starts with the page, recorded before the camera is on, is deleted (Delete last); the camera on, the sync check that starts by itself is ended with Later; two replays, each with its two clips; then a new page load straight to the session's page: both attempts listed with a badge "2 clips, …", "4 clips, …" in its header, the first attempt's solve clip plays in the viewer, and the page's Export validates against schema 2; every clip of the records is a file in its attempt's folder in OPFS, the MP4 of the record's size and the frames file valid against its schema, with the record's frame count and first frame, and nothing else is there but `attempt.json`. |
 | First render (T2.6) | `timer-render.spec.ts` | On the production build under `/cubetrace/`, after a demo solve (a session with a stored solve), the first animation frame that shows the clock comes within 2 s of `DOMContentLoaded`, with the camera setting off and on; with the camera (`getUserMedia`) and the storage (`navigator.storage.getDirectory`) each held back 3 s, the clock still comes within 2 s, and the solve list and the camera's preview after them. Recording is off in the file (no `MediaStreamTrackProcessor`), as in `timer-layout.spec.ts`. It prints the times: over three runs, the clock 44 to 83 ms after `DOMContentLoaded` with the camera off or on, the solve list 104 to 177 ms and the preview 137 to 194 ms; held back, the clock 39 to 104 ms, the list 3,056 to 3,121 ms and the preview 3,139 to 3,237 ms. |
+| Microphone (T2.12) | `microphone.spec.ts` | Chrome's fake camera at 30 fps and its microphone: Settings → Camera → Microphone says Raw, with its line of help; after demo solve 0 at speed 20, the Timer page without the demo cube (the session resumed, so no attempt and no sync check begins), the camera on: the codecs line ends with "opus, mic raw" and no notice shows; the export's `cameras[0].microphone` says `processing: 'raw'` with the four processing settings false, as the fake microphone reports them raw, and a sample rate and channels; Voice in Camera settings starts the recording again, which says "mic voice", and the export then says echo cancellation, noise suppression and gain control on; after a reload, Voice in Camera settings and in Settings, and "mic voice". It prints both records. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
 export), without its time check, which flow 1 makes on a settled page (below). The helpers in
@@ -466,11 +467,12 @@ export), without its time check, which flow 1 makes on a settled page (below). T
   download. The DNF flows run at speed 5 (solves of 4.3 and 6.9 s), which leaves seconds to press Esc
   after the solve starts although assertions poll up to 1 s apart.
 - **The specs that record run one at a time** (T2.6). `capture.spec.ts`, `recording.spec.ts`,
-  `session-clips.spec.ts` and `sync-check.spec.ts` record Chrome's fake camera, encoding 1080p30 VP9
-  in software; they are the Playwright project `encoding`, limited to one worker (the project's
-  `workers` option) and listed first, so that the next of them starts as soon as one ends, while the
-  other specs, the project `chromium`, run in the other worker. Two encoders at once on four CPUs
-  lose frames and hold back the demo cube's timers: when `session-clips.spec.ts` joined the suite,
+  `session-clips.spec.ts` and `sync-check.spec.ts` (and since `video-quality.spec.ts`, T2.10, and
+  `microphone.spec.ts`, T2.12) record Chrome's fake camera, encoding 1080p30 VP9 in software; they
+  are the Playwright project `encoding`, limited to one worker (the project's `workers` option) and
+  listed first, so that the next of them starts as soon as one ends, while the other specs, the
+  project `chromium`, run in the other worker. Two encoders at once on four CPUs lose frames and
+  hold back the demo cube's timers: when `session-clips.spec.ts` joined the suite,
   two of three runs in a row failed, once on a frame lost in the second after a save in
   `recording.spec.ts`'s no-drop test (an interval of 67.1 ms, with `sync-check.spec.ts` encoding in
   the other worker) and once on its timing check (the medians with the camera on and off 5.05 ms
@@ -630,7 +632,8 @@ test pattern takes about 1.2 Mbps.
 **Chrome's fake camera** (`--use-fake-device-for-media-stream`) gives 1920×1080 I420 frames at
 20 fps unless the flag says `fps=30`, as `capture.spec.ts` does to have the 1080p30 of the real
 cameras (`--use-fake-device-for-media-stream=fps=30`); its frames have no `duration`, and its
-microphone gives 48 kHz mono in 10 ms buffers.
+microphone gives 48 kHz mono in 10 ms buffers with the browser's voice processing, 44.1 kHz stereo
+without it (raw, as the recording asks for it since T2.12: "Microphone (T2.12)", below).
 
 **The capture lab** (`/capture-lab`, lazy, not in the navigation, with a plain message in a browser
 without the APIs, as the probe has) runs the pipeline on a chosen camera, shows its counters once per
@@ -786,7 +789,8 @@ first attempt of a new session begins with the connection, and its scramble clip
 seconds before it in memory), and the storage is under 95% of the quota. A new stream (another
 camera, another resolution) or a new "Record audio" or "Video quality" starts it again; the camera
 off, no session and no cube, or storage from 95% stop it. The microphone comes from its own
-`getUserMedia({audio: true})`; a refusal records the video alone and says so. `SessionService` emits
+`getUserMedia`, raw since T2.12 ("Microphone (T2.12)", below); a refusal records the video alone and
+says so. `SessionService` emits
 `milestones$` (an attempt `armed`, `ended` with its record and its end, or `dropped` without a
 record); the service saves the scramble clip `[max(scrambleStart − 2 s, scrambleDone − 60 s),
 scrambleDone + 1 s]` (T2.9) and the solve clip `[solveStart − 3 s, end + 1 s]` a second and a
@@ -1170,3 +1174,34 @@ kB raw against 17.4, so the Settings page, whose own chunk is 16.4 kB raw agains
 chunk too (6.0 kB transferred), which the Timer page loads right after it renders anyway; the texts
 are a chunk of their own, 0.5 kB. Camera settings' chunk is 26.4 kB raw (25.2 before), the capture
 worker 18.3 kB (18.2), the capture lab's chunk 19.4 kB (19.2).
+
+## Microphone (T2.12)
+
+Added by T2.12 on 2026-10-01. The recording asks for the microphone with every voice processing off
+(`apps/web/src/app/camera/microphone.ts`): `echoCancellation`, `noiseSuppression`, `autoGainControl`
+and `voiceIsolation` false, `channelCount: {ideal: 1}` and `sampleRate: {ideal: 48000}`, all of which
+a browser may ignore and none of which can fail a request. TypeScript 6.0's DOM lib has no
+`voiceIsolation`, neither in `MediaTrackConstraintSet` nor in `MediaTrackSettings`, while Chrome
+supports it (`getSupportedConstraints()` says so), hence the typed extensions `MicrophoneConstraints`
+and `MicrophoneSettings` there.
+
+**Chrome's fake microphone** (Playwright's Chromium 141 on Linux, `--use-fake-device-for-media-stream`,
+measured on 2026-10-01 with a throwaway page and by `apps/web/e2e/microphone.spec.ts`, which prints
+it): labelled "Fake Default Audio Input" (two more, "Fake Audio Input 1" and "2", are listed), its
+track's `getSettings()` reports every processing as asked. With `{audio: true}`: `echoCancellation`,
+`noiseSuppression` and `autoGainControl` true, `voiceIsolation` false, 48,000 Hz, one channel, 16-bit
+samples, `latency` 0.01 s. Raw: all four false, and the device's own format, 44,100 Hz in two
+channels (`f32-planar` `AudioData` of 441 frames, 10 ms), whatever the ideals ask: one channel asked
+for as a bare `channelCount: 1` gives two as well, and only an `exact` sample rate it lacks fails, with
+an `OverconstrainedError` on `sampleRate`. Its capabilities: `echoCancellation` `[true, false,
+"remote-only"]`, `autoGainControl`, `noiseSuppression` and `voiceIsolation` `[true, false]`, one or
+two channels, 44,100 to 48,000 Hz. Chromium's `AudioEncoder` takes Opus at 44.1 kHz stereo (AAC not at
+all, as above), so CI's clips keep their Opus sound raw: the capture lab's 3.4 s clip has 165 Opus
+packets, and the audio's arrival offset is 0.7 ms from the video's.
+
+**Sizes** (`ng build`, 2026-10-01, against `main` at 8aecd2c): the initial bundle is unchanged,
+264.47 kB raw. The chunk with `SettingsService` and the records' readers, which every page loads right
+after the first render, is 47.6 kB raw against 46.8 (15.2 kB transferred against 14.9); the recording
+service's 22.3 kB against 21.3, Camera settings' 28.4 against 27.4, the Settings page's 18.1 against
+17.0, the capture lab's 23.4 against 23.3; `microphone.ts`, which the recording and the capture lab
+share, is a chunk of its own, 1.3 kB.

@@ -580,6 +580,7 @@ describe('CameraService', () => {
       },
       crop: { x: 480, y: 270, w: 960, h: 540 },
       mode: 'full',
+      microphone: null,
     });
 
     const phone = load({ cameras: [FAKE_PHONE_FRONT], userAgent: ANDROID });

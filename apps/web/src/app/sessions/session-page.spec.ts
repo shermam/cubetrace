@@ -151,6 +151,7 @@ describe('SessionPage', () => {
           constraints: {},
           crop: null,
           mode: 'full',
+          microphone: null,
         },
       ],
     });
@@ -281,6 +282,7 @@ describe('SessionPage', () => {
       constraints: {},
       crop: null,
       mode: 'full' as const,
+      microphone: null,
     };
     expect(
       camerasText({
