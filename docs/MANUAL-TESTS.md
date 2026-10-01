@@ -590,3 +590,34 @@ functions before T3.3. Write the date and what came back next to each item.
   `not-found`.
 - [ ] Without the ID token: `unauthenticated`. Then delete the test's documents, `users/t32-check`,
   the object and the account (`deleteUser('t32-check')`).
+
+## T3.1 — the session index
+
+On https://shermam.github.io/cubetrace/, with the same Google account on the MacBook (Chrome) and on
+the ThinkPhone (the installed app), a real cube on each, after the coordinator has deployed the rules
+and the composite index (`firebase/firestore.indexes.json`). Next to each item, write the device,
+Chrome's version and what happened. The Firebase console (Firestore Database → Data) shows the
+documents.
+
+- [ ] Signed in on the MacBook, a solve on the real cube: in the console, `sessions/<id>` has the
+  session's fields and `owner`, and `sessions/<id>/attempts/0001` the attempt's without `moves`, with
+  `device` (the MacBook's label, its camera's label), `video` with both clips (the camera on) a few
+  seconds later, and `upload` as created: `pending`, `attempt.json` with its size and `doneMs` null
+  (the clips' files come with the uploads).
+- [ ] On the ThinkPhone, signed in with the same account, the Sessions page: the MacBook's session with
+  the badge "cloud" (its date opens a read-only page: the attempts, no Export, a clip badge that opens
+  nothing and says where the clips are), the phone's own sessions "both" (or "this device" for a demo
+  session), and the device filter with both labels; filtered by the MacBook's label, only its sessions.
+- [ ] A solve on the phone, then the MacBook's Sessions page reloaded: the phone's session is there as
+  "cloud", with its attempts.
+- [ ] Sessions recorded signed out (sign out on the MacBook, a solve, sign in again): once signed in,
+  the session appears in the console within a few seconds (the catch-up), and as "both" on the
+  Sessions page.
+- [ ] Airplane mode on the phone, a solve: the Sessions page shows the session as "both" with a dashed
+  badge (waiting), and the QA view says a write waits to be sent; airplane mode off: the document
+  reaches the console, and the MacBook lists it.
+- [ ] The QA view (Sessions → QA view) on each device: today's attempts per device, the clips and the
+  bytes they take, everything pending (nothing is uploaded until T3.3), and "This device … last synced
+  at" a time of today.
+- [ ] Signed out on one device: the Sessions page shows only that device's sessions, without badges,
+  filter or QA link, as before T3.1.

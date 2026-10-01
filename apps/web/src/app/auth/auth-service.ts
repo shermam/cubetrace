@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { userRecord } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, hostNow, type BrowserGlobals } from '../device/browser-globals';
@@ -30,6 +30,12 @@ export type AuthStatus = 'signed-out' | 'loading' | 'signed-in' | 'error';
 /** How signing in shows Google's page. */
 export type SignInFlow = 'popup' | 'redirect';
 
+/** The account signed in and the backend that reaches its data: for the session index (T3.1). */
+export interface CloudAccount {
+  readonly uid: string;
+  readonly backend: AccountBackend;
+}
+
 /**
  * A popup, except in the app installed on Android (display mode standalone), where a popup would
  * leave the app for a browser tab: there the page itself goes to Google's and comes back.
@@ -58,6 +64,8 @@ export class AuthService {
   private readonly statusSignal = signal<AuthStatus>('signed-out');
   private readonly errorSignal = signal<string | null>(null);
   private readonly recordErrorSignal = signal<string | null>(null);
+  /** The backend, once loaded. */
+  private readonly loadedSignal = signal<AccountBackend | null>(null);
 
   /** The backend, once loading it has begun; dropped when that failed, so that Sign in tries again. */
   private backend: Promise<AccountBackend> | null = null;
@@ -83,6 +91,19 @@ export class AuthService {
    * and once signed out.
    */
   readonly recordError = this.recordErrorSignal.asReadonly();
+  /**
+   * The account signed in with its backend, through which the session index (T3.1) writes and reads
+   * its documents; null without an account, and while a remembered one is still loading.
+   */
+  readonly cloud = computed<CloudAccount | null>(
+    () => {
+      const uid = this.userSignal()?.uid;
+      const backend = this.loadedSignal();
+      return uid === undefined || backend === null ? null : { uid, backend };
+    },
+    // The same account again (the backend reports it at each start, and on a new token) is no change.
+    { equal: (p, q) => p?.uid === q?.uid && p?.backend === q?.backend },
+  );
 
   constructor() {
     const remembered = this.remembered();
@@ -174,6 +195,7 @@ export class AuthService {
       });
       const loading = this.loadBackend().then(
         (backend) => {
+          this.loadedSignal.set(backend);
           backend.watchUser(
             (user) => {
               this.onReport(user, backend);

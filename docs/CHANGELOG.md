@@ -28,6 +28,30 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
   arrived with their sizes and marks the attempt uploaded. The app does not call them yet: the upload
   queue (T3.3) will. Their tests run against the Firestore emulator (`npm run test:functions`, in CI),
   the Firebase workflow deploys them with the rules, and `bucket/` has the bucket's CORS policies.
+- The session index (T3.1): signed in, every session of a real cube goes to the account's index in
+  the cloud as it is recorded, its record and each attempt's without the moves, with the device that
+  recorded it and its files, all pending (nothing is uploaded yet): the saves never wait for it, and
+  offline it waits on the device and goes when the network is back. Demo sessions stay on the device.
+  The sessions recorded signed out are added when the account signs in (at most 300 documents at a
+  time, the rest at the next start). A write the cloud refuses is said once, on the Sessions page and
+  in the session's notes (`cloud: …`).
+- The Sessions page, signed in, lists the account's sessions of every device, merged with this
+  device's: a badge on each ("this device", "cloud", "both", dashed while a change waits to be sent),
+  a filter by device, and why a session of this device is not in the cloud. A session recorded on
+  another device opens a read-only page: its attempts and statistics, without its clips or its moves,
+  which stay on that device. Delete there removes this device's copy only, and says so.
+- The QA view, `/qa` (Sessions → QA view, signed in): the attempts of the account's 50 newest sessions
+  by day and device, with their clips, the bytes they take, the bytes uploaded and pending, a total,
+  when this device last synced and what still waits to be sent.
+- Development: the session index's documents in `packages/core` (`cloudSession`, `cloudAttempt`, their
+  readers and `cloud-session.schema.json`, `cloud-attempt.schema.json`), the rules' checks of their
+  shape (an attempt without moves, its place, its owner) with their tests, the composite index of the
+  sessions query (`firebase/firestore.indexes.json`), and the end-to-end suite's fake index.
+
+### Changed
+
+- The current session's row on the Sessions page follows the timer's attempts while the page is open
+  (T3.1). Settings → Account says what the account keeps now.
 
 ## 0.2.0 — 2026-09-27
 

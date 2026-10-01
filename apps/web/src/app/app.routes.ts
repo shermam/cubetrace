@@ -19,6 +19,13 @@ export const routes: Routes = [
     loadComponent: () => import('./sessions/session-page').then((m) => m.SessionPage),
   },
   {
+    // The cloud index's attempts by day and device (docs/PLAN.md, T3.1), linked from the Sessions
+    // page signed in.
+    path: 'qa',
+    title: 'QA · cubetrace',
+    loadComponent: () => import('./qa/qa-page').then((m) => m.QaPage),
+  },
+  {
     path: 'settings',
     title: 'Settings · cubetrace',
     loadComponent: () => import('./settings/settings-page').then((m) => m.SettingsPage),

@@ -334,9 +334,12 @@
   <h2 id="account-heading">Account</h2>
   <app-account-control place="settings" />
   <p class="hint" data-testid="account-hint">
-    For now, signing in with Google only records your name, your email and the label of this device,
-    “{{ settings.hostLabel() }}”, in your cubetrace account: nothing is uploaded yet. The account is
-    there for the cloud index of your sessions and their uploads, which come next.
+    Signing in with Google records your name, your email and the label of this device, “{{
+      settings.hostLabel()
+    }}”, in your cubetrace account, and keeps an index of your sessions there: their records without
+    the moves, so that the Sessions page of each of your devices lists them all (demo sessions stay
+    on the device), but nothing is uploaded yet: the clips stay on the device that recorded them
+    until the uploads, which come next.
   </p>
 </section>
 

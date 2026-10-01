@@ -33,6 +33,7 @@ import type { StorageProblem } from '@cubetrace/storage';
 import { Subject, type Observable } from 'rxjs';
 
 import { APP_BUILD } from '../../environments/version';
+import { SessionIndexService } from '../cloud/session-index';
 import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
@@ -300,7 +301,14 @@ export class SessionService {
   private readonly wakeLock = inject(WakeLockService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly sessionStorage = inject(SESSION_STORAGE);
-  private readonly store = this.sessionStorage.store;
+  private readonly cloudIndex = inject(SessionIndexService);
+  /**
+   * The store, whose writes also go to the session index in the cloud while an account is signed in
+   * (T3.1, `SessionIndexService`): never awaited, and a refusal is noted in the session.
+   */
+  private readonly store = this.cloudIndex.track(this.sessionStorage.store, (sessionId, line) =>
+    this.addNote(sessionId, line),
+  );
   private readonly makeScramble = inject(SCRAMBLE_SOURCE);
 
   private readonly readySignal = signal(false);

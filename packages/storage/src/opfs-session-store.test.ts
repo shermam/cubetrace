@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FakeDirectoryHandle, FakeFileHandle } from './fake-opfs';
 import { opfsAvailable } from './opfs';
-import { OpfsSessionStore, attemptFolder, describeProblem } from './opfs-session-store';
+import { OpfsSessionStore, attemptFolder, describeProblem, recordJson } from './opfs-session-store';
 import { A, B, C, attempt, session } from './test-records';
 
 function setup(): { root: FakeDirectoryHandle; store: OpfsSessionStore } {
@@ -93,6 +93,9 @@ describe('OpfsSessionStore', () => {
     expect(JSON.parse(file(root, `sessions/${A}/attempts/0001/attempt.json`).text)).toEqual(a);
     expect(a.moves[0].hostMs).toBe(50.25);
     expect(await store.exportSession(A)).toEqual({ session: s, attempts: [a] });
+    // recordJson is that text, so that the session index (T3.1) knows a file's size before it reads it.
+    expect(recordJson(s)).toBe(sessionText);
+    expect(recordJson(a)).toBe(file(root, `sessions/${A}/attempts/0001/attempt.json`).text);
   });
 
   it('replaces a file as a whole when a record is saved again', async () => {

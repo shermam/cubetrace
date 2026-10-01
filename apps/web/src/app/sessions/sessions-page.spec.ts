@@ -3,9 +3,19 @@ import { provideRouter } from '@angular/router';
 import { MemorySessionStore, type SessionStore } from '@cubetrace/core';
 import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 
+import { ACCOUNT_LOADER } from '../auth/account-backend';
+import { ACCOUNT_STORAGE_KEY } from '../auth/auth-service';
+import { ADA, FakeAccountBackend } from '../auth/fake-account';
+import {
+  attemptDocument,
+  attemptWithClips,
+  realSession,
+  sessionDocument,
+} from '../cloud/cloud-testing';
+import { SessionIndexService } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { FakeLocalStorage, FakeStorageManager, settle } from '../device/fake-browser';
-import { CURRENT_SESSION_KEY } from '../session/session-service';
+import { CURRENT_SESSION_KEY, SessionService } from '../session/session-service';
 import { SESSION_STORAGE } from '../session/session-storage';
 import { SESSION_A, SESSION_B, testAttempt, testSession } from '../session/session-testing';
 import { SessionsPage } from './sessions-page';
@@ -290,5 +300,226 @@ describe('SessionsPage', () => {
       'The session could not be deleted: The folder is locked.',
     );
     expect(text(element, 'sessions-error')).toBeUndefined();
+  });
+
+  describe('signed in (T3.1)', () => {
+    const PHONE = '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e';
+    const DEMO = '0d0d0d0d-0000-4000-8000-000000000001';
+    let backend: FakeAccountBackend;
+
+    /** The page on a device whose account is remembered, the cloud's index in `backend`. */
+    async function renderSignedIn(): Promise<HTMLElement> {
+      const localStorage = new FakeLocalStorage();
+      localStorage.setItem(ACCOUNT_STORAGE_KEY, 'signed-in');
+      localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
+      TestBed.configureTestingModule({
+        providers: [
+          provideRouter([]),
+          { provide: BROWSER_GLOBALS, useValue: { navigator: { storage }, localStorage } },
+          { provide: SESSION_STORAGE, useValue: { store, kind: 'opfs' } },
+          { provide: ACCOUNT_LOADER, useValue: backend.loader },
+        ],
+      });
+      fixture = TestBed.createComponent(SessionsPage);
+      const index = TestBed.inject(SessionIndexService);
+      for (let k = 0; k < 4; k++) {
+        await fixture.whenStable();
+        await settle();
+        await index.whenIdle();
+      }
+      await fixture.whenStable();
+      return fixture.nativeElement as HTMLElement;
+    }
+
+    function place(row: HTMLElement): string | undefined {
+      return text(row, 'session-place');
+    }
+
+    beforeEach(async () => {
+      backend = new FakeAccountBackend();
+      backend.user = ADA;
+      store = new MemorySessionStore();
+      // This device: the laptop's session (a real cube) and a demo session.
+      await store.createSession(realSession(SESSION_A, 1_790_000_000_000));
+      await store.saveAttempt(attemptWithClips(1, 10_000));
+      await store.createSession(testSession(DEMO, 1_790_000_050_000));
+      await store.saveAttempt(testAttempt(1, 9_000, { session: DEMO }));
+      // The phone's session, in the cloud only.
+      const phone = realSession(PHONE, 1_790_000_100_000, 'ThinkPhone');
+      await backend.saveSessionIndex(
+        sessionDocument({ ...phone, summary: { attempts: 2, solved: 2, dnf: 0 } }, ADA.uid),
+        [
+          attemptDocument(attemptWithClips(1, 12_000, PHONE), phone, ADA.uid),
+          attemptDocument(attemptWithClips(2, 13_000, PHONE), phone, ADA.uid),
+        ],
+      );
+    });
+
+    it("lists this device's sessions and the cloud's, merged by id, each with its badge", async () => {
+      const element = await renderSignedIn();
+      const [phone, demo, laptop] = rows(element);
+
+      expect(rows(element).map((row) => row.getAttribute('data-session'))).toEqual([
+        PHONE,
+        DEMO,
+        SESSION_A,
+      ]);
+      expect(place(phone)).toBe('cloud');
+      expect(phone.querySelector('.place')?.getAttribute('title')).toBe(
+        'In your cloud index, recorded on ThinkPhone: its clips and moves are on that device.',
+      );
+      expect(phone.textContent).toContain('ThinkPhone · GAN 12 ui FreePlay');
+      expect(text(phone, 'session-attempts')).toBe('2 attempts');
+      expect(phone.textContent).toContain('recorded on another device');
+      // A session of the cloud alone opens its read-only page, and has nothing to export or delete.
+      expect(phone.querySelector('[data-testid="session-link"]')?.getAttribute('href')).toBe(
+        `/sessions/${PHONE}`,
+      );
+      expect(phone.querySelectorAll('button')).toHaveLength(0);
+
+      expect(place(demo)).toBe('this device');
+      expect(demo.querySelector('.place')?.getAttribute('title')).toBe(
+        'A demo session (the fake cube): it stays on this device.',
+      );
+      expect(text(demo, 'session-cloud-problem')).toBeUndefined();
+      // The laptop's session, written by the catch-up as the account started.
+      expect(place(laptop)).toBe('both');
+      expect(laptop.querySelector('.current')?.textContent).toBe('current');
+      expect(button(laptop, 'Export')).toBeDefined();
+      expect(backend.sessionDocument(SESSION_A)?.owner).toBe(ADA.uid);
+      expect(backend.sessionDocument(DEMO)).toBeUndefined();
+
+      expect(element.querySelector('[data-testid="qa-link"]')?.getAttribute('href')).toBe('/qa');
+      expect(text(element, 'cloud-error')).toBeUndefined();
+    });
+
+    it('filters the sessions by device, from the host labels seen', async () => {
+      const element = await renderSignedIn();
+      const select = element.querySelector<HTMLSelectElement>('[data-testid="device-filter"]');
+      expect(Array.from(select?.options ?? []).map((option) => option.textContent.trim())).toEqual([
+        'All devices',
+        'Linux laptop',
+        'ThinkPhone',
+      ]);
+
+      if (select !== null) {
+        select.value = 'ThinkPhone';
+        select.dispatchEvent(new Event('change'));
+      }
+      await fixture.whenStable();
+      expect(rows(element).map((row) => row.getAttribute('data-session'))).toEqual([PHONE]);
+
+      if (select !== null) {
+        select.value = 'Linux laptop';
+        select.dispatchEvent(new Event('change'));
+      }
+      await fixture.whenStable();
+      expect(rows(element).map((row) => row.getAttribute('data-session'))).toEqual([
+        DEMO,
+        SESSION_A,
+      ]);
+    });
+
+    it('says why a session of this device is not in the cloud, and that deleting it keeps its index', async () => {
+      backend.indexError = Object.assign(new Error('Missing or insufficient permissions.'), {
+        code: 'permission-denied',
+      });
+      const element = await renderSignedIn();
+      const laptop = rows(element).find((row) => row.getAttribute('data-session') === SESSION_A);
+
+      expect(laptop === undefined ? undefined : place(laptop)).toBe('this device');
+      expect(laptop === undefined ? undefined : text(laptop, 'session-cloud-problem')).toBe(
+        'Not in the cloud: the session could not be indexed: Missing or insufficient permissions.',
+      );
+      // The session's notes say it too, so that the next page loads know.
+      expect((await store.exportSession(SESSION_A)).session.notes).toBe(
+        'cloud: the session could not be indexed: Missing or insufficient permissions.',
+      );
+
+      const other = rows(element).find((row) => row.getAttribute('data-session') === DEMO);
+      if (other !== undefined) {
+        button(other, 'Delete…')?.click();
+      }
+      await fixture.whenStable();
+      expect(other?.textContent).toContain('Delete this session and its 1 attempt?');
+    });
+
+    it("says that the cloud's sessions could not be read, and lists this device's all the same", async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      backend.readError = new Error('Failed to get documents because the client is offline.');
+      const element = await renderSignedIn();
+      expect(text(element, 'cloud-error')).toBe(
+        "Your cloud's sessions could not be read: Failed to get documents because the client is offline.",
+      );
+      // The catch-up could not ask which of the laptop's attempts are in the index either: the
+      // session waits for the next one, on this device only.
+      expect(rows(element).map((row) => row.getAttribute('data-session'))).toEqual([
+        DEMO,
+        SESSION_A,
+      ]);
+      const laptop = rows(element).find((row) => row.getAttribute('data-session') === SESSION_A);
+      expect(laptop === undefined ? undefined : place(laptop)).toBe('this device');
+      expect(backend.sessionDocument(SESSION_A)).toBeUndefined();
+      warn.mockRestore();
+    });
+
+    it('says that deleting a session in both keeps its index', async () => {
+      const element = await renderSignedIn();
+      const laptop = rows(element).find((row) => row.getAttribute('data-session') === SESSION_A);
+      expect(laptop === undefined ? undefined : place(laptop)).toBe('both');
+      if (laptop !== undefined) {
+        button(laptop, 'Delete…')?.click();
+      }
+      await fixture.whenStable();
+      expect(laptop?.textContent).toContain(
+        'Delete this session and its 1 attempt from this device? Its index in the cloud stays.',
+      );
+    });
+
+    it('marks a session whose writes wait to be sent, offline', async () => {
+      backend.online = false;
+      const element = await renderSignedIn();
+      const laptop = rows(element).find((row) => row.getAttribute('data-session') === SESSION_A);
+      const badge = laptop?.querySelector('[data-testid="session-place"]');
+      expect(badge?.textContent.trim()).toBe('both');
+      expect(badge?.hasAttribute('data-pending')).toBe(true);
+      expect(badge?.getAttribute('title')).toBe(
+        'On this device and in your cloud index; some of its changes wait to be sent.',
+      );
+
+      backend.goOnline();
+      await settle();
+      await fixture.whenStable();
+      expect(badge?.hasAttribute('data-pending')).toBe(false);
+      expect(badge?.getAttribute('title')).toBe('On this device and in your cloud index.');
+    });
+
+    it('updates the current session’s row as the timer changes it', async () => {
+      await store.saveAttempt(testAttempt(1, 10_000));
+      const element = await renderSignedIn();
+      const laptop = (): HTMLElement =>
+        rows(element).find((row) => row.getAttribute('data-session') === SESSION_A) ??
+        document.createElement('li');
+      expect(text(laptop(), 'session-attempts')).toBe('1 attempt');
+      expect(text(laptop(), 'session-clips')).toBeUndefined();
+
+      // A clip saved while the page is open (the recording of the last solve).
+      await TestBed.inject(SessionService).attachClip(
+        { session: SESSION_A, index: 1, scrambleShown: 0 },
+        attemptWithClips(1).video[1],
+      );
+      await fixture.whenStable();
+      expect(text(laptop(), 'session-clips')).toBe('1 clip, 4.1 MB');
+      expect(place(laptop())).toBe('both');
+    });
+  });
+
+  it('shows no badge, no device filter and no QA view signed out', async () => {
+    const element = await render();
+    expect(rows(element)).toHaveLength(2);
+    expect(element.querySelector('[data-testid="session-place"]')).toBeNull();
+    expect(element.querySelector('[data-testid="device-filter"]')).toBeNull();
+    expect(element.querySelector('[data-testid="qa-link"]')).toBeNull();
+    expect(element.querySelector('[data-testid="sessions-cloud"]')).toBeNull();
   });
 });

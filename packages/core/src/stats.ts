@@ -7,8 +7,11 @@ import { PHASE_NAMES } from './phases';
 /** The DNF in a list of times. */
 export const DNF = Number.POSITIVE_INFINITY;
 
-/** The attempts' times in the order given: `timeMs` of a solve, {@link DNF} for a DNF. */
-export function attemptTimes(attempts: readonly AttemptRecord[]): number[] {
+/**
+ * The attempts' times in the order given: `timeMs` of a solve, {@link DNF} for a DNF. Only their
+ * results are read, so the attempts of the session index (without their moves, T3.1) do too.
+ */
+export function attemptTimes(attempts: readonly Pick<AttemptRecord, 'result'>[]): number[] {
   return attempts.map(({ result }) =>
     result.status === 'solved' && result.timeMs !== null ? result.timeMs : DNF,
   );

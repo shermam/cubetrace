@@ -1,0 +1,415 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/cloud-attempt.schema.json",
+  "title": "sessions/{id}/attempts/{index}",
+  "description": "An attempt's document in the session index in Firestore, schema version 2 (docs/DATA-MODEL.md §10): its attempt.json (attempt.schema.json, version 2) without moves, which stay on the device that recorded it and in the uploaded attempt.json, with owner, device and upload. {index} is the attempt's index zero-padded to 4 digits, as its folder.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "session",
+    "index",
+    "scramble",
+    "scrambledFacelets",
+    "crossFace",
+    "events",
+    "clock",
+    "result",
+    "phases",
+    "video",
+    "owner",
+    "device",
+    "upload"
+  ],
+  "properties": {
+    "schema": {
+      "const": 2
+    },
+    "session": {
+      "description": "The id of the session: a lowercase UUID v4.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "index": {
+      "description": "The attempt's 1-based position in its session.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "scramble": {
+      "description": "Face turns separated by single spaces (docs/DATA-MODEL.md §2).",
+      "type": "string",
+      "pattern": "^[UDRLFB][2']?( [UDRLFB][2']?)*$"
+    },
+    "scrambledFacelets": {
+      "description": "The scramble applied to a solved cube: the state at scrambleDone.",
+      "$ref": "#/$defs/facelets"
+    },
+    "crossFace": {
+      "description": "The face whose cross completed first (docs/DATA-MODEL.md §4); null if none did.",
+      "enum": ["U", "R", "F", "D", "L", "B", null]
+    },
+    "events": {
+      "description": "The events of docs/DATA-MODEL.md §3; null when they did not happen.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scrambleShown",
+        "scrambleStart",
+        "scrambleDone",
+        "pickup",
+        "solveStart",
+        "solveEnd"
+      ],
+      "properties": {
+        "scrambleShown": {
+          "type": "number"
+        },
+        "scrambleStart": {
+          "type": ["number", "null"]
+        },
+        "scrambleDone": {
+          "type": ["number", "null"]
+        },
+        "pickup": {
+          "type": ["number", "null"]
+        },
+        "solveStart": {
+          "type": ["number", "null"]
+        },
+        "solveEnd": {
+          "type": ["number", "null"]
+        }
+      }
+    },
+    "clock": {
+      "description": "The cube clock fit of this attempt, host ≈ a·cube + b, by least squares over its moves that ended their Bluetooth packet, from its first move to solveEnd or the DNF (docs/DATA-MODEL.md §7, docs/DEVICES.md); null without two of them at different cube times.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["a", "b", "residualP95Ms", "samples"],
+      "properties": {
+        "a": {
+          "description": "Host ms per cube ms.",
+          "type": "number"
+        },
+        "b": {
+          "description": "Host ms at cube ms 0.",
+          "type": "number"
+        },
+        "residualP95Ms": {
+          "description": "95th percentile (nearest rank) of the absolute residuals of the samples (the last 2000 if there are more).",
+          "type": "number",
+          "minimum": 0
+        },
+        "samples": {
+          "description": "The samples in the fit.",
+          "type": "integer",
+          "minimum": 2
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timeMs",
+        "inspectionMs",
+        "movesQtm",
+        "tps",
+        "status",
+        "replayOk",
+        "scrambleCorrected",
+        "scrambleExtraMoves"
+      ],
+      "properties": {
+        "timeMs": {
+          "description": "solveEnd − solveStart; null on a DNF.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "inspectionMs": {
+          "description": "solveStart − (pickup ?? scrambleDone); null if the solve did not start.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "movesQtm": {
+          "description": "Quarter turns of the solve's moves (a half turn counts two).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "tps": {
+          "description": "movesQtm / (timeMs / 1000), rounded to two decimals; null without a time.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "status": {
+          "enum": ["solved", "dnf"]
+        },
+        "replayOk": {
+          "description": "The solve's moves take scrambledFacelets to solved in the simulator.",
+          "type": "boolean"
+        },
+        "scrambleCorrected": {
+          "description": "The cube left the scramble's path during the scramble.",
+          "type": "boolean"
+        },
+        "scrambleExtraMoves": {
+          "description": "Moves made during the scramble beyond the scramble's own, in quarter turns: one wrong quarter turn undone counts 2.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "phases": {
+      "description": "The CFOP phases completed, in order (docs/DATA-MODEL.md §4): all eight for a solve its moves replay.",
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/phase"
+      }
+    },
+    "video": {
+      "description": "The video clips of the attempt: one per camera and segment (docs/DATA-MODEL.md §7).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/clip"
+      }
+    },
+    "owner": {
+      "description": "The Firebase Authentication uid of the account that wrote the document, as its session's: the rules require it on both (firebase/firestore.rules).",
+      "type": "string",
+      "minLength": 1
+    },
+    "device": {
+      "description": "The device that recorded the attempt, by which the QA view groups the attempts: its session's host label and the labels of its session's cameras.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "cameras"],
+      "properties": {
+        "host": {
+          "description": "The session's host.label (Settings → This device).",
+          "type": "string"
+        },
+        "cameras": {
+          "description": "The labels of the session's cameras (session.json's cameras), in their order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cameraLabel"
+          }
+        }
+      }
+    },
+    "upload": {
+      "description": "The state of the attempt's upload (docs/PLAN.md T3.2, T3.3): the app writes it with the document, pending, with the files of the attempt's folder it has then and their sizes on the device that recorded it; from then on only the upload's functions write it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "files"],
+      "properties": {
+        "state": {
+          "description": "pending: nothing sent yet; uploading; done: every file confirmed (T3.2's confirmUpload); failed.",
+          "enum": ["pending", "uploading", "done", "failed"]
+        },
+        "files": {
+          "description": "The files of the attempt's folder (docs/DATA-MODEL.md §5), by name: attempt.json, and each clip's <camera>.<segment>.mp4 and <camera>.<segment>.frames.json; and session.json, the session's file, on the attempt it was uploaded with (T3.2).",
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^(attempt\\.json|session\\.json|[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.(mp4|frames\\.json))$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/uploadFile"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "facelets": {
+      "description": "A cube state: 54 stickers in Kociemba order (docs/DATA-MODEL.md §2).",
+      "type": "string",
+      "pattern": "^[URFDLB]{54}$"
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "startMs", "endMs", "moves", "recognitionMs", "executionMs"],
+      "properties": {
+        "name": {
+          "enum": ["cross", "f2l1", "f2l2", "f2l3", "f2l4", "eoll", "ocll", "pll"]
+        },
+        "slot": {
+          "description": "F2L phases only: the pair's slot, named by its middle-layer edge position.",
+          "enum": ["UR", "UF", "UL", "UB", "DR", "DF", "DL", "DB", "FR", "FL", "BL", "BR"]
+        },
+        "startMs": {
+          "type": "number"
+        },
+        "endMs": {
+          "type": "number"
+        },
+        "moves": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recognitionMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "executionMs": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "if": {
+        "properties": {
+          "name": {
+            "enum": ["f2l1", "f2l2", "f2l3", "f2l4"]
+          }
+        },
+        "required": ["name"]
+      },
+      "then": {
+        "required": ["slot"]
+      },
+      "else": {
+        "not": {
+          "required": ["slot"]
+        }
+      }
+    },
+    "cameraLabel": {
+      "description": "A camera's label, unique within its session: lowercase letters and digits in words joined by hyphens (docs/DATA-MODEL.md §5).",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "crop": {
+      "description": "The framing rectangle in whole pixels of the camera's frames, as recorded (docs/DATA-MODEL.md §6); null for the whole frame.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["x", "y", "w", "h"],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "w": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "h": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "clip": {
+      "description": "One video clip of the attempt, in the attempt's folder (docs/DATA-MODEL.md §5 and §7).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "camera",
+        "segment",
+        "file",
+        "bytes",
+        "codec",
+        "audio",
+        "width",
+        "height",
+        "crop",
+        "fpsNominal",
+        "frames",
+        "firstFrameHostMs",
+        "framesFile",
+        "syncResidualMs"
+      ],
+      "properties": {
+        "camera": {
+          "$ref": "#/$defs/cameraLabel"
+        },
+        "segment": {
+          "enum": ["scramble", "solve"]
+        },
+        "file": {
+          "description": "The MP4 file: <camera>.<segment>.mp4.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.mp4$"
+        },
+        "bytes": {
+          "description": "The MP4 file's size.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "codec": {
+          "description": "The video codec string, such as avc1.640028.",
+          "type": "string",
+          "minLength": 1
+        },
+        "audio": {
+          "description": "The audio codec string, such as mp4a.40.2; null without an audio track.",
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "width": {
+          "description": "Of the encoded frames.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "description": "Of the encoded frames.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "crop": {
+          "description": "The framing rectangle when the clip was recorded; null for the whole frame.",
+          "$ref": "#/$defs/crop"
+        },
+        "fpsNominal": {
+          "description": "The frame rate the camera's track reported.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "frames": {
+          "description": "The number of frames in the clip.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "firstFrameHostMs": {
+          "description": "The host time of the clip's first frame: t0HostMs of its frames file.",
+          "type": "number"
+        },
+        "framesFile": {
+          "description": "The clip's frame times (frames.schema.json): <camera>.<segment>.frames.json.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.frames\\.json$"
+        },
+        "syncResidualMs": {
+          "description": "How far the camera lagged the cube when the clip was recorded: offsetMs of the camera's clock in session.json; null before a sync check.",
+          "type": ["number", "null"]
+        },
+        "truncatedStart": {
+          "description": "The clip begins later than asked, at the oldest keyframe in memory: the start asked for was older than the capture's buffer (docs/DATA-MODEL.md §7). Absent from the files written before it existed, which read as false.",
+          "type": "boolean"
+        }
+      }
+    },
+    "uploadFile": {
+      "description": "One file of the attempt's upload.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "doneMs"],
+      "properties": {
+        "bytes": {
+          "description": "The file's size, as the device that recorded it has it.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "doneMs": {
+          "description": "When the file's upload was confirmed, in ms (T3.3); null until then.",
+          "type": ["number", "null"]
+        }
+      }
+    }
+  }
+}

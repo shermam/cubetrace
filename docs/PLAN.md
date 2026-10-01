@@ -1322,6 +1322,38 @@ every `saveAttempt` writes `sessions/{id}/attempts/{index}` (the record without 
 (this device, cloud, both) and a device filter; a QA view lists attempts per day per device with
 bytes uploaded and pending.
 
+**Outcome (2026-10-01, PR #45).** The documents are §10 of `docs/DATA-MODEL.md`: a session's is its
+session.json with `owner`; an attempt's its attempt.json without `moves`, with `owner`, `device`
+(its session's host label and camera labels) and `upload` (written once, when the document is
+created: `pending`, the files of its folder the device has then, by name with their sizes, `doneMs`
+null; then the functions' alone, T3.2, which the rules hold the app to), both of the records' schema
+version, 2, with JSON Schemas (`cloud-session.schema.json`, `cloud-attempt.schema.json`) and readers
+(`parseCloudSession`, `parseCloudAttempt`) in `packages/core`; `{index}` is the folder's zero-padded
+index. `SessionIndexService` wraps `SessionService`'s store: after each local save, with an account
+signed in, the document goes through Firestore's persistent cache (`set` with `merge`), never
+awaited; Delete last deletes the attempt's document; deleting a session keeps its documents (the
+device's copy is staging, the index the dataset's). A save without an account (signed out, or before
+a remembered one has loaded) takes the session off the device's list of indexed sessions, kept per
+account in `localStorage` (`cubetrace.sessionIndex`), and the catch-up, at a sign-in and at each
+start signed in, writes the sessions not on it, the oldest first, each with its attempts in one
+batch, at most 300 documents a run, after asking the index which of their attempts are there (those
+are written without `upload`, the others created with it). A refusal is said once per session and
+page load (the console, the Sessions page, a `cloud: …` line in the session's notes), and the
+session goes back to the catch-up. `AccountBackend` gained `saveSessionIndex(session, attempts?)`,
+`saveAttemptIndex`, `deleteAttemptIndex`, `listSessions(uid, limit)`, `getSession(id)` and
+`listAttempts(uid, sessionId)`: the attempts' query takes the uid too, since the rules want
+`where('owner', '==', uid)` on every query; the listings give each document's `pending` and the
+query's `fromCache`. The sessions query needs a composite index (`owner` ascending, `createdMs`
+descending, `firebase/firestore.indexes.json`), which the emulator does not and which the workflow
+does not deploy yet (`--only firestore:rules,functions`): `firebase deploy --only firestore:indexes`
+with the rules. The QA view's "last sync" is this device's: when the server last confirmed one of
+its index writes (kept per account), with what still waits to be sent; another device's is not
+stored. The initial bundle gained the `/qa` route (104 bytes) and nothing else; Firebase's chunk 18
+kB raw (4 kB transferred). An attempt's document is created when the attempt ends, before its clips
+are cut, so its `upload.files` names `attempt.json` alone, and the clips' files come with their
+signatures (T3.2); the QA view counts the clips that `upload.files` does not name yet as pending, at
+their `video[].bytes`.
+
 ### T3.2 — `functions`: signed uploads
 
 `functions/` (Node 22, TypeScript, `firebase-functions` v7 `onCall`, auth required):

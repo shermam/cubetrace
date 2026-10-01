@@ -1,5 +1,5 @@
 import { InjectionToken, inject, isDevMode } from '@angular/core';
-import type { UserRecord } from '@cubetrace/core';
+import type { CloudAttempt, CloudAttemptFields, CloudSession, UserRecord } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 
@@ -20,11 +20,31 @@ export interface BackendUser extends AccountUser {
   readonly createdMs: number | null;
 }
 
+/** A document of the session index as Firestore gives it back (docs/DATA-MODEL.md §10, T3.1). */
+export interface CloudDocument {
+  /** The document's id: a session's id, or an attempt's index zero-padded to 4 digits (`0001`). */
+  readonly id: string;
+  /** Its fields as Firestore holds them, unchecked: core's parseCloudSession and parseCloudAttempt read them. */
+  readonly data: unknown;
+  /**
+   * It holds writes of this device that the server has not confirmed yet (Firestore's
+   * `hasPendingWrites`): offline, they wait in the cache.
+   */
+  readonly pending: boolean;
+}
+
+/** The documents a query of the session index found. */
+export interface CloudListing {
+  readonly documents: readonly CloudDocument[];
+  /** They come from this device's cache, the server being out of reach (Firestore's `fromCache`). */
+  readonly fromCache: boolean;
+}
+
 /**
  * The few calls the app makes into Firebase: Authentication with the Google provider, and Firestore
- * for users/{uid} (docs/ARCHITECTURE.md, "Account"). `firebase-sdk.ts` implements it with the SDK, in
- * a lazy chunk of its own; the unit tests and the end-to-end suite give fakes, so that neither loads
- * Firebase.
+ * for users/{uid} and the session index (docs/ARCHITECTURE.md, "Account"). `firebase-sdk.ts`
+ * implements it with the SDK, in a lazy chunk of its own; the unit tests and the end-to-end suite give
+ * fakes, so that neither loads Firebase.
  */
 export interface AccountBackend {
   /**
@@ -45,6 +65,32 @@ export interface AccountBackend {
    * has it.
    */
   saveUser(uid: string, record: UserRecord): Promise<void>;
+  /**
+   * Merges `session` into sessions/{id}, and in the same batch each of `attempts` into its
+   * sessions/{id}/attempts/{index} (docs/PLAN.md T3.1): an attempt with its `upload` creates its
+   * document, one without (its fields) changes the others and leaves `upload`, which is the upload
+   * functions' once the document exists, as it is. As `saveUser`, Firestore applies the writes to its
+   * cache at once and sends them when it can; the promise settles when the server has them, and
+   * rejects when it refuses them (the rules, a document too large).
+   */
+  saveSessionIndex(
+    session: CloudSession,
+    attempts?: readonly (CloudAttempt | CloudAttemptFields)[],
+  ): Promise<void>;
+  /** Merges `attempt` into sessions/{id}/attempts/{index}, as `saveSessionIndex` merges it. */
+  saveAttemptIndex(attempt: CloudAttempt | CloudAttemptFields): Promise<void>;
+  /** Deletes sessions/{id}/attempts/{index} (the timer's Delete last); settles as `saveSessionIndex`. */
+  deleteAttemptIndex(sessionId: string, index: number): Promise<void>;
+  /**
+   * The newest `limit` sessions of the account `uid`, newest first: `where('owner', '==', uid)` (the
+   * rules refuse a query that does not ask for the account's own documents), by `createdMs`. From the
+   * server, or from the cache when the server is out of reach.
+   */
+  listSessions(uid: string, limit: number): Promise<CloudListing>;
+  /** sessions/{id}; null when it is not there. */
+  getSession(sessionId: string): Promise<CloudDocument | null>;
+  /** The attempts of session `sessionId` of the account `uid` (`where('owner', '==', uid)`), by index. */
+  listAttempts(uid: string, sessionId: string): Promise<CloudListing>;
 }
 
 /** Loads the account's backend: the Firebase SDK, from its lazy chunk. */

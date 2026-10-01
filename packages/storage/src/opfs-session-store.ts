@@ -94,8 +94,11 @@ function attemptPath(sessionId: string, folder: string): string {
   return `${SESSIONS_FOLDER}/${sessionId}/${ATTEMPTS_FOLDER}/${folder}/${ATTEMPT_FILE}`;
 }
 
-/** A record as the store writes it: indented JSON with a final newline, readable in a file viewer. */
-function toJson(record: SessionRecord | AttemptRecord): string {
+/**
+ * A record as the store writes it: indented JSON with a final newline, readable in a file viewer. The
+ * session index (T3.1) gives an attempt.json's size from it, as the file will have it.
+ */
+export function recordJson(record: SessionRecord | AttemptRecord): string {
   return `${JSON.stringify(record, null, 2)}\n`;
 }
 
@@ -145,7 +148,7 @@ export class OpfsSessionStore implements SessionStore, ProblemReporter {
       if (folder === null) {
         throw new Error(`"${s.id}" cannot name a session folder.`);
       }
-      const json = toJson(s);
+      const json = recordJson(s);
       return async () => {
         const root = await this.#root;
         const sessions = await root.getDirectoryHandle(SESSIONS_FOLDER, { create: true });
@@ -166,7 +169,7 @@ export class OpfsSessionStore implements SessionStore, ProblemReporter {
 
   saveSession(s: SessionRecord): Promise<void> {
     return this.#enqueue(() => {
-      const json = toJson(s);
+      const json = recordJson(s);
       return async () => {
         const { dir } = await this.#session(s.id);
         await writeFile(dir, SESSION_FILE, json);
@@ -177,7 +180,7 @@ export class OpfsSessionStore implements SessionStore, ProblemReporter {
   saveAttempt(a: AttemptRecord): Promise<void> {
     return this.#enqueue(() => {
       const folder = attemptFolder(a.index);
-      const json = toJson(a);
+      const json = recordJson(a);
       return async () => {
         const { dir } = await this.#session(a.session);
         const attempts = await dir.getDirectoryHandle(ATTEMPTS_FOLDER, { create: true });

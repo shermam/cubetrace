@@ -14,6 +14,15 @@ import {
 } from '@cubetrace/core';
 import { BehaviorSubject } from 'rxjs';
 
+import { ACCOUNT_LOADER } from '../auth/account-backend';
+import { ACCOUNT_STORAGE_KEY } from '../auth/auth-service';
+import { ADA, FakeAccountBackend } from '../auth/fake-account';
+import {
+  attemptDocument,
+  attemptWithClips,
+  realSession,
+  sessionDocument,
+} from '../cloud/cloud-testing';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import {
   FakeLocalStorage,
@@ -84,11 +93,21 @@ describe('SessionPage', () => {
     ];
   }
 
-  /** The page of session `id`, over `store`; `current` is the session the timer resumes. */
-  async function render(id: string, current: string | null = null): Promise<HTMLElement> {
+  /**
+   * The page of session `id`, over `store`; `current` is the session the timer resumes. With
+   * `backend`, an account is signed in (remembered), whose index the backend has.
+   */
+  async function render(
+    id: string,
+    current: string | null = null,
+    backend: FakeAccountBackend | null = null,
+  ): Promise<HTMLElement> {
     const localStorage = new FakeLocalStorage();
     if (current !== null) {
       localStorage.setItem(CURRENT_SESSION_KEY, current);
+    }
+    if (backend !== null) {
+      localStorage.setItem(ACCOUNT_STORAGE_KEY, 'signed-in');
     }
     TestBed.configureTestingModule({
       providers: [
@@ -102,9 +121,11 @@ describe('SessionPage', () => {
           },
         },
         { provide: SESSION_STORAGE, useValue: { store, kind: 'opfs' } },
+        ...(backend === null ? [] : [{ provide: ACCOUNT_LOADER, useValue: backend.loader }]),
       ],
     });
     fixture = TestBed.createComponent(SessionPage);
+    await update();
     await update();
     return fixture.nativeElement as HTMLElement;
   }
@@ -267,6 +288,78 @@ describe('SessionPage', () => {
     const element = await render('4b0f3c2a-0000-4000-8000-000000000000');
     expect(text(element, 'session-error')).toMatch(/^This session could not be read: /);
     expect(element.querySelector('[data-testid="session-date"]')).toBeNull();
+  });
+
+  describe('signed in, a session of the cloud alone (T3.1)', () => {
+    const PHONE = '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e';
+    let backend: FakeAccountBackend;
+
+    beforeEach(async () => {
+      backend = new FakeAccountBackend();
+      backend.user = ADA;
+      const phone = {
+        ...realSession(PHONE, 1_790_000_200_000, 'ThinkPhone'),
+        summary: { attempts: 2, solved: 1, dnf: 1 },
+      };
+      await backend.saveSessionIndex(sessionDocument(phone, ADA.uid), [
+        attemptDocument(attemptWithClips(1, 12_000, PHONE), phone, ADA.uid),
+        attemptDocument(attemptWithClips(2, null, PHONE), phone, ADA.uid),
+      ]);
+    });
+
+    it('shows it read-only: its facts and attempts from the index, no clip to play, nothing to export or delete', async () => {
+      const element = await render(PHONE, SESSION_B, backend);
+
+      expect(text(element, 'session-place')).toBe('cloud');
+      expect(text(element, 'session-cloud-note')).toBe(
+        'Recorded on ThinkPhone: this session is in your cloud index, not on this device. Its ' +
+          'clips and its moves stay on the device that recorded it, so no clip plays here and ' +
+          'nothing can be exported.',
+      );
+      expect(text(element, 'session-device')).toBe('ThinkPhone');
+      expect(text(element, 'session-cube')).toBe('GAN 12 ui FreePlay');
+      expect(text(element, 'session-cameras')).toBe('laptop (FaceTime HD Camera)');
+      expect(text(element, 'session-clip-bytes')).toBe('4 clips, 10.6 MB');
+      expect(['count', 'dnf', 'mean', 'best'].map((stat) => text(element, `stat-${stat}`))).toEqual(
+        ['2', '1', 'DNF', '12.00'],
+      );
+      expect(rows(element)).toEqual(['2', '1']);
+      expect(button(element, 'Export')).toBeUndefined();
+      expect(button(element, 'Delete…')).toBeUndefined();
+      // The clip badges say where the clips are, and open nothing.
+      const badge = element.querySelector<HTMLElement>('[data-testid="clip-badge"]');
+      expect(badge?.tagName).toBe('SPAN');
+      expect(badge?.getAttribute('title')).toBe('The clips are on the device that recorded them.');
+      badge?.click();
+      await update();
+      expect(TestBed.inject(ClipViewing).index()).toBeNull();
+      expect(reads).toEqual([]);
+      expect(backend.reads).toEqual([`session ${PHONE}`, `attempts ${PHONE} ${ADA.uid}`]);
+      expect(text(element, 'session-error')).toBeUndefined();
+    });
+
+    it('shows a session of this device from this device, signed in too', async () => {
+      const element = await render(SESSION_A, SESSION_B, backend);
+      expect(text(element, 'session-place')).toBeUndefined();
+      expect(text(element, 'session-cloud-note')).toBeUndefined();
+      expect(button(element, 'Export')).toBeDefined();
+      expect(element.querySelector('[data-testid="clip-badge"]')?.tagName).toBe('BUTTON');
+      expect(backend.reads.filter((read) => read.startsWith('session '))).toEqual([]);
+    });
+
+    it('says why when the session is neither here nor in the cloud', async () => {
+      const element = await render('4b0f3c2a-0000-4000-8000-000000000000', null, backend);
+      expect(text(element, 'session-error')).toMatch(/^This session could not be read: /);
+
+      backend.readError = Object.assign(new Error('The client is offline.'), {
+        code: 'unavailable',
+      });
+      TestBed.resetTestingModule();
+      const offline = await render(PHONE, null, backend);
+      expect(text(offline, 'session-error')).toMatch(
+        /^This session could not be read: .*\. Nor from the cloud: The client is offline\.$/,
+      );
+    });
   });
 
   it('writes the cameras and the clips of a session', () => {

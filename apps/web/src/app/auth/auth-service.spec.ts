@@ -119,6 +119,35 @@ describe('AuthService', () => {
     expect(auth.recordError()).toBeNull();
   });
 
+  it('gives the session index the account with its backend once signed in, the same while it lasts, and nothing signed out', async () => {
+    const auth = load();
+    expect(auth.cloud()).toBeNull();
+    await auth.signIn();
+    await settle();
+    const account = auth.cloud();
+    expect(account).toEqual({ uid: 'ada-uid', backend });
+
+    // A new token, or the same account reported again: the same account for the index.
+    await backend.signInWithPopup();
+    await settle();
+    expect(auth.cloud()).toBe(account);
+
+    await auth.signOut();
+    expect(auth.cloud()).toBeNull();
+
+    // A remembered account is not there until its backend has said so.
+    await auth.signIn();
+    await settle();
+    backend.reportAtOnce = false;
+    const next = load();
+    await settle();
+    expect(next.status()).toBe('loading');
+    expect(next.cloud()).toBeNull();
+    backend.release();
+    await settle();
+    expect(next.cloud()?.uid).toBe('ada-uid');
+  });
+
   it('starts signed in when a sign-in is remembered: Firebase loads at once, and the device is seen again', async () => {
     await load().signIn();
     await settle();
