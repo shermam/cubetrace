@@ -43,11 +43,12 @@ to create the `v0.2.0` release from GitHub after it.
    are in the page footer.
 2. Go through the sections below in this order: **T2.1** (camera panel), **T2.4** (recording),
    **T2.10** (video quality), **T2.5** (sync check), **T2.7** (layout), **T2.13** (the phone's
-   scramble over the picture), **T2.9** (a long scramble, a reconnection, the sound), then **T2.3**
-   (clips, in the capture lab). Since T2.7, the "Camera section" of the T2.1 and T2.4 items is
-   Camera settings, a disclosure below the Cube section, and the framing rectangle is moved after
-   Framing → Edit. Tick an item when it passes on every row. When it fails or does something
-   unexpected on a row, write the row (such as "ThinkPhone, rear") and what happened next to it.
+   scramble over the picture), **T2.9** (a long scramble, a reconnection, the sound), **T2.12** (the
+   microphone), then **T2.3** (clips, in the capture lab). Since T2.7, the "Camera section" of the
+   T2.1 and T2.4 items is Camera settings, a disclosure below the Cube section, and the framing
+   rectangle is moved after Framing → Edit. Tick an item when it passes on every row. When it fails
+   or does something unexpected on a row, write the row (such as "ThinkPhone, rear") and what
+   happened next to it.
 3. Every failure becomes a GitHub issue with the row's device, Chrome version, camera and cube, the
    steps, what happened and what was expected (a screenshot, or the console line, when it shows it).
    The known limitations below are expected: report one only if it behaves otherwise than said.
@@ -71,7 +72,8 @@ to create the `v0.2.0` release from GitHub after it.
    20 minutes of solves with the camera on, the phone on its stand, how warm it got, how much battery
    it used, the frames dropped (Camera settings, Recording) and how much the storage meter went up;
    the sizes of one attempt's clips per camera (scramble and solve, in MB) and the codecs Chrome
-   chose; and the capture lab's `clock` values of its "VideoFrame.timestamp" section.
+   chose; the capture lab's `clock` values of its "VideoFrame.timestamp" section; and each device's
+   `cameras[].microphone` from its export (the "Audio" table).
 
 | Date | Device, OS | Chrome | Cube: model, hardware, firmware | Camera | App (footer) | Result |
 |---|---|---|---|---|---|---|
@@ -104,8 +106,8 @@ to create the `v0.2.0` release from GitHub after it.
   nothing (the export is the JSON records only): delete sessions, after downloading the clips to
   keep.
 - Turning the phone while it records restarts the recording at the new frame size: the attempt under
-  way can lose its clips. So does a change of Video quality or Record audio: change them between
-  attempts.
+  way can lose its clips. So does a change of Video quality, Record audio or Microphone: change them
+  between attempts.
 
 ## T1.5 — cube connection
 
@@ -521,3 +523,18 @@ ui FreePlay. Next to the item, write Chrome's version and the numbers asked for.
   mp4a.40.2" expected). After a solve, its "Last clip" line gives the solve clip's frames and size: a
   20 s solve clip (600 frames) is about 10 MB, half of the first recordings'; the row's badge ("2
   clips, … MB") about 20 MB for the attempt. Write down the frames and sizes of one attempt.
+
+## T2.12 — the microphone
+
+On https://shermam.github.io/cubetrace/, Timer page, with the camera on, on the ThinkPhone (the front
+camera, the phone on its stand, where the cube's sounds were missing) and on the MacBook. Settings →
+Camera → Microphone says Raw (the default). Next to the item, write the device, Chrome's version and
+what Camera settings said.
+
+- [ ] A clip's sound has the cube's clicks; the panel says mic raw: Camera settings' Recording part
+  ends its Codecs line with "mic raw" ("mp4a.40.2, mic raw" or "opus, mic raw"), with no notice
+  "The microphone is not raw: …" (if there is one, copy it: it names the processing the browser kept
+  on). After a solve, play its clip in the viewer with the volume up (the viewer starts muted: unmute
+  it): the turns are heard, a click each, a rattle during the solve, also with a TV or voices in the
+  room. In the session's export, `cameras[0].microphone` says `"processing": "raw"` with what the
+  browser applied: write it in `docs/DEVICES.md`, "Audio", one row per device.

@@ -17,9 +17,10 @@ builds after cubetrace 0.1.0) changed, from version 1 (written by 0.1.0):
   coarse summary: the fit that places a move on the host clock is its attempt's.
 - `<camera>.<segment>.frames.json`, the frame times of a clip, is new (§9).
 
-Within version 2, a clip in `attempt.json` gained `truncatedStart` (§7, `docs/PLAN.md` T2.9): an
-optional field, so that the version 2 files written before it stay valid (the readers take a missing
-one as false), and no new version.
+Within version 2, two optional fields were added, so that the version 2 files written before them
+stay valid, and no new version: a clip in `attempt.json` gained `truncatedStart` (§7, `docs/PLAN.md`
+T2.9; the readers take a missing one as false), and a camera in `session.json` gained `microphone`
+(§6, T2.12; the readers take a missing one as null).
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -173,7 +174,10 @@ mid-write; readers ignore such leftover `*.tmp` files and remove them.
     {"label": "laptop", "local": true, "facing": "user", "deviceLabel": "FaceTime HD Camera",
      "settings": {"width": 1920, "height": 1080, "frameRate": 30, "…": "…"},
      "capabilities": {"…": "…"}, "constraints": {"width": {"ideal": 1920}, "…": "…"},
-     "crop": {"x": 480, "y": 120, "w": 960, "h": 840}, "mode": "full"}
+     "crop": {"x": 480, "y": 120, "w": 960, "h": 840}, "mode": "full",
+     "microphone": {"label": "MacBook Pro Microphone (Built-in)", "processing": "raw",
+                    "echoCancellation": false, "noiseSuppression": false, "autoGainControl": false,
+                    "voiceIsolation": null, "sampleRate": 48000, "channelCount": 1}}
   ],
   "clock": {
     "cube": {"a": 1.0031, "b": 1730639990000.0, "residualP95Ms": 618.7, "samples": 1425},  // coarse
@@ -215,7 +219,9 @@ frames' and were placed by their arrival times, `clip audio rebased: <segment> o
 audio timestamps rebased by <ms> ms`, and one when the audio encoder gave no complete decoder config
 and the app made it from the encoder's settings, `clip audio described: <segment> of attempt
 <index>: …`; and each notice of a recording, once, `notice: <text>` (the microphone refused, silent
-or lost, no audio encoder). `summary` is counted from the attempts: each one is solved or a DNF.
+or lost, no audio encoder; since T2.12, the browser's voice processing kept on although the
+microphone was asked for raw, `notice: The microphone is not raw: …`, or the raw request refused).
+`summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in
@@ -229,6 +235,23 @@ on, in whole pixels of the camera's frames as recorded (after rotation: a phone 
 1080×1920 frames), `x` and `y` its top-left corner and `w` and `h` its size, or null for the whole
 frame. `mode` is `full` when whole frames are recorded (always in phase 2, where the rectangle is
 metadata for training) and `crop` when only the rectangle is (later).
+
+`microphone` is the microphone of the camera's sound when it last recorded (`docs/PLAN.md` T2.12),
+null when it recorded without one (Record audio off, the microphone refused or absent). `label` is
+the browser's name for it (`MediaStreamTrack.label`). `processing` is how the app asked for it: `raw`,
+the default, with the browser's voice processing asked off (echo cancellation, noise suppression,
+automatic gain control and voice isolation false, one channel at 48 kHz as ideals), since that
+processing takes a cube's click for noise; or `voice`, the browser's defaults (Settings' "Voice",
+for speech). The rest is what the browser says it applied, from the microphone track's
+`getSettings()`, each null when the browser does not report it: `echoCancellation`,
+`noiseSuppression`, `autoGainControl` and `voiceIsolation` are true when that processing is on
+(Chrome's echo cancellation modes, `all` and `remote-only`, count as on), `sampleRate` is in hertz
+and `channelCount` the number of channels. The browser may keep some processing on although raw was
+asked for (the session's `notes` then say so, above), and gives the device's own format, ideals
+notwithstanding: Chromium's fake microphone, raw, gives 44.1 kHz in two channels (48 kHz in one with
+its voice processing). The device's id is not kept. The field is absent from the files written
+before it existed, which read as null: their microphone, when they had one, was opened with the
+browser's defaults (`getUserMedia({audio: true})`), voice processing on.
 
 `clock.cameras` holds each camera's clock sync, by label (from the clapperboard, `docs/PLAN.md`
 T2.5, T2.8 and T2.11: one face flicked and flicked back, five times over, so up to ten single turns,

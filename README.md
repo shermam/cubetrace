@@ -79,8 +79,8 @@ scramble stays there alone. Settings → Timer → "Scramble over the picture (p
 the picture under the time and pins nothing. Camera settings also show what the camera claims next
 to what it delivers (a phone may claim 60 fps and deliver 30), and the manual controls it has:
 exposure and ISO, focus, white balance, zoom and torch, with Reset to auto. Settings → Camera has
-the resolution (1920×1080 or 1280×720), the frame rate asked for, the video quality (below) and the
-sharpness meter's threshold.
+the resolution (1920×1080 or 1280×720), the frame rate asked for, the video quality and the
+microphone (below) and the sharpness meter's threshold.
 
 **The framing rectangle** is the part of the picture the model will learn from, drawn on the
 camera's picture. Framing → Edit, in Camera settings, shows a larger picture on which it is dragged
@@ -115,6 +115,15 @@ before scrambling. The sound is recorded when Chrome gives the microphone: when 
 settings say where it is (no sound from the microphone yet, stopped, and why), and a clip without
 sound says why in a notice and in the session's `notes`.
 
+**The microphone is recorded raw**, so that the sound has every turn's click: Chrome's voice
+processing (echo cancellation, noise suppression, automatic gain control), which keeps speech and
+takes a cube's clicks for noise, is asked off (with it, a phone's clips had a TV's voices and none of
+the cube's sounds). Microphone, next to Record audio in Camera settings and in Settings → Camera, has
+Raw, the default, and Voice, the browser's defaults, for someone who wants speech. Camera settings
+say which after the codecs ("mic raw", "mic voice"), and "mic: the browser kept processing on", with
+a notice naming it, when the browser keeps some of it on anyway; the session keeps what the browser
+applied (`microphone` in its camera's entry, `docs/DATA-MODEL.md` §6).
+
 **The sync check** measures how far the camera's frames lag the cube. When the camera records in a
 session that has no check of it yet, with a cube connected, the check is due by itself before the
 next scramble's first turn: a panel under the camera's picture asks first for a framing rectangle
@@ -141,9 +150,9 @@ takes 0.44 times as much, and 60 fps 1.5 times as much; each choice says its bit
 resolution and frame rate chosen. Standard is plenty for the hands and the cube: the first recordings
 on a MacBook, at the 8 Mbps then asked for, took 35–42 MB per attempt, which would fill the browser's
 10 GB in two days of the owner's solves (`docs/DEVICES.md`). Camera settings give the bitrate in use
-next to the codecs ("avc1.640028 at 4 Mbps, mp4a.40.2") and, under the storage meter, what an attempt
-takes at it. A change starts the recording again, as one of Record audio does: make it between
-attempts.
+next to the codecs ("avc1.640028 at 4 Mbps, mp4a.40.2, mic raw") and, under the storage meter, what
+an attempt takes at it. A change starts the recording again, as one of Record audio or Microphone
+does: make it between attempts.
 
 **Storage.** Camera settings and the Sessions page have a storage meter: how much of the browser's
 quota the site uses (about 10 GB on the owner's laptop and phone, `docs/DEVICES.md`). From 80% it

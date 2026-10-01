@@ -119,7 +119,44 @@ Two consequences:
   is said: the Recording part's Codecs line gives the audio's state, a notice comes 3 s after the
   first frame when the microphone sends nothing, and a clip without sound says why in the session's
   notes; the second and the third are fixed (a decoder config made from the encoder's settings; the
-  audio placed by the arrival times). Round 2 tells which it was on the MacBook.
+  audio placed by the arrival times). Round 2 told which it was on the MacBook: the third (below,
+  "Audio").
+
+## Audio
+
+What the clips' sound showed in round 2, and what each device's microphone says it applies
+(`docs/PLAN.md` T2.9 and T2.12).
+
+- **Chrome's voice processing took the cube's clicks for noise on the ThinkPhone** (Android 16,
+  Chrome 155, app 0.2.0): its clips have sound, and a TV's voices came through clearly, but the
+  cube's own sounds were missing. The recording opened the microphone with
+  `getUserMedia({audio: true})`, so Chrome applied its voice processing (echo cancellation, noise
+  suppression, automatic gain control; on Android the platform's voice pipeline too), which keeps
+  speech and suppresses short clicks as noise. For the dataset the clicks are signal: each turn
+  clicks, so the sound can time the moves. Since T2.12 the microphone is asked for raw, every
+  processing off (Settings → Camera → Microphone, Raw by default; Voice is the browser's defaults),
+  and each session's camera keeps what the browser applied (`cameras[].microphone`,
+  `docs/DATA-MODEL.md` §6).
+- **The MacBook's microphone counts its own time** (the export of 2026-10-01, issue #40: MacBook Pro
+  2021, FaceTime HD camera, GAN 12 ui FreePlay, app 0.2.0, Chrome 153): with T2.9 every clip has its
+  AAC track (`mp4a.40.2`, six clips), and the session's notes name the cause of the clips without
+  sound before it (issue #33's audio half): `clip audio rebased: scramble of attempt 1: audio
+  timestamps rebased by 56536287 ms`. On macOS Chrome 153 the microphone's `AudioData.timestamp`
+  counts on a clock of its own, 56,536 s (15.7 hours) off the frames' `VideoFrame.timestamp`, so no
+  audio chunk overlapped a clip's frames and the muxer wrote clips without sound; since T2.9 the
+  buffer, the cut and the muxer place such audio by its arrival times. Chrome's fake microphone on
+  Linux counts on the frames' clock ("VideoFrame.timestamp", below), which is why CI never saw it.
+
+What each device's microphone reports at the default, Raw: the export's `cameras[].microphone`
+(Camera settings' Recording part says "mic raw" after the codecs, or "mic: the browser kept
+processing on" with a notice naming what it kept), to fill in rounds 2 and 3. Chromium's fake
+microphone is printed by `apps/web/e2e/microphone.spec.ts` at every run.
+
+| Device, Chrome | Microphone (`label`) | Echo cancellation / noise suppression / gain control / voice isolation | Sample rate, channels | The cube's clicks in a clip |
+|---|---|---|---|---|
+| Chromium 141's fake microphone (Linux, CI), 2026-10-01 | Fake Default Audio Input | off / off / off / off (with Voice: on / on / on / off) | 44,100 Hz, 2 (with Voice: 48,000 Hz, 1) | — (a tone) |
+| MacBook Pro 2021, Chrome: | | | | |
+| ThinkPhone, Chrome: | | | | |
 
 ## VideoFrame.timestamp
 
@@ -148,7 +185,8 @@ picture on another machine: a first `timestamp` of 192,556,290 µs on a runner u
   and the frames' intervals (`dtMs`) come from the timestamps, where a dropped frame shows as a
   double interval.
 - **`AudioData.timestamp` is on the same clock**: the audio's arrival offset was 0.6 ms from the
-  video's, so a cut takes the audio chunks that overlap its frames by their timestamps.
+  video's, so a cut takes the audio chunks that overlap its frames by their timestamps. Not so on the
+  MacBook, whose microphone counts on a clock of its own ("Audio", above).
 - The fake camera's frames have no `duration` (null); the worker uses the frame interval it
   measures from the timestamps. The fake camera runs at 20 fps without `fps=30`.
 

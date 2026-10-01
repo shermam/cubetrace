@@ -38,6 +38,14 @@ Deployed at https://shermam.github.io/cubetrace/.
   bitrate in use, and a line under the storage meter what an attempt takes. The first recordings on a
   MacBook took 35–42 MB per attempt at the 8 Mbps then asked for: two days of the owner's solves would
   have filled the browser's storage.
+- Microphone, next to Record audio in Camera settings and in Settings → Camera (T2.12): Raw, the
+  default, records the microphone with the browser's voice processing (echo cancellation, noise
+  suppression, automatic gain control) asked off, which on the owner's ThinkPhone had kept a TV's
+  voices and taken the cube's clicks for noise; Voice keeps the browser's defaults, for speech. The
+  Recording part says "mic raw" or "mic voice" after the codecs, and "mic: the browser kept
+  processing on", with a notice noted once in the session, when the browser keeps some on anyway; the
+  session keeps what the browser applied, from the microphone's `getSettings()` (`microphone` in a
+  camera's entry of `session.json`, optional: older files read as null).
 - Clip badges on the solve lists, which open the clip viewer (T2.4): the clip plays next to the
   attempt's moves by time, the one on screen highlighted; Download saves both clips, their frame
   times and `attempt.json`.
@@ -116,7 +124,8 @@ Deployed at https://shermam.github.io/cubetrace/.
 - Clips without an audio track (issue #33, T2.9): when the audio encoder's first chunk has no decoder
   config, the clip gets one made from the encoder's settings (for AAC with its AudioSpecificConfig);
   when the sound's timestamps count on another clock than the frames', the arrival times place it,
-  and the clip's notes say by how much; the round on the owner's MacBook tells which cause it was.
+  and the clip's notes say by how much. On the owner's MacBook it was the latter (issue #40): its
+  microphone's timestamps count on a clock of their own, 15.7 hours off the frames'.
 - The sync check failed checks in which the camera saw every turn (issue #38, T2.11): it took each
   turn's time in the picture at the first frame that changed around it, which caught the hand getting
   ready a varying time before the turn, so that the owner's two checks on the MacBook's FaceTime

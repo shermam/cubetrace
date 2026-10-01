@@ -64,7 +64,8 @@ cut ─▶ MessageChannel ─▶ clip worker: mediabunny MP4 + frames.json ─�
 `packages/capture` is plain TypeScript around two module workers. On the window, the camera is
 opened with its constraints and manual controls (snapshots go into `session.json`), and its preview
 measures the frame rate and the sharpness of the framing rectangle, at most twice a second and never
-during a solve. The camera's and the microphone's `MediaStreamTrackProcessor` streams (Chrome has
+during a solve; the microphone is opened raw, without the browser's voice processing, which takes a
+cube's clicks for noise (what the browser applied goes into `session.json` too, T2.12). The camera's and the microphone's `MediaStreamTrackProcessor` streams (Chrome has
 them on the main thread only) are transferred to the **capture worker**, which encodes without
 pause: H.264 High, else Main, hardware first, else VP9 (Chromium without proprietary codecs, as in
 CI), at the bitrate of the video quality chosen in Settings (4 Mbps at 1080p30 by default); AAC,
