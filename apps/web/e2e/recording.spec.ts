@@ -304,7 +304,10 @@ test('demo solves with the camera on get their two clips, which play and downloa
   await expect(page.getByTestId('storage-meter-text')).toHaveText(/ of .*\(\d+%\)$/);
 
   // The same demo solve, off and on: recording does not delay the timer. One replay's time varies
-  // by a few milliseconds either way (the demo cube's timers), so the medians are compared.
+  // by a few milliseconds either way (the demo cube's timers), so the medians are compared; a busy
+  // runner still moves a median of four by up to about 10 ms (CI saw differences of -7.4, +11.2,
+  // -5.2 and +5.0 ms with nothing wrong), so the limit is 15 ms: a main thread held by the
+  // recording costs hundreds, as the frame drops before T2.4 did.
   const times = exported.attempts.map((attempt) => attempt.result.timeMs ?? 0);
   const off = times.slice(1, firstOn - 1);
   const on = times.slice(firstOn - 1);
@@ -321,7 +324,7 @@ test('demo solves with the camera on get their two clips, which play and downloa
   };
   console.log(`recording: ${JSON.stringify(report)}`);
   test.info().annotations.push({ type: 'recording', description: JSON.stringify(report) });
-  expect(Math.abs(middle(on) - middle(off))).toBeLessThan(5);
+  expect(Math.abs(middle(on) - middle(off))).toBeLessThan(15);
 });
 
 test('saving a 10 s clip while recording loses no frame: none dropped, no double interval after it', async ({
