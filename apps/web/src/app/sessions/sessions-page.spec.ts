@@ -462,6 +462,24 @@ describe('SessionsPage', () => {
       );
     });
 
+    it('marks a session whose writes wait to be sent, offline', async () => {
+      backend.online = false;
+      const element = await renderSignedIn();
+      const laptop = rows(element).find((row) => row.getAttribute('data-session') === SESSION_A);
+      const badge = laptop?.querySelector('[data-testid="session-place"]');
+      expect(badge?.textContent.trim()).toBe('both');
+      expect(badge?.hasAttribute('data-pending')).toBe(true);
+      expect(badge?.getAttribute('title')).toBe(
+        'On this device and in your cloud index; some of its changes wait to be sent.',
+      );
+
+      backend.goOnline();
+      await settle();
+      await fixture.whenStable();
+      expect(badge?.hasAttribute('data-pending')).toBe(false);
+      expect(badge?.getAttribute('title')).toBe('On this device and in your cloud index.');
+    });
+
     it('updates the current session’s row as the timer changes it', async () => {
       await store.saveAttempt(testAttempt(1, 10_000));
       const element = await renderSignedIn();

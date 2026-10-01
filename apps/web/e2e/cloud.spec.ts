@@ -166,10 +166,11 @@ test('signed in: a demo session stays on this device; a real one goes to the ind
 
   // The phone's session opens read-only, from the index.
   await row(page, PHONE).getByTestId('session-link').click();
-  await expect(page.getByTestId('session-place')).toHaveText('cloud');
+  await expect(page).toHaveURL(new RegExp(`/sessions/${PHONE}$`));
   await expect(page.getByTestId('session-cloud-note')).toContainText(
     'Recorded on e2e-phone: this session is in your cloud index, not on this device.',
   );
+  await expect(page.getByTestId('session-place')).toHaveText('cloud');
   await expect(page.getByTestId('solve-row')).toHaveCount(2);
   await expect(page.getByTestId('stat-count')).toHaveText('2');
   await expect(page.getByRole('button', { name: 'Export' })).toHaveCount(0);

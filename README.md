@@ -64,10 +64,20 @@ Clearing the site's data in Chrome deletes all of them. Phase 3 adds cloud stora
 sessions of every device end up in one dataset.
 
 **An account, if you want one.** Sign in, in the header or in Settings → Account, signs in with Google
-(in a popup; the app installed on Android goes to Google's page and comes back). For now the account
-only records your name, your email and each device's label; nothing is uploaded, and the sessions
-stay in the browser as above. It is there for what phase 3 adds next: a cloud index of every device's
-sessions, and their uploads. Signed out, the app works as before and never downloads Firebase.
+(in a popup; the app installed on Android goes to Google's page and comes back). The account records
+your name, your email and each device's label, and keeps the index of your sessions (below); nothing
+is uploaded yet, and the sessions stay in the browser as above. Signed out, the app works as before and
+never downloads Firebase.
+
+**The session index.** Signed in, every session of a real cube goes, as it is recorded, to your index
+in the cloud (Firestore): the session's record and each attempt's, without the moves, with the device
+that recorded it and its files, all marked pending until the uploads come. Offline, it waits on the
+device and goes when the network is back; demo sessions stay on the device; sessions recorded signed
+out are added when you sign in. The Sessions page then lists the sessions of all your devices, each
+with a badge ("this device", "cloud" or "both") and a filter by device; a session recorded on another
+device opens read-only, since its clips and moves are on that device. Sessions → QA view counts the
+attempts by day and device, with what their clips take and what is uploaded, and when this device last
+synced.
 
 ## Recording
 

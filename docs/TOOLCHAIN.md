@@ -1380,3 +1380,45 @@ the first one is run with `--force`, which sets a one-day policy (`functions/REA
 6.7.1 (`@google-cloud/storage`'s), GHSA-w5hq-g745-h8pq, a missing bounds check when `v3`, `v5` or
 `v6` is given a buffer to write into; gaxios calls `v4()` for multipart boundaries only. The 5 high
 findings of T3.0 are unchanged (the functions' Firestore has `@grpc/grpc-js` 1.14.5, past them).
+
+## Session index (T3.1)
+
+Added by T3.1 on 2026-10-01: the session index in Firestore, the Sessions page merging the device's
+sessions with the cloud's, and the QA view (`docs/ARCHITECTURE.md`, "Session index";
+`docs/DATA-MODEL.md` §10).
+
+**The index wraps the session store.** `SessionIndexService` (`apps/web/src/app/cloud/`) gives
+`SessionService` its store wrapped, so that every write the timer, the recording and the sync check
+make (they all go through `SessionService`'s store) is followed, once it is in the origin private file
+system, by its document, without anyone waiting for it: the index's operations run one after the
+other in a queue of their own (so that a session's documents go in the order of its saves), and each
+write is handed to Firestore, whose persistent cache holds it until the server has it. No new
+dependency: `AccountBackend` (`firebase-sdk.ts`, still the only file that imports Firebase) gains the
+writes (`setDoc` and `writeBatch` with `merge`, batches of at most 500 writes, the session first) and
+the queries (`getDocs` of `where('owner', '==', uid)`, the sessions by `createdMs` descending with a
+`limit`; `getDoc` of one session), whose results carry each document's `hasPendingWrites` and the
+query's `fromCache`. The unit tests' fake (`fake-account.ts`) keeps an index in memory that merges
+writes as Firestore's `set` with `merge` does and can go offline (writes applied at once, confirmed
+on `goOnline()`); the end-to-end fake (`e2e/helpers/account.ts`) keeps one in `localStorage`, which a
+test seeds with another device's session.
+
+**A composite index for the sessions query.** Firestore serves an equality on `owner` with an order on
+`createdMs` only from a composite index: `firebase/firestore.indexes.json`, named in `firebase.json`.
+The emulator needs none, so the rules' tests pass without it; the project needs it deployed
+(`firebase deploy --only firestore:indexes`), which `.github/workflows/firebase.yml` (`--only
+firestore:rules`) does not do yet. The attempts' query (the equality alone, ordered by document id)
+needs no index of its own.
+
+**The rules' tests** (`firebase/rules.test.ts`, 40 tests, about 10 s) write the documents the app
+writes, built with core's `cloudSession` and `cloudAttempt` (the rules' tests import
+`@cubetrace/core` through its workspace), in one batch, and read them back with the app's queries;
+each clause of the shape checks fails at least one test when removed (checked on 2026-10-01 against an
+emulator on other ports, 8181, so as not to meet another run's on 8080: two `npm run test:rules` at
+once share that port, and the second one fails to start its emulator).
+
+**Sizes** (`ng build`, 2026-10-01, against `main` at e0b6417): the initial bundle is 264.63 kB raw,
+72.58 kB transferred (264.53 and 72.45 before): the only change in `main` is the route of `/qa`
+(104 bytes, its path, title and lazy import). The index's code (`SessionIndexService`, 13.6 kB raw) is
+a lazy chunk that the Timer, Sessions, session and QA pages share; the Sessions page's chunk is
+15.0 kB (8.2 before), the session page's 11.0 kB (9.1), the QA page's 8.6 kB; Firebase's chunk is
+637.3 kB raw, 160.8 kB transferred (619.1 and 156.6 before), for the queries and batches.

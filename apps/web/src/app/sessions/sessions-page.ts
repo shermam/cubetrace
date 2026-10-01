@@ -142,7 +142,7 @@ function lastCloudNote(notes: string): string | null {
                       class="place"
                       data-testid="session-place"
                       [attr.data-place]="row.place"
-                      [attr.data-pending]="row.cloud?.pending ? '' : null"
+                      [attr.data-pending]="waiting(row) ? '' : null"
                       [title]="placeTitle(row)"
                       >{{ placeLabel(row) }}</span
                     >
@@ -472,10 +472,21 @@ export class SessionsPage {
       case 'cloud':
         return `In your cloud index, recorded on ${row.session.host.label}: its clips and moves are on that device.`;
       case 'both':
-        return row.cloud?.pending === true
+        return this.waiting(row)
           ? 'On this device and in your cloud index; some of its changes wait to be sent.'
           : 'On this device and in your cloud index.';
     }
+  }
+
+  /**
+   * Writes of this device to the session's documents wait to be sent (offline): this page load's are
+   * not confirmed yet, or, for a session this page load has not written, the cloud's listing said so.
+   */
+  protected waiting(row: MergedSession): boolean {
+    return (
+      this.index.waiting().has(row.id) ||
+      (row.cloud?.pending === true && !this.index.written().has(row.id))
+    );
   }
 
   /**

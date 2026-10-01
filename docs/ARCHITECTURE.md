@@ -22,7 +22,8 @@ apps/web (Angular, PWA)
   device services: wake lock · storage persistence · browser support (read the browser through the
                    BROWSER_GLOBALS token; fakes in apps/web/src/app/device/fake-browser.ts)
   account (phase 3): AuthService · Firebase (Authentication, Firestore) in a lazy chunk behind
-                   ACCOUNT_LOADER (fake in apps/web/src/app/auth/fake-account.ts)
+                   ACCOUNT_LOADER (fake in apps/web/src/app/auth/fake-account.ts) · SessionIndexService:
+                   the session index in Firestore, the Sessions page's cloud sessions, the QA view
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider
@@ -138,6 +139,41 @@ partition third-party storage, Chrome since version 115 among them, can keep the
 app, which then says that signing in did not finish. If the installed app on the phone meets it
 (manual round 3), the fix is to serve the helper from the app's own site (Firebase's
 "signInWithRedirect best practices") or to use the popup there too.
+
+## Session index (T3.1)
+
+With an account signed in, the sessions and attempts of every device are indexed in Firestore
+(`docs/DATA-MODEL.md` §10): `sessions/{id}`, a session's record with its owner, and
+`sessions/{id}/attempts/{index}`, an attempt's record without its moves, with its device and the state
+of its upload. `SessionIndexService` (`apps/web/src/app/cloud/`) wraps the session store of
+`SessionService`, so that each save of a record, once the record is in the origin private file system,
+also writes its document, which no save waits for:
+
+```
+SessionService ─▶ the store (OPFS) ─▶ saved ─▶ SessionIndexService: one operation after the other
+                                                ├─ demo session (simulated cube): nothing
+                                                ├─ no account (signed out, or still loading): the session
+                                                │  leaves the device's list of indexed sessions
+                                                └─ account ─▶ AccountBackend ─▶ Firestore's cache (IndexedDB)
+                                                              ─▶ the server, when online; a refusal ─▶ the
+                                                              session's notes ("cloud: …"), once per session
+sign-in, or a start signed in ─▶ catch-up: the device's sessions not in the account's index, the
+                                 oldest first, each with its attempts in one batch, ≤ 300 documents
+```
+
+Offline, the writes wait in Firestore's persistent cache, across reloads, and go when the network is
+back; the queries of the Sessions page, a session's page and the QA view read the cache then, with
+the device's unsent writes in it (`pending`), and say they did (`fromCache`). The device keeps, by
+account, which of its sessions are all in the index (`localStorage` `cubetrace.sessionIndex`), so
+that the catch-up writes only what a sign-out or a refusal left out, without reading the server; a
+session changed while no account was signed in leaves that list, and the next catch-up writes it
+whole. The rules hold every document to its owner and its shape (an attempt without moves); the
+sessions query (`where('owner', '==', uid)`, newest `createdMs` first) has a composite index of its
+own (`firebase/firestore.indexes.json`). The Sessions page merges the device's sessions with the
+account's 100 newest from the index, by id ("this device", "cloud", "both"), a session of the cloud
+alone opening a read-only page (its clips and moves are on the device that recorded it); `/qa` counts
+the attempts of the 50 newest sessions by day and device. Signed out, none of it reads or writes
+anything, and the pages are as before. The uploads (T3.2, T3.3) will fill each attempt's `upload`.
 
 ## Storage (phase 3)
 

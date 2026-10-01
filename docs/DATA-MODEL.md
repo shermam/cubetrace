@@ -24,8 +24,10 @@ T2.9; the readers take a missing one as false), and a camera in `session.json` g
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
-`attempt.v1.schema.json` for version 1, and `user.schema.json` for the account's record in Firestore
-(§10), whose version 1 is its own.
+`attempt.v1.schema.json` for version 1, `user.schema.json` for the account's record in Firestore
+(§10), whose version 1 is its own, and `cloud-session.schema.json` and `cloud-attempt.schema.json`
+for the documents of the session index in Firestore (§10), which have the version of the records
+they copy (2).
 
 **Reading older records.** Files of version 1 are never rewritten to upgrade them. The readers,
 `parseSession` and `parseAttempt` in `packages/core/src/records.ts` (the app's session store
@@ -221,8 +223,10 @@ audio timestamps rebased by <ms> ms`, and one when the audio encoder gave no com
 and the app made it from the encoder's settings, `clip audio described: <segment> of attempt
 <index>: …`; and each notice of a recording, once, `notice: <text>` (the microphone refused, silent
 or lost, no audio encoder; since T2.12, the browser's voice processing kept on although the
-microphone was asked for raw, `notice: The microphone is not raw: …`, or the raw request refused).
-`summary` is counted from the attempts: each one is solved or a DNF.
+microphone was asked for raw, `notice: The microphone is not raw: …`, or the raw request refused);
+and, since T3.1, once when the session index in the cloud refuses a write of the session's,
+`cloud: the session could not be indexed: <reason>` or `cloud: attempt <index> could not be indexed:
+<reason>` (§10). `summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in
@@ -462,10 +466,90 @@ when the server refuses it, Settings → Account says so and the console has
 the app writes. The document also holds `quota`, the upload quota, which only the functions write
 (below, "Uploads").
 
-### `sessions/{id}` and `sessions/{id}/attempts/{index}`
+### The session index: `sessions/{id}` and `sessions/{id}/attempts/{index}`, schema version 2
 
-The session index of T3.1, which defines their fields. Each of these documents carries `owner`, the
-uid of the account that wrote it, which the rules require.
+The index of an account's sessions (`docs/PLAN.md` T3.1): through it the Sessions page of each of the
+account's devices lists the sessions of the others, and the QA view counts what was recorded and what
+is uploaded. A session's document is its `session.json` (§6) with `owner`; an attempt's is its
+`attempt.json` (§7) without `moves`, which stay on the device that recorded it (and go to the bucket
+in the uploaded `attempt.json`, T3.3), with `owner`, `device` and `upload`. The documents keep the
+schema version of the records they copy, 2; no other was ever written. `{id}` is the session's id,
+`{index}` the attempt's index zero-padded to 4 digits, as its folder (§5), so that a session's
+attempts sort by index.
+
+```jsonc
+// sessions/3f1c…
+{
+  "schema": 2, "id": "3f1c…", "createdMs": 1730640000000.0, "app": {…}, "host": {…},
+  "cube": {…}, "cameras": […], "clock": {…}, "audio": true, "settings": {…}, "notes": "",
+  "summary": {"attempts": 17, "solved": 16, "dnf": 1},   // session.json, field for field (§6)
+  "owner": "Xb3…uid"                                     // the account that wrote it
+}
+// sessions/3f1c…/attempts/0017
+{
+  "schema": 2, "session": "3f1c…", "index": 17, "scramble": "…", "scrambledFacelets": "…",
+  "crossFace": "D", "events": {…}, "clock": {…}, "result": {…}, "phases": […],
+  "video": [{"camera": "laptop", "segment": "solve", "file": "laptop.solve.mp4", "bytes": 23734012, …}],
+                                                         // attempt.json without "moves" (§7)
+  "owner": "Xb3…uid",
+  "device": {"host": "office-mbp", "cameras": ["laptop"]},
+  "upload": {
+    "state": "pending",                                  // "pending" | "uploading" | "done" | "failed"
+    "files": {
+      "attempt.json": {"bytes": 6120, "doneMs": null},
+      "laptop.scramble.mp4": {"bytes": 9502113, "doneMs": null},
+      "laptop.scramble.frames.json": {"bytes": 2310, "doneMs": null},
+      "laptop.solve.mp4": {"bytes": 23734012, "doneMs": null},
+      "laptop.solve.frames.json": {"bytes": 4823, "doneMs": null}
+    }
+  }
+}
+```
+
+`owner` is the Firebase Authentication uid of the account that wrote the document, which the rules
+require on both kinds. `device` is what recorded the attempt, by which the QA view groups the
+attempts: `host`, its session's host label (`host.label`, Settings → This device), and `cameras`, the
+labels of its session's cameras, in their order. `upload` is the state of the attempt's upload, which
+the upload queue (T3.3) and its functions (T3.2) keep: `state` is `pending` before anything is sent,
+`uploading`, `done` once every file is confirmed, or `failed`; `files` has an entry per file of the
+attempt's folder, by name (`attempt.json`, and each clip's `<camera>.<segment>.mp4` and
+`<camera>.<segment>.frames.json`): `bytes`, its size on the device that recorded it (an
+`attempt.json` as the store writes it, an MP4 as its clip's `bytes`, a frames file as the file system
+has it; one that cannot be read there is left out), and `doneMs`, when its upload was confirmed, in
+ms, null until then. What the index writes is `pending` with every file's `doneMs` null; until the
+upload queue comes, nothing changes it.
+
+**Writing.** With an account signed in, every save of a session (its creation, its summary after each
+attempt, a note, a camera, a sync check) writes its document, and every save of an attempt (when it
+ends, and again when a clip is attached) writes the attempt's, each merged into the stored one
+(Firestore's `set` with `merge`: a field the server added stays); the timer's Delete last deletes the
+attempt's document. Firestore applies the writes to its cache in IndexedDB at once and sends them
+when it can, offline after the network is back, across reloads; the saves of the records never wait
+for them. **Demo sessions are never written**: a session whose cube is the fake cube
+(`cube.hardware` is `simulated`). A session saved while no account is signed in on the device (made
+signed out, or changed after a sign-out, or before a remembered account has loaded) is written whole,
+its document and its attempts' in one batch, by the catch-up that runs when an account signs in, and
+at each start signed in: the sessions of the device that are not in the account's index, the oldest
+first, at most 300 documents at a time (the rest wait for the next start). Which sessions of the
+device are all in an account's index is kept on the device (`localStorage` `cubetrace.sessionIndex`,
+by uid, with when the server last confirmed a write, the QA view's last sync). Deleting a session on
+a device deletes that device's copy only: its documents stay in the index, as its uploads will in the
+bucket. A write the server refuses (the rules, a document too large) is said once per session and
+page load: in the console (`cubetrace: cloud: …`), on the Sessions page, and in the session's
+`notes`, `cloud: attempt 17 could not be indexed: <reason>` (§6), unless the notes have that line;
+the session is then written whole again by the next catch-up.
+
+**Reading.** The Sessions page reads the account's 100 newest sessions,
+`where('owner', '==', uid)` ordered by `createdMs` descending (the composite index of
+`firebase/firestore.indexes.json`, owner ascending and `createdMs` descending, serves the query; the
+emulator needs none); a session's page reads its document and its attempts
+(`where('owner', '==', uid)`, by document id); the QA view the attempts of the 50 newest sessions.
+Offline, the queries read Firestore's cache, with this device's unsent writes in it. The app reads the
+documents with `parseCloudSession` and `parseCloudAttempt` (`packages/core/src/records.ts`), which
+accept exactly what the schemas accept and leave out, with why, a document of another version.
+`packages/core/schema/cloud-session.schema.json` (`CLOUD_SESSION_SCHEMA`) and
+`cloud-attempt.schema.json` (`CLOUD_ATTEMPT_SCHEMA`) are this section in machine-readable form; they
+keep every field of `session.schema.json` and `attempt.schema.json` as those have them.
 
 ### Uploads: `users/{uid}.quota` and an attempt's `upload` (T3.2)
 
@@ -517,6 +601,9 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
 - `sessions/{id}` and `sessions/{id}/attempts/{index}`: only the account that `owner` names reads,
   updates and deletes one; a new one must name its writer as `owner`, an attempt only under a session
   of the same `owner` (in the same batch or before); `owner` never changes. A query must ask for the
-  account's own documents (`where('owner', '==', uid)`).
+  account's own documents (`where('owner', '==', uid)`). Their shape (T3.1): a session's document has
+  an integer `schema` and its path's `id`; an attempt's an integer `schema`, its path's session as
+  `session` and its path's index as `index` (`0017` is 17), `device` and `upload` maps, and no
+  `moves`.
 - Nothing else: no other collection, no subcollection of a user's record until a task opens it
   (T3.4's cubes), and nothing for anyone signed out.
