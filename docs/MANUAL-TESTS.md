@@ -601,8 +601,9 @@ documents.
 
 - [ ] Signed in on the MacBook, a solve on the real cube: in the console, `sessions/<id>` has the
   session's fields and `owner`, and `sessions/<id>/attempts/0001` the attempt's without `moves`, with
-  `device` (the MacBook's label, its camera's label) and `upload` (`pending`, `attempt.json` and, with
-  the camera on, both clips and their frames files with sizes, every `doneMs` null).
+  `device` (the MacBook's label, its camera's label), `video` with both clips (the camera on) a few
+  seconds later, and `upload` as created: `pending`, `attempt.json` with its size and `doneMs` null
+  (the clips' files come with the uploads).
 - [ ] On the ThinkPhone, signed in with the same account, the Sessions page: the MacBook's session with
   the badge "cloud" (its date opens a read-only page: the attempts, no Export, a clip badge that opens
   nothing and says where the clips are), the phone's own sessions "both" (or "this device" for a demo

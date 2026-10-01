@@ -14,7 +14,11 @@ export interface QaCounts {
   readonly recordedBytes: number;
   /** Their files whose upload is confirmed: `upload.files` with a `doneMs`. */
   readonly uploadedBytes: number;
-  /** Their files not uploaded yet: `upload.files` without a `doneMs`. */
+  /**
+   * Their files not uploaded yet: `upload.files` without a `doneMs`, and the clips that `upload.files`
+   * does not name yet (its list is the one the attempt was created with, until the uploads sign
+   * them), at their `video[].bytes`.
+   */
   readonly pendingBytes: number;
   /** The documents among them that hold writes of this device the server has not confirmed. */
   readonly unsent: number;
@@ -78,6 +82,7 @@ export function qaSummary(
 
 function countsOf(attempt: CloudAttempt, pending: boolean): QaCounts {
   const files = Object.values(attempt.upload.files);
+  const unlisted = attempt.video.filter((clip) => !Object.hasOwn(attempt.upload.files, clip.file));
   return {
     attempts: 1,
     clips: attempt.video.length,
@@ -85,9 +90,9 @@ function countsOf(attempt: CloudAttempt, pending: boolean): QaCounts {
     uploadedBytes: files
       .filter((file) => file.doneMs !== null)
       .reduce((sum, file) => sum + file.bytes, 0),
-    pendingBytes: files
-      .filter((file) => file.doneMs === null)
-      .reduce((sum, file) => sum + file.bytes, 0),
+    pendingBytes:
+      files.filter((file) => file.doneMs === null).reduce((sum, file) => sum + file.bytes, 0) +
+      unlisted.reduce((sum, clip) => sum + clip.bytes, 0),
     unsent: pending ? 1 : 0,
   };
 }

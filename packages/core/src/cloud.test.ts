@@ -15,6 +15,7 @@ import {
   attemptDocumentId,
   attemptFiles,
   cloudAttempt,
+  cloudAttemptFields,
   cloudSession,
   isSimulated,
   parseCloudAttempt,
@@ -87,6 +88,18 @@ describe('the documents of the session index', () => {
     expect(upload.state).toBe('pending');
     expect(upload.files['laptop.solve.mp4']).toEqual({ bytes: 4_412_345, doneMs: null });
     expect(document.video[0]).not.toBe(attempt.video[0]);
+  });
+
+  it("give an attempt's fields apart from its upload, which the app writes only with the document", () => {
+    const document = attemptDocument();
+    const fields = cloudAttemptFields({
+      attempt: attemptWithVideo(),
+      session: sessionWithCamera(),
+      owner: OWNER,
+    });
+    expect('upload' in fields).toBe(false);
+    expect('moves' in fields).toBe(false);
+    expect({ ...fields, upload: document.upload }).toEqual(document);
   });
 
   it('name an attempt by its index zero-padded as its folder, so that they sort by index', () => {
@@ -204,14 +217,19 @@ describe('the JSON Schemas of the documents', () => {
     }
   });
 
-  it('accept an upload under way, done or failed, with the times of the files confirmed', () => {
+  it('accept an upload under way, done or failed, with the times of the files confirmed, and the session.json it carried', () => {
     const document = attemptDocument();
     for (const state of ['uploading', 'done', 'failed']) {
       const upload = {
         state,
-        files: { ...document.upload.files, 'attempt.json': { bytes: 6_100, doneMs: 1.79e12 } },
+        files: {
+          ...document.upload.files,
+          'attempt.json': { bytes: 6_100, doneMs: 1.79e12 },
+          'session.json': { bytes: 3_900, doneMs: null },
+        },
       };
       expect(isCloudAttempt({ ...document, upload }), state).toBe(true);
+      expect(parseCloudAttempt({ ...document, upload }).upload).toEqual(upload);
     }
   });
 
@@ -401,7 +419,7 @@ describe('parseCloudSession and parseCloudAttempt', () => {
       'a file outside the folder',
       'attempt',
       changed(attemptDocument(), ['upload', 'files', '../x.mp4'], { bytes: 1, doneMs: null }),
-      'sessions/{id}/attempts/{index} (schema 2): upload.files.../x.mp4 is not attempt.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json.',
+      'sessions/{id}/attempts/{index} (schema 2): upload.files.../x.mp4 is not attempt.json, session.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json.',
     ],
   ] as [string, Kind, unknown, string][])(
     'throw on %s, naming the field',

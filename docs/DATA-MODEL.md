@@ -493,15 +493,9 @@ attempts sort by index.
                                                          // attempt.json without "moves" (§7)
   "owner": "Xb3…uid",
   "device": {"host": "office-mbp", "cameras": ["laptop"]},
-  "upload": {
+  "upload": {                                           // as the app creates it; the functions' then
     "state": "pending",                                  // "pending" | "uploading" | "done" | "failed"
-    "files": {
-      "attempt.json": {"bytes": 6120, "doneMs": null},
-      "laptop.scramble.mp4": {"bytes": 9502113, "doneMs": null},
-      "laptop.scramble.frames.json": {"bytes": 2310, "doneMs": null},
-      "laptop.solve.mp4": {"bytes": 23734012, "doneMs": null},
-      "laptop.solve.frames.json": {"bytes": 4823, "doneMs": null}
-    }
+    "files": {"attempt.json": {"bytes": 6120, "doneMs": null}}
   }
 }
 ```
@@ -509,28 +503,35 @@ attempts sort by index.
 `owner` is the Firebase Authentication uid of the account that wrote the document, which the rules
 require on both kinds. `device` is what recorded the attempt, by which the QA view groups the
 attempts: `host`, its session's host label (`host.label`, Settings → This device), and `cameras`, the
-labels of its session's cameras, in their order. `upload` is the state of the attempt's upload, which
-the upload queue (T3.3) and its functions (T3.2) keep: `state` is `pending` before anything is sent,
-`uploading`, `done` once every file is confirmed, or `failed`; `files` has an entry per file of the
-attempt's folder, by name (`attempt.json`, and each clip's `<camera>.<segment>.mp4` and
-`<camera>.<segment>.frames.json`): `bytes`, its size on the device that recorded it (an
+labels of its session's cameras, in their order. `upload` is the state of the attempt's upload
+(below, "Uploads"): `state` is `pending` before anything is sent, `uploading`, `done` once every file
+is confirmed, or `failed`; `files` has an entry per file, by name (`attempt.json`, each clip's
+`<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`, and `session.json` on the attempt
+the session's file went with): `bytes`, its size, and `doneMs`, when its upload was confirmed, in ms,
+null until then. **The app writes `upload` once, when it creates the attempt's document**: `pending`,
+with the files of the attempt's folder that the device has then and their sizes there (an
 `attempt.json` as the store writes it, an MP4 as its clip's `bytes`, a frames file as the file system
-has it; one that cannot be read there is left out), and `doneMs`, when its upload was confirmed, in
-ms, null until then. What the index writes is `pending` with every file's `doneMs` null; until the
-upload queue comes, nothing changes it.
+has it; one that cannot be read there is left out), each `doneMs` null. An attempt's document is
+created when the attempt ends, before its clips are cut, so its `files` names `attempt.json` alone,
+and the clips' files are added by the uploads as they are signed; from then on only the functions
+write `upload` (T3.2), and the rules refuse the app's changes to it.
 
 **Writing.** With an account signed in, every save of a session (its creation, its summary after each
 attempt, a note, a camera, a sync check) writes its document, and every save of an attempt (when it
 ends, and again when a clip is attached) writes the attempt's, each merged into the stored one
-(Firestore's `set` with `merge`: a field the server added stays); the timer's Delete last deletes the
-attempt's document. Firestore applies the writes to its cache in IndexedDB at once and sends them
+(Firestore's `set` with `merge`: a field the server added stays): the first write of an attempt's
+document carries its `upload`, the later ones every field but `upload`; the timer's Delete last
+deletes the attempt's document. Firestore applies the writes to its cache in IndexedDB at once and sends them
 when it can, offline after the network is back, across reloads; the saves of the records never wait
 for them. **Demo sessions are never written**: a session whose cube is the fake cube
 (`cube.hardware` is `simulated`). A session saved while no account is signed in on the device (made
 signed out, or changed after a sign-out, or before a remembered account has loaded) is written whole,
 its document and its attempts' in one batch, by the catch-up that runs when an account signs in, and
 at each start signed in: the sessions of the device that are not in the account's index, the oldest
-first, at most 300 documents at a time (the rest wait for the next start). Which sessions of the
+first, at most 300 documents at a time (the rest wait for the next start). For each one, it first asks
+the index which of its attempts are there (`where('owner', '==', uid)` on its attempts; the server, or
+offline the cache): those it writes without their `upload`, the others it creates with theirs; a
+session whose attempts cannot be asked for waits for the next catch-up. Which sessions of the
 device are all in an account's index is kept on the device (`localStorage` `cubetrace.sessionIndex`,
 by uid, with when the server last confirmed a write, the QA view's last sync). Deleting a session on
 a device deletes that device's copy only: its documents stay in the index, as its uploads will in the
@@ -576,7 +577,8 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
   document with `quota` alone, and the app's next merge adds the record's fields.
 - An attempt's document id is its folder's name (§5): `0001` for `index` 1, `0017`, `12345`. The
   functions find the attempt of a call's `attemptIndex` by it.
-- `upload` is created with the attempt (T3.1: `{state: 'pending', files: {}}`). `signUpload` sets
+- `upload` is created with the attempt (T3.1: `pending`, with the files the device has then, each
+  `doneMs` null; the app never writes it again, and the rules refuse it to). `signUpload` sets
   `state` to `uploading` and `files[path]` to `{bytes, doneMs: null}` for each file it signs (a file
   signed again starts again); `confirmUpload` sets a file's `doneMs`, the server's clock in ms since
   1970, once its object is in the bucket with that size, and `state` to `done` once every file of
@@ -604,6 +606,7 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
   account's own documents (`where('owner', '==', uid)`). Their shape (T3.1): a session's document has
   an integer `schema` and its path's `id`; an attempt's an integer `schema`, its path's session as
   `session` and its path's index as `index` (`0017` is 17), `device` and `upload` maps, and no
-  `moves`.
+  `moves`; and the account never changes an attempt's `upload` once the document exists (the
+  functions do, past the rules).
 - Nothing else: no other collection, no subcollection of a user's record until a task opens it
   (T3.4's cubes), and nothing for anyone signed out.

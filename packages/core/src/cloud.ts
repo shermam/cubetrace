@@ -30,12 +30,16 @@ export interface CloudUploadFile {
   doneMs: number | null;
 }
 
-/** `upload` of an attempt's document. */
+/**
+ * `upload` of an attempt's document: written by the app with the document (all pending), then only by
+ * the upload's functions (T3.2), which the rules leave it to.
+ */
 export interface CloudUpload {
   state: CloudUploadState;
   /**
    * The files of the attempt's folder (docs/DATA-MODEL.md §5) by their name: `attempt.json`, and each
-   * clip's `<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`.
+   * clip's `<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`; and `session.json`, the
+   * session's file, on the attempt it was uploaded with.
    */
   files: Record<string, CloudUploadFile>;
 }
@@ -64,6 +68,12 @@ export interface CloudAttempt extends Omit<AttemptRecord, 'moves'> {
   device: CloudDevice;
   upload: CloudUpload;
 }
+
+/**
+ * The fields of an attempt's document that the app writes again when the attempt changes (a clip
+ * attached): all but `upload`, which is the functions' once the document exists.
+ */
+export type CloudAttemptFields = Omit<CloudAttempt, 'upload'>;
 
 /** The name of an attempt's record in its folder (docs/DATA-MODEL.md §5). */
 const ATTEMPT_FILE_NAME = 'attempt.json';
@@ -112,9 +122,8 @@ export function cloudSession(session: SessionRecord, owner: string): CloudSessio
 }
 
 /**
- * `sessions/{id}/attempts/{index}` of `attempt`, owned by the account `owner`: a JSON copy of the
- * record without its moves, the device of `session` (its host label and its cameras' labels) and
- * `upload`.
+ * `sessions/{id}/attempts/{index}` of `attempt` as the app creates it, owned by the account `owner`:
+ * {@link cloudAttemptFields} and `upload`.
  */
 export function cloudAttempt(input: {
   attempt: AttemptRecord;
@@ -122,14 +131,25 @@ export function cloudAttempt(input: {
   owner: string;
   upload: CloudUpload;
 }): CloudAttempt {
-  const { attempt, session, owner, upload } = input;
+  return { ...cloudAttemptFields(input), upload: jsonCopy(input.upload) };
+}
+
+/**
+ * The fields of `attempt`'s document that the app writes, `upload` aside: a JSON copy of the record
+ * without its moves, its owner, and the device of `session` (its host label and its cameras' labels).
+ */
+export function cloudAttemptFields(input: {
+  attempt: AttemptRecord;
+  session: SessionRecord;
+  owner: string;
+}): CloudAttemptFields {
+  const { attempt, session, owner } = input;
   const copy: Partial<AttemptRecord> = jsonCopy(attempt);
   delete copy.moves;
   return {
     ...(copy as Omit<AttemptRecord, 'moves'>),
     owner,
     device: { host: session.host.label, cameras: session.cameras.map((camera) => camera.label) },
-    upload: jsonCopy(upload),
   };
 }
 

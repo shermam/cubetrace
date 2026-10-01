@@ -1,5 +1,5 @@
 import { InjectionToken, inject, isDevMode } from '@angular/core';
-import type { CloudAttempt, CloudSession, UserRecord } from '@cubetrace/core';
+import type { CloudAttempt, CloudAttemptFields, CloudSession, UserRecord } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 
@@ -67,13 +67,18 @@ export interface AccountBackend {
   saveUser(uid: string, record: UserRecord): Promise<void>;
   /**
    * Merges `session` into sessions/{id}, and in the same batch each of `attempts` into its
-   * sessions/{id}/attempts/{index} (docs/PLAN.md T3.1). As `saveUser`, Firestore applies the writes to
-   * its cache at once and sends them when it can; the promise settles when the server has them, and
+   * sessions/{id}/attempts/{index} (docs/PLAN.md T3.1): an attempt with its `upload` creates its
+   * document, one without (its fields) changes the others and leaves `upload`, which is the upload
+   * functions' once the document exists, as it is. As `saveUser`, Firestore applies the writes to its
+   * cache at once and sends them when it can; the promise settles when the server has them, and
    * rejects when it refuses them (the rules, a document too large).
    */
-  saveSessionIndex(session: CloudSession, attempts?: readonly CloudAttempt[]): Promise<void>;
-  /** Merges `attempt` into sessions/{id}/attempts/{index}; settles as `saveSessionIndex`. */
-  saveAttemptIndex(attempt: CloudAttempt): Promise<void>;
+  saveSessionIndex(
+    session: CloudSession,
+    attempts?: readonly (CloudAttempt | CloudAttemptFields)[],
+  ): Promise<void>;
+  /** Merges `attempt` into sessions/{id}/attempts/{index}, as `saveSessionIndex` merges it. */
+  saveAttemptIndex(attempt: CloudAttempt | CloudAttemptFields): Promise<void>;
   /** Deletes sessions/{id}/attempts/{index} (the timer's Delete last); settles as `saveSessionIndex`. */
   deleteAttemptIndex(sessionId: string, index: number): Promise<void>;
   /**

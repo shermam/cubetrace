@@ -1397,9 +1397,14 @@ dependency: `AccountBackend` (`firebase-sdk.ts`, still the only file that import
 writes (`setDoc` and `writeBatch` with `merge`, batches of at most 500 writes, the session first) and
 the queries (`getDocs` of `where('owner', '==', uid)`, the sessions by `createdMs` descending with a
 `limit`; `getDoc` of one session), whose results carry each document's `hasPendingWrites` and the
-query's `fromCache`. The unit tests' fake (`fake-account.ts`) keeps an index in memory that merges
-writes as Firestore's `set` with `merge` does and can go offline (writes applied at once, confirmed
-on `goOnline()`); the end-to-end fake (`e2e/helpers/account.ts`) keeps one in `localStorage`, which a
+query's `fromCache`. An attempt's document is written with its `upload` only when it is created
+(the first write of this page load, or one that the catch-up did not find in the index); its later
+writes carry every other field, since the upload's functions own `upload` from then on. The unit
+tests' fake (`fake-account.ts`) keeps an index in memory that merges writes as Firestore's `set` with
+`merge` does, refuses what the rules refuse of an attempt (a new document without its `upload`, a
+change to an existing one's, a deletion of one that is not there), lets a test change `upload` as the
+functions do (`serverSetsUpload`), and can go offline (writes applied at once, confirmed on
+`goOnline()`); the end-to-end fake (`e2e/helpers/account.ts`) keeps one in `localStorage`, which a
 test seeds with another device's session. `cloud.spec.ts` checks with it, on the dev server, that a
 demo session signed in stays on the device ("this device") beside the seeded session ("cloud", whose
 page is read-only, and the device filter), that the same session marked as a real cube's in its
@@ -1413,19 +1418,22 @@ owner's (`docs/MANUAL-TESTS.md`, T3.1).
 `createdMs` only from a composite index: `firebase/firestore.indexes.json`, named in `firebase.json`.
 The emulator needs none, so the rules' tests pass without it; the project needs it deployed
 (`firebase deploy --only firestore:indexes`), which `.github/workflows/firebase.yml` (`--only
-firestore:rules`) does not do yet. The attempts' query (the equality alone, ordered by document id)
-needs no index of its own.
+firestore:rules,functions`) does not do yet. The attempts' query (the equality alone, ordered by
+document id) needs no index of its own.
 
-**The rules' tests** (`firebase/rules.test.ts`, 40 tests, about 10 s) write the documents the app
-writes, built with core's `cloudSession` and `cloudAttempt` (the rules' tests import
-`@cubetrace/core` through its workspace), in one batch, and read them back with the app's queries;
-each clause of the shape checks fails at least one test when removed (checked on 2026-10-01 against an
-emulator on other ports, 8181, so as not to meet another run's on 8080: two `npm run test:rules` at
-once share that port, and the second one fails to start its emulator).
+**The rules' tests** (`firebase/rules.test.ts`, 45 tests with T3.2's, about 10 s) write the documents
+the app writes, built with core's `cloudSession`, `cloudAttempt` and `cloudAttemptFields` (the rules'
+tests import `@cubetrace/core` through its workspace), in one batch, read them back with the app's
+queries, and write an attempt's fields again over an `upload` that the functions changed, which stays;
+each of the 13 clauses of the index's checks (the shapes, and `upload` left alone) fails at least one
+test when removed (checked on 2026-10-01 against an emulator on other ports, 8181, so as not to meet
+another run's on 8080: two `npm run test:rules` at once share that port, and the second one fails to
+start its emulator).
 
-**Sizes** (`ng build`, 2026-10-01, against `main` at e0b6417): the initial bundle is 264.63 kB raw,
-72.54 kB transferred (264.53 and 72.45 before): the only change in `main` is the route of `/qa`
-(104 bytes, its path, title and lazy import). The index's code (`SessionIndexService`, 13.6 kB raw) is
-a lazy chunk that the Timer, Sessions, session and QA pages share; the Sessions page's chunk is
-15.1 kB (8.2 before), the session page's 11.0 kB (9.1), the QA page's 8.6 kB; Firebase's chunk is
-637.3 kB raw, 160.8 kB transferred (619.1 and 156.6 before), for the queries and batches.
+**Sizes** (`ng build`, 2026-10-01, against `main` at d7fee3d, whose app is e0b6417's): the initial
+bundle is 264.63 kB raw, 72.49 kB transferred (264.53 and 72.45 before): the only change in `main` is
+the route of `/qa` (104 bytes, its path, title and lazy import). The index's code
+(`SessionIndexService`, 14.4 kB raw) is a lazy chunk that the Timer, Sessions, session and QA pages
+share; the Sessions page's chunk is 15.1 kB (8.2 before), the session page's 11.0 kB (9.1), the QA
+page's 8.7 kB; Firebase's chunk is 637.3 kB raw, 160.8 kB transferred (619.1 and 156.6 before), for
+the queries and batches.

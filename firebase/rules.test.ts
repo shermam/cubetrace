@@ -10,6 +10,7 @@ import {
 import {
   AttemptMachine,
   cloudAttempt,
+  cloudAttemptFields,
   cloudSession,
   createSession,
   parseMoves,
@@ -186,10 +187,14 @@ function attemptDoc(
   };
 }
 
-/** A real session and its first attempt as the app's index writes them (packages/core cloud.ts). */
+/**
+ * A real session and its first attempt as the app's index writes them (packages/core cloud.ts): the
+ * attempt's document as created, with its upload, and its fields as written again (a clip attached).
+ */
 function appDocuments(owner: string): {
   session: Record<string, unknown>;
   attempt: Record<string, unknown>;
+  fields: Record<string, unknown>;
 } {
   const record = createSession({
     host: { label: 'office-mbp', userAgent: 'Chrome', platform: 'macOS', isPhone: false },
@@ -217,9 +222,15 @@ function appDocuments(owner: string): {
     owner,
     upload: pendingUpload({ 'attempt.json': 6_000 }),
   });
+  const fields = cloudAttemptFields({
+    attempt: { ...machine.toRecord(), video: [] },
+    session: { ...record, cameras: [] },
+    owner,
+  });
   return {
     session: cloudSession(record, owner) as unknown as Record<string, unknown>,
     attempt: attempt as unknown as Record<string, unknown>,
+    fields,
   };
 }
 
@@ -239,11 +250,22 @@ describe('sessions/{id}', () => {
 
   it('takes the documents the app writes, the session and its first attempt in one batch, and lists them back', async () => {
     const db = alice().firestore();
-    const { session: document, attempt } = appDocuments('alice');
+    const { session: document, attempt, fields } = appDocuments('alice');
     const batch = db.batch();
     batch.set(db.doc(session), document, { merge: true });
     batch.set(db.doc(`${session}/attempts/0001`), attempt, { merge: true });
     await assertSucceeds(batch.commit());
+    // The functions sign its upload (T3.2), then the app writes its fields again (a clip attached):
+    // the upload stays theirs.
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .doc(`${session}/attempts/0001`)
+        .update({ 'upload.state': 'uploading' });
+    });
+    await assertSucceeds(db.doc(`${session}/attempts/0001`).set(fields, { merge: true }));
+    const stored = await db.doc(`${session}/attempts/0001`).get();
+    expect(stored.get('upload.state')).toBe('uploading');
     await assertSucceeds(
       db
         .collection('sessions')
@@ -327,9 +349,41 @@ describe('sessions/{id}/attempts/{index}', () => {
     const db = alice().firestore();
     await assertSucceeds(db.doc(attempt).set(attemptDoc('alice')));
     await assertSucceeds(db.doc(attempt).get());
-    await assertSucceeds(db.doc(attempt).update({ 'upload.state': 'done' }));
+    await assertSucceeds(db.doc(attempt).update({ 'device.cameras': ['laptop', 'phone-front'] }));
     await assertSucceeds(db.collection(`${session}/attempts`).where('owner', '==', 'alice').get());
     await assertSucceeds(db.doc(attempt).delete());
+  });
+
+  it("leaves an attempt's upload to the functions: the app creates it with the document, and never changes it", async () => {
+    await seed(session, sessionDoc('alice'));
+    const db = alice().firestore();
+    await assertSucceeds(db.doc(attempt).set(attemptDoc('alice')));
+    // Its other fields written again, with the upload or without it, as it is: taken.
+    const fields = attemptDoc('alice', SESSION_ID, { device: { host: 'office-mbp', cameras: [] } });
+    await assertSucceeds(db.doc(attempt).set(fields, { merge: true }));
+    Reflect.deleteProperty(fields, 'upload');
+    await assertSucceeds(db.doc(attempt).set(fields, { merge: true }));
+    // A change of the upload, a field of it, or the upload gone: refused.
+    await assertFails(db.doc(attempt).update({ 'upload.state': 'done' }));
+    await assertFails(
+      db.doc(attempt).set(
+        {
+          upload: { state: 'pending', files: { 'laptop.solve.mp4': { bytes: 1, doneMs: null } } },
+        },
+        { merge: true },
+      ),
+    );
+    await assertFails(db.doc(attempt).set(fields));
+    // As the functions left it (signed), the app's next write of the fields keeps it.
+    await seed(
+      attempt,
+      attemptDoc('alice', SESSION_ID, {
+        upload: { state: 'uploading', files: { 'attempt.json': { bytes: 5_000, doneMs: null } } },
+      }),
+    );
+    await assertSucceeds(db.doc(attempt).set(fields, { merge: true }));
+    await assertFails(db.doc(attempt).set(attemptDoc('alice'), { merge: true }));
+    expect((await db.doc(attempt).get()).get('upload.state')).toBe('uploading');
   });
 
   it('lets a session and its first attempt be written in one batch', async () => {

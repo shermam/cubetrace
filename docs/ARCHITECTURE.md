@@ -165,15 +165,18 @@ Offline, the writes wait in Firestore's persistent cache, across reloads, and go
 back; the queries of the Sessions page, a session's page and the QA view read the cache then, with
 the device's unsent writes in it (`pending`), and say they did (`fromCache`). The device keeps, by
 account, which of its sessions are all in the index (`localStorage` `cubetrace.sessionIndex`), so
-that the catch-up writes only what a sign-out or a refusal left out, without reading the server; a
-session changed while no account was signed in leaves that list, and the next catch-up writes it
-whole. The rules hold every document to its owner and its shape (an attempt without moves); the
+that the catch-up looks only at what a sign-out or a refusal left out: a session changed while no
+account was signed in leaves that list, and the next catch-up writes it whole, after asking the index
+which of its attempts are there already. An attempt's document is created with its `upload`, all
+pending; the app's later writes of it (a clip attached, the catch-up) leave `upload` to the upload's
+functions ("Uploads", below), and the rules refuse the app's changes to it. The rules hold every
+document to its owner and its shape (an attempt without moves); the
 sessions query (`where('owner', '==', uid)`, newest `createdMs` first) has a composite index of its
 own (`firebase/firestore.indexes.json`). The Sessions page merges the device's sessions with the
 account's 100 newest from the index, by id ("this device", "cloud", "both"), a session of the cloud
 alone opening a read-only page (its clips and moves are on the device that recorded it); `/qa` counts
 the attempts of the 50 newest sessions by day and device. Signed out, none of it reads or writes
-anything, and the pages are as before. The uploads (T3.2, T3.3) will fill each attempt's `upload`.
+anything, and the pages are as before.
 
 ## Storage (phase 3)
 

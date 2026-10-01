@@ -444,13 +444,27 @@ describe('SessionsPage', () => {
       expect(other?.textContent).toContain('Delete this session and its 1 attempt?');
     });
 
-    it("says that deleting a session in both keeps its index, and that the cloud's sessions could not be read", async () => {
+    it("says that the cloud's sessions could not be read, and lists this device's all the same", async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       backend.readError = new Error('Failed to get documents because the client is offline.');
       const element = await renderSignedIn();
       expect(text(element, 'cloud-error')).toBe(
         "Your cloud's sessions could not be read: Failed to get documents because the client is offline.",
       );
-      // This device's sessions are listed all the same; the laptop's was written to the index.
+      // The catch-up could not ask which of the laptop's attempts are in the index either: the
+      // session waits for the next one, on this device only.
+      expect(rows(element).map((row) => row.getAttribute('data-session'))).toEqual([
+        DEMO,
+        SESSION_A,
+      ]);
+      const laptop = rows(element).find((row) => row.getAttribute('data-session') === SESSION_A);
+      expect(laptop === undefined ? undefined : place(laptop)).toBe('this device');
+      expect(backend.sessionDocument(SESSION_A)).toBeUndefined();
+      warn.mockRestore();
+    });
+
+    it('says that deleting a session in both keeps its index', async () => {
+      const element = await renderSignedIn();
       const laptop = rows(element).find((row) => row.getAttribute('data-session') === SESSION_A);
       expect(laptop === undefined ? undefined : place(laptop)).toBe('both');
       if (laptop !== undefined) {

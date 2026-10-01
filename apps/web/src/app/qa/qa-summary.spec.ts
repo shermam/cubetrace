@@ -85,6 +85,38 @@ describe('qaSummary', () => {
     });
   });
 
+  it("counts as pending the clips that the attempt's upload does not name yet", () => {
+    // Created before its clips were attached: its upload names attempt.json alone.
+    const document = {
+      ...attemptDocument(attemptWithClips(1), laptop, OWNER),
+      upload: {
+        state: 'pending' as const,
+        files: { 'attempt.json': { bytes: 5_000, doneMs: null } },
+      },
+    };
+    const summary = qaSummary([at(1_000, document)], dayOf);
+    expect(summary.total).toMatchObject({
+      recordedBytes: 5_300_000,
+      uploadedBytes: 0,
+      pendingBytes: 5_305_000,
+    });
+    // Signed by the uploads, a clip counts at the size signed, uploaded once confirmed.
+    const signed = {
+      ...document,
+      upload: {
+        state: 'uploading' as const,
+        files: {
+          'attempt.json': { bytes: 5_000, doneMs: 1_790_000_500_000 },
+          'laptop.solve.mp4': { bytes: 4_100_000, doneMs: null },
+        },
+      },
+    };
+    expect(qaSummary([at(1_000, signed)], dayOf).total).toMatchObject({
+      uploadedBytes: 5_000,
+      pendingBytes: 5_300_000,
+    });
+  });
+
   it('says nothing without an attempt', () => {
     expect(qaSummary([])).toEqual({
       rows: [],

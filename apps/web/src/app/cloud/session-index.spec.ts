@@ -160,33 +160,47 @@ describe('SessionIndexService', () => {
     expect(index.unconfirmed()).toBe(0);
     expect(index.lastSync()).toBe(clock.hostMs);
     expect(index.failures().size).toBe(0);
+    // The attempt's document was created with its upload.
+    expect(backend.uploadWrites).toEqual([`sessions/${SESSION_A}/attempts/0001`]);
     // Created signed in, the session is all in the index: the next start has nothing to catch up.
     expect(kept()[ADA.uid].sessions).toEqual([SESSION_A]);
     expect(notes).toEqual([]);
   });
 
-  it('writes an attempt again when a clip is attached, and deletes it with Delete last', async () => {
+  it('writes an attempt again when a clip is attached, without its upload, which the functions keep; and deletes it with Delete last', async () => {
     const { index, auth, tracked } = load();
     await signIn(auth, index);
     const session = realSession();
     await tracked.createSession(session);
     const bare = testAttempt(1, 10_000);
     await tracked.saveAttempt(bare);
+    await settleIndex(index);
+    const path = `sessions/${SESSION_A}/attempts/0001`;
+    expect(backend.uploadWrites).toEqual([path]);
+    // The upload's functions sign the attempt.json meanwhile (T3.2).
+    const signed = {
+      state: 'uploading' as const,
+      files: { 'attempt.json': { bytes: 4_321, doneMs: null } },
+    };
+    backend.serverSetsUpload(SESSION_A, 1, signed);
+
     await tracked.saveAttempt({ ...bare, video: attemptWithClips(1).video.slice(0, 1) });
     await settleIndex(index);
-
     const [attemptDoc] = backend.attemptDocuments(SESSION_A);
     expect(attemptDoc.video.map((clip) => clip.file)).toEqual(['laptop.scramble.mp4']);
-    expect(Object.keys(attemptDoc.upload.files).sort()).toEqual([
-      'attempt.json',
-      'laptop.scramble.frames.json',
-      'laptop.scramble.mp4',
-    ]);
+    expect(attemptDoc.upload).toEqual(signed);
+    expect(backend.uploadWrites).toEqual([path]);
+    expect(index.failures().size).toBe(0);
 
     await tracked.deleteAttempt(SESSION_A, 1);
     await settleIndex(index);
     expect(backend.attemptDocuments(SESSION_A)).toEqual([]);
-    expect(backend.indexWrites.at(-1)).toBe(`delete sessions/${SESSION_A}/attempts/0001`);
+    expect(backend.indexWrites.at(-1)).toBe(`delete ${path}`);
+    // An attempt of the same index after it is a new document, created with its upload.
+    await tracked.saveAttempt(testAttempt(1, 12_000));
+    await settleIndex(index);
+    expect(backend.uploadWrites).toEqual([path, path]);
+    expect(backend.attemptDocuments(SESSION_A)[0].upload.state).toBe('pending');
   });
 
   it('never writes a demo session, whose cube is simulated', async () => {
@@ -313,13 +327,18 @@ describe('SessionIndexService', () => {
     expect(backend.indexWrites).toHaveLength(5);
   });
 
-  it('writes a session changed while signed out whole at the next sign-in', async () => {
+  it('writes a session changed while signed out whole at the next sign-in, leaving the upload of the attempts already there', async () => {
     const { index, auth, tracked } = load();
     await signIn(auth, index);
     await tracked.createSession(realSession());
     await tracked.saveAttempt(attemptWithClips(1));
     await settleIndex(index);
     expect(backend.indexWrites).toHaveLength(2);
+    const done = {
+      state: 'done' as const,
+      files: { 'attempt.json': { bytes: 6_000, doneMs: 1_790_000_900_000 } },
+    };
+    backend.serverSetsUpload(SESSION_A, 1, done);
 
     await auth.signOut();
     await settleIndex(index);
@@ -334,7 +353,41 @@ describe('SessionIndexService', () => {
       `sessions/${SESSION_A}/attempts/0001`,
       `sessions/${SESSION_A}/attempts/0002`,
     ]);
-    expect(backend.attemptDocuments(SESSION_A).map((doc) => doc.index)).toEqual([1, 2]);
+    expect(backend.reads).toContain(`attempts ${SESSION_A} ${ADA.uid}`);
+    // Attempt 1 was there: written again without its upload, which stays the functions'. Attempt 2
+    // is new: created with its own.
+    expect(backend.uploadWrites).toEqual([
+      `sessions/${SESSION_A}/attempts/0001`,
+      `sessions/${SESSION_A}/attempts/0002`,
+    ]);
+    const [first, second] = backend.attemptDocuments(SESSION_A);
+    expect(first.upload).toEqual(done);
+    expect(second.upload.state).toBe('pending');
+    expect(index.failures().size).toBe(0);
+  });
+
+  it('leaves a session for the next catch-up when its attempts in the index cannot be read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await store.createSession(realSession());
+    await store.saveAttempt(attemptWithClips(1));
+    backend.readError = new Error('Failed to get documents because the client is offline.');
+    const { index, auth } = load();
+    await signIn(auth, index);
+    expect(backend.indexWrites).toEqual([]);
+    // Nothing written, nothing kept: the session is not in the index.
+    expect(storage.getItem(SESSION_INDEX_KEY)).toBeNull();
+    expect(warn.mock.calls.map(([text]) => String(text))).toEqual([
+      `cubetrace: cloud: the attempts of session ${SESSION_A} in the index could not be read; it waits for the next catch-up: Failed to get documents because the client is offline.`,
+    ]);
+
+    backend.readError = null;
+    const reload = load();
+    await settleIndex(reload.index);
+    expect(backend.indexWrites).toEqual([
+      `sessions/${SESSION_A}`,
+      `sessions/${SESSION_A}/attempts/0001`,
+    ]);
+    warn.mockRestore();
   });
 
   it(`writes at most ${String(CATCH_UP_DOCUMENTS)} documents per catch-up; a session left for later goes with its next attempt, and whole at the next start`, async () => {

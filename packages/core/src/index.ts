@@ -105,6 +105,7 @@ export { userRecord } from './user';
 // T3.1 — the session index in Firestore
 export type {
   CloudAttempt,
+  CloudAttemptFields,
   CloudDevice,
   CloudSession,
   CloudUpload,
@@ -116,6 +117,7 @@ export {
   attemptDocumentId,
   attemptFiles,
   cloudAttempt,
+  cloudAttemptFields,
   cloudSession,
   isSimulated,
   pendingUpload,

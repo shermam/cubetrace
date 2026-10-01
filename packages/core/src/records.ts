@@ -696,10 +696,13 @@ const CLOUD_SESSION = object<CloudSession>({
   owner,
 });
 
-/** The name of a file of an attempt's folder (docs/DATA-MODEL.md §5). */
+/**
+ * The name of a file of an attempt's folder (docs/DATA-MODEL.md §5), or `session.json`, the session's
+ * file, which its upload records on the attempt it went with (T3.2).
+ */
 const attemptFile = text(
-  'attempt.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json',
-  /^(attempt\.json|[a-z0-9]+(-[a-z0-9]+)*\.(scramble|solve)\.(mp4|frames\.json))$/u,
+  'attempt.json, session.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json',
+  /^(attempt\.json|session\.json|[a-z0-9]+(-[a-z0-9]+)*\.(scramble|solve)\.(mp4|frames\.json))$/u,
 );
 
 const CLOUD_ATTEMPT = object<CloudAttempt>({

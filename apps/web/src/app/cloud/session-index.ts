@@ -1,7 +1,9 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import {
+  attemptDocumentId,
   attemptFiles,
   cloudAttempt,
+  cloudAttemptFields,
   cloudSession,
   isSimulated,
   parseCloudAttempt,
@@ -9,6 +11,7 @@ import {
   pendingUpload,
   type AttemptRecord,
   type CloudAttempt,
+  type CloudAttemptFields,
   type CloudSession,
   type CloudUpload,
   type SessionRecord,
@@ -79,7 +82,10 @@ export type TrackedStore = SessionStore & Partial<ProblemReporter>;
  * signed in, every session saved through the store that `track` returns goes to `sessions/{id}` and
  * every attempt to `sessions/{id}/attempts/{index}`, with the account as their owner, through
  * Firestore's persistent cache: the saves never wait for them, and offline they wait in the cache,
- * across reloads. Demo sessions (a simulated cube) never go. A session saved while no account is
+ * across reloads. An attempt's document is created with its `upload`, all pending; its later writes
+ * (a clip attached, the catch-up) leave `upload` out, since from then on the upload's functions (T3.2)
+ * keep it and the rules refuse the app's changes to it. Demo sessions (a simulated cube) never go. A
+ * session saved while no account is
  * signed in, created then or changed, is written whole by the catch-up that runs when an account signs
  * in, or starts signed in: the sessions of this device that are not in its index (`SESSION_INDEX_KEY`
  * says which are), the oldest first, a session and its attempts in one batch, at most
@@ -133,6 +139,12 @@ export class SessionIndexService {
   private queue: Promise<void> = Promise.resolve();
   /** The sessions whose refusal this page load has said. */
   private readonly reported = new Set<string>();
+  /**
+   * The attempts' documents that exist in the account's index as far as this page load knows
+   * (`<session>/<index>`): written with their `upload`, or found by the catch-up. The next writes of
+   * these leave `upload` alone.
+   */
+  private readonly created = new Set<string>();
   /** The account whose catch-up this page load has run: once per account and page load. */
   private caughtUp: string | null = null;
   private note: NoteWriter = () => Promise.resolve();
@@ -252,6 +264,7 @@ export class SessionIndexService {
     if (this.caughtUp !== account.uid) {
       this.caughtUp = account.uid;
       this.writtenSignal.set(new Set());
+      this.created.clear();
       this.enqueue(() => this.catchUp(account));
     }
   }
@@ -288,13 +301,21 @@ export class SessionIndexService {
         this.changedSignedOut(session.id);
         return;
       }
-      const upload = await this.upload(attempt);
+      // Its document is created with its upload, all pending; written again (a clip attached), it
+      // leaves the upload to the functions.
+      const key = attemptKey(session.id, attempt.index);
+      const upload = this.created.has(key) ? null : await this.upload(attempt);
       const account = this.auth.cloud();
       if (account === null) {
         this.changedSignedOut(session.id);
         return;
       }
-      const document = cloudAttempt({ attempt, session, owner: account.uid, upload });
+      const owner = account.uid;
+      const document: CloudAttempt | CloudAttemptFields =
+        upload === null
+          ? cloudAttemptFields({ attempt, session, owner })
+          : cloudAttempt({ attempt, session, owner, upload });
+      this.created.add(key);
       const what = `attempt ${String(attempt.index)} could not be indexed`;
       if (this.isIndexed(account.uid, session.id)) {
         this.send(account, session.id, what, (backend) => backend.saveAttemptIndex(document));
@@ -316,6 +337,7 @@ export class SessionIndexService {
         return;
       }
       const account = this.auth.cloud();
+      this.created.delete(attemptKey(sessionId, index));
       if (account === null) {
         this.changedSignedOut(sessionId);
       } else if (this.isIndexed(account.uid, sessionId)) {
@@ -343,7 +365,11 @@ export class SessionIndexService {
 
   /**
    * Writes the sessions of this device that are not in the account's index, the oldest first, each
-   * with its attempts in one batch, until {@link CATCH_UP_DOCUMENTS} documents are written.
+   * with its attempts in one batch, until {@link CATCH_UP_DOCUMENTS} documents are written. It first
+   * asks the index which of a session's attempts are there already (the server, or offline the
+   * cache): those are written without their `upload`, which the functions may have changed; the
+   * others are created with theirs. A session whose attempts cannot be asked for waits for the next
+   * catch-up.
    */
   private async catchUp(account: CloudAccount): Promise<void> {
     this.catchingUpSignal.set(true);
@@ -359,13 +385,33 @@ export class SessionIndexService {
         }
         const session = this.sessions.get(listed.id) ?? listed;
         this.sessions.set(session.id, session);
-        const documents: CloudAttempt[] = [];
+        let there: ReadonlySet<string>;
+        try {
+          there = new Set(
+            (await account.backend.listAttempts(account.uid, session.id)).documents.map(
+              (document) => document.id,
+            ),
+          );
+        } catch (error: unknown) {
+          console.warn(
+            `cubetrace: cloud: the attempts of session ${session.id} in the index could not be read; it waits for the next catch-up: ${errorMessage(error)}`,
+          );
+          continue;
+        }
+        const owner = account.uid;
+        const documents: (CloudAttempt | CloudAttemptFields)[] = [];
         for (const attempt of attempts) {
-          const upload = await this.upload(attempt);
-          documents.push(cloudAttempt({ attempt, session, owner: account.uid, upload }));
+          documents.push(
+            there.has(attemptDocumentId(attempt.index))
+              ? cloudAttemptFields({ attempt, session, owner })
+              : cloudAttempt({ attempt, session, owner, upload: await this.upload(attempt) }),
+          );
         }
         if (this.auth.cloud()?.uid !== account.uid) {
           return;
+        }
+        for (const attempt of attempts) {
+          this.created.add(attemptKey(session.id, attempt.index));
         }
         this.send(account, session.id, 'the session could not be indexed', (backend) =>
           backend.saveSessionIndex(cloudSession(session, account.uid), documents),
@@ -484,6 +530,12 @@ export class SessionIndexService {
    * session and page load, with why.
    */
   private failed(uid: string, sessionId: string, message: string): void {
+    // What of the session's attempts is in the index is not known any more.
+    for (const key of [...this.created]) {
+      if (key.startsWith(`${sessionId}/`)) {
+        this.created.delete(key);
+      }
+    }
     if (this.writtenSignal().has(sessionId)) {
       this.writtenSignal.update((written) => {
         const next = new Set(written);
@@ -580,6 +632,11 @@ export class SessionIndexService {
       return {};
     }
   }
+}
+
+/** An attempt's document, as `created` names it. */
+function attemptKey(sessionId: string, index: number): string {
+  return `${sessionId}/${String(index)}`;
 }
 
 function isKept(value: unknown): value is Record<string, AccountState> {

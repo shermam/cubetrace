@@ -3,7 +3,12 @@
 // API. This is the only file that imports Firebase, and only ACCOUNT_LOADER's dynamic import loads it,
 // so the SDK is a lazy chunk of its own, firebase-sdk-<hash>.js, which the service worker caches only
 // once it has been used (ngsw-config.json): a device that never signs in never downloads it.
-import { attemptDocumentId, type CloudAttempt, type CloudSession } from '@cubetrace/core';
+import {
+  attemptDocumentId,
+  type CloudAttempt,
+  type CloudAttemptFields,
+  type CloudSession,
+} from '@cubetrace/core';
 import { initializeApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
@@ -83,9 +88,9 @@ export function connectFirebase(): AccountBackend {
     saveSessionIndex: async (session, attempts = []) => {
       // The session first, then its attempts, which the rules accept only under a session of the same
       // owner: one batch, or batches in that order when a session has more than 499 attempts.
-      const writes: [DocumentReference, CloudSession | CloudAttempt][] = [
+      const writes: [DocumentReference, CloudSession | CloudAttempt | CloudAttemptFields][] = [
         [doc(firestore, 'sessions', session.id), session],
-        ...attempts.map((attempt): [DocumentReference, CloudAttempt] => [
+        ...attempts.map((attempt): [DocumentReference, CloudAttempt | CloudAttemptFields] => [
           attemptRef(firestore, attempt.session, attempt.index),
           attempt,
         ]),

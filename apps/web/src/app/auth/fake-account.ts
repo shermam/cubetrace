@@ -4,7 +4,9 @@
 import {
   attemptDocumentId,
   type CloudAttempt,
+  type CloudAttemptFields,
   type CloudSession,
+  type CloudUpload,
   type UserRecord,
 } from '@cubetrace/core';
 
@@ -78,6 +80,8 @@ export class FakeAccountBackend implements AccountBackend {
    * sessions/<id>/attempts/0001`; the documents of one batch in a row.
    */
   readonly indexWrites: string[] = [];
+  /** The attempts' writes that carried `upload` (which create the document), by path, in order. */
+  readonly uploadWrites: string[] = [];
   /** How many batches the writes came in (`saveSessionIndex` writes a session with its attempts). */
   batches = 0;
   /** The index's queries, in order: `sessions <uid> <limit>`, `session <id>`, `attempts <id> <uid>`. */
@@ -173,30 +177,54 @@ export class FakeAccountBackend implements AccountBackend {
     return Promise.resolve();
   }
 
-  saveSessionIndex(session: CloudSession, attempts: readonly CloudAttempt[] = []): Promise<void> {
+  saveSessionIndex(
+    session: CloudSession,
+    attempts: readonly (CloudAttempt | CloudAttemptFields)[] = [],
+  ): Promise<void> {
     this.batches++;
-    return this.write(() => {
-      this.put(session);
-      for (const attempt of attempts) {
-        this.putAttempt(attempt);
-      }
-    });
+    return this.write(
+      () => attempts.every((attempt) => this.allowed(attempt)),
+      () => {
+        this.put(session);
+        for (const attempt of attempts) {
+          this.putAttempt(attempt);
+        }
+      },
+    );
   }
 
-  saveAttemptIndex(attempt: CloudAttempt): Promise<void> {
+  saveAttemptIndex(attempt: CloudAttempt | CloudAttemptFields): Promise<void> {
     this.batches++;
-    return this.write(() => {
-      this.putAttempt(attempt);
-    });
+    return this.write(
+      () => this.allowed(attempt),
+      () => {
+        this.putAttempt(attempt);
+      },
+    );
+  }
+
+  /**
+   * What the upload's functions do to an attempt's `upload` (T3.2), through the Admin SDK, past the
+   * rules: `upload` replaced.
+   */
+  serverSetsUpload(sessionId: string, index: number, upload: CloudUpload): void {
+    const attempt = this.index.get(sessionId)?.attempts.get(attemptDocumentId(index));
+    if (attempt === undefined) {
+      throw new Error(`No attempt ${String(index)} of session ${sessionId} in the index.`);
+    }
+    attempt.upload = structuredClone(upload);
   }
 
   deleteAttemptIndex(sessionId: string, index: number): Promise<void> {
     this.batches++;
-    return this.write(() => {
-      const path = `sessions/${sessionId}/attempts/${attemptDocumentId(index)}`;
-      this.indexWrites.push(`delete ${path}`);
-      this.index.get(sessionId)?.attempts.delete(attemptDocumentId(index));
-    });
+    return this.write(
+      () => this.index.get(sessionId)?.attempts.has(attemptDocumentId(index)) === true,
+      () => {
+        const path = `sessions/${sessionId}/attempts/${attemptDocumentId(index)}`;
+        this.indexWrites.push(`delete ${path}`);
+        this.index.get(sessionId)?.attempts.delete(attemptDocumentId(index));
+      },
+    );
   }
 
   listSessions(uid: string, limit: number): Promise<CloudListing> {
@@ -255,11 +283,18 @@ export class FakeAccountBackend implements AccountBackend {
   }
 
   /**
-   * A write of the index, applied to the documents at once as Firestore applies it to its cache; it
-   * settles when the server would have it (at once online), and rejects with `indexError`.
+   * A write of the index (one batch), applied to the documents at once as Firestore applies it to its
+   * cache; it settles when the server would have it (at once online), and rejects with `indexError`,
+   * or as the rules refuse it when `allowed` says they would (`permission-denied`), applying nothing.
    */
-  private write(apply: () => void): Promise<void> {
-    const refused = this.indexError;
+  private write(allowed: () => boolean, apply: () => void): Promise<void> {
+    const refused =
+      this.indexError ??
+      (allowed()
+        ? null
+        : Object.assign(new Error('Missing or insufficient permissions.'), {
+            code: 'permission-denied',
+          }));
     if (refused === null) {
       apply();
     }
@@ -287,13 +322,32 @@ export class FakeAccountBackend implements AccountBackend {
     entry.session = merged(entry.session, structuredClone(session));
   }
 
-  private putAttempt(attempt: CloudAttempt): void {
+  /**
+   * Whether the rules take `attempt` (firebase/firestore.rules): a new document only with its
+   * `upload`, and an existing one's `upload` never changed by the app.
+   */
+  private allowed(attempt: CloudAttempt | CloudAttemptFields): boolean {
+    const stored = this.index.get(attempt.session)?.attempts.get(attemptDocumentId(attempt.index));
+    if (stored === undefined) {
+      return 'upload' in attempt;
+    }
+    return (
+      !('upload' in attempt) || JSON.stringify(attempt.upload) === JSON.stringify(stored.upload)
+    );
+  }
+
+  private putAttempt(attempt: CloudAttempt | CloudAttemptFields): void {
     const id = attemptDocumentId(attempt.index);
     const path = `sessions/${attempt.session}/attempts/${id}`;
     this.indexWrites.push(path);
+    if ('upload' in attempt) {
+      this.uploadWrites.push(path);
+    }
     this.markUnsent(path);
     const attempts = this.entry(attempt.session).attempts;
-    attempts.set(id, merged(attempts.get(id) ?? null, structuredClone(attempt)));
+    const stored = attempts.get(id) ?? null;
+    // Only a new document comes without its stored upload, and the rules take it only with one.
+    attempts.set(id, merged(stored, structuredClone(attempt)) as CloudAttempt);
   }
 
   private entry(sessionId: string): IndexedSession {

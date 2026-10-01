@@ -199,7 +199,7 @@
       }
     },
     "upload": {
-      "description": "The state of the attempt's upload (docs/PLAN.md T3.3): what the index writes is pending, with the files of the attempt's folder and their sizes on the device that recorded it.",
+      "description": "The state of the attempt's upload (docs/PLAN.md T3.2, T3.3): the app writes it with the document, pending, with the files of the attempt's folder it has then and their sizes on the device that recorded it; from then on only the upload's functions write it.",
       "type": "object",
       "additionalProperties": false,
       "required": ["state", "files"],
@@ -209,10 +209,10 @@
           "enum": ["pending", "uploading", "done", "failed"]
         },
         "files": {
-          "description": "The files of the attempt's folder (docs/DATA-MODEL.md §5), by name: attempt.json, and each clip's <camera>.<segment>.mp4 and <camera>.<segment>.frames.json.",
+          "description": "The files of the attempt's folder (docs/DATA-MODEL.md §5), by name: attempt.json, and each clip's <camera>.<segment>.mp4 and <camera>.<segment>.frames.json; and session.json, the session's file, on the attempt it was uploaded with (T3.2).",
           "type": "object",
           "propertyNames": {
-            "pattern": "^(attempt\\.json|[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.(mp4|frames\\.json))$"
+            "pattern": "^(attempt\\.json|session\\.json|[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.(mp4|frames\\.json))$"
           },
           "additionalProperties": {
             "$ref": "#/$defs/uploadFile"
