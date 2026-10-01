@@ -60,8 +60,8 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=$key" >> "$GITHUB_ENV"
 
       # `npm run firebase` is npx with the pinned firebase-tools (package.json).
-      - name: Deploy the rules and the functions
-        run: npm run firebase -- deploy --only firestore:rules,functions --project cubetrace-cacd9 --non-interactive
+      - name: Deploy the rules, the indexes and the functions
+        run: npm run firebase -- deploy --only firestore:rules,firestore:indexes,functions --project cubetrace-cacd9 --non-interactive
 
       - name: Remove the key
         if: always()
