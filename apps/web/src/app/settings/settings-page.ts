@@ -1,5 +1,6 @@
 import { Component, type ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 
+import { AccountControl } from '../auth/account-control';
 import { videoQualityOptions } from '../camera/video-quality';
 import { type StoragePersistence, StorageService } from '../device/storage-service';
 import { WAKE_LOCK_TEXT, WakeLockService } from '../device/wake-lock-service';
@@ -30,10 +31,12 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
  * cube connection use (T1.6a): the host label, the cubes' MAC addresses, the idle disconnection
  * (T1.14), inspection, auto-advance, the scramble over the picture on a phone (T2.13), the camera's
  * resolution, frame rate and sharpness threshold (T2.1), Record audio (T2.4), the microphone, raw or
- * voice (T2.12), the video quality (T2.10) and the demo speed, all kept by `SettingsService`.
+ * voice (T2.12), the video quality (T2.10) and the demo speed, all kept by `SettingsService`; last,
+ * the account (T3.0), kept by `AuthService`.
  */
 @Component({
   selector: 'app-settings-page',
+  imports: [AccountControl],
   templateUrl: './settings-page.html',
   styleUrl: './settings-page.scss',
 })

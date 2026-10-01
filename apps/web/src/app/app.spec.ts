@@ -9,6 +9,8 @@ import { provideRouter } from '@angular/router';
 import { APP_BUILD } from '../environments/version';
 import { App } from './app';
 import { routes } from './app.routes';
+import { ACCOUNT_LOADER } from './auth/account-backend';
+import { FakeAccountBackend } from './auth/fake-account';
 import { BROWSER_GLOBALS, type BrowserGlobals } from './device/browser-globals';
 import {
   FakeLocalStorage,
@@ -115,6 +117,28 @@ describe('App', () => {
     await fixture.whenStable();
     expect(query(fixture, 'dialog')?.hasAttribute('open')).toBe(true);
     expect(query(fixture, 'dialog')?.dataset['reason']).toBe('support');
+  });
+
+  it('shows Sign in in the header, which loads the account only when clicked, then the account', async () => {
+    const backend = new FakeAccountBackend();
+    TestBed.overrideProvider(ACCOUNT_LOADER, { useValue: backend.loader });
+    const fixture = await render(chrome());
+    // The account's control comes with the cube's pill, right after the first render.
+    await settle();
+    await fixture.whenStable();
+
+    const signIn = query(fixture, '.status [data-testid="sign-in"]');
+    expect(signIn?.getAttribute('aria-label')).toBe('Sign in');
+    expect(backend.loads).toBe(0);
+
+    signIn?.click();
+    await settle();
+    await fixture.whenStable();
+    expect(backend.loads).toBe(1);
+    expect(query(fixture, '.status [data-testid="sign-in"]')).toBeNull();
+    expect(query(fixture, '.status [data-testid="account"]')?.getAttribute('aria-label')).toBe(
+      'Account: Ada Lovelace',
+    );
   });
 
   it("the pill's placeholder says the same, and the pill acts on a click made on it", async () => {
