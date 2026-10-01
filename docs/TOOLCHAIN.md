@@ -1400,7 +1400,14 @@ the queries (`getDocs` of `where('owner', '==', uid)`, the sessions by `createdM
 query's `fromCache`. The unit tests' fake (`fake-account.ts`) keeps an index in memory that merges
 writes as Firestore's `set` with `merge` does and can go offline (writes applied at once, confirmed
 on `goOnline()`); the end-to-end fake (`e2e/helpers/account.ts`) keeps one in `localStorage`, which a
-test seeds with another device's session.
+test seeds with another device's session. `cloud.spec.ts` checks with it, on the dev server, that a
+demo session signed in stays on the device ("this device") beside the seeded session ("cloud", whose
+page is read-only, and the device filter), that the same session marked as a real cube's in its
+`session.json` is written by the next start's catch-up (its documents valid against the cloud
+schemas, no moves) and then shows "both", that the QA view counts both devices' attempts by day, and
+that signed out the Sessions page has no badge, filter or QA link and Firebase never loads. The fake
+cube is always simulated, so the live writes of a real cube's session are the unit tests' and the
+owner's (`docs/MANUAL-TESTS.md`, T3.1).
 
 **A composite index for the sessions query.** Firestore serves an equality on `owner` with an order on
 `createdMs` only from a composite index: `firebase/firestore.indexes.json`, named in `firebase.json`.
