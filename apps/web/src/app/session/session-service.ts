@@ -753,6 +753,8 @@ export class SessionService {
    * there (deleted, or begun again with its index) or its session cannot be read.
    */
   async markClipsGone(ref: AttemptRef, files: readonly string[]): Promise<boolean> {
+    // The current session's attempts are the timer's once they are read from the store.
+    await this.whenReady();
     const gone = (record: AttemptRecord): AttemptRecord => ({
       ...record,
       video: record.video.map((clip) =>

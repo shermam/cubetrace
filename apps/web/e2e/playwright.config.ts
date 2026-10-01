@@ -11,7 +11,7 @@ const inCi = Boolean(process.env['CI']);
 // and hold back the demo cube's timers, which recording.spec.ts and capture.spec.ts measure (lost
 // frames, the timing with the camera on and off). The other specs run beside them.
 const encoding =
-  /\/(capture|microphone|recording|session-clips|sync-check|video-quality)\.spec\.ts$/;
+  /\/(capture|microphone|recording|session-clips|sync-check|uploads|video-quality)\.spec\.ts$/;
 
 export default defineConfig({
   testDir: '.',

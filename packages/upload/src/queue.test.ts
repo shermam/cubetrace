@@ -511,7 +511,10 @@ describe('UploadQueue', () => {
     const calls = d.cloud.calls.length;
     await reloaded.start();
     await flush();
+    // The index is asked first (the attempt is not all done in uploads.json): it has nothing
+    // confirmed of what remains, so the two files being sent are confirmed first.
     expect(d.cloud.calls.slice(calls)).toEqual([
+      `uploads ${A}`,
       `confirm ${A}/1 laptop.scramble.frames.json`,
       `confirm ${A}/1 laptop.solve.mp4`,
       `sign ${A}/1 laptop.solve.mp4,laptop.solve.frames.json,session.json`,
@@ -519,13 +522,63 @@ describe('UploadQueue', () => {
       expect.stringMatching(/^confirm /),
       expect.stringMatching(/^confirm /),
     ]);
-    expect(next.http.puts.map((put) => put.key.split('/').at(-1))).toEqual([
-      'laptop.solve.mp4',
+    expect(putNames(next)).toEqual([
       'laptop.solve.frames.json',
+      'laptop.solve.mp4',
       'session.json',
     ]);
     expect(reloaded.view().counts.done).toBe(1);
     await reloaded.stop();
+  });
+
+  it('after a reload that came before uploads.json was written, sends nothing the index says the bucket has', async () => {
+    const d = device();
+    await oneAttempt(d);
+    const queue = queueOf(d);
+    await queue.start();
+    await flush();
+    expect(queue.view().counts.done).toBe(1);
+    // The page went before its last changes reached uploads.json: there, the frames file and
+    // session.json are still pending, and the clip being sent.
+    await queue.flush();
+    const state = JSON.parse(fileText(d, 'uploads.json') ?? '{}') as {
+      accounts: Record<
+        string,
+        { sessions: Record<string, { sessionJson: unknown; attempts: Record<string, unknown> }> }
+      >;
+    };
+    const session = state.accounts[UID].sessions[A];
+    session.sessionJson = null;
+    const files = (session.attempts['0001'] as { files: Record<string, { state: string }> }).files;
+    files['laptop.solve.frames.json'].state = 'pending';
+    files['laptop.solve.mp4'].state = 'uploading';
+    files['session.json'].state = 'pending';
+    await d.root.plant('uploads.json', JSON.stringify(state));
+
+    const next = { ...d, http: new FakeUploadHttp(d.bucket, () => d.env.now()) };
+    const calls = d.cloud.calls.length;
+    const reloaded = queueOf(next);
+    await reloaded.start();
+    await flush();
+    expect(d.cloud.calls.slice(calls)).toEqual([`uploads ${A}`]);
+    expect(next.http.puts).toEqual([]);
+    expect(reloaded.view().counts).toMatchObject({ done: 1, pending: 0, uploading: 0 });
+    // Written again, it says so.
+    await reloaded.flush();
+    expect(stateOf(d)?.sessions[A].sessionJson).not.toBeNull();
+    await reloaded.stop();
+  });
+
+  it('writes uploads.json at once when asked (the page going away), else soon after a change', async () => {
+    const d = device();
+    await oneAttempt(d);
+    const queue = queueOf(d);
+    await queue.start();
+    await flush();
+    expect(fileText(d, 'uploads.json')).toBeNull();
+    await queue.flush();
+    expect(stateOf(d)?.sessions[A].attempts['0001'].files['attempt.json'].state).toBe('done');
+    await queue.stop();
   });
 
   it('takes as done what the index says the bucket has, when uploads.json does not know it', async () => {

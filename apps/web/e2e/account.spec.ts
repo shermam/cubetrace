@@ -41,7 +41,7 @@ test.describe('on the dev server, with a fake of Firebase', () => {
       accountSection(page).getByRole('button', { name: 'Sign in with Google' }),
     ).toBeVisible();
     await expect(accountSection(page).getByTestId('account-hint')).toContainText(
-      'nothing is uploaded yet',
+      'Their files are uploaded as Uploads, below, says.',
     );
     expect((await fakeAccountState(page)).loads).toBe(0);
   });

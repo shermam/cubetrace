@@ -19,8 +19,10 @@
 //   with "Wi-Fi only", nothing is sent.
 // - The state is uploads.json (state.ts), so that a reload resumes: what is done stays done, a file
 //   that was being sent is confirmed first (its PUT may have finished) and sent again otherwise.
-//   Rebuilt without it (another device, or the file lost), the index's `upload` of each attempt says
-//   what the bucket has (`doneMs` and the same size).
+//   For an attempt it does not know, or not as all done (a reload right after a file was confirmed,
+//   before uploads.json was written), the index's `upload` says what the bucket has (`doneMs` and
+//   the same size): a device that uploaded before, or another that rebuilt its file, sends nothing
+//   twice.
 // - Once uploaded, clips are deleted from the device by policy: all of an attempt's once it is all
 //   uploaded, without "Keep local copies"; in any case, from 70% of the storage quota, the oldest
 //   uploaded ones first, down to 60%. The attempt's record then says so (`video[].local` false); its
@@ -101,8 +103,11 @@ export const STORAGE_DELETE_TO = 0.6;
 /** The device's sessions are read again this often, for what another tab recorded. */
 export const RESCAN_MS = 10 * 60 * 1000;
 
-/** uploads.json is written at most this long after a change. */
-export const STATE_WRITE_DELAY_MS = 1000;
+/**
+ * uploads.json is written this long after a change, the changes meanwhile with it (and at once by
+ * `flush()`): soon, since a page that goes away takes the write under way with it.
+ */
+export const STATE_WRITE_DELAY_MS = 100;
 
 /** Progress is told at most this often. */
 export const PROGRESS_INTERVAL_MS = 200;
@@ -404,6 +409,18 @@ export class UploadQueue {
     this.#releaseLock?.();
     this.#releaseLock = null;
     this.#notify();
+  }
+
+  /**
+   * Writes uploads.json now, if it changed (the page is going away: `pagehide`). Resolves once it is
+   * written, or failed.
+   */
+  flush(): Promise<void> {
+    if (this.#writeTimer !== null) {
+      this.#env.clearTimeout(this.#writeTimer);
+      this.#writeTimer = null;
+    }
+    return this.#flush();
   }
 
   /** Follows new settings: "Wi-Fi only" now, and "Keep local copies" for every attempt done. */
@@ -786,10 +803,18 @@ export class UploadQueue {
       return;
     }
     let cloud: ReadonlyMap<number, CloudUpload> | null = null;
-    const unknown = loaded.attempts.some(
-      (attempt) => !(attemptDocumentId(attempt.index) in session.stored.attempts),
-    );
-    if (unknown) {
+    // What the index says is asked for the attempts uploads.json does not know as all done.
+    const unsure = loaded.attempts.some((attempt) => {
+      const known = session.stored.attempts[attemptDocumentId(attempt.index)] as
+        StoredAttempt | undefined;
+      return (
+        known === undefined ||
+        Object.values(known.files).some(
+          (file) => file.state === 'pending' || file.state === 'uploading',
+        )
+      );
+    });
+    if (unsure) {
       try {
         cloud = await this.#cloud.uploadsOf(sessionId);
       } catch {
@@ -893,14 +918,30 @@ export class UploadQueue {
       if (entry === null) {
         continue;
       }
+      if (task?.active !== true && (entry.state === 'pending' || entry.state === 'uploading')) {
+        // Confirmed already, as far as the index says (uploads.json did not have it yet).
+        entry = fromCloud(cloud, path, entry.bytes, entry.hash) ?? entry;
+      }
       files[path] = entry;
       tasks.push(this.#keepTask(task, path, entry));
     }
     // session.json rides along as #planRider says; it is the session's, not the record's.
-    const rider = stored.files[SESSION_JSON] as StoredFile | undefined;
+    let rider = stored.files[SESSION_JSON] as StoredFile | undefined;
     if (rider !== undefined) {
-      files[SESSION_JSON] = rider;
       const task = attempt.files.find((file) => file.path === SESSION_JSON);
+      if (
+        task?.active !== true &&
+        (rider.state === 'pending' || rider.state === 'uploading') &&
+        rider.hash !== undefined &&
+        rider.hash === session.hash
+      ) {
+        const confirmed = fromCloud(cloud, SESSION_JSON, rider.bytes, rider.hash);
+        if (confirmed !== null) {
+          rider = confirmed;
+          session.stored.sessionJson = { hash: rider.hash ?? '', bytes: rider.bytes };
+        }
+      }
+      files[SESSION_JSON] = rider;
       tasks.push(this.#keepTask(task, SESSION_JSON, rider));
     }
     for (const task of attempt.files) {

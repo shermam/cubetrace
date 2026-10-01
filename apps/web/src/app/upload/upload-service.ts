@@ -35,6 +35,7 @@ export type QueueHandle = Pick<
   UploadQueue,
   | 'start'
   | 'stop'
+  | 'flush'
   | 'setPolicy'
   | 'sessionSaved'
   | 'attemptSaved'
@@ -169,8 +170,14 @@ export class UploadService {
     const subscription = inject(SessionChanges).changes$.subscribe((change) => {
       this.forward(change);
     });
+    // The page is going away: the queue's state is written now rather than in a moment.
+    const pagehide = (): void => {
+      void this.running?.queue.flush();
+    };
+    this.globals.addEventListener?.('pagehide', pagehide);
     inject(DestroyRef).onDestroy(() => {
       subscription.unsubscribe();
+      this.globals.removeEventListener?.('pagehide', pagehide);
       this.follow(null);
     });
     effect(() => {
