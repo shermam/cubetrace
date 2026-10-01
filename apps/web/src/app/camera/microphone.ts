@@ -4,9 +4,9 @@ import type { MicrophoneInfo, MicrophoneProcessing } from '@cubetrace/core';
 // applied (the session's `cameras[].microphone`, docs/DATA-MODEL.md §6), and how the Recording part
 // of Camera settings says it. Asked for with `{audio: true}`, Chrome applies its voice processing
 // (echo cancellation, noise suppression, automatic gain control; on Android the platform's voice
-// pipeline too), which takes a turn's click for noise: the owner's ThinkPhone clips had a TV's voices
-// and none of the cube's sounds (docs/DEVICES.md, "Audio"). For the dataset the clicks are signal,
-// since each turn clicks, so the microphone is recorded raw unless Settings say Voice.
+// pipeline too), which takes a turn's click for noise: the owner's ThinkPhone clips had a TV's
+// voices and none of the cube's sounds (docs/DEVICES.md, "Audio"). For the dataset the clicks are
+// signal, since each turn clicks, so the microphone is recorded raw unless Settings say Voice.
 
 /** `MediaTrackConstraints` with `voiceIsolation`, a newer constraint TypeScript's DOM lib lacks. */
 export interface MicrophoneConstraints extends MediaTrackConstraints {
@@ -24,14 +24,14 @@ export interface MicrophoneTrack {
   getSettings(): MicrophoneSettings;
 }
 
-/** The microphone with the browser's defaults: the request when Voice is asked, and the fallback. */
+/** The microphone with the browser's defaults: the request for Voice, and the fallback. */
 export const DEFAULT_MICROPHONE: MediaStreamConstraints = { audio: true };
 
 /**
  * What `getUserMedia` is asked for to open the microphone as `processing` says. Raw: every voice
  * processing off, and one channel at 48 kHz as ideals, so that a device without them still opens
- * (Chromium's fake microphone, raw, gives two channels at 44.1 kHz: docs/TOOLCHAIN.md); booleans and
- * ideals never fail a request. Voice: the browser's defaults.
+ * (Chromium's fake microphone, raw, gives two channels at 44.1 kHz: docs/TOOLCHAIN.md); booleans
+ * and ideals never fail a request. Voice: the browser's defaults.
  */
 export function microphoneConstraints(processing: MicrophoneProcessing): MediaStreamConstraints {
   if (processing === 'voice') {
@@ -105,8 +105,8 @@ export function microphoneText(info: MicrophoneInfo): string {
 }
 
 /**
- * The notice when the browser kept some of its voice processing on although Raw was asked for, which
- * the recording notes once in the session; null otherwise.
+ * The notice when the browser kept some of its voice processing on although Raw was asked for,
+ * which the recording notes once in the session; null otherwise.
  */
 export function processingNotice(info: MicrophoneInfo): string | null {
   const kept = processingKept(info);

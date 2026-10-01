@@ -597,8 +597,8 @@ export class FakeAudioTrack extends EventTarget implements MediaStreamTrack {
 
 /**
  * What the fake microphone says it applies for the audio request `audio`, as Chrome does (T2.12):
- * each voice processing as the request's boolean asks, else on (voice isolation off), one channel at
- * 48 kHz, on the default device.
+ * each voice processing as the request's boolean asks, else on (voice isolation off), one channel
+ * at 48 kHz, on the default device.
  */
 function microphoneSettingsFor(
   audio: boolean | MediaTrackConstraints | undefined,
@@ -684,8 +684,9 @@ export function mediaError(name: string, message = '', constraint?: string): DOM
  * deviceId) or the first, refusing `frameRate: {exact}` above the camera's rate (an
  * OverconstrainedError on frameRate). `hold` makes it wait (a permission prompt) until `release()`.
  * An audio-only request (the recording's microphone) opens the microphone, whose track says it
- * applies what the request asks for (`microphoneSettingsFor`) with `microphoneSettings` over it, or
- * fails with the errors queued in `microphoneFailures`, or as without one when `microphone` is false.
+ * applies what the request asks for (`microphoneSettingsFor`) with `microphoneSettings` over it,
+ * or fails with the errors queued in `microphoneFailures`, or as without one when `microphone` is
+ * false.
  */
 export class FakeMediaDevices extends EventTarget implements MediaDevices {
   ondevicechange: MediaDevices['ondevicechange'] = null;

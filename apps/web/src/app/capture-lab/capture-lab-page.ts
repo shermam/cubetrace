@@ -310,7 +310,7 @@ export class CaptureLabPage {
           height: { ideal: 1080 },
           frameRate: { ideal: 60 },
         },
-        // As the recording opens it by default (T2.12): raw, without the browser's voice processing.
+        // As the recording opens it by default (T2.12): raw, the browser's voice processing off.
         audio: this.audio() && (microphoneConstraints('raw').audio ?? true),
       });
       this.stream = stream;

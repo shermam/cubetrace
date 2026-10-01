@@ -10,8 +10,8 @@ import { demoPath, expectSolves } from './helpers/timer';
 // getSettings()); Voice, chosen in Camera settings, starts the recording again with the browser's
 // defaults, and stays across a reload. Chromium's fake microphone reports every processing as asked
 // for: off raw (at 44.1 kHz and two channels, its own format, which the ideals of one channel at
-// 48 kHz do not change), on with the defaults (48 kHz, one channel). It starts the encoder, hence the
-// `encoding` project. Launch options force a browser of their own for this file.
+// 48 kHz do not change), on with the defaults (48 kHz, one channel). It starts the encoder, hence
+// the `encoding` project. Launch options force a browser of their own for this file.
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],

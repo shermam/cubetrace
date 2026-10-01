@@ -168,8 +168,8 @@ interface OpenMicrophone {
  * with its microphone and what the browser applied to it (`microphone`, T2.12; a notice says when
  * the browser kept its voice processing on although Raw was asked for). A clip that fails is said
  * once (`failure`, the console) and noted in the session's `notes`; the attempt is untouched. A
- * clip of an attempt that went meanwhile (a reset, Delete last) is removed again. Stopping saves the
- * clips still waiting for their time at once, with what the buffer has.
+ * clip of an attempt that went meanwhile (a reset, Delete last) is removed again. Stopping saves
+ * the clips still waiting for their time at once, with what the buffer has.
  */
 @Injectable({ providedIn: 'root' })
 export class RecordingService {
@@ -218,8 +218,9 @@ export class RecordingService {
   readonly savingClips = this.savingSignal.asReadonly();
   /**
    * The microphone of the recording (T2.12): how it was asked for and what the browser says it
-   * applied, from the last start of the pipeline; null when that recording has no microphone (Record
-   * audio off, the microphone refused). The session's camera entry holds it as its `microphone`.
+   * applied, from the last start of the pipeline; null when that recording has no microphone
+   * (Record audio off, the microphone refused). The session's camera entry holds it as its
+   * `microphone`.
    */
   readonly microphone = this.microphoneSignal.asReadonly();
   /** The origin's storage: usage, quota and the share in use; null until read. */
