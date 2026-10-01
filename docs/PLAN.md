@@ -1337,7 +1337,7 @@ marks the attempt `upload.state = 'done'`. `bucket/cors.json` for R2 (PUT and GE
 `https://shermam.github.io` and `http://localhost:4200`); a `functions/README.md` for deploying; the
 coordinator deploys first with the session key, the workflow thereafter.
 
-**Outcome (2026-10-01, PR #NN).** `functions/` is a workspace (ES modules, Node 22): firebase-functions
+**Outcome (2026-10-01, PR #44).** `functions/` is a workspace (ES modules, Node 22): firebase-functions
 7.4, firebase-admin 14.5, `@google-cloud/storage` 8.2, the AWS SDK 3.1145, pinned exactly because Cloud
 Build installs `functions/package.json` without the lockfile. The API as written, plus: the attempt's
 document id, and the `{index}` of its objects, is its folder's name (`0001`), which T3.1 must use;
