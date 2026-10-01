@@ -19,6 +19,7 @@ export {
   attemptFolder,
   describeProblem,
   isTemporaryOf,
+  recordJson,
   temporaryName,
 } from './opfs-session-store';
 export type { FakeOpfsOptions } from './fake-opfs';

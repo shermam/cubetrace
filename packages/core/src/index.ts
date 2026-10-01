@@ -83,6 +83,8 @@ export type { JsonSchema } from './schemas';
 export {
   ATTEMPT_SCHEMA,
   ATTEMPT_SCHEMA_V1,
+  CLOUD_ATTEMPT_SCHEMA,
+  CLOUD_SESSION_SCHEMA,
   FRAMES_SCHEMA,
   SESSION_SCHEMA,
   SESSION_SCHEMA_V1,
@@ -90,7 +92,32 @@ export {
 } from './schemas';
 // T2.0 — reading records of schema versions 1 and 2
 export type { RecordFile } from './records';
-export { RecordError, parseAttempt, parseSession } from './records';
+export {
+  RecordError,
+  parseAttempt,
+  parseCloudAttempt,
+  parseCloudSession,
+  parseSession,
+} from './records';
 // T3.0 — the account's record in Firestore
 export type { UserRecord, UserRecordInput } from './user';
 export { userRecord } from './user';
+// T3.1 — the session index in Firestore
+export type {
+  CloudAttempt,
+  CloudDevice,
+  CloudSession,
+  CloudUpload,
+  CloudUploadFile,
+  CloudUploadState,
+} from './cloud';
+export {
+  CLOUD_UPLOAD_STATES,
+  attemptDocumentId,
+  attemptFiles,
+  cloudAttempt,
+  cloudSession,
+  isSimulated,
+  pendingUpload,
+  sessionOfDocument,
+} from './cloud';

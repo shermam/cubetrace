@@ -1,12 +1,14 @@
 // The JSON Schemas (draft 2020-12) of the records (docs/DATA-MODEL.md §6, §7, §9 and §10):
 // session.json and attempt.json in schema version 2, which the app writes, and in version 1, which it
-// still reads, the frames files of the video clips, and users/{uid}, the account's record in
-// Firestore. They live as JSON files in packages/core/schema/, imported here as JSON modules
-// (TypeScript resolves them with the base tsconfig's `moduleResolution: bundler`; the bundlers inline
-// them). The app itself reads records with records.ts, which checks the same rules without a
-// validator.
+// still reads, the frames files of the video clips, users/{uid}, the account's record in Firestore,
+// and the documents of the session index there (T3.1). They live as JSON files in
+// packages/core/schema/, imported here as JSON modules (TypeScript resolves them with the base
+// tsconfig's `moduleResolution: bundler`; the bundlers inline them). The app itself reads records
+// with records.ts, which checks the same rules without a validator.
 import attemptSchemaV1 from '../schema/attempt.v1.schema.json';
 import attemptSchema from '../schema/attempt.schema.json';
+import cloudAttemptSchema from '../schema/cloud-attempt.schema.json';
+import cloudSessionSchema from '../schema/cloud-session.schema.json';
 import framesSchema from '../schema/frames.schema.json';
 import sessionSchemaV1 from '../schema/session.v1.schema.json';
 import sessionSchema from '../schema/session.schema.json';
@@ -38,3 +40,15 @@ export const FRAMES_SCHEMA: JsonSchema = framesSchema;
 
 /** The schema of users/{uid} in Firestore, the account's record (schema version 1, §10). */
 export const USER_SCHEMA: JsonSchema = userSchema;
+
+/**
+ * The schema of `sessions/{id}` in Firestore, a session's document in the session index (schema
+ * version 2, §10): session.json with its owner.
+ */
+export const CLOUD_SESSION_SCHEMA: JsonSchema = cloudSessionSchema;
+
+/**
+ * The schema of `sessions/{id}/attempts/{index}` in Firestore, an attempt's document in the session
+ * index (schema version 2, §10): attempt.json without its moves, with its owner, device and upload.
+ */
+export const CLOUD_ATTEMPT_SCHEMA: JsonSchema = cloudAttemptSchema;

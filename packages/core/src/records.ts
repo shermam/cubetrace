@@ -3,7 +3,8 @@
 // (packages/core/schema/) and comes back as a version 2 record, a new object that shares nothing
 // with its input. The checks are written out here instead of being run by a JSON Schema validator,
 // so that the app reads its files without one in its bundle; records.test.ts holds them to the
-// schemas with ajv, field by field.
+// schemas with ajv, field by field. Since T3.1 they also read the documents of the session index in
+// Firestore (docs/DATA-MODEL.md §10), which are of version 2 only (cloud.test.ts holds them to theirs).
 import type {
   AttemptEvents,
   AttemptMove,
@@ -14,6 +15,14 @@ import type {
   VideoClip,
 } from './attempt';
 import type { CubeClockParams } from './clock';
+import type {
+  CloudAttempt,
+  CloudDevice,
+  CloudSession,
+  CloudUpload,
+  CloudUploadFile,
+} from './cloud';
+import { CLOUD_UPLOAD_STATES } from './cloud';
 import type { Face } from './notation';
 import type { PhaseName } from './phases';
 import { PHASE_NAMES } from './phases';
@@ -32,8 +41,12 @@ import type {
 } from './session';
 import { UUID_V4 } from './session';
 
-/** The files the readers read. */
-export type RecordFile = 'session.json' | 'attempt.json';
+/**
+ * The files the readers read, and the documents of the session index in Firestore (T3.1), named by
+ * their paths.
+ */
+export type RecordFile =
+  'session.json' | 'attempt.json' | 'sessions/{id}' | 'sessions/{id}/attempts/{index}';
 
 /**
  * What {@link parseSession} and {@link parseAttempt} throw for a record they do not accept. The
@@ -86,6 +99,24 @@ export function parseSession(json: unknown): SessionRecord {
   });
 }
 
+/**
+ * A session's document in the session index (`sessions/{id}`, docs/DATA-MODEL.md §10): session.json of
+ * schema version 2 with its `owner`. Throws a {@link RecordError} naming the field on anything else,
+ * such as a document of another version, written by another version of the app.
+ */
+export function parseCloudSession(json: unknown): CloudSession {
+  return parseDocument('sessions/{id}', json, CLOUD_SESSION);
+}
+
+/**
+ * An attempt's document in the session index (`sessions/{id}/attempts/{index}`, docs/DATA-MODEL.md
+ * §10): attempt.json of schema version 2 without `moves`, with its `owner`, `device` and `upload`.
+ * Throws a {@link RecordError} naming the field on anything else.
+ */
+export function parseCloudAttempt(json: unknown): CloudAttempt {
+  return parseDocument('sessions/{id}/attempts/{index}', json, CLOUD_ATTEMPT);
+}
+
 function parse<T>(
   file: RecordFile,
   json: unknown,
@@ -100,6 +131,25 @@ function parse<T>(
   }
   try {
     return readers[version](json);
+  } catch (error: unknown) {
+    if (error instanceof Invalid) {
+      throw new RecordError(file, version, error.field, error.problem);
+    }
+    throw error;
+  }
+}
+
+/** A document of the session index: schema version 2 only, as no other was ever written. */
+function parseDocument<T>(file: RecordFile, json: unknown, reader: Reader<T>): T {
+  if (!isObject(json)) {
+    throw new RecordError(file, null, '', `must be an object, got ${show(json)}`);
+  }
+  const version = json['schema'];
+  if (version !== 2) {
+    throw new RecordError(file, null, 'schema', `must be 2, got ${show(version)}`);
+  }
+  try {
+    return reader.read(json, '');
   } catch (error: unknown) {
     if (error instanceof Invalid) {
       throw new RecordError(file, version, error.field, error.problem);
@@ -388,6 +438,11 @@ function object<T>(fields: Fields<T>): Reader<T> {
 
 /** An object whose keys are camera labels, each holding an `item`. */
 function byLabel<T>(item: Reader<T>): Reader<Record<string, T>> {
+  return byKey(label, item);
+}
+
+/** An object whose keys are what `key` accepts (a string with a pattern), each holding an `item`. */
+function byKey<T>(key: Reader<string>, item: Reader<T>): Reader<Record<string, T>> {
   return {
     what: 'an object',
     read: (value, at) => {
@@ -395,11 +450,16 @@ function byLabel<T>(item: Reader<T>): Reader<Record<string, T>> {
         return fail(at, `must be an object, got ${show(value)}`);
       }
       return Object.fromEntries(
-        Object.keys(value).map((key) => {
-          if (!LABEL.test(key)) {
-            fail(join(at, key), `is not ${label.what}`);
+        Object.keys(value).map((name) => {
+          try {
+            key.read(name, join(at, name));
+          } catch (error: unknown) {
+            if (error instanceof Invalid) {
+              fail(join(at, name), `is not ${key.what}`);
+            }
+            throw error;
           }
-          return [key, item.read(value[key], join(at, key))];
+          return [name, item.read(value[name], join(at, name))];
         }),
       );
     },
@@ -519,16 +579,18 @@ const clip = object<VideoClip>({
   truncatedStart: defaulted(bool, false),
 });
 
-/** The fields both versions share, in the order of the schemas. */
-const attemptStart = {
+/** The fields both versions share up to the moves, in the order of the schemas. */
+const attemptHead = {
   session: uuid,
   index: int(1),
   scramble: text('face turns separated by single spaces', /^[UDRLFB][2']?( [UDRLFB][2']?)*$/u),
   scrambledFacelets: text('54 facelets, each one of U R F D L B', /^[URFDLB]{54}$/u),
   crossFace: oneOf<(Face | null)[]>('U', 'R', 'F', 'D', 'L', 'B', null),
   events,
-  moves: list(move),
 };
+
+/** The fields both versions share, in the order of the schemas. */
+const attemptStart = { ...attemptHead, moves: list(move) };
 
 const attemptEnd = { result, phases: list(phase, { max: 8 }) };
 
@@ -618,4 +680,38 @@ const SESSION_V2 = object<SessionRecord>({
   cameras: list(camera),
   clock: object<SessionRecord['clock']>({ cube: clockFit(0), cameras: byLabel(cameraClock) }),
   ...sessionEnd,
+});
+
+// ---- The session index in Firestore (docs/DATA-MODEL.md §10) ----
+
+/** A Firebase Authentication uid. */
+const owner = nonEmpty;
+
+const CLOUD_SESSION = object<CloudSession>({
+  schema: oneOf(2),
+  ...sessionStart,
+  cameras: list(camera),
+  clock: object<SessionRecord['clock']>({ cube: clockFit(0), cameras: byLabel(cameraClock) }),
+  ...sessionEnd,
+  owner,
+});
+
+/** The name of a file of an attempt's folder (docs/DATA-MODEL.md §5). */
+const attemptFile = text(
+  'attempt.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json',
+  /^(attempt\.json|[a-z0-9]+(-[a-z0-9]+)*\.(scramble|solve)\.(mp4|frames\.json))$/u,
+);
+
+const CLOUD_ATTEMPT = object<CloudAttempt>({
+  schema: oneOf(2),
+  ...attemptHead,
+  clock: nullable(clockFit(2)),
+  ...attemptEnd,
+  video: list(clip),
+  owner,
+  device: object<CloudDevice>({ host: text(), cameras: list(label) }),
+  upload: object<CloudUpload>({
+    state: oneOf(...CLOUD_UPLOAD_STATES),
+    files: byKey(attemptFile, object<CloudUploadFile>({ bytes: int(1), doneMs: nullable(num()) })),
+  }),
 });
