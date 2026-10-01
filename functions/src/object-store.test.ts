@@ -5,12 +5,9 @@ import type { AddressInfo } from 'node:net';
 import { Storage } from '@google-cloud/storage';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import {
-  gcsObjectStore,
-  r2Client,
-  r2ObjectStore,
-  unconfiguredObjectStore,
-} from './object-store.js';
+import { gcsObjectStore } from './gcs.js';
+import { toSize, unconfiguredObjectStore } from './object-store.js';
+import { r2Client, r2ObjectStore } from './r2.js';
 
 // The two buckets' adapters with made-up credentials: the URLs they sign, checked against the
 // signature schemes themselves (the canonical request rebuilt from the URL and the headers returned),
@@ -221,6 +218,16 @@ describe('the size of an object', () => {
     await expect(store.sizeOf(key.replace('laptop', 'phone'))).resolves.toBeNull();
     await expect(store.sizeOf('users/alice/forbidden.json')).rejects.toThrow();
     expect(requests).toContain(`HEAD /cubetrace/${key}`);
+  });
+});
+
+describe('a size as a provider reports it', () => {
+  it('is a whole number of bytes, in a number or in decimal text', () => {
+    expect(toSize(1234)).toBe(1234);
+    expect(toSize('23734012')).toBe(23_734_012);
+    for (const odd of [undefined, null, -1, 1.5, '12 MB', '']) {
+      expect(() => toSize(odd)).toThrow('not one');
+    }
   });
 });
 

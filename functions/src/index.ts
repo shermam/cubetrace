@@ -2,20 +2,13 @@
 // confirmUpload, callable, in us-central1, for signed-in accounts only. Their logic is in uploads.ts;
 // this file plugs it into Firebase: the Admin SDK, the bucket of the configuration (params.ts) and the
 // structured logger.
-import { Storage } from '@google-cloud/storage';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { onCall, type CallableOptions } from 'firebase-functions/https';
 import * as logger from 'firebase-functions/logger';
 import { setGlobalOptions } from 'firebase-functions/options';
 
-import {
-  gcsObjectStore,
-  r2Client,
-  r2ObjectStore,
-  unconfiguredObjectStore,
-  type ObjectStore,
-} from './object-store.js';
+import { unconfiguredObjectStore, type ObjectStore } from './object-store.js';
 import {
   BUCKET_NAME,
   BUCKET_PROVIDER,
@@ -36,17 +29,29 @@ const options: CallableOptions = {
   secrets: R2_KEYS === null ? [] : [R2_KEYS.accessKeyId, R2_KEYS.secretAccessKey],
 };
 
-export const signUpload = onCall(options, (request) => uploads.signUpload(deps(), request));
+export const signUpload = onCall(options, async (request) =>
+  uploads.signUpload(await deps(), request),
+);
 
-export const confirmUpload = onCall(options, (request) => uploads.confirmUpload(deps(), request));
+export const confirmUpload = onCall(options, async (request) =>
+  uploads.confirmUpload(await deps(), request),
+);
 
-let cached: uploads.UploadDeps | undefined;
+let cached: Promise<uploads.UploadDeps> | undefined;
 
 /** The functions' dependencies, made on an instance's first call, from the configuration. */
-function deps(): uploads.UploadDeps {
-  cached ??= {
+function deps(): Promise<uploads.UploadDeps> {
+  cached ??= makeDeps().catch((error: unknown) => {
+    cached = undefined;
+    throw error;
+  });
+  return cached;
+}
+
+async function makeDeps(): Promise<uploads.UploadDeps> {
+  return {
     db: getFirestore(getApps()[0] ?? initializeApp()),
-    store: objectStore(),
+    store: await objectStore(),
     limits: {
       bytesPerDay: QUOTA_BYTES_PER_DAY.value(),
       filesPerDay: QUOTA_FILES_PER_DAY.value(),
@@ -55,14 +60,20 @@ function deps(): uploads.UploadDeps {
     now: () => Date.now(),
     log: logger,
   };
-  return cached;
 }
 
-/** The bucket of the configuration; one that says what is missing when the configuration is not whole. */
-function objectStore(): ObjectStore {
+/**
+ * The bucket of the configuration, its provider's SDK loaded only then; one that says what is
+ * missing when the configuration is not whole.
+ */
+async function objectStore(): Promise<ObjectStore> {
   const provider = BUCKET_PROVIDER.value();
   const bucket = BUCKET_NAME.value();
   if (provider === 'gcs') {
+    const [{ Storage }, { gcsObjectStore }] = await Promise.all([
+      import('@google-cloud/storage'),
+      import('./gcs.js'),
+    ]);
     return gcsObjectStore(new Storage().bucket(bucket));
   }
   if (provider !== 'r2') {
@@ -83,5 +94,6 @@ function objectStore(): ObjectStore {
       'the R2 secrets are not bound: deploy with BUCKET_PROVIDER=r2 in functions/.env',
     );
   }
+  const { r2Client, r2ObjectStore } = await import('./r2.js');
   return r2ObjectStore(r2Client(credentials), bucket);
 }

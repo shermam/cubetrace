@@ -10,6 +10,8 @@ export default defineConfig({
     // Google's auth library looks for a Compute Engine metadata server to learn its universe domain,
     // even against the emulator; the tests never run on Google Cloud, so it is told there is none.
     env: { METADATA_SERVER_DETECTION: 'none' },
+    // One file at a time: the files share the emulator's database, which uploads.test.ts clears.
+    fileParallelism: false,
     // The emulator answers the first request of a cold JVM in a few seconds.
     testTimeout: 30_000,
     hookTimeout: 60_000,

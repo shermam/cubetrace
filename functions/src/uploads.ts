@@ -83,11 +83,17 @@ const UID = /^[A-Za-z0-9_-]{1,128}$/;
 export function signUpload(deps: UploadDeps, call: Call): Promise<SignedFile[]> {
   return logged(deps.log, 'signUpload', call, async (uid) => {
     const request = parseSignRequest(call.data, deps.limits.maxFileBytes);
+    const refs = documents(deps.db, uid, request);
+    // The attempt first, so that one that is not there (yet), or not the caller's, is said so before
+    // anything is signed; the transaction below reads it again.
+    const [session, attempt] = await deps.db.getAll(refs.session, refs.attempt);
+    checkOwner(uid, request, session, attempt);
     const nowMs = deps.now();
     // Whole seconds, as the signatures count them, so that `expiresAt` is exactly the URLs' end.
     const signedAtMs = Math.floor(nowMs / 1000) * 1000;
     const expiresAt = signedAtMs + URL_LIFETIME_MS;
-    // Signed first: when the bucket cannot sign (a missing role), nothing is recorded or counted.
+    // Signed before the quota is counted: when the bucket cannot sign (a role missing), nothing is
+    // recorded or counted.
     const signed = await Promise.all(
       request.files.map(async (file): Promise<SignedFile> => {
         const object = {
@@ -99,15 +105,14 @@ export function signUpload(deps: UploadDeps, call: Call): Promise<SignedFile[]> 
         return { path: file.path, url, headers, expiresAt };
       }),
     );
-    const refs = documents(deps.db, uid, request);
     const bytes = request.files.reduce((sum, file) => sum + file.bytes, 0);
     const quota = await deps.db.runTransaction(async (transaction) => {
-      const [session, attempt, user] = await transaction.getAll(
+      const [sessionNow, attemptNow, user] = await transaction.getAll(
         refs.session,
         refs.attempt,
         refs.user,
       );
-      checkOwner(uid, request, session, attempt);
+      checkOwner(uid, request, sessionNow, attemptNow);
       const stored: unknown = user.get('quota');
       const { bytesPerDay, filesPerDay } = deps.limits;
       const after = reserve(
@@ -116,7 +121,7 @@ export function signUpload(deps: UploadDeps, call: Call): Promise<SignedFile[]> 
         { bytes, files: request.files.length },
         { bytesPerDay, filesPerDay },
       );
-      const upload = readUpload(attempt.get('upload'));
+      const upload = readUpload(attemptNow.get('upload'));
       for (const file of request.files) {
         upload.files.set(file.path, { bytes: file.bytes, doneMs: null });
       }

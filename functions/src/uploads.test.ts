@@ -363,11 +363,18 @@ describe('signUpload', () => {
     );
     expect(await data('users/bob')).toBeUndefined();
     expect(await data('users/alice')).toBeUndefined();
+    expect(bucket.signed).toEqual([]);
   });
 
   it('refuses a session or an attempt that is not in the index yet', async () => {
     const missing = { sessionId: '0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e', attemptIndex: 1, files };
     expect((await refusal(signUpload(deps, call(missing)))).code).toBe('not-found');
+    expect((await refusal(signUpload(deps, call(signRequest(files, 2))))).code).toBe('not-found');
+    expect(bucket.signed).toEqual([]);
+  });
+
+  it('says that an attempt is not in the index even when the bucket cannot sign', async () => {
+    bucket.failing = true;
     expect((await refusal(signUpload(deps, call(signRequest(files, 2))))).code).toBe('not-found');
   });
 
