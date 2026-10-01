@@ -1,5 +1,6 @@
 import { InjectionToken, inject, isDevMode } from '@angular/core';
 import type { CloudAttempt, CloudAttemptFields, CloudSession, UserRecord } from '@cubetrace/core';
+import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 
@@ -41,10 +42,10 @@ export interface CloudListing {
 }
 
 /**
- * The few calls the app makes into Firebase: Authentication with the Google provider, and Firestore
- * for users/{uid} and the session index (docs/ARCHITECTURE.md, "Account"). `firebase-sdk.ts`
- * implements it with the SDK, in a lazy chunk of its own; the unit tests and the end-to-end suite give
- * fakes, so that neither loads Firebase.
+ * The few calls the app makes into Firebase: Authentication with the Google provider, Firestore for
+ * users/{uid} and the session index (docs/ARCHITECTURE.md, "Account"), and the upload's two callable
+ * functions (T3.2, T3.3). `firebase-sdk.ts` implements it with the SDK, in a lazy chunk of its own;
+ * the unit tests and the end-to-end suite give fakes, so that neither loads Firebase.
  */
 export interface AccountBackend {
   /**
@@ -91,6 +92,19 @@ export interface AccountBackend {
   getSession(sessionId: string): Promise<CloudDocument | null>;
   /** The attempts of session `sessionId` of the account `uid` (`where('owner', '==', uid)`), by index. */
   listAttempts(uid: string, sessionId: string): Promise<CloudListing>;
+  /**
+   * Resolves once the writes made so far are on the server (Firestore's `waitForPendingWrites`):
+   * the upload's functions find only the documents that are there (T3.3). Offline, it waits.
+   */
+  waitForIndexWrites(): Promise<void>;
+  /**
+   * `signUpload` (functions/README.md): a PUT URL per file of an attempt, with the headers to send.
+   * Rejects with the function's `HttpsError`: its `code` (`functions/not-found`,
+   * `functions/resource-exhausted`, …), `message` and `details`.
+   */
+  signUpload(request: SignRequest): Promise<SignedFile[]>;
+  /** `confirmUpload` (functions/README.md): the files found in the bucket; rejects as `signUpload`. */
+  confirmUpload(request: ConfirmRequest): Promise<ConfirmResult>;
 }
 
 /** Loads the account's backend: the Firebase SDK, from its lazy chunk. */

@@ -8,10 +8,11 @@ import { SessionIndexService, type CloudRead } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
 import { SessionService, type SessionList, type SessionListItem } from '../session/session-service';
+import { clipsSummary } from '../shared/clips-text';
 import { downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
-import { formatBytes } from '../shared/format-bytes';
 import { StorageMeter } from '../shared/storage-meter';
+import { UploadPanel } from '../upload/upload-panel';
 import { exportFileName } from './session-export';
 import {
   PLACE_LABELS,
@@ -54,7 +55,7 @@ function lastCloudNote(notes: string): string | null {
  */
 @Component({
   selector: 'app-sessions-page',
-  imports: [RouterLink, StorageMeter],
+  imports: [RouterLink, StorageMeter, UploadPanel],
   template: `
     <h1>Sessions</h1>
     <app-storage-meter />
@@ -65,8 +66,9 @@ function lastCloudNote(notes: string): string | null {
     @if (signedIn()) {
       <div class="cloud" data-testid="sessions-cloud">
         <p class="muted note">
-          Signed in, the sessions of this device go to your cloud index, without their files
-          (nothing is uploaded yet), and your other devices' sessions are listed here too.
+          Signed in, the sessions of this device go to your cloud index, and their records and clips
+          to your account's storage (Uploads, below; Settings → Uploads); your other devices'
+          sessions are listed here too.
         </p>
         <div class="tools">
           <label for="device-filter">Device</label>
@@ -85,6 +87,7 @@ function lastCloudNote(notes: string): string | null {
           <p class="warning" role="alert" data-testid="cloud-error">{{ error }}</p>
         }
       </div>
+      <app-upload-panel />
     }
     @if (error(); as message) {
       <p class="error" role="alert" data-testid="sessions-error">{{ message }}</p>
@@ -447,11 +450,9 @@ export class SessionsPage {
     return `${String(count)} ${count === 1 ? 'attempt' : 'attempts'}`;
   }
 
-  /** "2 clips, 5.3 MB" */
+  /** "2 clips, 5.3 MB"; "2 clips in the cloud" once uploaded and deleted here (T3.3). */
   protected clipsText(item: SessionListItem): string {
-    return (
-      `${String(item.clips)} ${item.clips === 1 ? 'clip' : 'clips'}, ` + formatBytes(item.clipBytes)
-    );
+    return clipsSummary(item.clips, item.clipBytes, item.cloudClips);
   }
 
   protected describe(problem: StorageProblem): string {

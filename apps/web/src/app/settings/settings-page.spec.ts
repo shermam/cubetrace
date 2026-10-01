@@ -12,13 +12,20 @@ describe('SettingsPage', () => {
   let storage: FakeStorageManager;
   let localStorage: FakeLocalStorage;
 
-  async function render(): Promise<ComponentFixture<SettingsPage>> {
+  async function render(
+    navigator: Record<string, unknown> = {},
+  ): Promise<ComponentFixture<SettingsPage>> {
     TestBed.configureTestingModule({
       providers: [
         {
           provide: BROWSER_GLOBALS,
           useValue: {
-            navigator: { wakeLock, storage, userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' },
+            navigator: {
+              wakeLock,
+              storage,
+              userAgent: 'Mozilla/5.0 (X11; Linux x86_64)',
+              ...navigator,
+            },
             localStorage,
           },
         },
@@ -374,20 +381,21 @@ describe('SettingsPage', () => {
     expect(TestBed.inject(SettingsService).demoSpeed()).toBe(20);
   });
 
-  it('ends with the account: Sign in with Google, what it does today, then the account and Sign out', async () => {
+  it('ends with the account (Sign in with Google, what it does, then the account and Sign out) and the uploads', async () => {
     const backend = new FakeAccountBackend();
     TestBed.overrideProvider(ACCOUNT_LOADER, { useValue: backend.loader });
     const fixture = await render();
     const sections = (fixture.nativeElement as HTMLElement).querySelectorAll('section');
-    const account = sections[sections.length - 1];
+    const account = sections[sections.length - 2];
     expect(account.id).toBe('account');
     expect(account.querySelector('h2')?.textContent).toBe('Account');
+    expect(sections[sections.length - 1].id).toBe('uploads');
     expect(text(fixture, 'account-hint')).toBe(
       'Signing in with Google records your name, your email and the label of this device, ' +
         '“Linux laptop”, in your cubetrace account, and keeps an index of your sessions there: ' +
         'their records without the moves, so that the Sessions page of each of your devices lists ' +
-        'them all (demo sessions stay on the device), but nothing is uploaded yet: the clips stay ' +
-        'on the device that recorded them until the uploads, which come next.',
+        'them all (demo sessions stay on the device). Their files are uploaded as Uploads, below, ' +
+        'says.',
     );
     expect(backend.loads).toBe(0);
 
@@ -398,5 +406,49 @@ describe('SettingsPage', () => {
     buttonNamed(fixture, 'Sign out').click();
     await update(fixture);
     expect(buttonNamed(fixture, 'Sign in with Google')).toBeDefined();
+  });
+
+  it("keeps the uploads' switches: on a laptop, uploads on, local copies kept, no Wi-Fi only", async () => {
+    const fixture = await render();
+    const upload = input(fixture, '[data-testid="upload-sessions"]');
+    const keep = input(fixture, '[data-testid="keep-local-copies"]');
+    expect(upload.checked).toBe(true);
+    expect(keep.checked).toBe(true);
+    expect(text(fixture, 'upload-wifi-only')).toBeUndefined();
+    expect(text(fixture, 'uploads-hint')).toContain(
+      "Demo sessions never go, nor anything signed out, nor the cubes' MAC addresses.",
+    );
+    expect(text(fixture, 'keep-local-hint')).toContain(
+      "once the browser's storage is 70% full, the oldest uploaded clips are deleted first, until it is under 60%.",
+    );
+
+    upload.checked = false;
+    upload.dispatchEvent(new Event('change'));
+    keep.checked = false;
+    keep.dispatchEvent(new Event('change'));
+    await update(fixture);
+    const settings = TestBed.inject(SettingsService);
+    expect(settings.uploadSessions()).toBe(false);
+    expect(settings.keepLocalCopies()).toBe(false);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}')).toMatchObject({
+      uploadSessions: false,
+      keepLocalCopies: false,
+    });
+  });
+
+  it('shows Wi-Fi only on a phone whose browser says the network type, on by default, local copies off', async () => {
+    const fixture = await render({
+      userAgent:
+        'Mozilla/5.0 (Linux; Android 15; motorola edge 50 neo) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36',
+      connection: Object.assign(new EventTarget(), { type: 'wifi', effectiveType: '4g' }),
+    });
+    const wifi = input(fixture, '[data-testid="upload-wifi-only"]');
+    expect(wifi.checked).toBe(true);
+    expect(input(fixture, '[data-testid="keep-local-copies"]').checked).toBe(false);
+    wifi.checked = false;
+    wifi.dispatchEvent(new Event('change'));
+    await update(fixture);
+    expect(TestBed.inject(SettingsService).wifiOnly()).toBe(false);
   });
 });

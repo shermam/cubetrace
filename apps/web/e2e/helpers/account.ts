@@ -5,7 +5,9 @@ import type { Page } from '@playwright/test';
 // in development builds only), so that no test opens Google's page or reaches Firebase. Its state is
 // in localStorage, so that the account stays signed in across page loads, as Firebase keeps it in
 // IndexedDB, and so is its session index (T3.1): the documents as written, merged as Firestore's
-// `set` with `merge` merges them.
+// `set` with `merge` merges them. Its upload functions (T3.2, T3.3) answer only in a test that runs a
+// bucket (`fakeBucket`): they sign URLs into it, on the app's own origin, and confirm what it holds;
+// elsewhere they refuse as unavailable, and the upload queue waits.
 
 /** A signed-in account as the backend reports it (src/app/auth/account-backend.ts, BackendUser). */
 export interface FakeAccountUser {
@@ -37,6 +39,92 @@ export interface FakeAccountState {
   readonly index: FakeIndex;
   /** The index's writes in order: `sessions/<id>`, `sessions/<id>/attempts/0001`, `delete …`. */
   readonly indexWrites: readonly string[];
+  /**
+   * The upload functions' calls that went through, in order: `sign <session>/<index> <paths>`,
+   * `confirm …` (the functions write `upload` past the rules, so these are not in `indexWrites`).
+   */
+  readonly uploadCalls: readonly string[];
+}
+
+/** An object the fake bucket holds: what its PUT sent. */
+export interface FakeObject {
+  readonly bytes: number;
+  readonly contentType: string;
+  readonly body: Buffer;
+}
+
+/**
+ * The bucket of the fake functions, in the test: the PUTs to the URLs they sign
+ * (`/e2e-bucket/<key>` on the app's origin, which a route answers before the dev server sees it),
+ * stored by key with their bytes. `hold()` keeps the next PUTs waiting until `release()`.
+ */
+export interface FakeBucket {
+  readonly objects: Map<string, FakeObject>;
+  /** The keys PUT, in order (a key twice when it was sent twice). */
+  readonly puts: string[];
+  hold(): void;
+  release(): void;
+  /** How many PUTs wait now. */
+  readonly held: number;
+}
+
+/** Where the fake functions' URLs point, on the app's origin. */
+const BUCKET_PATH = '/e2e-bucket/';
+
+/**
+ * Runs the fake functions' bucket for `page` (call it before `page.goto`): a route that takes the
+ * PUTs and keeps their bytes, and `window.cubetraceE2eBucketSize(key)`, through which the page's fake
+ * `confirmUpload` asks for an object's size, as the functions ask the bucket.
+ */
+export async function fakeBucket(page: Page): Promise<FakeBucket> {
+  const objects = new Map<string, FakeObject>();
+  const puts: string[] = [];
+  let gate: Promise<void> | null = null;
+  let open: () => void = () => undefined;
+  let waiting = 0;
+  await page.route(`**${BUCKET_PATH}**`, async (route) => {
+    const request = route.request();
+    const key = decodeURIComponent(new URL(request.url()).pathname.slice(BUCKET_PATH.length));
+    if (request.method() !== 'PUT') {
+      await route.fulfill({ status: 405, body: 'PUT only' });
+      return;
+    }
+    if (gate !== null) {
+      waiting++;
+      await gate;
+      waiting--;
+    }
+    const body = request.postDataBuffer() ?? Buffer.alloc(0);
+    const headers = request.headers();
+    const range = headers['x-goog-content-length-range'];
+    if (range !== `${String(body.length)},${String(body.length)}`) {
+      await route.fulfill({ status: 400, body: `Not of the size signed: ${String(range)}` });
+      return;
+    }
+    puts.push(key);
+    objects.set(key, { bytes: body.length, contentType: headers['content-type'] ?? '', body });
+    await route.fulfill({ status: 200, body: '' });
+  });
+  await page.exposeFunction(
+    'cubetraceE2eBucketSize',
+    (key: string) => objects.get(key)?.bytes ?? null,
+  );
+  return {
+    objects,
+    puts,
+    hold: () => {
+      gate ??= new Promise<void>((resolve) => {
+        open = resolve;
+      });
+    },
+    release: () => {
+      gate = null;
+      open();
+    },
+    get held() {
+      return waiting;
+    },
+  };
 }
 
 /** The account Google's page would sign in. */
@@ -69,6 +157,7 @@ export async function fakeAccount(
         saved: { uid: string; record: unknown }[];
         index: { sessions: Record<string, Doc>; attempts: Record<string, Record<string, Doc>> };
         indexWrites: string[];
+        uploadCalls: string[];
       }
       const read = (): State =>
         (JSON.parse(localStorage.getItem(key) ?? 'null') as State | null) ?? {
@@ -78,6 +167,7 @@ export async function fakeAccount(
           saved: [],
           index: structuredClone(seed),
           indexWrites: [],
+          uploadCalls: [],
         };
       const change = (edit: (state: State) => void): State => {
         const state = read();
@@ -97,6 +187,39 @@ export async function fakeAccount(
           out[field] = isMap(value) && isMap(stored[field]) ? merged(stored[field], value) : value;
         }
         return out;
+      };
+      // The upload functions (functions/README.md), on the index above, with the test's bucket.
+      type Upload = {
+        state: string;
+        files: Record<string, { bytes: number; doneMs: number | null }>;
+      };
+      const functionsError = (code: string, message: string): Error =>
+        Object.assign(new Error(message), { code: `functions/${code}` });
+      const bucketSize = (): ((key: string) => Promise<number | null>) | null => {
+        const size: unknown = Reflect.get(window, 'cubetraceE2eBucketSize');
+        return typeof size === 'function'
+          ? (size as (key: string) => Promise<number | null>)
+          : null;
+      };
+      const objectKey = (uid: string, sessionId: string, index: number, path: string): string =>
+        path === 'session.json'
+          ? `users/${uid}/sessions/${sessionId}/session.json`
+          : `users/${uid}/sessions/${sessionId}/attempts/${String(index).padStart(4, '0')}/${path}`;
+      /** The attempt a call is about, checked as the functions check it; its upload to change. */
+      const target = (state: State, sessionId: string, index: number): Doc => {
+        const uid = state.user?.uid;
+        const attempt = state.index.attempts[sessionId]?.[String(index).padStart(4, '0')] as
+          Doc | undefined;
+        if (uid === undefined) {
+          throw functionsError('unauthenticated', 'Sign in to upload.');
+        }
+        if (state.index.sessions[sessionId]?.['owner'] !== uid || attempt?.['owner'] !== uid) {
+          throw functionsError(
+            'not-found',
+            `The attempt ${String(index)} is not in the cloud index.`,
+          );
+        }
+        return attempt;
       };
       const putAttempt = (state: State, attempt: Doc): void => {
         const sessionId = String(attempt['session']);
@@ -201,6 +324,87 @@ export async function fakeAccount(
             .map(([id, attempt]) => ({ id, data: attempt, pending: false }));
           return Promise.resolve({ documents, fromCache: false });
         },
+        waitForIndexWrites(): Promise<void> {
+          return Promise.resolve();
+        },
+        signUpload(request: {
+          sessionId: string;
+          attemptIndex: number;
+          files: { path: string; bytes: number; contentType: string }[];
+        }) {
+          try {
+            if (bucketSize() === null) {
+              throw functionsError('unavailable', 'The upload functions are not in this test.');
+            }
+            const uid = read().user?.uid ?? '';
+            change((state) => {
+              const attempt = target(state, request.sessionId, request.attemptIndex);
+              const upload = attempt['upload'] as Upload;
+              upload.state = 'uploading';
+              for (const file of request.files) {
+                upload.files[file.path] = { bytes: file.bytes, doneMs: null };
+              }
+              state.uploadCalls.push(
+                `sign ${request.sessionId}/${String(request.attemptIndex)} ${request.files.map((file) => file.path).join(',')}`,
+              );
+            });
+            return Promise.resolve(
+              request.files.map((file) => ({
+                path: file.path,
+                url: `${location.origin}/e2e-bucket/${objectKey(uid, request.sessionId, request.attemptIndex, file.path)}`,
+                headers: {
+                  'Content-Type': file.contentType,
+                  'x-goog-content-length-range': `${String(file.bytes)},${String(file.bytes)}`,
+                },
+                expiresAt: Date.now() + 15 * 60 * 1000,
+              })),
+            );
+          } catch (error: unknown) {
+            return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        },
+        async confirmUpload(request: {
+          sessionId: string;
+          attemptIndex: number;
+          files: { path: string }[];
+        }) {
+          const size = bucketSize();
+          if (size === null) {
+            throw functionsError('unavailable', 'The upload functions are not in this test.');
+          }
+          const uid = read().user?.uid ?? '';
+          const sizes = await Promise.all(
+            request.files.map((file) =>
+              size(objectKey(uid, request.sessionId, request.attemptIndex, file.path)),
+            ),
+          );
+          let result: unknown = null;
+          change((state) => {
+            const attempt = target(state, request.sessionId, request.attemptIndex);
+            const upload = attempt['upload'] as Upload;
+            const confirmed = request.files.map(({ path }, k) => {
+              const signed = upload.files[path] as Upload['files'][string] | undefined;
+              if (signed === undefined) {
+                throw functionsError('failed-precondition', `${path} was not signed.`);
+              }
+              if (sizes[k] !== signed.bytes) {
+                throw functionsError('not-found', `${path} is not in the bucket.`);
+              }
+              signed.doneMs ??= Date.now();
+              return { path, bytes: signed.bytes, doneMs: signed.doneMs };
+            });
+            const pending = Object.entries(upload.files)
+              .filter(([, file]) => file.doneMs === null)
+              .map(([path]) => path)
+              .sort();
+            upload.state = pending.length === 0 ? 'done' : 'uploading';
+            state.uploadCalls.push(
+              `confirm ${request.sessionId}/${String(request.attemptIndex)} ${request.files.map((file) => file.path).join(',')}`,
+            );
+            result = { state: upload.state, confirmed, pending };
+          });
+          return result;
+        },
       };
       Reflect.set(window, 'cubetraceE2eAccountLoader', () => {
         change((state) => {
@@ -229,6 +433,7 @@ export async function fakeAccountState(page: Page): Promise<FakeAccountState> {
         saved: [],
         index: { sessions: {}, attempts: {} },
         indexWrites: [],
+        uploadCalls: [],
       },
     STATE_KEY,
   );

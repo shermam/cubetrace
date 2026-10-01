@@ -4,6 +4,15 @@
 // that the signature asks for (Content-Type, GCS's x-goog-content-length-range) are set as given.
 import type { PutRequest, PutResponse, UploadHttp } from './ports';
 
+/**
+ * The request's event handlers, as methods: their parameters are then compared both ways, so that
+ * the DOM's handlers (`this` the request, the event a `ProgressEvent`) fit.
+ */
+interface XhrHandlers {
+  progress(event: { readonly loaded: number }): void;
+  settled(event: unknown): void;
+}
+
 /** The part of `XMLHttpRequest` the upload uses. */
 export interface XhrLike {
   open(method: string, url: string): void;
@@ -12,11 +21,11 @@ export interface XhrLike {
   abort(): void;
   readonly status: number;
   readonly responseText: string;
-  readonly upload: { onprogress: ((event: { readonly loaded: number }) => void) | null };
-  onload: (() => void) | null;
-  onerror: (() => void) | null;
-  ontimeout: (() => void) | null;
-  onabort: (() => void) | null;
+  readonly upload: { onprogress: XhrHandlers['progress'] | null };
+  onload: XhrHandlers['settled'] | null;
+  onerror: XhrHandlers['settled'] | null;
+  ontimeout: XhrHandlers['settled'] | null;
+  onabort: XhrHandlers['settled'] | null;
 }
 
 /** {@link UploadHttp} over `XMLHttpRequest`s that `create` makes (`() => new XMLHttpRequest()`). */

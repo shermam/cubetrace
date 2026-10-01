@@ -8,8 +8,17 @@ import type { AttemptRecord } from '@cubetrace/core';
  */
 export type ListedAttempt = Omit<AttemptRecord, 'moves'>;
 
+/**
+ * An attempt's upload as its row says it (T3.3): `waiting` (its clips are still to come), `pending`,
+ * `uploading`, `done` or `failed`, and the words.
+ */
+export interface UploadBadge {
+  readonly state: 'waiting' | 'pending' | 'uploading' | 'done' | 'failed';
+  readonly text: string;
+}
+
 import { sessionStats } from '../session/session-stats';
-import { formatBytes } from '../shared/format-bytes';
+import { clipsText } from '../shared/clips-text';
 import { formatTime } from '../shared/format-time';
 import { attemptPhases, barSegments, type BarSegment } from './breakdown';
 import { ClipViewing } from './clip-viewing';
@@ -24,8 +33,13 @@ interface SolveRow {
   readonly segments: readonly BarSegment[];
   /** `DNF`; `Corrected` (the scramble went off its path and back); `No replay` (a resync). */
   readonly flags: readonly string[];
-  /** Its clips (T2.4): "2 clips, 5.3 MB"; null without one. */
+  /**
+   * Its clips (T2.4): "2 clips, 5.3 MB", or "2 clips in the cloud" once they were deleted from the
+   * device after their upload (T3.3); null without one.
+   */
   readonly clips: string | null;
+  /** None of its clips is on this device any more (T3.3). */
+  readonly inCloud: boolean;
   /**
    * Which of its clips begin later than asked, their start older than the capture's buffer (T2.9):
    * "The scramble clip begins late: …"; null when none does.
@@ -57,18 +71,14 @@ function solveRow(attempt: ListedAttempt): SolveRow {
   if (status === 'solved' && !replayOk) {
     flags.push('No replay');
   }
-  const bytes = attempt.video.reduce((sum, clip) => sum + clip.bytes, 0);
-  const count = attempt.video.length;
   return {
     index: attempt.index,
     status,
     time: status === 'solved' && timeMs !== null ? formatTime(timeMs) : 'DNF',
     segments: status === 'solved' ? barSegments(phases, total) : [],
     flags,
-    clips:
-      count === 0
-        ? null
-        : `${String(count)} ${count === 1 ? 'clip' : 'clips'}, ${formatBytes(bytes)}`,
+    clips: clipsText(attempt.video),
+    inCloud: attempt.video.length > 0 && attempt.video.every((clip) => clip.local === false),
     late: lateText(attempt.video.filter((clip) => clip.truncatedStart).map((clip) => clip.segment)),
   };
 }
@@ -79,7 +89,9 @@ function solveRow(attempt: ListedAttempt): SolveRow {
  * above them the session's count, mean, best, ao5 and ao12 (unless `showStats` is false). With a
  * `limit` (the Timer page's 12, T2.7), only the newest ones, and under them how many the session
  * has, with "See all", the session's page (`sessionId`). A session of the cloud's index alone (T3.1)
- * lists its attempts without their moves, and its clip badges open nothing (`playable` false).
+ * lists its attempts without their moves, and its clip badges open nothing (`playable` false). A
+ * clip badge says "in the cloud" for clips deleted from the device once uploaded, and with `uploads`
+ * (the session's page, T3.3) each row says its attempt's upload.
  */
 @Component({
   selector: 'app-solve-list',
@@ -129,12 +141,23 @@ function solveRow(attempt: ListedAttempt): SolveRow {
               @for (flag of row.flags; track flag) {
                 <span class="flag" [class.dnf]="flag === 'DNF'">{{ flag }}</span>
               }
+              @if (uploads()?.get(row.index); as upload) {
+                <span
+                  class="flag upload"
+                  data-testid="upload-badge"
+                  [attr.data-state]="upload.state"
+                  [title]="'Upload: ' + upload.text"
+                  >{{ upload.text }}</span
+                >
+              }
               @if (row.clips; as clips) {
                 @if (playable()) {
                   <button
                     type="button"
                     class="clips"
                     data-testid="clip-badge"
+                    [class.cloud]="row.inCloud"
+                    [attr.data-cloud]="row.inCloud ? '' : null"
                     [attr.aria-label]="
                       'The clips of attempt ' +
                       row.index +
@@ -271,8 +294,25 @@ function solveRow(attempt: ListedAttempt): SolveRow {
       color: var(--warn);
     }
 
-    .elsewhere {
+    .elsewhere,
+    .clips.cloud {
       color: var(--text-muted);
+    }
+
+    .upload {
+      white-space: nowrap;
+
+      &[data-state='done'] {
+        color: var(--ok);
+      }
+
+      &[data-state='uploading'] {
+        color: var(--accent);
+      }
+
+      &[data-state='failed'] {
+        color: var(--danger);
+      }
     }
   `,
 })
@@ -290,6 +330,8 @@ export class SolveList {
   readonly sessionId = input<string | null>(null);
   /** The statistics above the list: count, mean, best, ao5 and ao12. */
   readonly showStats = input(true);
+  /** Each attempt's upload, by index (T3.3); null (the default) says nothing of the uploads. */
+  readonly uploads = input<ReadonlyMap<number, UploadBadge> | null>(null);
   protected readonly viewer = inject(ClipViewing);
 
   protected readonly stats = computed(() => sessionStats(this.attempts()));

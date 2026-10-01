@@ -708,6 +708,7 @@ describe('SessionService', () => {
           mean: '11.00',
           clips: 2,
           clipBytes: 3_500_000,
+          cloudClips: 0,
           current: true,
           unreadable: [],
         },

@@ -52,8 +52,49 @@ describe('SettingsService', () => {
     expect(settings.cameraPickFor('macOS laptop')).toBeNull();
     expect(settings.cameraControlsFor('FaceTime HD Camera')).toEqual({});
     expect(settings.cameraFramings()).toEqual([]);
+    expect(settings.uploadSessions()).toBe(true);
+    expect(settings.keepLocalCopies()).toBe(true);
+    expect(settings.networkTypeKnown).toBe(false);
+    expect(settings.wifiOnly()).toBe(false);
     expect(settings.saveError()).toBeNull();
     expect(storage.length).toBe(0);
+  });
+
+  it("gives the uploads a phone's defaults on a phone: Wi-Fi only where the network's type is known, no local copies", () => {
+    const phone =
+      'Mozilla/5.0 (Linux; Android 15; motorola edge 50 neo) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
+    const connection = Object.assign(new EventTarget(), { type: 'cellular', effectiveType: '4g' });
+    const settings = load({
+      navigator: { userAgent: phone, connection } as Partial<Navigator>,
+      localStorage: storage,
+    });
+    expect(settings.isPhone).toBe(true);
+    expect(settings.networkTypeKnown).toBe(true);
+    expect(settings.wifiOnlySetting()).toBe(true);
+    expect(settings.wifiOnly()).toBe(true);
+    expect(settings.keepLocalCopies()).toBe(false);
+    settings.setWifiOnly(false);
+    settings.setKeepLocalCopies(true);
+    expect(settings.wifiOnly()).toBe(false);
+    expect(settings.keepLocalCopies()).toBe(true);
+
+    // A phone whose browser does not say the network's type: Wi-Fi only cannot be honoured.
+    const blind = load({ navigator: { userAgent: phone }, localStorage: new FakeLocalStorage() });
+    expect(blind.networkTypeKnown).toBe(false);
+    expect(blind.wifiOnlySetting()).toBe(true);
+    expect(blind.wifiOnly()).toBe(false);
+    // A laptop's browser that has navigator.connection without a type (desktop Chrome).
+    const laptop = load({
+      navigator: {
+        userAgent: MAC_USER_AGENT,
+        connection: Object.assign(new EventTarget(), { effectiveType: '4g' }),
+      } as Partial<Navigator>,
+      localStorage: new FakeLocalStorage(),
+    });
+    expect(laptop.networkTypeKnown).toBe(false);
+    expect(laptop.wifiOnly()).toBe(false);
+    expect(laptop.keepLocalCopies()).toBe(true);
   });
 
   it('keeps every setting across a reload, in localStorage', () => {
@@ -80,6 +121,9 @@ describe('SettingsService', () => {
       { width: 1920, height: 1080 },
       { x: 480, y: 270, w: 960, h: 540 },
     );
+    settings.setUploadSessions(false);
+    settings.setWifiOnly(true);
+    settings.setKeepLocalCopies(false);
 
     expect(stored()).toEqual({
       version: 1,
@@ -110,8 +154,16 @@ describe('SettingsService', () => {
           rect: { x: 480, y: 270, w: 960, h: 540 },
         },
       ],
+      uploadSessions: false,
+      wifiOnly: true,
+      keepLocalCopies: false,
     });
     const reloaded = load();
+    expect(reloaded.uploadSessions()).toBe(false);
+    expect(reloaded.wifiOnlySetting()).toBe(true);
+    // A laptop's browser does not say the network's type: it uploads on any network.
+    expect(reloaded.wifiOnly()).toBe(false);
+    expect(reloaded.keepLocalCopies()).toBe(false);
     expect(reloaded.hostLabel()).toBe('office-mbp');
     expect(reloaded.cubeMacs()).toEqual([{ name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56' }]);
     expect(reloaded.demoSpeed()).toBe(20);

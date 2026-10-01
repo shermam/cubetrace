@@ -17,12 +17,14 @@ import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
 import { SessionService } from '../session/session-service';
 import { sessionStats } from '../session/session-stats';
+import { clipsText as describeClips } from '../shared/clips-text';
 import { downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
-import { formatBytes } from '../shared/format-bytes';
 import { ClipViewer } from '../timer/clip-viewer';
 import { ClipViewing } from '../timer/clip-viewing';
-import { SolveList, type ListedAttempt } from '../timer/solve-list';
+import { SolveList, type ListedAttempt, type UploadBadge } from '../timer/solve-list';
+import { UploadService } from '../upload/upload-service';
+import { cloudUploadBadge, uploadBadge } from '../upload/upload-text';
 import { exportFileName } from './session-export';
 
 const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -43,6 +45,8 @@ interface CloudOnlySession {
   readonly session: SessionRecord;
   readonly attempts: readonly ListedAttempt[];
   readonly unreadable: readonly CloudProblem[];
+  /** Each attempt's upload, as its document says (T3.3), by index. */
+  readonly uploads: ReadonlyMap<number, UploadBadge>;
 }
 
 /** The session the page shows. */
@@ -61,13 +65,12 @@ export function camerasText(session: SessionRecord): string {
   return cameras.length === 0 ? 'none' : cameras.join(', ');
 }
 
-/** "30 clips, 120.3 MB": the clips of `attempts` and their MP4s' bytes; "none" without one. */
+/**
+ * "30 clips, 120.3 MB": the clips of `attempts` and their MP4s' bytes on this device, with those in
+ * the cloud only (T3.3: "30 clips, 80.2 MB, 10 in the cloud"); "none" without one.
+ */
 export function clipsText(attempts: readonly Pick<AttemptRecord, 'video'>[]): string {
-  const clips = attempts.flatMap((attempt) => attempt.video);
-  const bytes = clips.reduce((sum, clip) => sum + clip.bytes, 0);
-  return clips.length === 0
-    ? 'none'
-    : `${String(clips.length)} ${clips.length === 1 ? 'clip' : 'clips'}, ${formatBytes(bytes)}`;
+  return describeClips(attempts.flatMap((attempt) => attempt.video)) ?? 'none';
 }
 
 /**
@@ -79,7 +82,8 @@ export function clipsText(attempts: readonly Pick<AttemptRecord, 'video'>[]): st
  * recording is shown from `SessionService`'s signals, so the page follows its attempts as they come;
  * another one is read once from the store. Since T3.1, a session this device does not have is read
  * from the account's index in the cloud, signed in: read-only, its attempts without their moves, no
- * clip to play and nothing to export or delete here, which the page says.
+ * clip to play and nothing to export or delete here, which the page says. Since T3.3 each attempt's
+ * row says its upload: from this device's queue, or for a session of the cloud from its document.
  */
 @Component({
   selector: 'app-session-page',
@@ -184,6 +188,7 @@ export function clipsText(attempts: readonly Pick<AttemptRecord, 'video'>[]): st
           [attempts]="shown.attempts"
           [showStats]="false"
           [playable]="shown.source === 'device'"
+          [uploads]="uploadBadges()"
         />
       </section>
     } @else if (loadError(); as error) {
@@ -326,6 +331,7 @@ export class SessionPage {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
   private readonly viewing = inject(ClipViewing);
+  private readonly uploads = inject(UploadService);
 
   /** The session's id, from the address. */
   protected readonly id = signal('');
@@ -367,6 +373,27 @@ export class SessionPage {
   protected readonly clips = computed(() => {
     const shown = this.shown();
     return shown === null ? '' : clipsText(shown.attempts);
+  });
+  /**
+   * Each attempt's upload (T3.3): this device's queue's, or for a session of the cloud its
+   * documents'; null when there is nothing to say (signed out, uploads off).
+   */
+  protected readonly uploadBadges = computed((): ReadonlyMap<number, UploadBadge> | null => {
+    const shown = this.shown();
+    if (shown === null) {
+      return null;
+    }
+    if (shown.source === 'cloud') {
+      return shown.uploads;
+    }
+    const badges = new Map<number, UploadBadge>();
+    for (const attempt of shown.attempts) {
+      const view = this.uploads.attempt(shown.session.id, attempt.index);
+      if (view !== null) {
+        badges.set(attempt.index, uploadBadge(view));
+      }
+    }
+    return badges.size === 0 ? null : badges;
   });
   /** The attempt whose clips the viewer shows; null while it is closed (and for the cloud's). */
   protected readonly viewed = computed(() => {
@@ -482,11 +509,15 @@ export class SessionPage {
       return null;
     }
     const attempts = await this.index.cloudAttempts(id);
+    const entries = attempts?.entries ?? [];
     return {
       source: 'cloud',
       session: sessionOfDocument(entry.document),
-      attempts: attempts?.entries.map((attempt) => attempt.document) ?? [],
+      attempts: entries.map((attempt) => attempt.document),
       unreadable: attempts?.unreadable ?? [],
+      uploads: new Map(
+        entries.map(({ document }) => [document.index, cloudUploadBadge(document.upload.state)]),
+      ),
     };
   }
 }

@@ -42,6 +42,9 @@ export interface BrowserGlobals {
    * installed (`(display-mode: standalone)`, the account's sign-in, T3.0).
    */
   readonly matchMedia?: (query: string) => MediaQueryState;
+  /** The window's `online` and `offline` events: when the upload queue may send again (T3.3). */
+  readonly addEventListener?: (type: 'online' | 'offline', listener: () => void) => void;
+  readonly removeEventListener?: (type: 'online' | 'offline', listener: () => void) => void;
 }
 
 /**
