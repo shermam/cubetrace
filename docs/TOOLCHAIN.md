@@ -468,10 +468,11 @@ export), without its time check, which flow 1 makes on a settled page (below). T
   after the solve starts although assertions poll up to 1 s apart.
 - **The specs that record run one at a time** (T2.6). `capture.spec.ts`, `recording.spec.ts`,
   `session-clips.spec.ts` and `sync-check.spec.ts` (and since `video-quality.spec.ts`, T2.10, and
-  `microphone.spec.ts`, T2.12) record Chrome's fake camera, encoding 1080p30 VP9 in software; they are the Playwright project `encoding`, limited to one worker (the project's
-  `workers` option) and listed first, so that the next of them starts as soon as one ends, while the
-  other specs, the project `chromium`, run in the other worker. Two encoders at once on four CPUs
-  lose frames and hold back the demo cube's timers: when `session-clips.spec.ts` joined the suite,
+  `microphone.spec.ts`, T2.12) record Chrome's fake camera, encoding 1080p30 VP9 in software; they
+  are the Playwright project `encoding`, limited to one worker (the project's `workers` option) and
+  listed first, so that the next of them starts as soon as one ends, while the other specs, the
+  project `chromium`, run in the other worker. Two encoders at once on four CPUs lose frames and
+  hold back the demo cube's timers: when `session-clips.spec.ts` joined the suite,
   two of three runs in a row failed, once on a frame lost in the second after a save in
   `recording.spec.ts`'s no-drop test (an interval of 67.1 ms, with `sync-check.spec.ts` encoding in
   the other worker) and once on its timing check (the medians with the camera on and off 5.05 ms
@@ -1198,8 +1199,9 @@ two channels, 44,100 to 48,000 Hz. Chromium's `AudioEncoder` takes Opus at 44.1 
 all, as above), so CI's clips keep their Opus sound raw: the capture lab's 3.4 s clip has 165 Opus
 packets, and the audio's arrival offset is 0.7 ms from the video's.
 
-**Sizes** (`ng build`, 2026-10-01, against `main` at b0c908a): the initial bundle is unchanged,
-264.46 kB raw. The chunk with `SettingsService` and the records' readers, which every page loads right
-after the first render, is 47.3 kB raw against 46.6 (15.1 kB transferred against 14.9); the recording
-service's 24.1 kB against 23.1, Camera settings' 28.4 against 27.4, the Settings page's 17.4 against
-16.4; `microphone.ts`, which the recording and the capture lab share, is a chunk of its own, 1.3 kB.
+**Sizes** (`ng build`, 2026-10-01, against `main` at 8aecd2c): the initial bundle is unchanged,
+264.47 kB raw. The chunk with `SettingsService` and the records' readers, which every page loads right
+after the first render, is 47.6 kB raw against 46.8 (15.2 kB transferred against 14.9); the recording
+service's 22.3 kB against 21.3, Camera settings' 28.4 against 27.4, the Settings page's 18.1 against
+17.0, the capture lab's 23.4 against 23.3; `microphone.ts`, which the recording and the capture lab
+share, is a chunk of its own, 1.3 kB.
