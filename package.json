@@ -20,12 +20,15 @@
     "lint": "npm run typecheck && eslint . --ignore-pattern \"apps/web/**\" && npm run lint -w @cubetrace/web",
     "test": "vitest run && npm run test -w @cubetrace/web -- --watch=false",
     "test:watch": "vitest",
+    "test:rules": "npm run firebase -- emulators:exec --only firestore --project demo-cubetrace \"vitest run --config firebase/vitest.config.ts\"",
     "e2e": "playwright test -c apps/web/e2e/playwright.config.ts",
+    "firebase": "npx --yes firebase-tools@15.32.1",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@playwright/test": "1.56.1",
     "@types/node": "^22.20.4",
     "ajv": "^8.20.0",

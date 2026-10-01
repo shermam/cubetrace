@@ -18,6 +18,11 @@ __screenshots__/
 # Logs
 npm-debug.log*
 yarn-error.log*
+# The Firebase CLI's and its emulators' (npm run test:rules, deploys)
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
 
 # Generated before every build (apps/web/scripts/write-version.mts, write-demo-solves.mts)
 apps/web/src/environments/version.ts
