@@ -1,0 +1,8 @@
+[
+  {
+    "AllowedOrigins": ["https://shermam.github.io", "http://localhost:4200"],
+    "AllowedMethods": ["PUT", "GET"],
+    "AllowedHeaders": ["Content-Type"],
+    "MaxAgeSeconds": 3600
+  }
+]
