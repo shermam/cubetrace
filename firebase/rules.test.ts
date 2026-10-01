@@ -11,6 +11,7 @@ import {
   AttemptMachine,
   cloudAttempt,
   cloudAttemptFields,
+  cloudCube,
   cloudSession,
   createSession,
   parseMoves,
@@ -149,11 +150,111 @@ describe('users/{uid}', () => {
     }
   });
 
-  it('keeps the collections under a record closed until a task opens them (T3.4: cubes)', async () => {
+  it('keeps the collections under a record closed but its cubes (T3.4, below)', async () => {
     await seed('users/alice', user());
     const db = alice().firestore();
-    await assertFails(db.doc('users/alice/cubes/GAN12ui_AB12').set({ mac: 'AB:12:CD:34:EF:56' }));
-    await assertFails(db.doc('users/alice/cubes/GAN12ui_AB12').get());
+    for (const path of ['users/alice/sessions/one', 'users/alice/devices/office-mbp']) {
+      await assertFails(db.doc(path).set({ mac: 'AB:12:CD:34:EF:56' }));
+      await assertFails(db.doc(path).get());
+    }
+    await assertFails(db.collection('users/alice/macs').get());
+  });
+});
+
+// The account's cubes (T3.4, docs/DATA-MODEL.md §10): users/{uid}/cubes/{name}, Settings' list of
+// the cubes' MAC addresses, one document per cube by its Bluetooth name.
+const CUBE = 'users/alice/cubes/GAN12ui_AB12';
+
+/** users/alice/cubes/GAN12ui_AB12 as the laptop writes it (packages/core cloud-cube.ts). */
+function cube(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...cloudCube({
+      name: 'GAN12ui_AB12',
+      mac: 'AB:12:CD:34:EF:56',
+      updatedMs: 1_790_000_123_456.7,
+      device: 'office-mbp',
+    }),
+    ...extra,
+  };
+}
+
+describe('users/{uid}/cubes/{name}', () => {
+  it('lets an account write, read, list, replace and delete its own cubes, with or without its record', async () => {
+    const db = alice().firestore();
+    await assertSucceeds(db.doc(CUBE).set(cube()));
+    await assertSucceeds(db.doc(CUBE).get());
+    await assertSucceeds(db.collection('users/alice/cubes').get());
+    // Changed on the phone: the whole entry written again.
+    await assertSucceeds(
+      db
+        .doc(CUBE)
+        .set(
+          cube({ mac: '11:22:33:44:55:66', updatedMs: 1_790_000_200_000, device: 'Android phone' }),
+        ),
+    );
+    await assertSucceeds(db.doc(CUBE).update({ updatedMs: 1_790_000_300_000 }));
+    await assertSucceeds(db.doc(CUBE).delete());
+    // A name as Chrome's list may show it, with spaces; and the account's record beside it.
+    await seed('users/alice', user());
+    await assertSucceeds(
+      db.doc('users/alice/cubes/GAN 356 i3').set(cube({ name: 'GAN 356 i3', updatedMs: 0 })),
+    );
+    const listed = await assertSucceeds(db.collection('users/alice/cubes').get());
+    expect(listed.docs.map((document) => document.id)).toEqual(['GAN 356 i3']);
+  });
+
+  it("refuses another account, and anyone signed out, any access to an account's cubes", async () => {
+    await seed(CUBE, cube());
+    for (const db of [bob().firestore(), nobody().firestore()]) {
+      await assertFails(db.doc(CUBE).get());
+      await assertFails(db.collection('users/alice/cubes').get());
+      await assertFails(db.doc(CUBE).set(cube()));
+      await assertFails(db.doc(CUBE).update({ mac: '11:22:33:44:55:66' }));
+      await assertFails(db.doc(CUBE).delete());
+      await assertFails(
+        db.doc('users/alice/cubes/GAN12ui_CD34').set(cube({ name: 'GAN12ui_CD34' })),
+      );
+    }
+    // Bob's own list is his.
+    await assertSucceeds(bob().firestore().doc('users/bob/cubes/GAN12ui_AB12').set(cube()));
+  });
+
+  it.each([
+    ['schema version 2', { schema: 2 }],
+    ['no schema', { schema: undefined }],
+    ['the name of another cube', { name: 'GAN12ui_CD34' }],
+    ['its name in another case', { name: 'gan12ui_ab12' }],
+    ['no name', { name: undefined }],
+    ['a MAC address in lower case', { mac: 'ab:12:cd:34:ef:56' }],
+    ['a MAC address with dashes', { mac: 'AB-12-CD-34-EF-56' }],
+    ['a MAC address without separators', { mac: 'AB12CD34EF56' }],
+    ['a MAC address of five bytes', { mac: 'AB:12:CD:34:EF' }],
+    ['a MAC address with a byte more', { mac: 'AB:12:CD:34:EF:56:78' }],
+    ['a MAC address after other text', { mac: 'mac AB:12:CD:34:EF:56' }],
+    ['a MAC address that is a number', { mac: 188_000_000_000_000 }],
+    ['no MAC address', { mac: undefined }],
+    ['a time that is text', { updatedMs: '1790000123456' }],
+    ['a negative time', { updatedMs: -1 }],
+    ['no time', { updatedMs: undefined }],
+    ['an empty device', { device: '' }],
+    ['a device that is a number', { device: 7 }],
+    ['no device', { device: undefined }],
+    ['an unknown field', { owner: 'alice' }],
+  ] as [string, Record<string, unknown>][])('refuses a cube with %s', async (_, change) => {
+    const document = cube();
+    for (const [field, value] of Object.entries(change)) {
+      if (value === undefined) {
+        Reflect.deleteProperty(document, field);
+      } else {
+        document[field] = value;
+      }
+    }
+    const db = alice().firestore();
+    await assertFails(db.doc(CUBE).set(document));
+    // Nor can an update leave a stored cube so.
+    await seed(CUBE, cube());
+    await assertFails(db.doc(CUBE).set(document));
+    await assertSucceeds(db.doc(CUBE).set(cube()));
   });
 });
 

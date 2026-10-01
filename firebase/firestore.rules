@@ -1,8 +1,8 @@
 rules_version = '2';
 
 // Who may read and write what in cubetrace's Firestore (docs/DATA-MODEL.md §10). A signed-in account
-// reads and writes its own users/{uid}, and the sessions it owns with their attempts; nothing is
-// public, and everything not matched here is denied. Tested against the emulator by
+// reads and writes its own users/{uid} with its cubes, and the sessions it owns with their attempts;
+// nothing is public, and everything not matched here is denied. Tested against the emulator by
 // firebase/rules.test.ts (`npm run test:rules`); deployed by .github/workflows/firebase.yml.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -63,6 +63,33 @@ service cloud.firestore {
         && validUser(request.resource.data)
         && (!('createdMs' in resource.data)
           || request.resource.data.createdMs == resource.data.createdMs);
+    }
+
+    // users/{uid}/cubes/{name} (T3.4, issue #21): Settings' list of the cubes' MAC addresses, one
+    // document per cube by its Bluetooth name, which only the account reads and writes. A document is
+    // the entry as a device of the account writes it, whole: its own name, the MAC address normalized
+    // as Settings keeps it (AB:12:CD:34:EF:56), when it last changed (the newest wins a merge) and the
+    // device that wrote it. Its place is the account's, so it needs no owner.
+    function cubeFields() {
+      return ['schema', 'name', 'mac', 'updatedMs', 'device'];
+    }
+
+    function validCube(cube, name) {
+      return cube.keys().hasAll(cubeFields())
+        && cube.keys().hasOnly(cubeFields())
+        && cube.schema == 1
+        && cube.name == name
+        && cube.mac is string
+        && cube.mac.matches('[0-9A-F]{2}(:[0-9A-F]{2}){5}')
+        && cube.updatedMs is number
+        && cube.updatedMs >= 0
+        && cube.device is string
+        && cube.device.size() > 0;
+    }
+
+    match /users/{uid}/cubes/{name} {
+      allow read, delete: if isOwnUid(uid);
+      allow create, update: if isOwnUid(uid) && validCube(request.resource.data, name);
     }
 
     // sessions/{id} and their attempts carry `owner`, the uid of the account that wrote them: only

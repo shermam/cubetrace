@@ -84,6 +84,7 @@ export {
   ATTEMPT_SCHEMA,
   ATTEMPT_SCHEMA_V1,
   CLOUD_ATTEMPT_SCHEMA,
+  CLOUD_CUBE_SCHEMA,
   CLOUD_SESSION_SCHEMA,
   FRAMES_SCHEMA,
   SESSION_SCHEMA,
@@ -96,6 +97,7 @@ export {
   RecordError,
   parseAttempt,
   parseCloudAttempt,
+  parseCloudCube,
   parseCloudSession,
   parseSession,
 } from './records';
@@ -123,3 +125,6 @@ export {
   pendingUpload,
   sessionOfDocument,
 } from './cloud';
+// T3.4 — the account's cubes (their MAC addresses) in Firestore
+export type { CloudCube, CloudCubeInput } from './cloud-cube';
+export { CUBE_NAME, MAC_ADDRESS, cloudCube, isCubeDocumentName } from './cloud-cube';

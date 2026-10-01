@@ -4,7 +4,8 @@
 // with its input. The checks are written out here instead of being run by a JSON Schema validator,
 // so that the app reads its files without one in its bundle; records.test.ts holds them to the
 // schemas with ajv, field by field. Since T3.1 they also read the documents of the session index in
-// Firestore (docs/DATA-MODEL.md §10), which are of version 2 only (cloud.test.ts holds them to theirs).
+// Firestore (docs/DATA-MODEL.md §10), which are of version 2 only (cloud.test.ts holds them to theirs),
+// and since T3.4 the account's cubes there, of version 1 (cloud-cube.test.ts).
 import type {
   AttemptEvents,
   AttemptMove,
@@ -23,6 +24,8 @@ import type {
   CloudUploadFile,
 } from './cloud';
 import { CLOUD_UPLOAD_STATES } from './cloud';
+import type { CloudCube } from './cloud-cube';
+import { CUBE_NAME, MAC_ADDRESS } from './cloud-cube';
 import type { Face } from './notation';
 import type { PhaseName } from './phases';
 import { PHASE_NAMES } from './phases';
@@ -42,11 +45,15 @@ import type {
 import { UUID_V4 } from './session';
 
 /**
- * The files the readers read, and the documents of the session index in Firestore (T3.1), named by
- * their paths.
+ * The files the readers read, and the documents of the session index in Firestore (T3.1) and of the
+ * account's cubes (T3.4), named by their paths.
  */
 export type RecordFile =
-  'session.json' | 'attempt.json' | 'sessions/{id}' | 'sessions/{id}/attempts/{index}';
+  | 'session.json'
+  | 'attempt.json'
+  | 'sessions/{id}'
+  | 'sessions/{id}/attempts/{index}'
+  | 'users/{uid}/cubes/{name}';
 
 /**
  * What {@link parseSession} and {@link parseAttempt} throw for a record they do not accept. The
@@ -117,6 +124,16 @@ export function parseCloudAttempt(json: unknown): CloudAttempt {
   return parseDocument('sessions/{id}/attempts/{index}', json, CLOUD_ATTEMPT);
 }
 
+/**
+ * A cube of the account's list in Firestore (`users/{uid}/cubes/{name}`, docs/DATA-MODEL.md §10,
+ * T3.4): schema version 1, its name, its MAC address normalized, when it last changed and the device
+ * that wrote it. Throws a {@link RecordError} naming the field on anything else, such as a document of
+ * another version, written by another version of the app.
+ */
+export function parseCloudCube(json: unknown): CloudCube {
+  return parseDocument('users/{uid}/cubes/{name}', json, CLOUD_CUBE, 1);
+}
+
 function parse<T>(
   file: RecordFile,
   json: unknown,
@@ -139,14 +156,26 @@ function parse<T>(
   }
 }
 
-/** A document of the session index: schema version 2 only, as no other was ever written. */
-function parseDocument<T>(file: RecordFile, json: unknown, reader: Reader<T>): T {
+/**
+ * A document of Firestore of one schema version, the only one ever written: 2 for the session index,
+ * 1 for the cubes.
+ */
+function parseDocument<T>(
+  file: RecordFile,
+  json: unknown,
+  reader: Reader<T>,
+  version: 1 | 2 = 2,
+): T {
   if (!isObject(json)) {
     throw new RecordError(file, null, '', `must be an object, got ${show(json)}`);
   }
-  const version = json['schema'];
-  if (version !== 2) {
-    throw new RecordError(file, null, 'schema', `must be 2, got ${show(version)}`);
+  if (json['schema'] !== version) {
+    throw new RecordError(
+      file,
+      null,
+      'schema',
+      `must be ${String(version)}, got ${show(json['schema'])}`,
+    );
   }
   try {
     return reader.read(json, '');
@@ -720,4 +749,14 @@ const CLOUD_ATTEMPT = object<CloudAttempt>({
     state: oneOf(...CLOUD_UPLOAD_STATES),
     files: byKey(attemptFile, object<CloudUploadFile>({ bytes: int(1), doneMs: nullable(num()) })),
   }),
+});
+
+// ---- The account's cubes in Firestore (docs/DATA-MODEL.md §10, T3.4) ----
+
+const CLOUD_CUBE = object<CloudCube>({
+  schema: oneOf(1),
+  name: text('a name that can name a document (no "/", neither . nor .., not __…__)', CUBE_NAME),
+  mac: text('a MAC address such as AB:12:CD:34:EF:56 (upper case, colons)', MAC_ADDRESS),
+  updatedMs: num({ min: 0 }),
+  device: nonEmpty,
 });

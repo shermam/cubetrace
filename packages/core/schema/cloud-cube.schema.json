@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/cloud-cube.schema.json",
+  "title": "users/{uid}/cubes/{name}",
+  "description": "A cube of an account's list of MAC addresses in Firestore, schema version 1 (docs/DATA-MODEL.md §10, docs/PLAN.md T3.4): an entry of Settings → Cube MAC addresses, by the cube's Bluetooth name, which is the document's id. The account's, never the dataset's: no file of the dataset holds a MAC address.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "mac", "updatedMs", "device"],
+  "properties": {
+    "schema": { "const": 1 },
+    "name": {
+      "description": "The cube's Bluetooth name as Settings has it (such as GAN12ui_AB12), the document's id: not empty, without a slash, neither . nor .., and not __…__, as Firestore's ids must be. Settings matches names ignoring case.",
+      "type": "string",
+      "pattern": "^(?!\\.\\.?$)(?!__.*__$)[^/]+$"
+    },
+    "mac": {
+      "description": "The cube's MAC address as Settings keeps it: six hex bytes in upper case with colons between them.",
+      "type": "string",
+      "pattern": "^[0-9A-F]{2}(:[0-9A-F]{2}){5}$"
+    },
+    "updatedMs": {
+      "description": "When the entry last changed, in ms, on the host clock of the device that changed it: of two copies of an entry, the one changed last wins a merge.",
+      "type": "number",
+      "minimum": 0
+    },
+    "device": {
+      "description": "The host label of the device that wrote the document (Settings → This device; session.json's host.label).",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

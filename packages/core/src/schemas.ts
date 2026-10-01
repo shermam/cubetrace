@@ -1,13 +1,14 @@
 // The JSON Schemas (draft 2020-12) of the records (docs/DATA-MODEL.md §6, §7, §9 and §10):
 // session.json and attempt.json in schema version 2, which the app writes, and in version 1, which it
 // still reads, the frames files of the video clips, users/{uid}, the account's record in Firestore,
-// and the documents of the session index there (T3.1). They live as JSON files in
-// packages/core/schema/, imported here as JSON modules (TypeScript resolves them with the base
-// tsconfig's `moduleResolution: bundler`; the bundlers inline them). The app itself reads records
-// with records.ts, which checks the same rules without a validator.
+// the documents of the session index there (T3.1), and the account's cubes (T3.4). They live as JSON
+// files in packages/core/schema/, imported here as JSON modules (TypeScript resolves them with the
+// base tsconfig's `moduleResolution: bundler`; the bundlers inline them). The app itself reads
+// records with records.ts, which checks the same rules without a validator.
 import attemptSchemaV1 from '../schema/attempt.v1.schema.json';
 import attemptSchema from '../schema/attempt.schema.json';
 import cloudAttemptSchema from '../schema/cloud-attempt.schema.json';
+import cloudCubeSchema from '../schema/cloud-cube.schema.json';
 import cloudSessionSchema from '../schema/cloud-session.schema.json';
 import framesSchema from '../schema/frames.schema.json';
 import sessionSchemaV1 from '../schema/session.v1.schema.json';
@@ -52,3 +53,9 @@ export const CLOUD_SESSION_SCHEMA: JsonSchema = cloudSessionSchema;
  * index (schema version 2, §10): attempt.json without its moves, with its owner, device and upload.
  */
 export const CLOUD_ATTEMPT_SCHEMA: JsonSchema = cloudAttemptSchema;
+
+/**
+ * The schema of `users/{uid}/cubes/{name}` in Firestore, a cube of the account's list of MAC
+ * addresses (schema version 1, §10, T3.4).
+ */
+export const CLOUD_CUBE_SCHEMA: JsonSchema = cloudCubeSchema;
