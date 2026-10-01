@@ -15,6 +15,7 @@ export default defineConfig([
     '**/playwright-report/',
     '**/test-results/',
     'fixtures/',
+    'functions/lib/',
   ]),
   {
     files: ['**/*.{js,mjs,cjs}'],
@@ -41,6 +42,24 @@ export default defineConfig([
         {
           patterns: [
             { group: ['@angular/*'], message: 'packages/* are plain TypeScript: no Angular.' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The Cloud Functions are deployed on their own: Cloud Build installs functions/package.json
+    // from npm, without the workspace's packages.
+    files: ['functions/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@cubetrace/*', '@angular/*'],
+              message: 'functions/ is deployed alone: no workspace package, no Angular.',
+            },
           ],
         },
       ],
