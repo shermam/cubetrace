@@ -1250,12 +1250,13 @@ the photo is a component of its own rather than an `<ng-template>` (`NgTemplateO
 connection").
 
 **Sizes** (`ng build`, 2026-10-01, against `main` at b0c908a): the initial bundle's code is
-unchanged, but it is 264.52 kB raw, 72.61 kB transferred (264.46 and 72.56 before): `main` names the
-lazy chunks it imports (the pages, the header's controls, the connect dialog), and their names are
-longer with `namedChunks`. Firebase is `firebase-sdk-<hash>.js`, 619.1 kB raw, 156.6 kB transferred.
-The header's controls, `header-controls-<hash>.js`, are 14.8 kB raw, 4.4 kB transferred (the cube's
-pill alone was 1.9 kB): `AuthService`, the control, the photo and the error texts, loaded right after
-the first render. The Settings page's chunk is unchanged, 16.4 kB.
+unchanged, but it is 264.53 kB raw, 72.58 kB transferred (264.46 and 72.56 before): `main` names the
+eight lazy chunks it imports (the pages, the header's controls, the connect dialog), and their names
+are 63 bytes longer in all with `namedChunks`. Firebase is `firebase-sdk-<hash>.js`, 619.1 kB raw,
+156.6 kB transferred. The account's code (`AuthService`, the control, the photo, the error texts) is a
+chunk of 13.0 kB raw, 3.9 kB transferred, which the header's controls (`header-controls-<hash>.js`,
+2.3 kB, the cube's pill with it; the pill alone was 1.9 kB) and the Settings page share, and which
+every start loads right after the first render; the Settings page's own chunk is 17.0 kB (16.4).
 
 **Sign-in flows.** A popup (`signInWithPopup`), except in the app installed on Android (display mode
 `standalone` and the platform Android), where a popup would leave the app for a Chrome tab: there
