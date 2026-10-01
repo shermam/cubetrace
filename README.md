@@ -208,11 +208,12 @@ accepts 24.15 and later) with npm 10. Run the commands from the repository root.
 
 | Command | What it does |
 |---|---|
-| `npm ci` | install everything (npm workspaces: `apps/*`, `packages/*`) |
+| `npm ci` | install everything (npm workspaces: `apps/*`, `packages/*`, `functions`) |
 | `npm start` | dev server on http://localhost:4200 (`ng serve`) |
 | `npm run build` | production build into `apps/web/dist/web/browser` (`ng build`) |
 | `npm test` | package tests (Vitest), then the app's tests (`ng test`, single run, jsdom) |
 | `npm run test:rules` | the Firestore rules' tests against the Firestore emulator (needs Java 21; the Firebase CLI comes through npx) |
+| `npm run test:functions` | builds the Cloud Functions, then runs their tests against the Firestore emulator (needs Java 21) |
 | `npm run test:watch` | package tests in watch mode; for the app, `npm run test -w @cubetrace/web` |
 | `npm run e2e` | Playwright end-to-end tests in Chromium (starts `ng serve` on port 4200 and a production build on port 4300, unless servers already run there) |
 | `npm run lint` | type-check, `eslint .`, then `ng lint` for the app |
@@ -224,9 +225,10 @@ once with `npx playwright install chromium`. The versions and the reasons behind
 [`CLAUDE.md`](CLAUDE.md).
 
 Every push to `main` builds the app with `--base-href /cubetrace/` and publishes it to GitHub Pages
-(`.github/workflows/pages.yml`), and deploys the Firestore rules when it changes them
-(`.github/workflows/firebase.yml`). Pull requests and pushes run `.github/workflows/ci.yml`: lint,
-format check, tests, the rules' tests, build and the end-to-end tests.
+(`.github/workflows/pages.yml`), and deploys the Firestore rules and the Cloud Functions when it
+changes them (`.github/workflows/firebase.yml`). Pull requests and pushes run
+`.github/workflows/ci.yml`: lint, format check, tests, the rules' and the functions' tests, build and
+the end-to-end tests.
 
 ## Repository layout
 
@@ -242,6 +244,8 @@ packages/capture/  @cubetrace/capture: the camera and the recording
   src/clip-worker.ts, mux.ts, clip-writer.ts      the clip worker: MP4 muxing with mediabunny, the files written into OPFS
   src/motion.ts, clapperboard.ts            the sync check: the motion in the framing rectangle, and the lag it gives
 firebase/          the Firestore rules and their tests (firebase.json and .firebaserc at the root: the project cubetrace-cacd9)
+functions/         the Cloud Functions: signUpload and confirmUpload, the signed uploads into the bucket (functions/README.md)
+bucket/            the bucket's CORS policies, for Google Cloud Storage and Cloudflare R2, and how to set the bucket up
 fixtures/          real solves, cube identities, the round 1 exports (hardware/) and a second of encoded video (media/): the tests' reference data (read-only)
 docs/              plan, architecture, data model, toolchain, manual tests, devices, owner's actions, changelog, screenshots
 ```

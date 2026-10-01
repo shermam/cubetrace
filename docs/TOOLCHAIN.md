@@ -2,7 +2,8 @@
 
 Set up by T1.0 on 2026-09-27. Change it only with a pull request that says why (`CLAUDE.md`).
 `package-lock.json` is the source of truth for every version; `package.json` files use caret or
-tilde ranges, except Playwright, which is pinned exactly (see below).
+tilde ranges, except Playwright, which is pinned exactly (see below), and the functions' dependencies,
+which Cloud Build installs without the lockfile ("Functions", below).
 
 ## Versions installed
 
@@ -28,7 +29,11 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | firebase (the Firebase JavaScript SDK) | 12.19.0 | `apps/web/package.json` | added by T3.0: Authentication and Firestore, modular imports, in one lazy chunk; Apache-2.0; see "Account" below |
 | `@firebase/rules-unit-testing` | 5.0.2 | root `package.json` | added by T3.0: the Firestore rules' tests against the emulator; its peer is the same `firebase` |
 | firebase-tools (the Firebase CLI) | 15.32.1, exact | the `firebase` script of the root `package.json` (npx) | not installed by `npm ci`: the emulators (`npm run test:rules`) and the deploys (`.github/workflows/firebase.yml`); see "Account" below |
-| Java | 21: Temurin in CI, OpenJDK 21.0.10 locally | `.github/workflows/ci.yml` (`actions/setup-java`) | the Firestore emulator, 1.22.0 with firebase-tools 15.32.1, a jar that the CLI downloads into `~/.cache/firebase/emulators` (137 MB), which CI caches |
+| Java | 21: Temurin in CI, OpenJDK 21.0.10 locally | `.github/workflows/ci.yml` (`actions/setup-java`) | the Firestore emulator, 1.22.0 with firebase-tools 15.32.1, a jar that the CLI downloads into `~/.cache/firebase/emulators` (137 MB), which CI caches; `npm run test:rules` and `npm run test:functions` |
+| firebase-functions | 7.4.0, exact | `functions/package.json` | added by T3.2: `onCall`, parameters and secrets, the logger, the loader the CLI finds functions with; MIT; see "Functions" below |
+| firebase-admin | 14.5.0, exact | `functions/package.json` | added by T3.2: Firestore for the functions (its Firestore is `@google-cloud/firestore` 9.3, over `@grpc/grpc-js` 1.14.5); needs Node 22; Apache-2.0 |
+| `@google-cloud/storage` | 8.2.0, exact | `functions/package.json` | added by T3.2: V4 signed URLs and object metadata for Google Cloud Storage; firebase-admin's optional dependency, the same copy; Apache-2.0 |
+| `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | 3.1145.0, exact | `functions/package.json` | added by T3.2: S3 SigV4 presigned URLs and `HeadObject` for Cloudflare R2; Apache-2.0 |
 
 ## Commands
 
@@ -41,6 +46,8 @@ tilde ranges, except Playwright, which is pinned exactly (see below).
 | `npm test` | `vitest run` (`packages/**/src/**/*.test.ts`, Node), then `ng test --watch=false` (the app's `*.spec.ts`, jsdom, headless) |
 | `npm run test:watch` | `vitest` in watch mode for the packages; the app: `npm run test -w @cubetrace/web` |
 | `npm run test:rules` | `firebase emulators:exec --only firestore --project demo-cubetrace "vitest run --config firebase/vitest.config.ts"`: starts the Firestore emulator (port 8080, `firebase.json`), runs `firebase/*.test.ts` against it, stops it |
+| `npm run test:functions` | `npm run build -w @cubetrace/functions`, then `firebase emulators:exec --only firestore --project demo-cubetrace "vitest run --config functions/vitest.config.ts"`: the functions' tests (`functions/src/*.test.ts`) against the Firestore emulator |
+| `npm run build -w @cubetrace/functions` | `tsc -p functions/tsconfig.build.json`: the functions compiled into `functions/lib/` (gitignored), which deploys and the Functions emulator load |
 | `npm run firebase -- <arguments>` | the Firebase CLI: `npx --yes firebase-tools@15.32.1 <arguments>`, downloaded into npm's cache on first use |
 | `npm run e2e` | `playwright test -c apps/web/e2e/playwright.config.ts` (Chromium; report in `apps/web/e2e/playwright-report`); starts `ng serve` on port 4200 and a production build under `/cubetrace/` on port 4300 |
 | `npm run icons -w @cubetrace/web` | `scripts/generate-icons.mts`: redraws `apps/web/public/icons/` (the SVG and the PNGs the manifest lists) |
@@ -1303,3 +1310,73 @@ pinned) and runs `npm run test:rules` after `npm test`. `firebase.yml` deploys t
 its first step while the repository secret `FIREBASE_SERVICE_ACCOUNT` is missing, then writes the key
 into the runner's temporary directory for the CLI (`GOOGLE_APPLICATION_CREDENTIALS`) and removes it at
 the end (`docs/USER-ACTIONS.md` has the key and its roles).
+
+## Functions (T3.2)
+
+Added by T3.2 on 2026-10-01: `functions/`, the Cloud Functions `signUpload` and `confirmUpload`
+(`functions/README.md`, `docs/ARCHITECTURE.md` "Uploads", `docs/DATA-MODEL.md` §10), the bucket's
+CORS policies (`bucket/`), and their deploy.
+
+**A workspace that is deployed alone.** `functions/` is an npm workspace (`@cubetrace/functions`), so
+`npm ci` installs it, `npm run typecheck` and `npm run lint` cover it and its dependencies are in the
+root lockfile. `firebase deploy` builds it (`predeploy` in `firebase.json`), uploads the directory
+without `src/` and `node_modules`, and Cloud Build runs `npm install` on `functions/package.json`
+alone, without the root lockfile and without the workspace's packages: the functions import none
+(`no-restricted-imports` in `eslint.config.js`; `paths` emptied in `functions/tsconfig.json`), and
+their direct dependencies are pinned exactly, so that Cloud Build installs the versions tested (their
+own dependencies follow their ranges). `gcp-build` is empty: Cloud Run functions would otherwise run
+`npm run build`, whose `tsc` is the root's and is not there; `lib/` is uploaded built.
+
+**ES modules, compiled by `tsc`.** `"type": "module"`, `module` and `moduleResolution` `nodenext`
+(relative imports end in `.js`), `lib` ES2023 without the DOM, Node's types; `tsconfig.json`
+type-checks everything (the tests too) and `tsconfig.build.json` emits `src/` minus the tests into
+`lib/` with source maps. firebase-functions 7 has ES module builds of every entry point, and its
+loader (the CLI's way to find the functions) loads ES modules. The functions import its entry points
+one by one (`/https`, `/params`, `/logger`, `/options`), not the root, which loads every provider, and
+load the bucket's adapter of the configuration (`gcs.ts` or `r2.ts`, behind `ObjectStore` in
+`object-store.ts`) with its SDK on an instance's first call: with GCS a cold start never loads the
+AWS SDK (loading `lib/index.js` took 0.56 s and 110 MB, and 0.8 s and 134 MB with both SDKs imported
+up front).
+
+**Parameters in a committed `.env`.** A non-interactive deploy (the workflow's, and the coordinator's)
+refuses to go on without a value in a dotenv file for every parameter, its default notwithstanding
+(firebase-tools 15.32.1, `resolveParams`), so `functions/.env` holds them all; none is a secret, and
+`.gitignore` lets that one file through. The CLI loads the code to find the functions with those values
+in its environment and nothing else of the shell's; the R2 secrets are declared only when
+`BUCKET_PROVIDER` is `r2` there, because any declared secret must exist in Secret Manager for a deploy
+to go through, bound or not. `functions/src/deploy.test.ts` runs that loader on the build for each
+provider. The emulator also reads `functions/.env.local` and `functions/.secret.local` (gitignored).
+
+**Signing.** GCS: `File.getSignedUrl` (V4, `write`) with `accessibleAt`, `expires` (whole seconds, so
+the URL says 900), `contentType` and the extension header `x-goog-content-length-range: n,n`; on
+Cloud Functions the library signs through the IAM Credentials API's `signBlob` as the function's
+service account, with no key file. R2: an `S3Client` for `https://<account>.r2.cloudflarestorage.com`,
+region `auto`, path-style, and `requestChecksumCalculation`/`responseChecksumValidation` set to
+`WHEN_REQUIRED`: since 3.729 the SDK otherwise signs a CRC32 of the empty body into every presigned
+`PUT`, which the real upload then fails; `getSignedUrl` signs `content-type` and `content-length`
+(`signableHeaders`). `functions/src/object-store.test.ts` checks both with made-up keys by rebuilding
+the canonical request from the URL and the headers returned and verifying the signature (RSA-SHA256
+for GCS with the key pair's public half, HMAC-SHA256 for R2), and reads sizes from a local server that
+answers as each provider's API does (GCS's client skips authentication for a custom endpoint).
+
+**Tests.** `npm run test:functions` builds, then runs Vitest (`functions/vitest.config.ts`) inside
+`firebase emulators:exec --only firestore --project demo-cubetrace`: 94 tests in about 13 s, one file
+at a time since they share the emulator's database; the handlers run with the Admin SDK against it
+(data cleared before each test through the emulator's REST endpoint) and a fake bucket.
+`METADATA_SERVER_DETECTION=none` keeps Google's auth library from looking for a Compute Engine
+metadata server, which it otherwise does against the emulator too. Checked by hand on 2026-10-01 in
+the Functions emulator (`emulators:exec --only functions,firestore`): with R2 and made-up keys in
+`.env.local` and `.secret.local`, the CLI loaded both functions from `lib/` with the parameters and the
+secrets, a call signed out came back 401, one without the session 404, and one with it 200 with two
+presigned URLs, the quota and the intent written; with GCS and no Google credentials, signing failed
+as `internal`, the cause (`Request failed with status code 403`, the metadata server's) in the log.
+
+**Deploys.** `.github/workflows/firebase.yml` runs `npm ci` (the CLI builds the functions and loads
+them) and `firebase deploy --only firestore:rules,functions --non-interactive`. Such a deploy fails
+after deploying when the Artifact Registry repository of the functions' images has no cleanup policy:
+the first one is run with `--force`, which sets a one-day policy (`functions/README.md`).
+
+**`npm audit`.** The functions add two moderate findings, one chain: `uuid` 9.0.1 under `gaxios`
+6.7.1 (`@google-cloud/storage`'s), GHSA-w5hq-g745-h8pq, a missing bounds check when `v3`, `v5` or
+`v6` is given a buffer to write into; gaxios calls `v4()` for multipart boundaries only. The 5 high
+findings of T3.0 are unchanged (the functions' Firestore has `@grpc/grpc-js` 1.14.5, past them).

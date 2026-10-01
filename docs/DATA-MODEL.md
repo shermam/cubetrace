@@ -458,13 +458,51 @@ signed in or started signed in. The app does not wait for the write: Firestore a
 cache in IndexedDB at once and sends it when it can, after the network is back or after a reload;
 when the server refuses it, Settings → Account says so and the console has
 `cubetrace: The account's record (users/{uid}) could not be saved: …`.
-`packages/core/schema/user.schema.json` (`USER_SCHEMA`) is this record in machine-readable form. The
-upload quota of T3.2 will be a field of this document that only the functions write.
+`packages/core/schema/user.schema.json` (`USER_SCHEMA`) is this record in machine-readable form: what
+the app writes. The document also holds `quota`, the upload quota, which only the functions write
+(below, "Uploads").
 
 ### `sessions/{id}` and `sessions/{id}/attempts/{index}`
 
 The session index of T3.1, which defines their fields. Each of these documents carries `owner`, the
 uid of the account that wrote it, which the rules require.
+
+### Uploads: `users/{uid}.quota` and an attempt's `upload` (T3.2)
+
+The functions (`functions/README.md`) keep two fields through the Admin SDK, past the rules:
+
+```jsonc
+// users/{uid}
+"quota": {"day": "2026-10-01", "bytes": 43000, "files": 3}
+
+// sessions/{id}/attempts/{index}
+"upload": {
+  "state": "uploading",                  // "pending" | "uploading" | "done" | "failed"
+  "files": {                             // by file name in the attempt's folder (§5)
+    "attempt.json": {"bytes": 18220, "doneMs": 1790889065000},
+    "laptop.solve.mp4": {"bytes": 23734012, "doneMs": null}
+  }
+}
+```
+
+- `quota` is what `signUpload` has signed for the account on `day`, the UTC day (`YYYY-MM-DD`): the
+  bytes and the files, every signature counted, a file signed again included; a call on another day
+  counts from zero. The account reads it with its record and can neither write it nor delete a record
+  that holds it (the rules, below). When the record is not there yet, the functions create the
+  document with `quota` alone, and the app's next merge adds the record's fields.
+- An attempt's document id is its folder's name (§5): `0001` for `index` 1, `0017`, `12345`. The
+  functions find the attempt of a call's `attemptIndex` by it.
+- `upload` is created with the attempt (T3.1: `{state: 'pending', files: {}}`). `signUpload` sets
+  `state` to `uploading` and `files[path]` to `{bytes, doneMs: null}` for each file it signs (a file
+  signed again starts again); `confirmUpload` sets a file's `doneMs`, the server's clock in ms since
+  1970, once its object is in the bucket with that size, and `state` to `done` once every file of
+  `files` has one. The functions never write `pending` or `failed`, and keep any other field of
+  `upload` as it is. `path` is the file's name in the attempt's folder (`attempt.json`,
+  `<camera>.<segment>.mp4`, `<camera>.<segment>.frames.json`), or `session.json`, the session's file,
+  recorded on the attempt it was uploaded with.
+- The objects are `users/{uid}/sessions/{id}/attempts/{index}/<path>`, and
+  `users/{uid}/sessions/{id}/session.json` for the session's file, in the bucket of the configuration
+  (`bucket/README.md`).
 
 ### The rules
 
@@ -473,7 +511,9 @@ uid of the account that wrote it, which the rules require.
 
 - `users/{uid}`: only the account `uid` reads, writes and deletes it; it writes only the record's
   fields (`schema` 1, `createdMs` a number, `displayName` and `email` text or null, `devices` a map),
-  and never changes `createdMs` once set.
+  and never changes `createdMs` once set. `quota` is the functions': the account reads it, never
+  creates, changes or removes it, and cannot delete a record that holds it, which would start the
+  day's count again.
 - `sessions/{id}` and `sessions/{id}/attempts/{index}`: only the account that `owner` names reads,
   updates and deletes one; a new one must name its writer as `owner`, an attempt only under a session
   of the same `owner` (in the same batch or before); `owner` never changes. A query must ask for the

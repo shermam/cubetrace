@@ -563,3 +563,30 @@ and what happened. The Firebase console (Firestore Database → Data) shows the 
   a solve is saved; back online, nothing to do.
 - [ ] Sign out (the header's menu or Settings): "Sign in" again; reload: still signed out, and the
   Network panel shows no `firebase` request.
+
+## T3.2 — signed uploads
+
+By the coordinator, once the bucket (`bucket/README.md`) and the functions are deployed
+(`functions/README.md`), from its session with the environment's key; the app does not call the
+functions before T3.3. Write the date and what came back next to each item.
+
+- [ ] A test account without Google: the Admin SDK's `createCustomToken('t32-check')`, exchanged for an
+  ID token at `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=<apiKey>`
+  (the web config's key, `apps/web/src/environments/firebase.ts`) with
+  `{"token": "<custom token>", "returnSecureToken": true}`; and, written with the Admin SDK,
+  `sessions/<a UUID v4>` and its `attempts/0001`, both with `owner: 't32-check'`.
+- [ ] `signUpload` (the URL the deploy printed; `POST` with `Authorization: Bearer <ID token>` and
+  `{"data": {"sessionId": "<the UUID>", "attemptIndex": 1, "files": [{"path": "attempt.json",
+  "bytes": 2, "contentType": "application/json"}]}}`) answers one URL on
+  `storage.googleapis.com/cubetrace-data/users/t32-check/…`, with its two headers; the function's log
+  has `signUpload: signed`; `users/t32-check` has `quota: {day, bytes: 2, files: 1}` and the attempt
+  `upload.state: 'uploading'`. If it answers `internal` and the log says `signBlob` was denied, the
+  functions' account lacks Token Creator on itself, or the IAM Credentials API is off.
+- [ ] `curl -X PUT -H 'Content-Type: application/json' -H 'x-goog-content-length-range: 2,2'
+  --data-binary '{}' '<url>'` succeeds; the same with `--data-binary '{"a":1}'` (7 bytes), or with
+  `Content-Type: text/plain`, is refused.
+- [ ] `confirmUpload` with `{"files": [{"path": "attempt.json"}]}` answers `state: 'done'`, and the
+  attempt's `upload.files['attempt.json'].doneMs` is set. Again without the object (deleted first):
+  `not-found`.
+- [ ] Without the ID token: `unauthenticated`. Then delete the test's documents, `users/t32-check`,
+  the object and the account (`deleteUser('t32-check')`).

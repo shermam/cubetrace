@@ -20,6 +20,14 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
   own record and its own sessions), tested against the Firestore emulator (`npm run test:rules`, in
   CI with Java 21), and a workflow that deploys them when a merge changes them
   (`.github/workflows/firebase.yml`).
+- Development: the Cloud Functions the uploads will go through (T3.2, `functions/`). `signUpload`
+  gives a signed-in account, for one of its own attempts, a URL per file into the dataset's bucket
+  (Google Cloud Storage for now, Cloudflare R2 by configuration), valid 15 minutes for that file's
+  type and exact size, within a daily quota per account (2 GB and 400 files by default, kept in the
+  account's record, which the app can read and not change); `confirmUpload` checks that the files
+  arrived with their sizes and marks the attempt uploaded. The app does not call them yet: the upload
+  queue (T3.3) will. Their tests run against the Firestore emulator (`npm run test:functions`, in CI),
+  the Firebase workflow deploys them with the rules, and `bucket/` has the bucket's CORS policies.
 
 ## 0.2.0 — 2026-09-27
 
