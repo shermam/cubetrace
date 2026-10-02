@@ -182,8 +182,9 @@ known on every device. Signed out, the app works as before: nothing leaves the d
 is never downloaded.
 
 **The account.** Sign in, in the header or in Settings → Account, signs in with Google (in a popup;
-the app installed on Android goes to Google's page and comes back). The account records your name,
-your email and each device's label, and stays signed in across reloads, offline too, until Sign out.
+over the app installed on Android, a Chrome tab of its own that closes itself). The account records
+your name, your email and each device's label, and stays signed in across reloads, offline too,
+until Sign out.
 
 **What syncs**, through Firestore, whose cache on the device keeps each change while offline and
 sends it once the network is back:

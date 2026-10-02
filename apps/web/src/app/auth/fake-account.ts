@@ -47,19 +47,16 @@ export function functionsError(code: string, message: string, details?: unknown)
 
 /**
  * The account's backend in memory. Like Firebase, it keeps the account signed in across page loads
- * (one instance stands for the device: give the same one to each load), reports it to its watchers
- * asynchronously, and reads a redirect's outcome once.
+ * (one instance stands for the device: give the same one to each load) and reports it to its
+ * watchers asynchronously.
  */
 export class FakeAccountBackend implements AccountBackend {
   /** The account signed in on this device, as Firebase keeps it in IndexedDB. */
   user: BackendUser | null = null;
   /** The account that Google's page signs in. */
   account: BackendUser = ADA;
-  /** Set: the popup (or the redirect, or reading its outcome) fails with it. */
+  /** Set: the popup fails with it. */
   popupError: Error | null = null;
-  redirectError: Error | null = null;
-  /** The outcome waiting for the page that comes back from a redirect. */
-  redirectUser: BackendUser | null = null;
   signOutError: Error | null = null;
   /** Set: users/{uid} cannot be saved (Firestore refuses it). */
   saveError: Error | null = null;
@@ -76,7 +73,7 @@ export class FakeAccountBackend implements AccountBackend {
   /** Set: the index's reads fail with it. */
   readError: Error | null = null;
 
-  /** The calls made, in order: `watch`, `popup`, `redirect`, `redirect-result`, `sign-out`. */
+  /** The calls made, in order: `watch`, `popup`, `sign-out`. */
   readonly calls: string[] = [];
   /** Every users/{uid} written, in order. */
   readonly saved: { uid: string; record: UserRecord }[] = [];
@@ -156,26 +153,6 @@ export class FakeAccountBackend implements AccountBackend {
     }
     this.setUser(this.account);
     return Promise.resolve();
-  }
-
-  signInWithRedirect(): Promise<void> {
-    this.calls.push('redirect');
-    if (this.redirectError !== null) {
-      return Promise.reject(this.redirectError);
-    }
-    // The page would leave for Google's here; the test then loads the page again.
-    this.redirectUser = this.account;
-    return new Promise<void>(() => undefined);
-  }
-
-  redirectResult(): Promise<BackendUser | null> {
-    this.calls.push('redirect-result');
-    const user = this.redirectUser;
-    this.redirectUser = null;
-    if (user !== null) {
-      this.setUser(user);
-    }
-    return Promise.resolve(user);
   }
 
   signOut(): Promise<void> {

@@ -6,7 +6,7 @@ import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals'
 import { FakeLocalStorage, FakeMediaQuery, FakePerformance, settle } from '../device/fake-browser';
 import { SettingsService } from '../settings/settings-service';
 import { ACCOUNT_LOADER, type AccountLoader } from './account-backend';
-import { ACCOUNT_STORAGE_KEY, AuthService, signInFlow } from './auth-service';
+import { ACCOUNT_STORAGE_KEY, AuthService, installedApp } from './auth-service';
 import { ADA, FakeAccountBackend, authError } from './fake-account';
 
 const MAC_USER_AGENT =
@@ -21,18 +21,14 @@ function displayMode(installed: boolean): BrowserGlobals['matchMedia'] {
   return (query) => new FakeMediaQuery(installed && query === '(display-mode: standalone)');
 }
 
-describe('signInFlow', () => {
-  it.each([
-    ['a tab on a laptop', MAC_USER_AGENT, false, 'popup'],
-    ['the app installed on a laptop', MAC_USER_AGENT, true, 'popup'],
-    ['a tab on an Android phone', ANDROID_USER_AGENT, false, 'popup'],
-    ['the app installed on an Android phone', ANDROID_USER_AGENT, true, 'redirect'],
-  ] as const)('signs in from %s with a %s', (_, userAgent, installed, flow) => {
-    expect(signInFlow({ navigator: { userAgent }, matchMedia: displayMode(installed) })).toBe(flow);
+describe('installedApp', () => {
+  it('tells the installed app (display mode standalone) from a browser tab', () => {
+    expect(installedApp({ matchMedia: displayMode(true) })).toBe(true);
+    expect(installedApp({ matchMedia: displayMode(false) })).toBe(false);
   });
 
   it('takes a browser without matchMedia for a tab', () => {
-    expect(signInFlow({ navigator: { userAgent: ANDROID_USER_AGENT } })).toBe('popup');
+    expect(installedApp({ navigator: { userAgent: ANDROID_USER_AGENT } })).toBe(false);
   });
 });
 
@@ -308,52 +304,82 @@ describe('AuthService', () => {
     expect(auth.status()).toBe('signed-in');
   });
 
-  it('signs in with a redirect in the app installed on Android, and reads its outcome when the page comes back', async () => {
+  it('signs in with the same popup in the app installed on Android (issue #50), and remembers the account', async () => {
     globals = {
       ...globals,
       navigator: { userAgent: ANDROID_USER_AGENT },
       matchMedia: displayMode(true),
     };
     const auth = load();
-    void auth.signIn();
+    await auth.signIn();
     await settle();
 
-    expect(backend.calls).toEqual(['watch', 'redirect']);
-    expect(remembered()).toBe('redirect');
-    expect(auth.status()).toBe('loading');
-
-    // Google sends the page back: a new page load.
-    const back = load();
-    expect(back.status()).toBe('loading');
-    await settle();
-
-    expect(backend.calls.slice(2)).toEqual(['watch', 'redirect-result']);
-    expect(back.status()).toBe('signed-in');
-    expect(back.user()?.email).toBe('ada@example.com');
+    expect(backend.calls).toEqual(['watch', 'popup']);
+    expect(auth.status()).toBe('signed-in');
+    expect(auth.user()?.email).toBe('ada@example.com');
     expect(remembered()).toBe('signed-in');
     expect(Object.keys(backend.saved[0].record.devices)).toEqual(['Android phone']);
   });
 
-  it('says so when the page comes back from a redirect without an account', async () => {
+  it("forgets 0.3.0's redirect value at start: signed out, nothing said, Firebase not loaded", async () => {
     storage.setItem(ACCOUNT_STORAGE_KEY, 'redirect');
     const auth = load();
+    expect(auth.status()).toBe('signed-out');
     await settle();
 
-    expect(backend.calls).toEqual(['watch', 'redirect-result']);
-    expect(auth.status()).toBe('error');
-    expect(auth.error()).toBe(
-      'Signing in did not finish: Google sent the page back without an account. Sign in again.',
-    );
+    expect(auth.status()).toBe('signed-out');
+    expect(auth.error()).toBeNull();
+    expect(auth.user()).toBeNull();
+    expect(backend.loads).toBe(0);
+    expect(backend.calls).toEqual([]);
     expect(remembered()).toBeNull();
   });
 
-  it('says so when the redirect cannot leave (offline), and forgets it', async () => {
+  it.each([
+    ['blocked', 'auth/popup-blocked'],
+    ['closed first', 'auth/popup-closed-by-user'],
+    ['cancelled', 'auth/cancelled-popup-request'],
+  ])(
+    "says what to do when Google's window is %s in the installed app: sign in from a Chrome tab",
+    async (_, code) => {
+      globals = {
+        ...globals,
+        navigator: { userAgent: ANDROID_USER_AGENT },
+        matchMedia: displayMode(true),
+      };
+      backend.popupError = authError(code);
+      const auth = load();
+      await auth.signIn();
+      await settle();
+
+      expect(auth.status()).toBe('error');
+      expect(auth.error()).toBe(
+        "Google's window did not finish signing in from the installed app. Open the app's address in " +
+          'Chrome itself and sign in there once: the installed app shares its storage with Chrome, so ' +
+          'that signs it in too. Then open the installed app again.',
+      );
+      expect(auth.user()).toBeNull();
+      expect(remembered()).toBeNull();
+
+      // A Chrome tab at the same address signs in meanwhile: the storage is the same, so the installed
+      // app's next start finds the account without Google's page.
+      backend.user = ADA;
+      storage.setItem(ACCOUNT_STORAGE_KEY, 'signed-in');
+      const next = load();
+      await settle();
+      expect(next.status()).toBe('signed-in');
+      expect(next.user()?.uid).toBe('ada-uid');
+      expect(backend.calls.filter((call) => call === 'popup')).toHaveLength(1);
+    },
+  );
+
+  it('keeps the other messages in the installed app: a popup that did not finish is the one case', async () => {
     globals = {
       ...globals,
       navigator: { userAgent: ANDROID_USER_AGENT },
       matchMedia: displayMode(true),
     };
-    backend.redirectError = authError('auth/network-request-failed');
+    backend.popupError = authError('auth/network-request-failed');
     const auth = load();
     await auth.signIn();
 

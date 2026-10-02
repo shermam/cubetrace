@@ -151,9 +151,10 @@ adds items; the owner ticks them when done (date and any detail that others need
   issue for every failure.
 - [ ] **The `v0.3.0` release**, after round 3, from the GitHub UI (the coordinator's session cannot
   push tags): Releases → Draft a new release → Choose a tag: type `v0.3.0` and choose "Create new
-  tag on publish", target `main` (with T3.5 merged), title `0.3.0`, the notes from the 0.3.0 section
-  of `docs/CHANGELOG.md` → Publish release. The `v0.2.0` release, if still missing (round 2's item),
-  is made the same way, on the commit the coordinator names.
+  tag on publish", target `main` (after T3.6 merges: the installed app's sign-in, issue #50), title
+  `0.3.0`, the notes from the 0.3.0 section of `docs/CHANGELOG.md` → Publish release. The `v0.2.0`
+  release, if still missing (round 2's item), is made the same way, on the commit the coordinator
+  names.
 
 ## Later
 

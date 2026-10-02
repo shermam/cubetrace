@@ -18,13 +18,11 @@ import {
   browserLocalPersistence,
   browserPopupRedirectResolver,
   connectAuthEmulator,
-  getRedirectResult,
   indexedDBLocalPersistence,
   initializeAuth,
   onAuthStateChanged,
   signInWithCredential,
   signInWithPopup,
-  signInWithRedirect,
   signOut,
   type Auth,
   type User,
@@ -82,8 +80,9 @@ export function connectFirebase(emulators: FirebaseEmulators | null = null): Acc
   const app = initializeApp(
     emulators === null ? FIREBASE_CONFIG : { ...FIREBASE_CONFIG, projectId: emulators.projectId },
   );
-  // The account is kept in IndexedDB across reloads. No popup and redirect resolver here: the calls
-  // that open Google's page pass it, so that a remembered sign-in starts without Google's iframe.
+  // The account is kept in IndexedDB across reloads. No popup resolver here: the one call that opens
+  // Google's page passes it (browserPopupRedirectResolver, the SDK's resolver for popups too), so
+  // that a remembered sign-in starts without Google's iframe.
   const auth = initializeAuth(app, {
     persistence: [indexedDBLocalPersistence, browserLocalPersistence],
   });
@@ -120,11 +119,6 @@ export function connectFirebase(emulators: FirebaseEmulators | null = null): Acc
         return;
       }
       await signInWithPopup(auth, google, browserPopupRedirectResolver);
-    },
-    signInWithRedirect: () => signInWithRedirect(auth, google, browserPopupRedirectResolver),
-    redirectResult: async () => {
-      const result = await getRedirectResult(auth, browserPopupRedirectResolver);
-      return result === null ? null : backendUser(result.user);
     },
     signOut: () => signOut(auth),
     saveUser: (uid, record) => setDoc(doc(firestore, 'users', uid), record, { merge: true }),
