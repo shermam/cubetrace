@@ -1470,8 +1470,8 @@ the service, which starts the queue, exists on every page then. It injects what 
 (`SessionService`, the index, the store) rather than an `Injector` to reach them later, since a lazy
 chunk's use of `Injector` makes `main` export it: tried first, it reshuffled `main`'s exports and added
 11 bytes. Without it `main` is byte for byte the same but for the build's commit and the lazy chunks'
-hashes: the initial bundle is 264.63 kB raw, 72.51 kB transferred, as before (`ng build`, 2026-10-02,
-against `main` at 9ad784b). The header's controls are 2.6 kB (2.3), the Sessions page 21.2 kB (15.1, the
+hashes: the initial bundle is 264.63 kB raw, as before (`ng build`, 2026-10-02, against `main` at
+9ad784b; the CLI's estimate of its transfer, 72.51 to 72.59 kB, moves with the hashes). The header's controls are 2.6 kB (2.3), the Sessions page 21.2 kB (15.1, the
 panel), a session's page 11.4 kB (11.0), Settings 21.0 kB (18.9), Firebase 646.8 kB raw (637.3).
 
 **One tab uploads: a Web Lock.** The queue holds `cubetrace.uploads` (`navigator.locks`) while it runs;

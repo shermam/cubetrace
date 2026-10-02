@@ -1424,8 +1424,8 @@ chunk (`upload-runtime-<hash>.js`, 27.2 kB raw, a lazy group of the service work
 signed in with uploads on; it injects what the queue needs (`SessionService`, the index, the store)
 rather than an `Injector`, which `main` would have had to export, and only the header's indicator, a
 nested deferred block that a signed-in account loads, makes it on every page; `main` is byte for byte
-the same but for the build's commit and the lazy chunks' hashes (the initial bundle 264.63 kB raw,
-72.51 kB transferred, as before). `SessionChanges` turns the store's writes into events (after the
+the same but for the build's commit and the lazy chunks' hashes (the initial bundle 264.63 kB raw, as
+before; the CLI's estimate of its transfer moves by a few tens of bytes with the hashes). `SessionChanges` turns the store's writes into events (after the
 index's), `ClipsInFlight` holds an attempt back while the recording has a clip of it to save, and
 `SessionService.markClipsGone` saves `local: false` before a clip is deleted. Firebase's chunk gains
 `firebase/functions` (646.8 kB raw, 637.3 before). The e2e fake of Firebase plays the two functions
