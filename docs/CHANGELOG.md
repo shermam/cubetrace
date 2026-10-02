@@ -73,6 +73,32 @@ versions follow [Semantic Versioning](https://semver.org/).
   `apps/web/src/app/timer`, with their tests; the recording flow of the end-to-end suite seeks and
   plays a clip and checks the puzzle object's quaternion, the player's alg and the highlighted move
   against what core computes from the gyro file the app wrote.
+- The clip viewer's 3D cube seen straight on, with the view and a mirror kept per camera (T3.10,
+  issue #55): the cube is under the video now, as wide as it and about half as tall, and the
+  player's camera looks at it level and from the front (cubing.js looks from above and to the right
+  by default, so an upright cube already looked tilted), so that its tilt can be compared with the
+  hands'. Under the cube, Turn ◀ ▶ (90° around it), Tilt ▲ ▼ (90° over it, within ±90°), Behind and
+  Reset view move the viewpoint, a drag with the mouse or a finger turns it freely (cubing.js's own
+  drag input; a click adds no move), and Mirror (none, left–right, up–down, front–back, all) reflects
+  the orientation shown, for a camera behind or beside the cube or a cube whose gyroscope's axes
+  differ. The view and the mirror are kept per camera label: on the device (Settings, at most 8
+  cameras) and, signed in, in the account (`users/{uid}.viewer`, `docs/DATA-MODEL.md` §10), read once
+  at each sign-in and merged with the device's (the account's for the cameras the device has not
+  set), then written a second after the last change; a clip of a camera without a choice opens with
+  the defaults; Re-zero and Raw stay per clip. One line under the controls says how to calibrate,
+  and `docs/MANUAL-TESTS.md`, "After T3.10", replaces "After T3.8" with the steps.
+- Development: `Mirror`, `mirrored` and `shownOrientation`'s mirror, `ViewerChoice` with its reader,
+  merge and diff (`user.ts`) in `packages/core`; `viewer` in `user.schema.json` and in the rules,
+  with their tests; `AccountBackend.getUser` and `saveViewer` in the SDK and both fakes;
+  `ClipCube.view`, `target`, `orbit` and `onDrag`; `ViewerSyncService`; the recording flow of the
+  end-to-end suite checks the layout, the straight-on view, the presets, a drag with the mouse, the
+  mirror and the choice kept on a second open.
+
+### Changed
+
+- The clip viewer's layout (T3.10): the 3D cube under the video instead of beside it, the video at
+  most 45% of the screen's height and the cube 30%; the view's controls and the mirror in one
+  wrapping row under the cube, Re-zero and Raw under the orientation line.
 
 ## 0.3.0 — 2026-10-02
 

@@ -536,7 +536,11 @@ into the stored document (Firestore's `set` with `merge`), so that `devices` gat
   "createdMs": 1790000000000,            // when the account was created
   "displayName": "Ada Lovelace",         // null without one
   "email": "ada@example.com",            // null without one
-  "devices": {"office-mbp": 1790000123456.7, "Android phone": 1790000200000.2}
+  "devices": {"office-mbp": 1790000123456.7, "Android phone": 1790000200000.2},
+  "viewer": {                            // T3.10: the clip viewer's choice per camera; absent before
+    "laptop": {"latitude": 0, "longitude": 0, "mirror": "none"},
+    "phone-rear": {"latitude": 90, "longitude": 180, "mirror": "left-right"}
+  }
 }
 ```
 
@@ -551,6 +555,22 @@ when the server refuses it, Settings → Account says so and the console has
 `packages/core/schema/user.schema.json` (`USER_SCHEMA`) is this record in machine-readable form: what
 the app writes. The document also holds `quota`, the upload quota, which only the functions write
 (below, "Uploads").
+
+`viewer` (T3.10, `docs/PLAN.md`) is how the clip viewer shows each camera's clips, by the camera's
+label (the clip's `camera`, §7): `latitude` and `longitude`, where the player's camera looks at the
+3D cube from, in degrees (0 and 0 straight on from the front; the latitude −90 to 90, 90 straight
+above the cube; the longitude −180 to 180, 90 to the cube's right, 180 behind it), and `mirror`, the
+reflection applied to the orientation shown (`none`, `left-right`, `up-down`, `front-back` or `all`:
+across the plane normal to the viewer's X, Y or Z, or all three). The app writes it apart from the
+sign-in's record, merged (Firestore's `set` with `merge` of `viewer` alone, with the cameras whose
+choice changed), a second after the last change on the device, and reads it once at each sign-in
+and at each start signed in, merging it with the device's choices: the device's for the cameras it
+has set, the account's for the others, the account then written the device's (`ViewerSyncService`,
+`docs/ARCHITECTURE.md`, "The clip viewer"). At most 8 cameras: the rules check each entry by its
+place in the map, within the engine's budget of expressions, and refuse a ninth. A record written
+before T3.10 has none, the sign-in's write never carries it, and Re-zero and Raw, which are per clip,
+are not in it. `packages/core/src/user.ts` has the reader (`parseViewerChoices`, which leaves out an
+entry that is not well formed), the merge and the diff.
 
 ### The account's cubes: `users/{uid}/cubes/{name}`, schema version 1
 
@@ -855,8 +875,10 @@ of the last days with the Admin SDK, past the rules (`npm run round-report`, `do
 (`npm run test:rules`, in CI) and deployed on merge by `.github/workflows/firebase.yml`:
 
 - `users/{uid}`: only the account `uid` reads, writes and deletes it; it writes only the record's
-  fields (`schema` 1, `createdMs` a number, `displayName` and `email` text or null, `devices` a map),
-  and never changes `createdMs` once set. `quota` is the functions': the account reads it, never
+  fields (`schema` 1, `createdMs` a number, `displayName` and `email` text or null, `devices` a map,
+  and `viewer`, if there, a map of at most 8 entries, each a map of exactly `latitude`, a number from
+  −90 to 90, `longitude`, from −180 to 180, and `mirror`, one of the five; T3.10), and never changes
+  `createdMs` once set. `quota` is the functions': the account reads it, never
   creates, changes or removes it, and cannot delete a record that holds it, which would start the
   day's count again.
 - `sessions/{id}` and `sessions/{id}/attempts/{index}`: only the account that `owner` names reads,

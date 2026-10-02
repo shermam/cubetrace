@@ -10,7 +10,8 @@ import type { Page } from '@playwright/test';
 // elsewhere they refuse as unavailable, and the upload queue waits. The account's cubes (T3.4) are in
 // localStorage too, unless the test gives a cloud (`fakeCloud`) that browser contexts share: two
 // devices of one account; and so are the diagnostics events the app writes (T3.9), in the order of
-// their batches.
+// their batches, and users/{uid} as the writes left it (the sign-in's record merged with the clip
+// viewer's choices per camera, T3.10), which stays per context.
 
 /** A signed-in account as the backend reports it (src/app/auth/account-backend.ts, BackendUser). */
 export interface FakeAccountUser {
@@ -38,6 +39,10 @@ export interface FakeAccountState {
   /** `popup`, `sign-out`, in order. */
   readonly calls: readonly string[];
   readonly saved: readonly { readonly uid: string; readonly record: unknown }[];
+  /** users/{uid}, by uid, as the writes left it: the record merged with `viewer` (T3.10). */
+  readonly users: Readonly<Record<string, Record<string, unknown>>>;
+  /** The writes of `viewer` into users/{uid} (T3.10), in order: `users/<uid> viewer <labels>`. */
+  readonly viewerWrites: readonly string[];
   /** The session index, as written (and as the test seeded it). */
   readonly index: FakeIndex;
   /** The index's writes in order: `sessions/<id>`, `sessions/<id>/attempts/0001`, `delete …`. */
@@ -198,6 +203,8 @@ export async function fakeAccount(
         loads: number;
         calls: string[];
         saved: { uid: string; record: unknown }[];
+        users: Record<string, Doc>;
+        viewerWrites: string[];
         index: { sessions: Record<string, Doc>; attempts: Record<string, Record<string, Doc>> };
         indexWrites: string[];
         uploadCalls: string[];
@@ -213,6 +220,8 @@ export async function fakeAccount(
           loads: 0,
           calls: [],
           saved: [],
+          users: {},
+          viewerWrites: [],
           index: structuredClone(seed),
           indexWrites: [],
           uploadCalls: [],
@@ -334,7 +343,24 @@ export async function fakeAccount(
           return Promise.resolve();
         },
         saveUser(uid: string, record: unknown): Promise<void> {
-          change((state) => state.saved.push({ uid, record }));
+          change((state) => {
+            state.saved.push({ uid, record });
+            state.users[uid] = merged(state.users[uid], record as Doc);
+          });
+          return Promise.resolve();
+        },
+        // The account's record (T3.10): read once at each sign-in, the viewer's choices merged in.
+        getUser(uid: string) {
+          const record = read().users[uid] as Doc | undefined;
+          return Promise.resolve(
+            record === undefined ? null : { id: uid, data: record, pending: false },
+          );
+        },
+        saveViewer(uid: string, viewer: Doc): Promise<void> {
+          change((state) => {
+            state.users[uid] = merged(state.users[uid], { viewer });
+            state.viewerWrites.push(`users/${uid} viewer ${Object.keys(viewer).sort().join(',')}`);
+          });
           return Promise.resolve();
         },
         saveSessionIndex(session: Doc, attempts: Doc[] = []): Promise<void> {
@@ -565,6 +591,8 @@ export async function fakeAccountState(page: Page): Promise<FakeAccountState> {
         loads: 0,
         calls: [],
         saved: [],
+        users: {},
+        viewerWrites: [],
         index: { sessions: {}, attempts: {} },
         indexWrites: [],
         uploadCalls: [],

@@ -1,7 +1,7 @@
 // The account's backend on the Firebase SDK (docs/ARCHITECTURE.md, "Account"): Authentication with
-// the Google provider, Firestore for users/{uid}, the session index (T3.1), the account's cubes
-// (T3.4) and its diagnostics events (T3.9), and the upload's two callable functions (T3.3), through
-// the modular API. This is the only
+// the Google provider, Firestore for users/{uid} (with the clip viewer's choices in it, T3.10), the
+// session index (T3.1), the account's cubes (T3.4) and its diagnostics events (T3.9), and the
+// upload's two callable functions (T3.3), through the modular API. This is the only
 // file that imports Firebase, and only ACCOUNT_LOADER's dynamic import loads it, so the SDK is a
 // lazy chunk of its own, firebase-sdk-<hash>.js, which the service worker caches only once it has
 // been used (ngsw-config.json): a device that never signs in never downloads it. In development builds
@@ -123,6 +123,12 @@ export function connectFirebase(emulators: FirebaseEmulators | null = null): Acc
     },
     signOut: () => signOut(auth),
     saveUser: (uid, record) => setDoc(doc(firestore, 'users', uid), record, { merge: true }),
+    getUser: async (uid) => {
+      const snapshot = await getDoc(doc(firestore, 'users', uid));
+      return snapshot.exists() ? cloudDocument(snapshot) : null;
+    },
+    // The clip viewer's choices (T3.10): a merge, so that the cameras not named keep theirs.
+    saveViewer: (uid, viewer) => setDoc(doc(firestore, 'users', uid), { viewer }, { merge: true }),
     saveSessionIndex: async (session, attempts = []) => {
       // The session first, then its attempts, which the rules accept only under a session of the same
       // owner: one batch, or batches in that order when a session has more than 499 attempts.

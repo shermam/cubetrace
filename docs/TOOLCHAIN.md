@@ -1674,8 +1674,8 @@ all the scripts together, 3531.1 kB raw against 3502.5 (1029.2 kB gzipped agains
 
 ## The clip viewer's 3D cube (T3.8)
 
-Added by T3.8 on 2026-10-02: a 3D cube beside the clip in the viewer, following the video
-(`docs/ARCHITECTURE.md` "The clip viewer", `docs/DATA-MODEL.md` §11).
+Added by T3.8 on 2026-10-02: a 3D cube beside the clip in the viewer (under it since T3.10),
+following the video (`docs/ARCHITECTURE.md` "The clip viewer", `docs/DATA-MODEL.md` §11).
 
 **No new dependency, no new chunk.** The cube is cubing.js's `<twisty-player>`, from the scramble
 view's lazy chunk (`TWISTY_LOADER`, the dynamic import of `cubing/twisty`), with `visualization="3D"`:
@@ -1703,12 +1703,20 @@ sets), the method
 the move to the end), `experimentalCurrentThreeJSPuzzleObject()` (the `Cube3D` `Object3D`, deprecated
 but the only way to a three.js object; cubing.js never touches its rotation, only its pieces'
 matrices) and `experimentalCurrentVantages()` (the `Twisty3DVantage` elements, whose `scheduleRender`
-draws on the next animation frame). `clip-cube.ts` names these six members in a `CubePlayer`
-interface, which the spec checks against `TwistyPlayer` for the compiler, and the viewer takes the
+draws on the next animation frame). `clip-cube.ts` names these members (and, since T3.10, the
+model's orbit, below) in a `CubePlayer` interface, which the spec checks against `TwistyPlayer` for
+the compiler, and the viewer takes the
 element as one only once it has them (`cubePlayerOf`), so that jsdom's unknown element in the unit
 tests, or the element before the chunk loaded, drives nothing; the viewer's spec defines a fake
 `twisty-player` custom element that records the algs, the moves added, the quaternions set and the
-renders asked.
+renders asked. T3.10 added the camera's orbit: the attributes `camera-latitude`, `camera-longitude`
+(0 and 0: straight on, where cubing.js's defaults are 35° and 30°), `camera-latitude-limit` (90) and
+`camera-distance` (5) for the first render, `experimental-drag-input="auto"` for the drag, and the
+model's props `experimentalModel.twistySceneModel.orbitCoordinatesRequest` (`set({latitude,
+longitude})`, one request for both angles) and `orbitCoordinates` (`addFreshListener`, which reports
+the orbit once at first and then at each change, the user's drags and the inertia after them
+included; `removeFreshListener` on dispose), named in `CubePlayerModel`; the fake model for the
+specs is `clip-cube-testing.ts`.
 
 **No live cube on the Timer page**, by the owner's decision: the solver watches the real cube, and a
 WebGL renderer would compete with the capture pipeline for the GPU and the main thread. The viewer

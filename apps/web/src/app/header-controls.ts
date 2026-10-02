@@ -3,6 +3,7 @@ import { Component, computed, inject } from '@angular/core';
 import { AccountControl } from './auth/account-control';
 import { AuthService } from './auth/auth-service';
 import { CubeSyncService } from './cloud/cube-sync';
+import { ViewerSyncService } from './cloud/viewer-sync';
 import { CubeStatusPill } from './connect/cube-status-pill';
 import { DiagnosticsService } from './diagnostics/diagnostics-service';
 import { UploadIndicator } from './upload/upload-indicator';
@@ -14,9 +15,10 @@ import { UploadIndicator } from './upload/upload-indicator';
  * indicator comes between them (T3.3), from a deferred block of its own: it starts the upload queue,
  * and a device signed out never loads it. With the account comes the sync of the cubes' MAC
  * addresses (T3.4), which starts here on every page, so that a start signed in merges the cube list
- * before a cube is connected; signed out, it does nothing. The diagnostics (T3.9) start here too, so
- * that every page load records its start, signed in or not (signed out, the events wait in memory
- * for a sign-in during the page's life).
+ * before a cube is connected, and the sync of the clip viewer's choices per camera (T3.10), merged
+ * at the same moment; signed out, both do nothing. The diagnostics (T3.9) start here too, so that
+ * every page load records its start, signed in or not (signed out, the events wait in memory for a
+ * sign-in during the page's life).
  */
 @Component({
   selector: 'app-header-controls',
@@ -44,6 +46,7 @@ export class HeaderControls {
 
   constructor() {
     inject(CubeSyncService);
+    inject(ViewerSyncService);
     inject(DiagnosticsService);
   }
 }

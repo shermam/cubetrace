@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { MAX_VIEWER_CHOICES, VIEWER_DEFAULT } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import { FakeLocalStorage, FakePerformance } from '../device/fake-browser';
@@ -133,6 +134,7 @@ describe('SettingsService', () => {
     settings.setWifiOnly(true);
     settings.setKeepLocalCopies(false);
     settings.setDiagnostics(false);
+    settings.setViewerChoice('laptop', { latitude: 90, longitude: 180, mirror: 'left-right' });
 
     expect(stored()).toEqual({
       version: 2,
@@ -167,6 +169,7 @@ describe('SettingsService', () => {
       wifiOnly: true,
       keepLocalCopies: false,
       diagnostics: false,
+      viewer: { laptop: { latitude: 90, longitude: 180, mirror: 'left-right' } },
     });
     const reloaded = load();
     expect(reloaded.uploadSessions()).toBe(false);
@@ -209,6 +212,87 @@ describe('SettingsService', () => {
         rect: { x: 480, y: 270, w: 960, h: 540 },
       },
     ]);
+    expect(reloaded.viewerChoiceFor('laptop')).toEqual({
+      latitude: 90,
+      longitude: 180,
+      mirror: 'left-right',
+    });
+    expect(reloaded.viewerChoiceFor('phone')).toBeNull();
+  });
+
+  it("keeps the clip viewer's choice per camera, normalized, the oldest first and at most 8 (T3.10)", () => {
+    const settings = load();
+    expect(settings.viewerChoices()).toEqual({});
+    expect(settings.viewerChoiceFor('laptop')).toBeNull();
+
+    // A drag's angles, as the player reports them: kept to a tenth of a degree, the longitude in
+    // (−180, 180]; the same choice again changes nothing.
+    settings.setViewerChoice('laptop', { latitude: 12.34, longitude: -179.96, mirror: 'none' });
+    expect(settings.viewerChoiceFor('laptop')).toEqual({
+      latitude: 12.3,
+      longitude: 180,
+      mirror: 'none',
+    });
+    const written = storage.getItem(SETTINGS_STORAGE_KEY);
+    settings.setViewerChoice('laptop', { latitude: 12.3, longitude: -180, mirror: 'none' });
+    expect(storage.getItem(SETTINGS_STORAGE_KEY)).toBe(written);
+    settings.setViewerChoice('laptop', { latitude: 12.3, longitude: 180, mirror: 'all' });
+    expect(settings.viewerChoiceFor('laptop')?.mirror).toBe('all');
+    // Another camera's choice beside it; a camera without a label keeps nothing, nor does one
+    // given the defaults, which a camera without an entry has.
+    settings.setViewerChoice('phone-front', VIEWER_DEFAULT);
+    settings.setViewerChoice('phone-rear', { ...VIEWER_DEFAULT, mirror: 'all' });
+    settings.setViewerChoice('', { ...VIEWER_DEFAULT, mirror: 'all' });
+    expect(Object.keys(settings.viewerChoices())).toEqual(['laptop', 'phone-rear']);
+    // Back to the defaults for a camera with an entry: kept as such.
+    settings.setViewerChoice('phone-rear', VIEWER_DEFAULT);
+    expect(settings.viewerChoiceFor('phone-rear')).toEqual(VIEWER_DEFAULT);
+
+    // A change makes the camera's entry the newest; past the cap the oldest goes.
+    settings.setViewerChoice('laptop', { latitude: 0, longitude: 90, mirror: 'none' });
+    expect(Object.keys(settings.viewerChoices())).toEqual(['phone-rear', 'laptop']);
+    for (let k = 1; k < MAX_VIEWER_CHOICES; k++) {
+      settings.setViewerChoice(`camera-${String(k)}`, { ...VIEWER_DEFAULT, latitude: k });
+    }
+    expect(Object.keys(settings.viewerChoices())).toHaveLength(MAX_VIEWER_CHOICES);
+    expect(settings.viewerChoiceFor('phone-rear')).toBeNull();
+    expect(settings.viewerChoiceFor('laptop')).toEqual({
+      latitude: 0,
+      longitude: 90,
+      mirror: 'none',
+    });
+
+    // A merge with the account's (ViewerSyncService): set as a whole.
+    settings.setViewerChoices({
+      laptop: { latitude: 0, longitude: 90, mirror: 'none' },
+      'phone-front': { latitude: -45.67, longitude: 0, mirror: 'up-down' },
+    });
+    expect(settings.viewerChoices()).toEqual({
+      laptop: { latitude: 0, longitude: 90, mirror: 'none' },
+      'phone-front': { latitude: -45.7, longitude: 0, mirror: 'up-down' },
+    });
+    const reloaded = load();
+    expect(reloaded.viewerChoices()).toEqual(settings.viewerChoices());
+  });
+
+  it("drops the clip viewer's stored choices that are not well formed, entry by entry (T3.10)", () => {
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        viewer: {
+          laptop: { latitude: 90, longitude: -180, mirror: 'left-right' },
+          far: { latitude: 91, longitude: 0, mirror: 'none' },
+          odd: { latitude: 0, longitude: 0, mirror: 'sideways' },
+          bare: { latitude: 0 },
+          phone: 'front',
+        },
+      }),
+    );
+    expect(load().viewerChoices()).toEqual({
+      laptop: { latitude: 90, longitude: 180, mirror: 'left-right' },
+    });
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ viewer: ['laptop'] }));
+    expect(load().viewerChoices()).toEqual({});
   });
 
   it('keeps the camera chosen on each host, and forgets nothing else when it changes', () => {

@@ -4,20 +4,38 @@ import {
   type GyroJson,
   type GyroSummary,
   type Quat,
+  VIEWER_DEFAULT,
   type VideoClip,
+  type ViewerChoice,
   clipHostMs,
   clipSeconds,
   fromAxisAngle,
+  mirrored,
   sameOrientation,
   toPlayerFrame,
 } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
-import { FakeAnimationFrames, polyfillDialog, settle } from '../device/fake-browser';
+import {
+  FakeAnimationFrames,
+  FakeLocalStorage,
+  polyfillDialog,
+  settle,
+} from '../device/fake-browser';
 import { ATTEMPT_FILES } from '../session/attempt-files';
 import { SESSION_A, testAttempt } from '../session/session-testing';
+import { SETTINGS_STORAGE_KEY, SettingsService } from '../settings/settings-service';
 import type { PuzzleObject, Renderable } from './clip-cube';
-import { CUBE_TEMPO_SCALE, ClipViewer, attemptFileName, clipMoves, moveAt } from './clip-viewer';
+import { FakeOrbitModel } from './clip-cube-testing';
+import {
+  CUBE_CAMERA_DISTANCE,
+  CUBE_TEMPO_SCALE,
+  ClipViewer,
+  VIEW_HELP,
+  attemptFileName,
+  clipMoves,
+  moveAt,
+} from './clip-viewer';
 import { ClipViewing } from './clip-viewing';
 import { TWISTY_LOADER } from './scramble-view';
 
@@ -31,6 +49,8 @@ class FakeTwistyPlayer extends HTMLElement {
   alg = '';
   experimentalSetupAlg = '';
   timestamp: number | 'start' | 'end' = 0;
+  /** The model's orbit (T3.10): the requests made of it, and the user's drags. */
+  readonly experimentalModel = new FakeOrbitModel();
   readonly added: string[] = [];
   readonly quaternions: Quat[] = [];
   renders = 0;
@@ -74,9 +94,10 @@ function clip(
   segment: 'scramble' | 'solve',
   firstFrameHostMs: number,
   syncResidualMs: number | null = null,
+  camera = 'laptop',
 ): VideoClip {
   return {
-    camera: 'laptop',
+    camera,
     segment,
     file: `laptop.${segment}.mp4`,
     bytes: 1_234_567,
@@ -175,17 +196,23 @@ describe('ClipViewer', () => {
   let revoked: string[];
   let reads: string[];
   let frames: FakeAnimationFrames;
+  /** The settings' storage: the view and the mirror kept per camera (T3.10). */
+  let storage: FakeLocalStorage;
   let fixture: ComponentFixture<ClipViewer>;
 
   async function render(
     missing: readonly string[] = [],
     attempt: AttemptRecord = ATTEMPT,
-    options: { gyro?: GyroJson; picture?: boolean } = {},
+    options: { gyro?: GyroJson; picture?: boolean; viewer?: Record<string, ViewerChoice> } = {},
   ): Promise<HTMLElement> {
     urls = [];
     revoked = [];
     reads = [];
     frames = new FakeAnimationFrames();
+    storage = new FakeLocalStorage();
+    if (options.viewer !== undefined) {
+      storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ viewer: options.viewer }));
+    }
     FakeTwistyPlayer.instances.length = 0;
     polyfillDialog();
     TestBed.configureTestingModule({
@@ -193,6 +220,7 @@ describe('ClipViewer', () => {
         {
           provide: BROWSER_GLOBALS,
           useValue: {
+            localStorage: storage,
             URL: {
               createObjectURL: (blob: Blob) => {
                 const url = `blob:${String(urls.length)}:${blob.type}`;
@@ -295,6 +323,29 @@ describe('ClipViewer', () => {
     return element.querySelector('[data-testid="clip-orientation"]')?.textContent.trim() ?? '';
   }
 
+  /** The choice kept for the camera labelled `camera`, as the viewer's host keeps it. */
+  function kept(camera: string): ViewerChoice | null {
+    return TestBed.inject(SettingsService).viewerChoiceFor(camera);
+  }
+
+  /** The orbit the model holds: where the player's camera looks from. */
+  function orbit(): [number, number] {
+    const { latitude, longitude } = cube().experimentalModel.orbit;
+    return [latitude, longitude];
+  }
+
+  function click(element: HTMLElement, testId: string): void {
+    element.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)?.click();
+  }
+
+  function mirrorSelect(element: HTMLElement): HTMLSelectElement {
+    const select = element.querySelector<HTMLSelectElement>('[data-testid="clip-mirror"]');
+    if (select === null) {
+      throw new Error('No mirror select.');
+    }
+    return select;
+  }
+
   function expectOrientation(actual: Quat | undefined, expected: Quat, what: string): void {
     expect(actual, what).toBeDefined();
     expect(sameOrientation(actual ?? [0, 0, 0, 1], expected), `${what}: ${String(actual)}`).toBe(
@@ -330,7 +381,7 @@ describe('ClipViewer', () => {
     ).toBe("F' at 2.40 s");
   });
 
-  it('shows the 3D cube beside the video, set up for the solve from the scramble, and says the orientation is not recorded (T3.8)', async () => {
+  it('shows the 3D cube under the video, seen straight on, set up for the solve from the scramble, and says the orientation is not recorded (T3.8, T3.10)', async () => {
     const element = await render();
     const player = element.querySelector('[data-testid="clip-cube-player"]');
     expect(player?.tagName.toLowerCase()).toBe('twisty-player');
@@ -342,9 +393,25 @@ describe('ClipViewer', () => {
         'control-panel',
         'hint-facelets',
         'experimental-drag-input',
+        'camera-latitude',
+        'camera-longitude',
+        'camera-latitude-limit',
+        'camera-distance',
         'tempo-scale',
       ].map((name) => player?.getAttribute(name)),
-    ).toEqual(['3x3x3', '3D', 'none', 'none', 'none', 'none', String(CUBE_TEMPO_SCALE)]);
+    ).toEqual([
+      '3x3x3',
+      '3D',
+      'none',
+      'none',
+      'none',
+      'auto',
+      '0',
+      '0',
+      '90',
+      String(CUBE_CAMERA_DISTANCE),
+      String(CUBE_TEMPO_SCALE),
+    ]);
     expect(cube().experimentalSetupAlg).toBe('R U F');
     expect(cube().alg).toBe('');
     expect(cube().timestamp).toBe('end');
@@ -356,9 +423,204 @@ describe('ClipViewer', () => {
     // No gyro file: nothing is read but the clip, and the cube stays upright.
     expect(reads).toEqual([`${SESSION_A}/3/laptop.solve.mp4`]);
     expect(cube().quaternions).toEqual([[0, 0, 0, 1]]);
+    // Under the video, in its column, as wide as it and half as tall (twice a 16:9 clip's ratio).
+    const block = element.querySelector<HTMLElement>('.player [data-testid="clip-cube"]');
+    expect(block).not.toBeNull();
+    expect(block?.style.getPropertyValue('--cube-aspect')).toBe('3.556');
+    expect(element.querySelector('video')?.compareDocumentPosition(block ?? element) ?? 0).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    // The view's controls, the mirror and the help line (T3.10); the model at the front view.
     expect(
-      (element.querySelector('.body') as HTMLElement).style.getPropertyValue('--cube-share'),
-    ).toBe('0.36');
+      Array.from(element.querySelectorAll('.view-controls button'), (b) => b.textContent.trim()),
+    ).toEqual(['Turn ◀', 'Turn ▶', 'Tilt ▲', 'Tilt ▼', 'Behind', 'Reset view']);
+    expect(mirrorSelect(element).value).toBe('none');
+    expect(
+      Array.from(mirrorSelect(element).options, (option) => [option.value, option.text.trim()]),
+    ).toEqual([
+      ['none', 'none'],
+      ['left-right', 'left–right'],
+      ['up-down', 'up–down'],
+      ['front-back', 'front–back'],
+      ['all', 'all'],
+    ]);
+    expect(element.querySelector('[data-testid="clip-view-help"]')?.textContent.trim()).toBe(
+      VIEW_HELP,
+    );
+    expect(orbit()).toEqual([0, 0]);
+    expect(kept('laptop')).toBeNull();
+  });
+
+  it('turns and tilts the view by the presets, keeps the choice for the clip’s camera, and resets it (T3.10)', async () => {
+    const element = await render();
+    const model = cube().experimentalModel;
+    click(element, 'clip-turn-right');
+    await update();
+    expect(orbit()).toEqual([0, 90]);
+    expect(kept('laptop')).toEqual({ latitude: 0, longitude: 90, mirror: 'none' });
+    click(element, 'clip-turn-left');
+    click(element, 'clip-turn-left');
+    await update();
+    expect(orbit()).toEqual([0, -90]);
+    expect(kept('laptop')).toEqual({ latitude: 0, longitude: -90, mirror: 'none' });
+    // Tilts within what the camera allows: a second step up stays at 90.
+    click(element, 'clip-tilt-up');
+    await update();
+    expect(orbit()).toEqual([90, -90]);
+    const requests = model.requests.length;
+    click(element, 'clip-tilt-up');
+    await update();
+    expect(orbit()).toEqual([90, -90]);
+    expect(model.requests).toHaveLength(requests);
+    expect(kept('laptop')).toEqual({ latitude: 90, longitude: -90, mirror: 'none' });
+    click(element, 'clip-tilt-down');
+    click(element, 'clip-tilt-down');
+    await update();
+    expect(orbit()).toEqual([-90, -90]);
+    // Behind: longitude 180, kept as 180 and held by the model as 180.
+    click(element, 'clip-behind');
+    await update();
+    expect(orbit()).toEqual([-90, 180]);
+    expect(kept('laptop')).toEqual({ latitude: -90, longitude: 180, mirror: 'none' });
+    click(element, 'clip-reset-view');
+    await update();
+    expect(orbit()).toEqual([0, 0]);
+    expect(kept('laptop')).toEqual(VIEWER_DEFAULT);
+    // The other clip, of the same camera: its view too; another camera's clip: the defaults.
+    click(element, 'clip-turn-right');
+    await update();
+    element.querySelector<HTMLButtonElement>('[data-segment="scramble"]')?.click();
+    await update();
+    expect(orbit()).toEqual([0, 90]);
+    fixture.componentRef.setInput('attempt', {
+      ...ATTEMPT,
+      video: [clip('scramble', -2000, null, 'phone-rear'), clip('solve', -1000)],
+    });
+    await update();
+    expect(orbit()).toEqual([0, 0]);
+    expect(kept('phone-rear')).toBeNull();
+    expect(kept('laptop')).toEqual({ latitude: 0, longitude: 90, mirror: 'none' });
+  });
+
+  it('keeps a drag’s orbit for the camera, to a tenth of a degree, without asking the player again (T3.10)', async () => {
+    const element = await render();
+    const model = cube().experimentalModel;
+    const requests = model.requests.length;
+    model.drag({ latitude: 12.34, longitude: -20.06 });
+    await update();
+    expect(kept('laptop')).toEqual({ latitude: 12.3, longitude: -20.1, mirror: 'none' });
+    expect(model.requests).toHaveLength(requests);
+    expect(orbit()).toEqual([12.34, -20.06]);
+    model.drag({ latitude: 40, longitude: 170 });
+    model.drag({ latitude: 45.55, longitude: 179.96 });
+    await update();
+    expect(kept('laptop')).toEqual({ latitude: 45.6, longitude: 180, mirror: 'none' });
+    expect(model.requests).toHaveLength(requests);
+    // A preset from where the drag left the camera, kept to a tenth of a degree.
+    click(element, 'clip-tilt-down');
+    await update();
+    expect(orbit()).toEqual([-44.4, 180]);
+    expect(kept('laptop')).toEqual({ latitude: -44.4, longitude: 180, mirror: 'none' });
+  });
+
+  it('opens a clip with the view and the mirror kept for its camera, which the player’s first report does not undo (T3.10)', async () => {
+    const choice: ViewerChoice = { latitude: 90, longitude: 180, mirror: 'up-down' };
+    const element = await render([], WITH_GYRO, {
+      gyro: TURNING,
+      viewer: { laptop: choice, 'phone-rear': { latitude: 0, longitude: -90, mirror: 'all' } },
+    });
+    const model = cube().experimentalModel;
+    expect(model.requests).toEqual([{ latitude: 90, longitude: 180 }]);
+    expect(orbit()).toEqual([90, 180]);
+    expect(mirrorSelect(element).value).toBe('up-down');
+    expect(kept('laptop')).toEqual(choice);
+    // The orientation in the mirror: at 2.45 s (host time 1450, no lag), 245° about the vertical
+    // since the first frame's sample, seen up–down.
+    const player = video(element);
+    const state = controllable(player);
+    state.time = 2.45;
+    player.dispatchEvent(new Event('timeupdate'));
+    await update();
+    expectOrientation(
+      cube().quaternions.at(-1),
+      mirrored(fromAxisAngle(UP, 245), 'up-down'),
+      'at 2.45 s, up–down',
+    );
+    // A clip of another camera: its own choice; the scramble clip of this one: the same choice.
+    fixture.componentRef.setInput('attempt', {
+      ...WITH_GYRO,
+      video: [clip('scramble', -2000, null, 'phone-rear'), clip('solve', -1000)],
+    });
+    await update();
+    element.querySelector<HTMLButtonElement>('[data-segment="scramble"]')?.click();
+    await update();
+    expect(orbit()).toEqual([0, -90]);
+    expect(mirrorSelect(element).value).toBe('all');
+    element.querySelector<HTMLButtonElement>('[data-segment="solve"]')?.click();
+    await update();
+    expect(orbit()).toEqual([90, 180]);
+    expect(mirrorSelect(element).value).toBe('up-down');
+  });
+
+  it('reflects the orientation in the mirror chosen, kept for the camera; Re-zero and Raw are not kept (T3.10)', async () => {
+    const element = await render([], WITH_GYRO, { gyro: TURNING });
+    const player = video(element);
+    const state = controllable(player);
+    state.time = 2.45;
+    player.dispatchEvent(new Event('timeupdate'));
+    await update();
+    // At 2.45 s the picture shows host time 1450 (no lag): 245° since the first frame's sample.
+    expectOrientation(cube().quaternions.at(-1), fromAxisAngle(UP, 245), 'no mirror');
+
+    const select = mirrorSelect(element);
+    select.value = 'left-right';
+    select.dispatchEvent(new Event('change'));
+    await update();
+    expectOrientation(
+      cube().quaternions.at(-1),
+      mirrored(fromAxisAngle(UP, 245), 'left-right'),
+      'left–right',
+    );
+    expect(kept('laptop')).toEqual({ latitude: 0, longitude: 0, mirror: 'left-right' });
+    expect(select.value).toBe('left-right');
+    // The mirror applies to the raw samples and after a re-zero too; neither is kept.
+    click(element, 'clip-rezero');
+    await update();
+    expectOrientation(cube().quaternions.at(-1), [0, 0, 0, 1], 're-zeroed');
+    state.time = 3.45;
+    player.dispatchEvent(new Event('timeupdate'));
+    await update();
+    expectOrientation(
+      cube().quaternions.at(-1),
+      mirrored(fromAxisAngle(UP, 100), 'left-right'),
+      're-zeroed, left–right',
+    );
+    element.querySelector<HTMLInputElement>('[data-testid="clip-raw"]')?.click();
+    await update();
+    expectOrientation(
+      cube().quaternions.at(-1),
+      mirrored(toPlayerFrame(fromAxisAngle(WHITE, 50 + 345)), 'left-right'),
+      'raw, left–right',
+    );
+    expect(kept('laptop')).toEqual({ latitude: 0, longitude: 0, mirror: 'left-right' });
+    select.value = 'all';
+    select.dispatchEvent(new Event('change'));
+    await update();
+    expectOrientation(
+      cube().quaternions.at(-1),
+      mirrored(toPlayerFrame(fromAxisAngle(WHITE, 50 + 345)), 'all'),
+      'raw, all',
+    );
+    select.value = 'none';
+    select.dispatchEvent(new Event('change'));
+    await update();
+    expect(kept('laptop')).toEqual(VIEWER_DEFAULT);
+    // A value that is no mirror changes nothing.
+    select.dispatchEvent(new Event('change'));
+    Object.defineProperty(select, 'value', { configurable: true, value: 'sideways' });
+    select.dispatchEvent(new Event('change'));
+    await update();
+    expect(kept('laptop')).toEqual(VIEWER_DEFAULT);
   });
 
   it('highlights the move the video shows, and goes to a move clicked', async () => {
@@ -718,7 +980,7 @@ describe('ClipViewer', () => {
     );
     // No 3D cube for a clip that is not here (T3.8).
     expect(element.querySelector('[data-testid="clip-cube"]')).toBeNull();
-    expect(element.querySelector('.body')?.classList.contains('with-cube')).toBe(false);
+    expect(element.querySelector('[data-testid="clip-mirror"]')).toBeNull();
     expect(
       Array.from(element.querySelectorAll('[data-testid="clip-segment"]'), (button) =>
         button.textContent.replace(/\s+/g, ' ').trim(),
@@ -735,8 +997,8 @@ describe('ClipViewer', () => {
     await update();
     expect(reads).toEqual([`${SESSION_A}/3/laptop.scramble.mp4`]);
     expect(video(element).getAttribute('src')).toBe('blob:0:video/mp4');
-    expect(element.querySelector('[data-testid="clip-cube"]')).not.toBeNull();
-    expect(element.querySelector('.body')?.classList.contains('with-cube')).toBe(true);
+    expect(element.querySelector('.player [data-testid="clip-cube"]')).not.toBeNull();
+    expect(element.querySelector('[data-testid="clip-mirror"]')).not.toBeNull();
 
     const names: string[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (

@@ -3,10 +3,14 @@ import type { TwistyPlayer } from 'cubing/twisty';
 import {
   ClipCube,
   type CubePlayer,
+  ORBIT_TOLERANCE,
+  type Orbit,
   type PuzzleObject,
   type Renderable,
   cubePlayerOf,
+  sameOrbit,
 } from './clip-cube';
+import { FakeOrbitModel } from './clip-cube-testing';
 import { IDENTITY, type Quat, fromAxisAngle } from '@cubetrace/core';
 
 /** A player that records what it was told, with a puzzle object that arrives when the test says. */
@@ -14,6 +18,7 @@ class FakePlayer implements CubePlayer {
   alg = '';
   experimentalSetupAlg = '';
   timestamp: number | 'start' | 'end' = 0;
+  readonly experimentalModel = new FakeOrbitModel();
   readonly log: string[] = [];
   readonly quaternions: Quat[] = [];
   renders = 0;
@@ -66,6 +71,16 @@ describe('cubePlayerOf', () => {
     // so that name is not the example).
     expect(cubePlayerOf(document.createElement('div'))).toBeNull();
     expect(cubePlayerOf({ experimentalAddMove: () => undefined })).toBeNull();
+    // The model's orbit too (T3.10).
+    const player = new FakePlayer();
+    expect(
+      cubePlayerOf({
+        experimentalAddMove: () => undefined,
+        experimentalCurrentThreeJSPuzzleObject: () =>
+          player.experimentalCurrentThreeJSPuzzleObject(),
+        experimentalCurrentVantages: () => player.experimentalCurrentVantages(),
+      }),
+    ).toBeNull();
   });
 
   it('asks of cubing.js’s player members it has (a check for the compiler)', () => {
@@ -171,5 +186,143 @@ describe('ClipCube', () => {
     expect(cube.show(0, false)).toBe('animate');
     expect(cube.orient(fromAxisAngle([0, 0, 1], 10))).toBe(false);
     expect(player.log).toEqual(['add R']);
+  });
+});
+
+describe('ClipCube and the orbit (T3.10)', () => {
+  /** The orbits the listener heard, as the user's drags. */
+  function dragged(cube: ClipCube): Orbit[] {
+    const heard: Orbit[] = [];
+    cube.onDrag((orbit) => heard.push(orbit));
+    return heard;
+  }
+
+  it('compares orbits within a tolerance, −180 and 180 being one longitude', () => {
+    expect(sameOrbit({ latitude: 0, longitude: 180 }, { latitude: 0, longitude: -180 }, 0)).toBe(
+      true,
+    );
+    expect(
+      sameOrbit({ latitude: 0, longitude: 179.95 }, { latitude: 0, longitude: -180 }, 0.06),
+    ).toBe(true);
+    expect(
+      sameOrbit({ latitude: 12.34, longitude: 0 }, { latitude: 12.3, longitude: 0 }, 0.06),
+    ).toBe(true);
+    expect(
+      sameOrbit({ latitude: 12.34, longitude: 0 }, { latitude: 12.2, longitude: 0 }, 0.06),
+    ).toBe(false);
+    expect(sameOrbit({ latitude: 0, longitude: 0.1 }, { latitude: 0, longitude: 0 }, 0.06)).toBe(
+      false,
+    );
+    expect(ORBIT_TOLERANCE).toBeLessThan(0.1);
+  });
+
+  it('requests the view of the model in one go, and not again while the camera is there or the request is on its way', async () => {
+    const player = new FakePlayer();
+    const model = player.experimentalModel;
+    const cube = new ClipCube(player);
+    expect(cube.orbit).toBeNull();
+    expect(cube.target).toBeNull();
+    cube.view({ latitude: 90, longitude: 180 });
+    expect(model.requests).toEqual([{ latitude: 90, longitude: 180 }]);
+    // The same request again, before the model reported: nothing more; the target is the request.
+    cube.view({ latitude: 90, longitude: 180 });
+    expect(model.requests).toHaveLength(1);
+    expect(cube.orbit).toBeNull();
+    expect(cube.target).toEqual({ latitude: 90, longitude: 180 });
+    await settled();
+    // The model reports its orbit; a view from behind is 180 there as here, and −180 is the same.
+    expect(cube.orbit).toEqual({ latitude: 90, longitude: 180 });
+    expect(cube.target).toEqual({ latitude: 90, longitude: 180 });
+    cube.view({ latitude: 90, longitude: 180 });
+    cube.view({ latitude: 90, longitude: -180 });
+    cube.view({ latitude: 89.95, longitude: 180 });
+    expect(model.requests).toHaveLength(1);
+    // Another view: requested.
+    cube.view({ latitude: 0, longitude: 0 });
+    expect(model.requests).toEqual([
+      { latitude: 90, longitude: 180 },
+      { latitude: 0, longitude: 0 },
+    ]);
+    await settled();
+    expect(cube.orbit).toEqual({ latitude: 0, longitude: 0 });
+  });
+
+  it("tells the user's drags from its own requests' echoes, and from the model's orbit before the first request", async () => {
+    const player = new FakePlayer();
+    const model = player.experimentalModel;
+    model.orbit = { latitude: 31.7, longitude: 0, distance: 5 };
+    const cube = new ClipCube(player);
+    const heard = dragged(cube);
+    // The model's own orbit, reported as the listener is added: not a drag, nor is the echo.
+    cube.view({ latitude: 0, longitude: 0 });
+    await settled();
+    expect(cube.orbit).toEqual({ latitude: 0, longitude: 0 });
+    expect(heard).toEqual([]);
+
+    // The user drags: heard, each report; then the view is asked for the orbit saved from the drag,
+    // rounded, which moves nothing.
+    model.drag({ latitude: 12.34, longitude: -20.06 });
+    model.drag({ latitude: 13.3, longitude: -21 });
+    await settled();
+    expect(heard).toEqual([
+      { latitude: 12.34, longitude: -20.06 },
+      { latitude: 13.3, longitude: -21 },
+    ]);
+    expect(cube.target).toEqual({ latitude: 13.3, longitude: -21 });
+    cube.view({ latitude: 13.3, longitude: -21 });
+    expect(model.requests).toHaveLength(1);
+    model.drag({ latitude: 14, longitude: -21 });
+    await settled();
+    expect(heard).toHaveLength(3);
+
+    // A new request closes the gate until its echo: a report still on its way from before it (the
+    // end of a drag's inertia) is not a drag; after the echo, a drag is heard again.
+    model.drag({ latitude: 14.5, longitude: -21 });
+    cube.view({ latitude: 0, longitude: 90 });
+    await settled();
+    expect(heard).toHaveLength(3);
+    expect(cube.orbit).toEqual({ latitude: 0, longitude: 90 });
+    model.drag({ latitude: 1, longitude: 91 });
+    await settled();
+    expect(heard).toHaveLength(4);
+    expect(heard[3]).toEqual({ latitude: 1, longitude: 91 });
+  });
+
+  it('takes the echo of a view from behind asked as −180, which the model reports as 180', async () => {
+    const player = new FakePlayer();
+    const cube = new ClipCube(player);
+    const heard = dragged(cube);
+    cube.view({ latitude: 0, longitude: -180 });
+    await settled();
+    expect(cube.orbit).toEqual({ latitude: 0, longitude: 180 });
+    expect(heard).toEqual([]);
+    player.experimentalModel.drag({ latitude: 0, longitude: -170 });
+    await settled();
+    expect(heard).toEqual([{ latitude: 0, longitude: -170 }]);
+    // And a report of −180 where the model holds 180 moves the camera by nothing: no drag.
+    cube.view({ latitude: 0, longitude: 180 });
+    await settled();
+    expect(heard).toHaveLength(1);
+    for (const listener of player.experimentalModel.listeners) {
+      listener({ latitude: 0, longitude: -180, distance: 5 });
+    }
+    await settled();
+    expect(heard).toHaveLength(1);
+    expect(cube.orbit).toEqual({ latitude: 0, longitude: -180 });
+  });
+
+  it('hears nothing once disposed, and leaves the model its listener no more', async () => {
+    const player = new FakePlayer();
+    const model = player.experimentalModel;
+    const cube = new ClipCube(player);
+    const heard = dragged(cube);
+    cube.view({ latitude: 0, longitude: 0 });
+    await settled();
+    expect(model.listeners.size).toBe(1);
+    cube.dispose();
+    expect(model.listeners.size).toBe(0);
+    model.drag({ latitude: 5, longitude: 5 });
+    await settled();
+    expect(heard).toEqual([]);
   });
 });

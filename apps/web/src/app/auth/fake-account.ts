@@ -10,6 +10,7 @@ import {
   type CloudSession,
   type CloudUpload,
   type UserRecord,
+  type ViewerChoices,
 } from '@cubetrace/core';
 import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 
@@ -78,6 +79,13 @@ export class FakeAccountBackend implements AccountBackend {
   readonly calls: string[] = [];
   /** Every users/{uid} written, in order. */
   readonly saved: { uid: string; record: UserRecord }[] = [];
+  /**
+   * users/{uid}, by uid: the records as the writes left them (merged, as Firestore merges them) and
+   * as a test seeded them, with the clip viewer's `viewer` (T3.10).
+   */
+  users = new Map<string, Record<string, unknown>>();
+  /** The writes of `viewer` into users/{uid}, in order: `users/<uid> viewer <labels>`. */
+  readonly viewerWrites: string[] = [];
   /** The session index, by session id: the documents as written (the writes merged, as Firestore). */
   readonly index = new Map<string, IndexedSession>();
   /**
@@ -170,7 +178,48 @@ export class FakeAccountBackend implements AccountBackend {
       return Promise.reject(this.saveError);
     }
     this.saved.push({ uid, record: structuredClone(record) });
+    const fields: Record<string, unknown> = { ...structuredClone(record) };
+    this.users.set(uid, merged(this.users.get(uid) ?? null, fields));
     return Promise.resolve();
+  }
+
+  getUser(uid: string): Promise<CloudDocument | null> {
+    this.reads.push(`user ${uid}`);
+    if (this.readError !== null) {
+      return Promise.reject(this.readError);
+    }
+    const record = this.users.get(uid);
+    return Promise.resolve(
+      record === undefined ? null : this.document(uid, `users/${uid}`, record),
+    );
+  }
+
+  /**
+   * The clip viewer's choices (T3.10): merged into the record, as Firestore merges a map; refused
+   * with `saveError`, as users/{uid}'s writes are, applying nothing; offline, the write waits as the
+   * cubes' do.
+   */
+  saveViewer(uid: string, viewer: ViewerChoices): Promise<void> {
+    const refused = this.saveError;
+    if (refused === null) {
+      this.viewerWrites.push(`users/${uid} viewer ${Object.keys(viewer).sort().join(',')}`);
+      this.markUnsent(`users/${uid}`);
+      this.users.set(uid, merged(this.users.get(uid) ?? null, { viewer: structuredClone(viewer) }));
+    }
+    return new Promise<void>((resolve, reject) => {
+      const send = (): void => {
+        if (refused === null) {
+          resolve();
+        } else {
+          reject(refused);
+        }
+      };
+      if (this.online) {
+        queueMicrotask(send);
+      } else {
+        this.waiting.push(send);
+      }
+    });
   }
 
   saveSessionIndex(

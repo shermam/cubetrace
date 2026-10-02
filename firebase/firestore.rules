@@ -16,9 +16,16 @@ service cloud.firestore {
 
     // users/{uid}, the account's record (schema 1). The client writes only these fields, so that the
     // fields the server keeps there later (T3.2's upload quota) are out of its reach; createdMs, once
-    // set, never changes.
+    // set, never changes. `viewer` (T3.10) is the clip viewer's choice per camera label, which the app
+    // merges into the record apart from the sign-in's write: a map of at most 8 entries, each a map
+    // of exactly the player's camera latitude (−90 to 90) and longitude (−180 to 180), in degrees,
+    // and the mirror. The rules cannot loop over a map, so each entry is checked by its place in the
+    // map's list of values, up to the eighth; a label cannot be empty, since Firestore refuses an
+    // empty field name before the rules see it. The cap keeps the check within the engine's budget of
+    // 1,000 expressions per request, which 16 entries exceeded in the emulator; the client checks the
+    // numbers' type by comparing them, which raises an error, and so a refusal, on anything else.
     function userFields() {
-      return ['schema', 'createdMs', 'displayName', 'email', 'devices'];
+      return ['schema', 'createdMs', 'displayName', 'email', 'devices', 'viewer'];
     }
 
     function validUser(user) {
@@ -26,7 +33,36 @@ service cloud.firestore {
         && user.createdMs is number
         && (user.displayName == null || user.displayName is string)
         && (user.email == null || user.email is string)
-        && user.devices is map;
+        && user.devices is map
+        && (!('viewer' in user) || validViewer(user.viewer));
+    }
+
+    function validViewerChoice(choice) {
+      return choice is map
+        && choice.keys().hasOnly(['latitude', 'longitude', 'mirror'])
+        && choice.latitude >= -90
+        && choice.latitude <= 90
+        && choice.longitude >= -180
+        && choice.longitude <= 180
+        && choice.mirror in ['none', 'left-right', 'up-down', 'front-back', 'all'];
+    }
+
+    // Entry k of the viewer map, when it has one.
+    function viewerEntryOk(viewer, k) {
+      return viewer.size() <= k || validViewerChoice(viewer.values()[k]);
+    }
+
+    function validViewer(viewer) {
+      return viewer is map
+        && viewer.size() <= 8
+        && viewerEntryOk(viewer, 0)
+        && viewerEntryOk(viewer, 1)
+        && viewerEntryOk(viewer, 2)
+        && viewerEntryOk(viewer, 3)
+        && viewerEntryOk(viewer, 4)
+        && viewerEntryOk(viewer, 5)
+        && viewerEntryOk(viewer, 6)
+        && viewerEntryOk(viewer, 7);
     }
 
     // users/{uid}.quota (T3.2): the account's upload quota of the day, {day, bytes, files}, which only

@@ -16,25 +16,32 @@ import {
 import {
   type AttemptRecord,
   type GyroTrack,
+  MIRRORS,
+  type Mirror,
   type Quat,
+  VIEWER_DEFAULT,
   type VideoClip,
+  type ViewerChoice,
   clipHostMs,
   clipSeconds,
   gyroTrack,
+  isMirror,
   orientationAt,
   parseGyro,
   referenceAt,
   shownOrientation,
+  viewerChoice,
 } from '@cubetrace/core';
 import { attemptFolder } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { ATTEMPT_FILES } from '../session/attempt-files';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
+import { SettingsService } from '../settings/settings-service';
 import { downloadBlob, downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
-import { ClipCube, cubePlayerOf } from './clip-cube';
+import { ClipCube, type Orbit, cubePlayerOf } from './clip-cube';
 import { ClipViewing } from './clip-viewing';
 import { TWISTY_LOADER } from './twisty-loader';
 
@@ -91,6 +98,36 @@ export type OrientationState = 'none' | 'reading' | 'ready' | 'failed';
 export const CUBE_TEMPO_SCALE = 5;
 
 /**
+ * The player's camera distance (T3.10): cubing.js's default, 6, shows the 3x3x3 (a cube of side 1)
+ * at under half the canvas's height; 5 shows it a fifth larger, and its space diagonal (0.87 from the
+ * centre) still fits the camera's 20° of vertical field (0.88 at 5), so that no tilt clips a corner.
+ */
+export const CUBE_CAMERA_DISTANCE = 5;
+
+/** The step of the view's presets, in degrees: a quarter turn around or over the cube. */
+export const VIEW_STEP = 90;
+
+/** How the mirrors read in the viewer's select. */
+export const MIRROR_TEXT: Readonly<Record<Mirror, string>> = {
+  none: 'none',
+  'left-right': 'left–right',
+  'up-down': 'up–down',
+  'front-back': 'front–back',
+  all: 'all',
+};
+
+/** The line of help under the viewer's controls (docs/PLAN.md T3.10). */
+export const VIEW_HELP =
+  'Pause where the cube is square to the camera and press Re-zero; if tilts go the other way, ' +
+  'choose a mirror; turn the view for a camera behind or beside the cube.';
+
+/**
+ * The 3D cube's canvas is as wide as the video and about half as tall: its aspect ratio is twice the
+ * clip's (`--cube-aspect`), within 1 and 4; this is a 16:9 clip's, used without a clip.
+ */
+export const CUBE_ASPECT_DEFAULT = 3.556;
+
+/**
  * The clips of an attempt (docs/PLAN.md, T2.4), in a modal dialog the solve list's clip badge opens:
  * the video of one (the solve's first), read from the origin private file system behind an object
  * URL that goes when it closes, next to the attempt's moves of that segment by their time into the
@@ -100,10 +137,10 @@ export const CUBE_TEMPO_SCALE = 5;
  * device once uploaded (`local` false, T3.3) says it is in the cloud in place of its video, and its
  * MP4 is not among the files downloaded.
  *
- * Beside the video, a 3D cube follows it (T3.8): cubing.js's `<twisty-player>`, which turns with
- * the segment's moves as the picture passes them (the next move animated, the state rebuilt after a
- * seek or when several moves passed in one frame, `ClipCube`) from the segment's starting state
- * (the scramble as the setup alg for the solve, solved for the scramble, whose moves include a
+ * Under the video, a 3D cube follows it (T3.8, T3.10): cubing.js's `<twisty-player>`, which turns
+ * with the segment's moves as the picture passes them (the next move animated, the state rebuilt
+ * after a seek or when several moves passed in one frame, `ClipCube`) from the segment's starting
+ * state (the scramble as the setup alg for the solve, solved for the scramble, whose moves include a
  * mis-scramble's corrections), and tilts as the real cube did when the attempt has a gyro file
  * (`gyro.json`, docs/DATA-MODEL.md §11): the samples around the host time the picture shows, slerped,
  * relative to the sample at the clip's first frame by default, so that the cube starts upright and
@@ -114,6 +151,17 @@ export const CUBE_TEMPO_SCALE = 5;
  * cube without a gyroscope) the cube still turns, and a line says the orientation is not recorded;
  * a file that cannot be read is said in that line. The viewer follows the video frame by frame while
  * it plays and on every seek, and nothing runs once the dialog closes.
+ *
+ * The cube is seen straight on by default (T3.10, issue #55): the player's camera level with it and
+ * in front (latitude 0, longitude 0, where cubing.js looks from above and to the right), so that an
+ * upright cube is drawn upright and a tilt to the right shows to the right. Under the cube, the view
+ * is changed by presets (Turn ◀ ▶, 90° of longitude; Tilt ▲ ▼, 90° of latitude, within ±90°; Behind,
+ * longitude 180°; Reset view) or by dragging the cube with the mouse or a finger (cubing.js's own
+ * drag input, whose orbit the viewer reads back), and a mirror (none, left–right, up–down,
+ * front–back, all) reflects the orientation shown, for a camera behind or beside the cube, or a cube
+ * whose gyroscope's axes differ. The view and the mirror are kept per camera label (the clip's
+ * `camera`) in Settings and, signed in, in the account (`users/{uid}.viewer`, ViewerSyncService), so
+ * that the next clip of that camera opens as it was left; "Re-zero" and "Raw" are per clip, not kept.
  */
 @Component({
   selector: 'app-clip-viewer',
@@ -150,7 +198,7 @@ export const CUBE_TEMPO_SCALE = 5;
           </button>
         }
       </div>
-      <div class="body" [class.with-cube]="cubeShown()" [style.--cube-share]="cubeShare()">
+      <div class="body">
         <div class="player">
           @if (selected()?.local === false) {
             <p class="cloud" data-testid="clip-cloud">
@@ -180,57 +228,130 @@ export const CUBE_TEMPO_SCALE = 5;
           @if (facts(); as facts) {
             <p class="muted" data-testid="clip-facts">{{ facts }}</p>
           }
+          @if (cubeShown()) {
+            <div class="cube" data-testid="clip-cube" [style.--cube-aspect]="cubeAspect()">
+              @if (pictureError(); as error) {
+                <p class="error" data-testid="clip-cube-error">No 3D cube: {{ error }}</p>
+              } @else {
+                <twisty-player
+                  #cube
+                  data-testid="clip-cube-player"
+                  puzzle="3x3x3"
+                  visualization="3D"
+                  background="none"
+                  control-panel="none"
+                  hint-facelets="none"
+                  experimental-drag-input="auto"
+                  camera-latitude="0"
+                  camera-longitude="0"
+                  camera-latitude-limit="90"
+                  [attr.camera-distance]="cameraDistance"
+                  [attr.tempo-scale]="tempoScale"
+                  title="Drag the cube to turn the view"
+                  aria-hidden="true"
+                ></twisty-player>
+                <div class="view-controls" role="group" aria-label="View">
+                  <button
+                    type="button"
+                    data-testid="clip-turn-left"
+                    title="See the cube from 90° further to the left"
+                    (click)="turn(-viewStep)"
+                  >
+                    Turn ◀
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="clip-turn-right"
+                    title="See the cube from 90° further to the right"
+                    (click)="turn(viewStep)"
+                  >
+                    Turn ▶
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="clip-tilt-up"
+                    title="See the cube from 90° higher"
+                    (click)="tilt(viewStep)"
+                  >
+                    Tilt ▲
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="clip-tilt-down"
+                    title="See the cube from 90° lower"
+                    (click)="tilt(-viewStep)"
+                  >
+                    Tilt ▼
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="clip-behind"
+                    title="See the cube from behind"
+                    (click)="behind()"
+                  >
+                    Behind
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="clip-reset-view"
+                    title="See the cube from the front, level"
+                    (click)="resetView()"
+                  >
+                    Reset view
+                  </button>
+                  <label>
+                    Mirror:
+                    <select
+                      #mirrorBox
+                      data-testid="clip-mirror"
+                      title="Reflect the orientation shown"
+                      (change)="setMirror(mirrorBox.value)"
+                    >
+                      @for (option of mirrors; track option) {
+                        <option [value]="option" [selected]="option === mirror()">
+                          {{ mirrorText[option] }}
+                        </option>
+                      }
+                    </select>
+                  </label>
+                </div>
+              }
+              <p
+                class="orientation"
+                [class.error]="orientationState() === 'failed'"
+                data-testid="clip-orientation"
+              >
+                {{ orientationText() }}
+              </p>
+              @if (orientationState() === 'ready') {
+                <div class="orientation-controls">
+                  <button
+                    type="button"
+                    data-testid="clip-rezero"
+                    title="Take the orientation at this moment as upright"
+                    [disabled]="raw()"
+                    (click)="rezero()"
+                  >
+                    Re-zero
+                  </button>
+                  <label>
+                    <input
+                      #rawBox
+                      type="checkbox"
+                      data-testid="clip-raw"
+                      [checked]="raw()"
+                      (change)="setRaw(rawBox.checked)"
+                    />
+                    Raw
+                  </label>
+                </div>
+              }
+              @if (!pictureError()) {
+                <p class="help" data-testid="clip-view-help">{{ viewHelp }}</p>
+              }
+            </div>
+          }
         </div>
-        @if (cubeShown()) {
-          <div class="cube" data-testid="clip-cube">
-            @if (pictureError(); as error) {
-              <p class="error" data-testid="clip-cube-error">No 3D cube: {{ error }}</p>
-            } @else {
-              <twisty-player
-                #cube
-                data-testid="clip-cube-player"
-                puzzle="3x3x3"
-                visualization="3D"
-                background="none"
-                control-panel="none"
-                hint-facelets="none"
-                experimental-drag-input="none"
-                [attr.tempo-scale]="tempoScale"
-                aria-hidden="true"
-              ></twisty-player>
-            }
-            <p
-              class="orientation"
-              [class.error]="orientationState() === 'failed'"
-              data-testid="clip-orientation"
-            >
-              {{ orientationText() }}
-            </p>
-            @if (orientationState() === 'ready') {
-              <div class="orientation-controls">
-                <button
-                  type="button"
-                  data-testid="clip-rezero"
-                  title="Take the orientation at this moment as upright"
-                  [disabled]="raw()"
-                  (click)="rezero()"
-                >
-                  Re-zero
-                </button>
-                <label>
-                  <input
-                    #rawBox
-                    type="checkbox"
-                    data-testid="clip-raw"
-                    [checked]="raw()"
-                    (change)="setRaw(rawBox.checked)"
-                  />
-                  Raw
-                </label>
-              </div>
-            }
-          </div>
-        }
         <ol class="moves" #list data-testid="clip-moves" aria-label="The moves, by their time">
           @for (move of moves(); track $index) {
             <li [class.current]="$index === current()" data-testid="clip-move">
@@ -317,22 +438,14 @@ export const CUBE_TEMPO_SCALE = 5;
       color: var(--accent);
     }
 
-    /* On a laptop the video, the 3D cube and the moves in one row: the cube's column takes the
-       share of the width left over by the moves that makes its square as tall as the video
-       (height / (width + height) of the clip's frames, --cube-share); on a phone they stack. */
+    /* On a laptop the player's column (the video, the 3D cube under it and its controls) and the
+       moves beside it; on a phone they stack: the video, the cube, the moves. */
     .body {
       display: grid;
       gap: var(--space-3);
 
       @media (min-width: 40rem) {
         grid-template-columns: minmax(0, 3fr) minmax(9rem, 1fr);
-
-        &.with-cube {
-          grid-template-columns:
-            minmax(0, 1fr)
-            calc((100% - 9rem - 2 * var(--space-3)) * var(--cube-share, 0.36))
-            9rem;
-        }
       }
     }
 
@@ -344,7 +457,7 @@ export const CUBE_TEMPO_SCALE = 5;
 
     video {
       width: 100%;
-      max-height: 60vh;
+      max-height: 45vh;
       border-radius: var(--radius);
       background: #000;
     }
@@ -355,36 +468,45 @@ export const CUBE_TEMPO_SCALE = 5;
       align-content: start;
     }
 
-    /* A square as wide as its column (as tall as the video, above), or 12rem under the video on a
-       phone; the player's own size (384 × 256 px) is overridden. */
+    /* As wide as the video and about half as tall: twice the clip's aspect ratio (--cube-aspect) on
+       a laptop, 2:1 on a phone; the player's own size (384 × 256 px) is overridden. A finger on it
+       drags the cube rather than scrolling the dialog. */
     twisty-player {
-      width: min(100%, 12rem);
-      max-height: 60vh;
-      aspect-ratio: 1 / 1;
+      width: 100%;
+      max-height: 30vh;
+      aspect-ratio: 2 / 1;
       height: auto;
-      justify-self: center;
+      touch-action: none;
 
       @media (min-width: 40rem) {
-        width: 100%;
+        aspect-ratio: var(--cube-aspect, 3.556);
       }
     }
 
     .orientation,
-    .orientation-controls {
+    .orientation-controls,
+    .view-controls,
+    .help {
       color: var(--text-muted);
       font-size: 0.8125rem;
     }
 
+    .view-controls,
     .orientation-controls {
       display: flex;
       flex-wrap: wrap;
-      gap: var(--space-3);
+      gap: var(--space-2) var(--space-3);
       align-items: center;
 
       label {
         display: inline-flex;
         gap: var(--space-1);
         align-items: center;
+      }
+
+      button,
+      select {
+        font-size: 0.8125rem;
       }
     }
 
@@ -451,11 +573,17 @@ export class ClipViewer {
   /** Closed with the dialog (the Close button, Esc). */
   protected readonly viewing = inject(ClipViewing);
   protected readonly tempoScale = CUBE_TEMPO_SCALE;
+  protected readonly cameraDistance = CUBE_CAMERA_DISTANCE;
+  protected readonly viewStep = VIEW_STEP;
+  protected readonly viewHelp = VIEW_HELP;
+  protected readonly mirrors = MIRRORS;
+  protected readonly mirrorText = MIRROR_TEXT;
 
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
   private readonly files = inject(ATTEMPT_FILES);
   private readonly diagnostics = inject(DiagnosticsService);
+  private readonly settings = inject(SettingsService);
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly list = viewChild<ElementRef<HTMLElement>>('list');
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
@@ -506,13 +634,24 @@ export class ClipViewer {
     const clip = this.selected();
     return clip !== null && clip.local !== false;
   });
-  /** The share of the row's width that makes the cube's square as tall as the video (the styles). */
-  protected readonly cubeShare = computed(() => {
+  /** The 3D cube's aspect ratio: twice the clip's, so that it is half as tall as the video. */
+  protected readonly cubeAspect = computed(() => {
     const clip = this.selected();
-    return clip === null || clip.width + clip.height <= 0
-      ? 0.36
-      : Math.round((clip.height / (clip.width + clip.height)) * 1000) / 1000;
+    return clip === null || clip.width <= 0 || clip.height <= 0
+      ? CUBE_ASPECT_DEFAULT
+      : Math.round(Math.min(4, Math.max(1, (2 * clip.width) / clip.height)) * 1000) / 1000;
   });
+  /** The camera whose clip is shown: the view and the mirror are kept per camera label (T3.10). */
+  private readonly camera = computed(() => this.selected()?.camera ?? null);
+  /**
+   * The choice for the clip's camera: as kept on this device (and merged with the account's), else
+   * the defaults, the cube seen straight on from the front without a mirror.
+   */
+  protected readonly choice = computed<ViewerChoice>(() => {
+    const camera = this.camera();
+    return (camera === null ? null : this.settings.viewerChoiceFor(camera)) ?? VIEWER_DEFAULT;
+  });
+  protected readonly mirror = computed(() => this.choice().mirror);
   /** `cubing/twisty` could not load: no 3D cube. */
   protected readonly pictureError = signal<string | null>(null);
   /** `cubing/twisty` has defined `<twisty-player>`. */
@@ -632,6 +771,10 @@ export class ClipViewer {
           const player = cubePlayerOf(element);
           this.cube = player === null ? null : new ClipCube(player);
           this.cubeOn = element;
+          // The user dragged the cube: the view is kept for the clip's camera (T3.10).
+          this.cube?.onDrag((orbit) => {
+            this.onDrag(orbit);
+          });
         }
         if (this.cube !== null) {
           this.cube.load(
@@ -640,6 +783,21 @@ export class ClipViewer {
           );
           this.cube.show(moveAt(moves, clip, this.time()), true);
           this.cube.orient(this.orientationAt(this.time()));
+          this.cube.view(orbitOf(this.choice()));
+        }
+      });
+    });
+    // The view and the mirror kept for the clip's camera, as they change (T3.10): a preset, a drag's
+    // orbit saved, the mirror, or a merge with the account's. The cube is asked for the view only
+    // when it is not there already (a drag's orbit, saved rounded, moves nothing).
+    effect(() => {
+      const choice = this.choice();
+      this.cubeElement();
+      this.playerReady();
+      untracked(() => {
+        if (this.cube !== null) {
+          this.cube.view(orbitOf(choice));
+          this.reorient();
         }
       });
     });
@@ -792,6 +950,68 @@ export class ClipViewer {
     this.reorient();
   }
 
+  /** "Turn ◀ / ▶": the view `degrees` further around the cube (to the right when positive). */
+  protected turn(degrees: number): void {
+    const from = this.viewFrom();
+    this.applyView(from.latitude, from.longitude + degrees);
+  }
+
+  /** "Tilt ▲ / ▼": the view `degrees` higher over the cube (lower when negative), within ±90°. */
+  protected tilt(degrees: number): void {
+    const from = this.viewFrom();
+    this.applyView(from.latitude + degrees, from.longitude);
+  }
+
+  /** "Behind": the view from behind the cube, at the same height. */
+  protected behind(): void {
+    this.applyView(this.viewFrom().latitude, 180);
+  }
+
+  /** "Reset view": the view from the front, level with the cube. */
+  protected resetView(): void {
+    this.applyView(0, 0);
+  }
+
+  /** "Mirror": the reflection of the orientation shown, kept for the clip's camera. */
+  protected setMirror(value: string): void {
+    const camera = this.camera();
+    if (!isMirror(value) || camera === null) {
+      return;
+    }
+    const current = this.choice();
+    this.settings.setViewerChoice(camera, viewerChoice(current.latitude, current.longitude, value));
+    this.reorient();
+  }
+
+  /**
+   * Where the view is now, or is on its way to: the player's camera as it last reported it (a drag
+   * included) or as last asked, else the choice.
+   */
+  private viewFrom(): Orbit {
+    return this.cube?.target ?? orbitOf(this.choice());
+  }
+
+  /** Points the player's camera and keeps the view for the clip's camera. */
+  private applyView(latitude: number, longitude: number): void {
+    const camera = this.camera();
+    const next = viewerChoice(latitude, longitude, this.choice().mirror);
+    if (camera !== null) {
+      this.settings.setViewerChoice(camera, next);
+    }
+    this.cube?.view(orbitOf(next));
+  }
+
+  /** The user dragged the cube to `orbit`: kept for the clip's camera, to a tenth of a degree. */
+  private onDrag(orbit: Orbit): void {
+    const camera = this.camera();
+    if (camera !== null) {
+      this.settings.setViewerChoice(
+        camera,
+        viewerChoice(orbit.latitude, orbit.longitude, this.choice().mirror),
+      );
+    }
+  }
+
   /** Downloads both clips' MP4s and frames files, the gyro file when there is one, and attempt.json. */
   protected async download(): Promise<void> {
     const record = this.attempt();
@@ -846,8 +1066,8 @@ export class ClipViewer {
 
   /**
    * The orientation to show at `seconds` into the clip, in cubing.js's frame: the gyro sample at the
-   * host time the picture shows then, relative to the reference unless raw; null without a track,
-   * or before a truncated file's first sample.
+   * host time the picture shows then, relative to the reference unless raw, in the camera's mirror;
+   * null without a track, or before a truncated file's first sample.
    */
   private orientationAt(seconds: number): Quat | null {
     const track = this.track();
@@ -856,7 +1076,9 @@ export class ClipViewer {
       return null;
     }
     const q = orientationAt(track, clipHostMs(clip, seconds));
-    return q === null ? null : shownOrientation(q, this.raw() ? null : this.reference());
+    return q === null
+      ? null
+      : shownOrientation(q, this.raw() ? null : this.reference(), this.mirror());
   }
 
   private async read(clip: VideoClip | null, session: string, index: number): Promise<void> {
@@ -922,4 +1144,9 @@ export class ClipViewer {
     }
     this.url.set(url);
   }
+}
+
+/** The orbit of a choice: its angles. */
+function orbitOf(choice: ViewerChoice): Orbit {
+  return { latitude: choice.latitude, longitude: choice.longitude };
 }

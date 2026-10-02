@@ -138,13 +138,57 @@ export function toPlayerFrame(q: Quat): Quat {
 }
 
 /**
+ * A reflection of the orientation shown (docs/PLAN.md T3.10), named by the viewer's own axes, which
+ * are cubing.js's: `left-right` reflects across the plane normal to X (a tilt to the right shows as
+ * one to the left), `up-down` across the plane normal to Y, `front-back` across the plane normal to
+ * Z, and `all` across all three; `none` shows the orientation as it is. A camera behind the cube, or
+ * a cube whose gyroscope's axes differ from the documented ones, needs one.
+ */
+export type Mirror = 'none' | 'left-right' | 'up-down' | 'front-back' | 'all';
+
+/** The mirrors, in the order the viewer's select lists them. */
+export const MIRRORS: readonly Mirror[] = ['none', 'left-right', 'up-down', 'front-back', 'all'];
+
+/** Whether `value` names a mirror. */
+export function isMirror(value: unknown): value is Mirror {
+  return typeof value === 'string' && (MIRRORS as readonly string[]).includes(value);
+}
+
+/**
+ * The rotation `q` seen in a mirror: a reflection across a plane turns a rotation about an axis `n`
+ * by `θ` into one about the reflected axis by `−θ`, so that across the plane normal to X the
+ * quaternion `(x, y, z, w)` becomes `(x, −y, −z, w)`, across the plane normal to Y `(−x, y, −z, w)`,
+ * across the plane normal to Z `(−x, −y, z, w)`, and across all three the conjugate, `(−x, −y, −z,
+ * w)`. A mirror applied twice gives `q` back.
+ */
+export function mirrored(q: Quat, mirror: Mirror): Quat {
+  switch (mirror) {
+    case 'none':
+      return q;
+    case 'left-right':
+      return [q[0], -q[1], -q[2], q[3]];
+    case 'up-down':
+      return [-q[0], q[1], -q[2], q[3]];
+    case 'front-back':
+      return [-q[0], -q[1], q[2], q[3]];
+    case 'all':
+      return conjugate(q);
+  }
+}
+
+/**
  * The orientation shown for the cube's `q`: relative to `reference`, the sample the cube is upright
  * at in the player (`reference⁻¹ · q`, the rotation since then in the cube's own frame, so that it
  * tilts and turns as the hands did whatever the gyro's yaw reference), or raw without one; either in
- * cubing.js's frame ({@link toPlayerFrame}).
+ * cubing.js's frame ({@link toPlayerFrame}), and seen in `mirror` ({@link mirrored}, in those axes:
+ * reflecting the relative orientation before the frame change by the corresponding plane of the
+ * cube's frame would give the same).
  */
-export function shownOrientation(q: Quat, reference: Quat | null): Quat {
-  return toPlayerFrame(reference === null ? q : multiply(conjugate(reference), q));
+export function shownOrientation(q: Quat, reference: Quat | null, mirror: Mirror = 'none'): Quat {
+  return mirrored(
+    toPlayerFrame(reference === null ? q : multiply(conjugate(reference), q)),
+    mirror,
+  );
 }
 
 /**

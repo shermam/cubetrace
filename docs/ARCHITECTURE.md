@@ -19,7 +19,8 @@ Chrome only, on Android, macOS and Windows: Web Bluetooth rules out Safari and F
 ```
 apps/web (Angular, PWA)
   timer UI · scramble view (cubing.js twisty-player) · CFOP chart · session list · settings · probe page ·
-  clip viewer (a clip's video, its moves by time, and a 3D cube that follows it: cubing.js in 3D, T3.8)
+  clip viewer (a clip's video, its moves by time, and a 3D cube that follows it: cubing.js in 3D, T3.8;
+               its view and mirror per camera, T3.10)
   device services: wake lock · storage persistence · browser support (read the browser through the
                    BROWSER_GLOBALS token; fakes in apps/web/src/app/device/fake-browser.ts)
   account (phase 3): AuthService · Firebase (Authentication, Firestore, Functions) in a lazy chunk behind
@@ -27,6 +28,7 @@ apps/web (Angular, PWA)
                    the session index in Firestore, the Sessions page's cloud sessions, the QA view ·
                    UploadService: the upload queue, from a lazy chunk of its own, its panel and indicator ·
                    CubeSyncService: Settings' cube MAC addresses merged with the account's (T3.4) ·
+                   ViewerSyncService: the clip viewer's view and mirror per camera merged with the account's (T3.10) ·
                    DiagnosticsService: the app's own log of its use, in the account (T3.9)
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
@@ -130,8 +132,9 @@ the WebRTC data channel; phase 3 uploads them.
 The solve lists' clip badges open the viewer (`apps/web/src/app/timer/clip-viewer.ts`, a modal
 dialog on the Timer and the session pages): it reads the clip's MP4 from the attempt's folder
 (`ATTEMPT_FILES`, behind an object URL let go when the dialog closes) and lists the segment's moves
-by their time into the clip, the one on screen highlighted. Since T3.8 a 3D cube follows the video
-beside it:
+by their time into the clip, the one on screen highlighted. Since T3.8 a 3D cube follows the video,
+under it since T3.10 (as wide as the video and about half as tall; on a phone the video, the cube,
+then the moves):
 
 ```
 attempt.json moves[] ──▶ clipMoves: seconds = (hostMs + lag − firstFrameHostMs) / 1000      lag = the clip's syncResidualMs
@@ -139,12 +142,14 @@ gyro.json ──parseGyro──▶ GyroTrack (sample times, quaternions)        
 video frame at t ──▶ host time firstFrameHostMs + t·1000 − lag
    ├─▶ the last move at or before it ──▶ ClipCube.show: one move on, animated (experimentalAddMove, tempo 5: ~100 ms);
    │                                      a seek or several moves ──▶ alg = the moves so far, timestamp end
-   └─▶ orientationAt (binary search, slerp) ──▶ conj(reference) · q ──▶ cubing.js's frame ──▶ Object3D.quaternion, scheduleRender
+   └─▶ orientationAt (binary search, slerp) ──▶ conj(reference) · q ──▶ cubing.js's frame ──▶ mirrored ──▶ Object3D.quaternion, scheduleRender
+the clip's camera label ──▶ SettingsService.viewerChoiceFor: {latitude, longitude, mirror} ──▶ ClipCube.view (the player's orbit), the mirror above
+a drag of the cube ──▶ the model's orbitCoordinates ──▶ ClipCube.onDrag ──▶ setViewerChoice ──▶ (signed in) ViewerSyncService ──▶ users/{uid}.viewer
 ```
 
-The cube is cubing.js's `<twisty-player>` in 3D (no control panel, no drag input, no hint facelets,
-a transparent background), from the scramble view's lazy chunk (`TWISTY_LOADER`), its 3D code a
-further lazy chunk that cubing.js loads itself. The solve clip's cube starts from the scramble (the
+The cube is cubing.js's `<twisty-player>` in 3D (no control panel, no hint facelets, a transparent
+background, cubing.js's own drag input on), from the scramble view's lazy chunk (`TWISTY_LOADER`),
+its 3D code a further lazy chunk that cubing.js loads itself. The solve clip's cube starts from the scramble (the
 setup alg; `scrambledFacelets` by definition), the scramble clip's from solved, its moves including a
 mis-scramble's corrections. The viewer follows the video on every frame while it plays
 (`requestVideoFrameCallback`, else an animation frame) and on `timeupdate`, `seeked` and `pause`; the
@@ -156,14 +161,48 @@ nothing before a truncated file's first sample; shown relative to the sample at 
 frame (`conj(q_ref) · q`: the cube starts upright and moves as the hands moved it, whatever the
 gyro's yaw reference, which is arbitrary and drifts), or to the sample at the current time after
 "Re-zero", or raw with the "Raw" box; then carried from the cube's frame (+X red, +Y blue, +Z white)
-into cubing.js's (+X R, +Y U, +Z F) by one constant, a rotation of −90° about X (`CUBE_TO_PLAYER`).
-The puzzle's three.js object comes from `experimentalCurrentThreeJSPuzzleObject()` and the render from
-the vantages' `scheduleRender()`, only when the orientation changed. Without a gyro file (an older
-attempt, a cube without a gyroscope) the cube still turns and a line says the orientation is not
-recorded; a file that cannot be read is said in that line; a clip in the cloud has no cube. Per frame
-the loop costs one scan of the segment's moves, one binary search over the samples, one slerp and
-one render; nothing runs once the dialog closes. There is no live 3D cube on the Timer page, by
-decision: the solver watches the real cube, and WebGL would compete with the capture pipeline.
+into cubing.js's (+X R, +Y U, +Z F) by one constant, a rotation of −90° about X (`CUBE_TO_PLAYER`);
+then seen in the camera's mirror, if one is chosen (`mirrored`, T3.10: a reflection across the plane
+normal to the viewer's X, Y or Z, or all three, turns a rotation about an axis by θ into one about
+the reflected axis by −θ, `(x, −y, −z, w)` for left–right, `(−x, y, −z, w)` for up–down, `(−x, −y,
+z, w)` for front–back, the conjugate for all). The puzzle's three.js object comes from
+`experimentalCurrentThreeJSPuzzleObject()` and the render from the vantages' `scheduleRender()`,
+only when the orientation changed. Without a gyro file (an older attempt, a cube without a
+gyroscope) the cube still turns and a line says the orientation is not recorded; a file that cannot
+be read is said in that line; a clip in the cloud has no cube. Per frame the loop costs one scan of
+the segment's moves, one binary search over the samples, one slerp and one render; nothing runs once
+the dialog closes. There is no live 3D cube on the Timer page, by decision: the solver watches the
+real cube, and WebGL would compete with the capture pipeline.
+
+**The view (T3.10, issue #55).** The player's camera looks at the cube straight on by default: level
+with it and in front (`camera-latitude` and `camera-longitude` 0, where cubing.js looks from 35°
+above and 30° to the right, which drew an upright cube tilted), at `camera-distance` 5 (6 by default:
+a fifth larger, every corner still in the 20° of vertical field), with `camera-latitude-limit` 90, so
+that an upright cube is drawn upright and a tilt to the right shows to the right. Under the cube,
+in one wrapping row: Turn ◀ ▶ (90° of longitude), Tilt ▲ ▼ (90° of latitude, within ±90°), Behind
+(longitude 180°), Reset view (0, 0), and the Mirror select; each preset is one request of the
+player's model (`experimentalModel.twistySceneModel.orbitCoordinatesRequest.set`, both angles at
+once, from where the camera is or is on its way to). The cube can be dragged with the mouse or a
+finger (`experimental-drag-input="auto"`; a click adds no move, the player's move-press input being
+off), and `ClipCube` reads the orbit back from the model (`orbitCoordinates`' fresh listener),
+telling the user's drags from the echoes of its own requests, so that the viewer keeps the orbit
+where a drag leaves the camera, to a tenth of a degree. The view and the mirror are kept per camera
+label (the clip's `camera`): on the device in Settings (`viewer`, at most 8 cameras, the oldest
+first; a camera without one has the defaults, which are never stored) and, signed in, in the account
+(`users/{uid}.viewer`, `docs/DATA-MODEL.md` §10) by `ViewerSyncService`
+(`apps/web/src/app/cloud/viewer-sync.ts`, made by the header's controls as the cube sync is): at
+each sign-in and start signed in the record is read once and the choices merged (the device's for
+the cameras it has set, the account's for the others), the account written what it lacks; from then
+on each change is written a second after the last (a drag is one write), a merge of the cameras
+changed, never awaited; a refusal is said once, and a write lost with the page is made up by the next
+start's merge. Re-zero and Raw are per clip and never kept. The calibration (`docs/MANUAL-TESTS.md`,
+"After T3.10"): pause where the cube is square to the camera and Re-zero; if tilts go the other way,
+a mirror; turn the view for a camera behind or beside the cube. A slice move (M, S, E) is a check of
+the orientation: the cube reports a slice as two opposite outer-layer turns relative to its core
+(`docs/DATA-MODEL.md` §2) while the core itself rotates with the middle layer, which the gyro
+records, so that shown together the two turns and the core's rotation reproduce the middle layer
+turning in space, and outer layers that seem to turn mean the orientation shown is off (or lags the
+turns' animation).
 
 ## Account (phase 3)
 
@@ -195,7 +234,7 @@ through the window (development builds only), so that no test reaches Google, an
 runs the app's own SDK against the Firebase emulators ("Testing the cloud", below).
 
 The rules (`firebase/firestore.rules`, `docs/DATA-MODEL.md` §10): an account reads and writes only
-its own `users/{uid}` with its cubes (T3.4), and the sessions, and their attempts, whose `owner` is
+its own `users/{uid}` (with the clip viewer's choices in it, T3.10) with its cubes (T3.4), and the sessions, and their attempts, whose `owner` is
 its uid; nothing is public. They are tested against the Firestore emulator in CI and deployed on merge by
 `.github/workflows/firebase.yml`. The service worker has no data group, so it caches nothing of
 Google's or Firebase's: it passes their requests through (one that fails reaches the SDK as a 504,

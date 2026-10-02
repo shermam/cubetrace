@@ -26,6 +26,35 @@
       "type": "object",
       "propertyNames": { "minLength": 1 },
       "additionalProperties": { "type": "number", "minimum": 0 }
+    },
+    "viewer": {
+      "description": "The clip viewer's choice per camera label (the clip's camera, §7; T3.10): where the player's camera looks at the 3D cube from, and the mirror applied to the cube's orientation. Written apart from the sign-in's record, merged, when the user changes it; absent from a record written before T3.10. At most 8 cameras.",
+      "type": "object",
+      "propertyNames": { "minLength": 1 },
+      "maxProperties": 8,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["latitude", "longitude", "mirror"],
+        "properties": {
+          "latitude": {
+            "description": "The player's camera latitude, in degrees: 0 level with the cube, 90 straight above it.",
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "description": "The player's camera longitude, in degrees around the cube: 0 in front of it, 90 to its right, 180 behind it.",
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "mirror": {
+            "description": "The reflection applied to the orientation shown: across the plane normal to the viewer's X (left-right), Y (up-down) or Z (front-back), all three, or none.",
+            "enum": ["none", "left-right", "up-down", "front-back", "all"]
+          }
+        }
+      }
     }
   }
 }

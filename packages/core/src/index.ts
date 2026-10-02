@@ -123,10 +123,11 @@ export {
   gyroSummary,
 } from './gyro';
 // T3.8 — the clip viewer's 3D cube: the cube's orientation from a gyro file, and a clip's time on the host clock
-export type { CubeStep, GyroTrack, Quat, Vec3 } from './orientation';
+export type { CubeStep, GyroTrack, Mirror, Quat, Vec3 } from './orientation';
 export {
   CUBE_TO_PLAYER,
   IDENTITY,
+  MIRRORS,
   SAME_ORIENTATION,
   angleBetween,
   conjugate,
@@ -135,6 +136,8 @@ export {
   firstSampleAtOrAfter,
   fromAxisAngle,
   gyroTrack,
+  isMirror,
+  mirrored,
   multiply,
   normalize,
   orientationAt,
@@ -147,9 +150,21 @@ export {
   toPlayerFrame,
 } from './orientation';
 export { clipHostMs, clipLagMs, clipSeconds } from './clip';
-// T3.0 — the account's record in Firestore
-export type { UserRecord, UserRecordInput } from './user';
-export { userRecord } from './user';
+// T3.0 — the account's record in Firestore; T3.10 — the clip viewer's choice per camera in it
+export type { UserRecord, UserRecordInput, ViewerChoice, ViewerChoices } from './user';
+export {
+  MAX_VIEWER_CHOICES,
+  VIEWER_DEFAULT,
+  changedViewerChoices,
+  clampLatitude,
+  isViewerChoice,
+  mergeViewerChoices,
+  normalizeLongitude,
+  parseViewerChoices,
+  sameViewerChoice,
+  userRecord,
+  viewerChoice,
+} from './user';
 // T3.1 — the session index in Firestore
 export type {
   CloudAttempt,

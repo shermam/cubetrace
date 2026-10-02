@@ -4,6 +4,7 @@ import type { GyroJson } from './gyro';
 import {
   CUBE_TO_PLAYER,
   IDENTITY,
+  MIRRORS,
   type Quat,
   type Vec3,
   angleBetween,
@@ -12,6 +13,8 @@ import {
   firstSampleAtOrAfter,
   fromAxisAngle,
   gyroTrack,
+  isMirror,
+  mirrored,
   multiply,
   normalize,
   orientationAt,
@@ -146,6 +149,91 @@ describe('the frame mapping', () => {
     expectSame(shownOrientation(tilted, null), toPlayerFrame(tilted));
     expect(sameOrientation(shownOrientation(tilted, null), fromAxisAngle(PLAYER_X, 30))).toBe(
       false,
+    );
+  });
+});
+
+describe('the mirrors (T3.10)', () => {
+  /** A tilt to the right: the top of the cube leaning towards the viewer's right, about Z. */
+  const tiltRight = fromAxisAngle(PLAYER_Z, -30);
+  const tiltLeft = fromAxisAngle(PLAYER_Z, 30);
+  /** A tilt forward: the top coming towards the viewer, about X. */
+  const tiltForward = fromAxisAngle(PLAYER_X, 30);
+  /** A turn to the left about the vertical, as seen from above. */
+  const turnLeft = fromAxisAngle(PLAYER_Y, 30);
+
+  it('names five, none first', () => {
+    expect(MIRRORS).toEqual(['none', 'left-right', 'up-down', 'front-back', 'all']);
+    for (const mirror of MIRRORS) {
+      expect(isMirror(mirror)).toBe(true);
+    }
+    for (const value of ['mirror', '', 'LEFT-RIGHT', 1, null, undefined, ['all']]) {
+      expect(isMirror(value)).toBe(false);
+    }
+  });
+
+  it('turns a tilt to the right into one to the left under left–right, and keeps a turn about the vertical', () => {
+    expectSame(mirrored(tiltRight, 'left-right'), tiltLeft, 'the tilt');
+    expectSame(mirrored(tiltLeft, 'left-right'), tiltRight, 'the other tilt');
+    // The turn about the vertical goes the other way too: its axis is in the mirror's plane.
+    expectSame(mirrored(turnLeft, 'left-right'), fromAxisAngle(PLAYER_Y, -30), 'the turn');
+    // A tilt forward is about X, the plane's normal: it stays as it is.
+    expectSame(mirrored(tiltForward, 'left-right'), tiltForward, 'the tilt forward');
+  });
+
+  it('reflects across the plane normal to Y under up–down, and to Z under front–back', () => {
+    expectSame(mirrored(tiltForward, 'up-down'), fromAxisAngle(PLAYER_X, -30), 'forward, up–down');
+    expectSame(mirrored(turnLeft, 'up-down'), turnLeft, 'the turn, up–down');
+    expectSame(mirrored(tiltRight, 'up-down'), tiltLeft, 'right, up–down');
+    expectSame(
+      mirrored(tiltForward, 'front-back'),
+      fromAxisAngle(PLAYER_X, -30),
+      'forward, front–back',
+    );
+    expectSame(
+      mirrored(turnLeft, 'front-back'),
+      fromAxisAngle(PLAYER_Y, -30),
+      'the turn, front–back',
+    );
+    expectSame(mirrored(tiltRight, 'front-back'), tiltRight, 'right, front–back');
+  });
+
+  it('is the conjugate under all, the identity under none, and its own inverse', () => {
+    const q = normalize([0.1, 0.5, -0.3, 0.8]);
+    expect(mirrored(q, 'all')).toEqual(conjugate(q));
+    expect(mirrored(q, 'none')).toBe(q);
+    for (const mirror of MIRRORS) {
+      expectSame(mirrored(mirrored(q, mirror), mirror), q, `${mirror} twice`);
+      expect(angleBetween(mirrored(q, mirror), IDENTITY)).toBeCloseTo(angleBetween(q, IDENTITY), 9);
+    }
+    // The components, as the contract writes them.
+    expect(mirrored([1, 2, 3, 4], 'left-right')).toEqual([1, -2, -3, 4]);
+    expect(mirrored([1, 2, 3, 4], 'up-down')).toEqual([-1, 2, -3, 4]);
+    expect(mirrored([1, 2, 3, 4], 'front-back')).toEqual([-1, -2, 3, 4]);
+    expect(mirrored([1, 2, 3, 4], 'all')).toEqual([-1, -2, -3, 4]);
+  });
+
+  it('applies to the orientation shown, after the reference and the frame change', () => {
+    const reference = fromAxisAngle(WHITE, 123);
+    // A tilt about the cube's red axis since the reference, which the player shows about its X:
+    // mirrored left–right it stays; up–down it goes the other way.
+    const tilted = multiply(reference, fromAxisAngle(RED, 30));
+    expectSame(shownOrientation(tilted, reference), fromAxisAngle(PLAYER_X, 30));
+    expectSame(shownOrientation(tilted, reference, 'none'), fromAxisAngle(PLAYER_X, 30));
+    expectSame(shownOrientation(tilted, reference, 'left-right'), fromAxisAngle(PLAYER_X, 30));
+    expectSame(shownOrientation(tilted, reference, 'up-down'), fromAxisAngle(PLAYER_X, -30));
+    expectSame(shownOrientation(tilted, reference, 'all'), fromAxisAngle(PLAYER_X, -30));
+    // Raw too: the sample in the player's frame, then the mirror.
+    for (const mirror of MIRRORS) {
+      expectSame(shownOrientation(tilted, null, mirror), mirrored(toPlayerFrame(tilted), mirror));
+    }
+    // Reflecting the relative orientation in the cube's frame by the corresponding plane gives the
+    // same: the plane normal to the player's Y is the plane normal to the cube's white axis (+Z).
+    const relative = fromAxisAngle([1, 2, 3], 40);
+    const reflectedInCubeFrame: Quat = [-relative[0], -relative[1], relative[2], relative[3]];
+    expectSame(
+      shownOrientation(multiply(reference, relative), reference, 'up-down'),
+      toPlayerFrame(reflectedInCubeFrame),
     );
   });
 });
