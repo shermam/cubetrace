@@ -68,11 +68,13 @@ files, the bytes, the quota after), `confirmUpload: confirmed`, `…: refused` w
 
 Parameters (`src/params.ts`), whose values are in `functions/.env`, committed: none is a secret, and a
 deploy without prompts needs a value for each. A `functions/.env.<project id>` beside it overrides
-them for one project; `functions/.env.local` (gitignored) for the emulator only.
+them for one project; `functions/.env.local` (gitignored) for the emulator only. One such file is
+committed: `functions/.env.demo-cubetrace`, for the emulators' offline project, which gives the
+end-to-end suite's bucket (below, "The local bucket") and which deploys neither read nor upload.
 
 | Parameter | Value | |
 |---|---|---|
-| `BUCKET_PROVIDER` | `gcs` | `gcs` (Google Cloud Storage) or `r2` (Cloudflare R2) |
+| `BUCKET_PROVIDER` | `gcs` | `gcs` (Google Cloud Storage) or `r2` (Cloudflare R2); `local` in the Functions emulator only |
 | `BUCKET_NAME` | `cubetrace-data` | the bucket at the provider |
 | `R2_ACCOUNT_ID` | empty | Cloudflare's account id, for R2's endpoint |
 | `QUOTA_BYTES_PER_DAY` | `2000000000` | 2 GB signed per account per UTC day |
@@ -94,13 +96,29 @@ use. The emulator reads them from `functions/.secret.local` (gitignored).
 - `npm run test:functions`: the build, then `functions/src/*.test.ts` against the Firestore emulator
   (`firebase emulators:exec --only firestore`, project `demo-cubetrace`, Java 21 or later): the
   requests, the quota, the two functions with the Admin SDK and a fake bucket, both signers checked
-  against their signature schemes with made-up keys, and what a deploy finds in the built code (the
-  functions, the parameters, the secrets for each provider).
-- The Functions emulator: `npm run build -w @cubetrace/functions && npm run firebase -- emulators:start
-  --only functions,firestore --project demo-cubetrace` serves
-  `http://127.0.0.1:5001/demo-cubetrace/us-central1/signUpload`. With `gcs` it cannot sign without
-  Google credentials; R2 with made-up keys in `.env.local` and `.secret.local` signs, but cannot
-  confirm. T3.5 adds a provider that signs URLs to a local server, for the end-to-end suite.
+  against their signature schemes with made-up keys, the local bucket and its refusal outside the
+  Functions emulator, and what a deploy finds in the built code (the functions, the parameters, the
+  secrets for each provider).
+- The Functions emulator: `npm run build -w @cubetrace/functions && npm run firebase --
+  emulators:start --only functions,firestore --project demo-cubetrace` serves
+  `http://127.0.0.1:5001/demo-cubetrace/us-central1/signUpload`. For that project the CLI reads
+  `.env.demo-cubetrace` after `.env`, so the bucket is the local one (below); `gcs` there could not
+  sign without Google credentials, and R2 with made-up keys in `.env.local` and `.secret.local`
+  signs but cannot confirm.
+- `npm run e2e:cloud`: the end-to-end suite's cloud project, the app's own Firebase SDK against the
+  Auth, Firestore and Functions emulators (`docs/TOOLCHAIN.md`, "Cloud end-to-end").
+
+### The local bucket
+
+`BUCKET_PROVIDER=local` (`src/local.ts`) is the end-to-end suite's: its URLs are
+`<LOCAL_BUCKET_URL>/<key>?contentType=…&bytes=…&expires=…` on a server on the same machine
+(`http://127.0.0.1:4600`, `apps/web/e2e/helpers/bucket-sink.mts`), with GCS's headers
+(`Content-Type`, `x-goog-content-length-range`), and the size of an object is read with `HEAD`
+there. Nothing is signed: the server holds each `PUT` to what its URL says, as a signature would. It
+works only where `FUNCTIONS_EMULATOR` is `true`, which the Functions emulator sets and Cloud
+Functions never does: anywhere else every call fails with `internal`, the log saying why, so a
+deploy configured with it signs nothing. `LOCAL_BUCKET_URL` is a variable of `.env.demo-cubetrace`,
+not a parameter, so that deploys need no value for it.
 
 ## Deploying
 
