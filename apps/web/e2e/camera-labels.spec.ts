@@ -65,6 +65,18 @@ async function recording(page: Page, checkDue: boolean): Promise<void> {
   await expect(check).toBeHidden();
 }
 
+/**
+ * Chooses the camera named `name` in Camera settings, and waits until the recording has started
+ * again on it: its buffer starts from nothing, where the last camera's held 4 s and more.
+ */
+async function switchTo(page: Page, name: string): Promise<void> {
+  await page.getByTestId('camera-device').selectOption({ label: name });
+  const stats = page.getByTestId('recording-stats');
+  await expect
+    .poll(async () => Number(await stats.getAttribute('data-buffer-seconds')), { timeout: 20_000 })
+    .toBeLessThan(2);
+}
+
 /** Replays the demo solve as attempt `index`, and waits for its two clips. */
 async function solveWithClips(page: Page, index: number): Promise<void> {
   await replayDemo(page);
@@ -107,12 +119,13 @@ test('two cameras of the laptop in one session: an entry and a label each, the c
   await solveWithClips(page, 1);
 
   // The second camera: a camera of its own in the session, so a check is due for it.
-  await picker.selectOption({ label: 'fake_device_2' });
+  await switchTo(page, 'fake_device_2');
   await recording(page, true);
   await solveWithClips(page, 2);
 
-  // The first camera again: its label, and its check, already set aside, are the session's.
-  await picker.selectOption({ label: 'fake_device_0' });
+  // The first camera again: its label is the session's, whose check was set aside: none is due.
+  await switchTo(page, 'fake_device_0');
+  await expect(picker.locator('option:checked')).toHaveText('fake_device_0');
   await recording(page, false);
   await solveWithClips(page, 3);
 

@@ -247,10 +247,10 @@ replaced by the camera as it was opened again, so that the session's entries, it
 and its clips always name the same device. The app tells two devices apart by the browser's name
 for them (`deviceLabel`) and, for two of one name (two webcams of one model), by the browser's id
 for them, which no record keeps (it identifies the browser's installation): it knows the ids of the
-cameras opened since the page loaded, so after a reload a camera of a shared name takes the first
-label of that name. A new session starts again from the camera's own label. In the files written
-before T2.14, a second device took the label of the first, whose entry it replaced, and the clips
-of both name it. `facing` is the camera's `facingMode` when the browser says it (`user` for
+cameras that recorded since the page loaded, so after a reload a camera of a shared name takes the
+first label of that name. A new session starts again from the camera's own label. In the files
+written before T2.14, a second device took the label of the first, whose entry it replaced, and the
+clips of both name it. `facing` is the camera's `facingMode` when the browser says it (`user` for
 a front camera, `environment` for a rear one), `unknown` otherwise; `deviceLabel` is the browser's
 name for it (`MediaDeviceInfo.label`). `settings`, `capabilities` and `constraints` are snapshots,
 as JSON, of `getSettings()` when the camera was opened, of `getCapabilities()`, and of the
