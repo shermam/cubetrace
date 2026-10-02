@@ -1884,7 +1884,17 @@ E) is a check of the orientation (the owner's second look at the capture): the c
 two opposite outer-layer turns relative to its core (`docs/DATA-MODEL.md` §2) while the core itself
 rotates with the middle layer, which the gyro records, so that shown together the two turns and the
 core's rotation reproduce the middle layer turning in space; outer layers that seem to turn mean the
-orientation shown is off (or lags the turns' animation), which the "After T3.10" item says.
+orientation shown is off (or lags the turns' animation), which the "After T3.10" item says. Sizes
+(`ng build`, against `main` at e6c9942): the initial bundle is unchanged (264.57 kB raw, `main`
+261.5 kB byte for byte the same but for the lazy chunks' hashes); the viewer's lazy chunk
+(`clip-viewer-<hash>.js`) is 23.7 kB raw, 7.8 kB gzipped, against 18.5 and 6.4 (the controls, the
+orbit's driving and the styles); the header's controls chunk, which every page loads after its first
+render, 5.7 kB raw, 2.4 kB gzipped, against 2.7 and 1.2 (`ViewerSyncService`); the chunk of core and
+the services 73.3 kB raw, 25.1 kB gzipped, against 71.1 and 24.4 (the mirrors, the choice's model
+and Settings' map); the Settings page's chunk unchanged; all the scripts together 3,551.2 kB raw
+against 3,540.7 (1,017.6 kB gzipped against 1,014.7). Per frame nothing was added to T3.8's loop but
+the mirror's four sign changes; a drag costs, per report, a settings write (one JSON of a few
+kilobytes in `localStorage`) and, signed in, nothing until a second after the last one.
 Found on the way: the clip viewer's spec, the sync's and the settings' each caught a test written
 against a stale assumption (the lag of the fake clip in an expected angle, two preset clicks before
 the model's report, the defaults rule); the component's dialog scrolls on a short laptop screen (a

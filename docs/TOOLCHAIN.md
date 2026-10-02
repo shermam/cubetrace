@@ -1703,8 +1703,9 @@ sets), the method
 the move to the end), `experimentalCurrentThreeJSPuzzleObject()` (the `Cube3D` `Object3D`, deprecated
 but the only way to a three.js object; cubing.js never touches its rotation, only its pieces'
 matrices) and `experimentalCurrentVantages()` (the `Twisty3DVantage` elements, whose `scheduleRender`
-draws on the next animation frame). `clip-cube.ts` names these six members in a `CubePlayer`
-interface, which the spec checks against `TwistyPlayer` for the compiler, and the viewer takes the
+draws on the next animation frame). `clip-cube.ts` names these members (and, since T3.10, the
+model's orbit, below) in a `CubePlayer` interface, which the spec checks against `TwistyPlayer` for
+the compiler, and the viewer takes the
 element as one only once it has them (`cubePlayerOf`), so that jsdom's unknown element in the unit
 tests, or the element before the chunk loaded, drives nothing; the viewer's spec defines a fake
 `twisty-player` custom element that records the algs, the moves added, the quaternions set and the
