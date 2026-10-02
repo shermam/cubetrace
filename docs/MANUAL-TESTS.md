@@ -856,7 +856,7 @@ Next to the item, write the device, the cube and what happened.
   forward when it does, and turns about the vertical with it; the turns of the solve follow the
   picture, and the highlighted move changes when the picture shows the turn, not before. Write which
   of the three motions the 3D cube made the same way, and which it mirrored or made about another
-  axis: the correction is `CUBE_TO_PLAYER` in `apps/web/src/app/timer/cube-orientation.ts` (one
+  axis: the correction is `CUBE_TO_PLAYER` in `packages/core/src/orientation.ts` (one
   constant), or a conjugation of `q` in `toPlayerFrame` beside it if every motion goes the opposite
   way. "Raw" off and on; "Re-zero" at a moment the cube is tilted: it stands upright from there.
 - [ ] A clip of an attempt before T3.7 (no `gyro.json`): the cube turns with the moves, upright, and

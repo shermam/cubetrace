@@ -923,9 +923,10 @@ less the camera's lag, `syncResidualMs` of §7) it takes the sample there, or th
 around it (the first or last sample beyond the file's span; nothing before the first sample of a
 truncated file), relative to the sample at the clip's first frame by default, so that the yaw's
 reference does not matter, or raw on request; the cube's frame above is carried into cubing.js's
-(+X through R, +Y through U, +Z through F: `(x, y, z) → (x, z, −y)`). `v` is the angular velocity per axis as the cube reports it, raw: the Gen2 cubes (the
-GAN 12 ui FreePlay, the GAN 356 i3) send 4-bit signed values, −7 to 7, per packet, in the cube's
-units; null when the cube's gyro packets carry none (a sample without one among others is 0).
+(+X through R, +Y through U, +Z through F: `(x, y, z) → (x, z, −y)`). `v` is the angular velocity
+per axis as the cube reports it, raw: the Gen2 cubes (the GAN 12 ui FreePlay, the GAN 356 i3) send
+4-bit signed values, −7 to 7, per packet, in the cube's units; null when the cube's gyro packets
+carry none (a sample without one among others is 0).
 
 The samples come from a ring buffer of the page's gyro events (`GyroBuffer` in
 `packages/core/src/gyro.ts`): typed arrays holding the last 10 minutes, sized for 100 Hz (a GAN cube

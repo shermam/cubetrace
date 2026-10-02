@@ -1,9 +1,10 @@
 // The cube's orientation for the clip viewer's 3D cube (docs/PLAN.md T3.8): the quaternions of an
 // attempt's gyro file (docs/DATA-MODEL.md §11) interpolated at a host time, taken relative to a
 // reference sample, and carried from the cube's own frame into cubing.js's. Pure arithmetic on
-// `[x, y, z, w]` tuples, so that the tests run it on known rotations and the viewer's follow loop
-// pays one binary search and one slerp per frame.
-import type { GyroJson } from '@cubetrace/core';
+// `[x, y, z, w]` tuples, so that the tests run it on known rotations, the end-to-end suite computes
+// what the viewer must show from the file the app wrote, and the viewer's follow loop pays one
+// binary search and one slerp per frame.
+import type { GyroJson } from './gyro';
 
 /** A unit quaternion as the gyro file keeps it: `x, y, z, w`, the scalar last. */
 export type Quat = readonly [number, number, number, number];
@@ -89,9 +90,14 @@ export function angleBetween(a: Quat, b: Quat): number {
   return (2 * Math.acos(cosine) * 180) / Math.PI;
 }
 
-/** Whether `a` and `b` are the same orientation to {@link SAME_ORIENTATION} (`q` and `−q` are). */
+/**
+ * Whether `a` and `b` are the same orientation to {@link SAME_ORIENTATION} (`q` and `−q` are). The
+ * dot product is taken over the lengths, so that a quaternion a little off unit length (the file's
+ * five decimals) is the same orientation as itself.
+ */
 export function sameOrientation(a: Quat, b: Quat): boolean {
-  return 1 - Math.abs(dot(a, b)) < SAME_ORIENTATION;
+  const lengths = Math.hypot(a[0], a[1], a[2], a[3]) * Math.hypot(b[0], b[1], b[2], b[3]);
+  return lengths > 0 && 1 - Math.abs(dot(a, b)) / lengths < SAME_ORIENTATION;
 }
 
 /**
@@ -143,24 +149,37 @@ export function shownOrientation(q: Quat, reference: Quat | null): Quat {
 
 /**
  * The samples of a gyro file as the viewer reads them: the host time of each (`t0HostMs` plus the
- * intervals), the quaternions flat as in the file, and whether the file begins later than the
- * attempt's window.
+ * intervals), the quaternions flat as in the file but of unit length, and whether the file begins
+ * later than the attempt's window.
  */
 export interface GyroTrack {
   readonly hostMs: Float64Array;
-  readonly q: readonly number[];
+  readonly q: Float64Array;
   readonly truncatedStart: boolean;
 }
 
-/** The track of `file`, the sample times summed in tenths of a millisecond, as they were written. */
+/**
+ * The track of `file`: the sample times summed in tenths of a millisecond, as they were written,
+ * and the quaternions normalized, since the file keeps five decimals (a length off by up to 4e-5,
+ * which would make a sample differ from itself in {@link sameOrientation} and make the rotations
+ * drift from unit length); a zero quaternion reads as the identity.
+ */
 export function gyroTrack(file: GyroJson): GyroTrack {
-  const hostMs = new Float64Array(file.dtMs.length);
+  const count = file.dtMs.length;
+  const hostMs = new Float64Array(count);
+  const q = new Float64Array(count * 4);
   let tenths = 0;
-  for (const [k, dt] of file.dtMs.entries()) {
-    tenths += Math.round(dt * 10);
+  for (let k = 0; k < count; k++) {
+    tenths += Math.round(file.dtMs[k] * 10);
     hostMs[k] = file.t0HostMs + tenths / 10;
+    const at = k * 4;
+    const unit = normalize([file.q[at], file.q[at + 1], file.q[at + 2], file.q[at + 3]]);
+    q[at] = unit[0];
+    q[at + 1] = unit[1];
+    q[at + 2] = unit[2];
+    q[at + 3] = unit[3];
   }
-  return { hostMs, q: file.q, truncatedStart: file.truncatedStart };
+  return { hostMs, q, truncatedStart: file.truncatedStart };
 }
 
 /** Sample `k` of the track. */

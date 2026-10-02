@@ -1755,12 +1755,14 @@ the highlighted move while a clip plays, and the line of a clip without a gyro f
 The lazy chunk's size before and after, and the per-frame cost. (9) Nothing else: no version bump, no
 workflow change, no new dependency.
 
-**Outcome (2026-10-02).** As contracted, with these choices. The maths live in
-`apps/web/src/app/timer/cube-orientation.ts` (a `[x, y, z, w]` tuple type, `multiply`, `conjugate`,
+**Outcome (2026-10-02).** As contracted, with these choices. The maths live in `packages/core`
+(`orientation.ts`: a `[x, y, z, w]` tuple type, `multiply`, `conjugate`,
 `slerp` along the shorter arc with a linear fallback for near-equal orientations, `orientationAt`
 over a `GyroTrack` whose sample times are the file's intervals summed in tenths of a millisecond,
 `referenceAt`, `shownOrientation`, `toPlayerFrame` with the constant `CUBE_TO_PLAYER = (−√½, 0, 0,
-√½)`, and `cubeStep`), and the player's driving in `clip-cube.ts` (`ClipCube` over a `CubePlayer`
+√½)`, and `cubeStep`; `clip.ts`: a clip's time on the host clock with the camera's lag, `clipHostMs`
+and `clipSeconds`), so that the end-to-end flow computes from the gyro file the app wrote what the
+viewer must show, and the player's driving in `clip-cube.ts` (`ClipCube` over a `CubePlayer`
 interface of the six members used: `alg`, `experimentalSetupAlg`, `timestamp`,
 `experimentalAddMove`, `experimentalCurrentThreeJSPuzzleObject`, `experimentalCurrentVantages`,
 which the compiler checks against cubing.js's `TwistyPlayer` in the spec), so that the viewer's tests
@@ -1777,21 +1779,32 @@ cube and the 9rem moves list, the cube's column the share `height / (width + hei
 frames of what the video and the cube have (`--cube-share`), which makes the square as tall as the
 16:9 picture; on a phone the cube is 12rem under the video. `session-page.spec.ts` now replaces
 `TWISTY_LOADER` too, since the viewer would load cubing.js in jsdom. The known limitation of round 2
-("the highlighted move can lead the picture by the sync check's lag") is closed. Sizes
+("the highlighted move can lead the picture by the sync check's lag") is closed. Found on the way:
+the demo's gyroscope starts over at each replay (`replayDemo` connects a new fake cube, its angle
+from 0) while the page's gyro buffer keeps the previous cube's samples, so a demo attempt's file
+begins with the previous cube's orientation and jumps to the new one's: the viewer's reference is
+then the previous cube's, and the solve's turn runs from about 37° away back towards it, which an
+early version of the end-to-end check, polling the quaternion while the video played, caught only
+when a poll fell in that second (it failed under the full suite's load); the check now seeks to
+the solve's middle, plays to the end and seeks back, and compares the quaternion, the alg and the
+highlighted move with what core computes from the file at those moments. Sizes
 (`ng build`, against `main` at 4be2a6d): the initial bundle is unchanged (264.57 kB raw); the
-viewer's lazy chunk (`clip-viewer-<hash>.js`, the pages' `@defer`) is 20.1 kB raw, 7.0 kB gzipped,
-against 11.4 and 4.2 (the cube's driving, the orientation maths, the controls and the styles); the
-scramble view's chunk (`cubing/twisty`, 116.5 kB raw, 32.8 kB gzipped) is unchanged and shared,
-`TWISTY_LOADER` now in a module of its own (`twisty-loader.ts`, a 163-byte chunk; the Timer page's
-chunk is 31.2 kB as before), so that the viewer does not pull the scramble view in; cubing.js's 3D
-code, `twisty-dynamic-3d` (509.2 kB raw, 131.9 kB gzipped; the CLI's estimate 108.9 kB), was already
-emitted and prefetched by the service worker and is now loaded, by cubing.js itself, the first time
-a clip is opened; the services' chunk grows by `parseGyro`'s reader, 387 bytes; all the scripts
-together 3,540.3 kB raw against 3,531.1 (1,010.1 kB gzipped against 1,007.1). Per frame: one scan of the segment's moves (at
-most a few hundred), one binary search over the samples, one slerp, one `quaternion.set` and one
-`scheduleRender` when the orientation changed, plus cubing.js's own render of a move in progress.
-Left for the owner: the frame mapping on a real recording (`docs/MANUAL-TESTS.md`, "After T3.8"),
-since the driver's documentation of the gyro's axes is all it rests on.
+viewer's lazy chunk (`clip-viewer-<hash>.js`, the pages' `@defer`) is 18.5 kB raw, 6.4 kB gzipped,
+against 11.4 and 4.2 (the cube's driving, the controls and the styles); the chunk of core and the
+services, which every page loads after its first render, is 71.1 kB raw against 68.7 (the CLI's
+transfer estimate 22.05kB against 21.2 kB: the orientation maths, the clip's time mapping and
+`parseGyro`'s reader); the scramble view's chunk (`cubing/twisty`, 116.5 kB raw, 32.8 kB gzipped) is
+unchanged and shared, `TWISTY_LOADER` now in a module of its own (`twisty-loader.ts`, a 163-byte
+chunk; the Timer page's chunk is 31.2 kB as before), so that the viewer does not pull the scramble
+view in; cubing.js's 3D code, `twisty-dynamic-3d` (509.2 kB raw, 131.9 kB gzipped; the CLI's estimate
+108.9 kB), was already emitted and prefetched by the service worker and is now loaded, by cubing.js
+itself, the first time a clip is opened; all the scripts together 3,540.7 kB raw against 3,531.1
+(1,010.5 kB gzipped against 1,007.1). Per frame: one scan
+of the segment's moves (at most a few hundred), one binary search over the samples, one slerp, one
+`quaternion.set` and one `scheduleRender` when the orientation changed, plus cubing.js's own render
+of a move in progress. Left for the owner: the frame mapping on a real recording
+(`docs/MANUAL-TESTS.md`, "After T3.8"), since the driver's documentation of the gyro's axes is all
+it rests on.
 
 ## Phases 4 and 5
 

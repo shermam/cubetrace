@@ -1,22 +1,24 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import type { AttemptRecord, GyroJson, GyroSummary, VideoClip } from '@cubetrace/core';
+import {
+  type AttemptRecord,
+  type GyroJson,
+  type GyroSummary,
+  type Quat,
+  type VideoClip,
+  clipHostMs,
+  clipSeconds,
+  fromAxisAngle,
+  sameOrientation,
+  toPlayerFrame,
+} from '@cubetrace/core';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { FakeAnimationFrames, polyfillDialog, settle } from '../device/fake-browser';
 import { ATTEMPT_FILES } from '../session/attempt-files';
 import { SESSION_A, testAttempt } from '../session/session-testing';
 import type { PuzzleObject, Renderable } from './clip-cube';
-import {
-  CUBE_TEMPO_SCALE,
-  ClipViewer,
-  attemptFileName,
-  clipHostMs,
-  clipMoves,
-  clipSeconds,
-  moveAt,
-} from './clip-viewer';
+import { CUBE_TEMPO_SCALE, ClipViewer, attemptFileName, clipMoves, moveAt } from './clip-viewer';
 import { ClipViewing } from './clip-viewing';
-import { type Quat, fromAxisAngle, sameOrientation, toPlayerFrame } from './cube-orientation';
 import { TWISTY_LOADER } from './scramble-view';
 
 /**

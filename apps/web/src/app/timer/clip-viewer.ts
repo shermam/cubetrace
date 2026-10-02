@@ -13,7 +13,19 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { type AttemptRecord, type VideoClip, parseGyro } from '@cubetrace/core';
+import {
+  type AttemptRecord,
+  type GyroTrack,
+  type Quat,
+  type VideoClip,
+  clipHostMs,
+  clipSeconds,
+  gyroTrack,
+  orientationAt,
+  parseGyro,
+  referenceAt,
+  shownOrientation,
+} from '@cubetrace/core';
 import { attemptFolder } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
@@ -24,14 +36,6 @@ import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
 import { ClipCube, cubePlayerOf } from './clip-cube';
 import { ClipViewing } from './clip-viewing';
-import {
-  type GyroTrack,
-  type Quat,
-  gyroTrack,
-  orientationAt,
-  referenceAt,
-  shownOrientation,
-} from './cube-orientation';
 import { TWISTY_LOADER } from './twisty-loader';
 
 /** A move as the viewer lists it: its time into the clip. */
@@ -43,26 +47,9 @@ export interface ClipMove {
 }
 
 /**
- * How far the camera's picture lags the cube in `clip`, in ms: its `syncResidualMs`, measured by
- * the sync check (docs/DATA-MODEL.md §6, §7), 0 when none was made. A frame whose host time is `t`
- * shows the world as it was at `t − lag`, so a move made at host time `m` is in the picture at
- * `m + lag`.
+ * The moves of `record` in the segment of `clip`, timed from the clip's first frame, where the
+ * picture shows them (`clipSeconds`: the camera's lag later than their host times).
  */
-export function clipLagMs(clip: VideoClip): number {
-  return clip.syncResidualMs ?? 0;
-}
-
-/** The host time the picture at `seconds` into `clip` shows: `firstFrameHostMs + seconds × 1000 − lag`. */
-export function clipHostMs(clip: VideoClip, seconds: number): number {
-  return clip.firstFrameHostMs + seconds * 1000 - clipLagMs(clip);
-}
-
-/** Where `clip` shows the host time `hostMs`, in seconds from its first frame: the lag later. */
-export function clipSeconds(clip: VideoClip, hostMs: number): number {
-  return (hostMs + clipLagMs(clip) - clip.firstFrameHostMs) / 1000;
-}
-
-/** The moves of `record` in the segment of `clip`, timed from the clip's first frame. */
 export function clipMoves(record: AttemptRecord, clip: VideoClip): ClipMove[] {
   return record.moves
     .filter((move) => move.phase === clip.segment)
@@ -121,8 +108,8 @@ export const CUBE_TEMPO_SCALE = 5;
  * (`gyro.json`, docs/DATA-MODEL.md §11): the samples around the host time the picture shows, slerped,
  * relative to the sample at the clip's first frame by default, so that the cube starts upright and
  * then moves as the hands moved it ("Re-zero" takes the sample at the current time as the reference;
- * "Raw" shows the samples as they are, their yaw arbitrary), carried into cubing.js's frame
- * (`cube-orientation.ts`). The camera's lag (`syncResidualMs`) is applied to the moves and the samples
+ * "Raw" shows the samples as they are, their yaw arbitrary), carried into cubing.js's frame (core's
+ * `orientation.ts`). The camera's lag (`syncResidualMs`) is applied to the moves and the samples
  * alike: the picture at `t` shows the world `lag` earlier. Without a gyro file (an older attempt, a
  * cube without a gyroscope) the cube still turns, and a line says the orientation is not recorded;
  * a file that cannot be read is said in that line. The viewer follows the video frame by frame while

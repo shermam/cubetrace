@@ -66,11 +66,13 @@ versions follow [Semantic Versioning](https://semver.org/).
   watches the real cube, and WebGL would compete with the capture. The gyroscope's frame is mapped
   from the driver's documentation, not yet from a real recording: `docs/MANUAL-TESTS.md`, "After
   T3.8", says how to check it.
-- Development: `cube-orientation.ts` (quaternion arithmetic, the frame mapping `CUBE_TO_PLAYER`,
-  the interpolation over a gyro file, `cubeStep`) and `clip-cube.ts` (the player driven through
+- Development: `orientation.ts` (quaternion arithmetic, the frame mapping `CUBE_TO_PLAYER`, the
+  interpolation over a gyro file, `cubeStep`) and `clip.ts` (a clip's time on the host clock, the
+  camera's lag applied) in `packages/core`, and `clip-cube.ts` (the player driven through
   `experimentalAddMove`, `experimentalCurrentThreeJSPuzzleObject` and the vantages) in
-  `apps/web/src/app/timer`, with their tests; the recording flow of the end-to-end suite plays a
-  clip and watches the puzzle object's quaternion and the highlighted move.
+  `apps/web/src/app/timer`, with their tests; the recording flow of the end-to-end suite seeks and
+  plays a clip and checks the puzzle object's quaternion, the player's alg and the highlighted move
+  against what core computes from the gyro file the app wrote.
 
 ## 0.3.0 — 2026-10-02
 

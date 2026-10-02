@@ -7,7 +7,7 @@ import {
   type Renderable,
   cubePlayerOf,
 } from './clip-cube';
-import { IDENTITY, type Quat, fromAxisAngle } from './cube-orientation';
+import { IDENTITY, type Quat, fromAxisAngle } from '@cubetrace/core';
 
 /** A player that records what it was told, with a puzzle object that arrives when the test says. */
 class FakePlayer implements CubePlayer {

@@ -150,7 +150,7 @@ mis-scramble's corrections. The viewer follows the video on every frame while it
 (`requestVideoFrameCallback`, else an animation frame) and on `timeupdate`, `seeked` and `pause`; the
 same mapping times the moves list, so the highlighted move and the 3D turn agree with the picture,
 the camera's lag applied to both (`docs/DATA-MODEL.md` §7: the picture at `t` shows the world `lag`
-earlier). The orientation (`cube-orientation.ts`, pure) is the gyro sample at that host time, slerped
+earlier). The orientation (core's `orientation.ts`, pure) is the gyro sample at that host time, slerped
 between its neighbours along the shorter arc, the first or last sample beyond the file's span and
 nothing before a truncated file's first sample; shown relative to the sample at the clip's first
 frame (`conj(q_ref) · q`: the cube starts upright and moves as the hands moved it, whatever the

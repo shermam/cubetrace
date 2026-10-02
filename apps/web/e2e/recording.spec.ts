@@ -4,10 +4,20 @@ import { type Download, type Page, expect, test } from '@playwright/test';
 import {
   FRAMES_SCHEMA,
   GYRO_SCHEMA,
+  IDENTITY,
   type AttemptRecord,
   type FramesJson,
   type GyroJson,
+  type Quat,
   type VideoClip,
+  angleBetween,
+  clipHostMs,
+  clipSeconds,
+  gyroTrack,
+  orientationAt,
+  parseGyro,
+  referenceAt,
+  shownOrientation,
 } from '@cubetrace/core';
 import { Ajv2020 } from 'ajv/dist/2020';
 
@@ -487,10 +497,14 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
     JSON.parse(await attemptText(page, sessionId, 2, 'gyro.json')),
   );
 
-  // The 3D cube follows the video (T3.8): the orientation comes from the gyro file, zeroed at the
-  // clip's first frame; as the solve clip plays, the puzzle object's quaternion changes (the demo
-  // cube turns about its white axis while it replays) and the highlighted move advances; once the
-  // video ended, the cube has made the solve's moves, in order.
+  // The 3D cube follows the video (T3.8). Its orientation comes from the gyro file: at a moment of
+  // the clip, the sample at the host time the picture shows, relative to the sample at the clip's
+  // first frame, in cubing.js's frame; core's `orientation.ts` computes here, from the file the app
+  // wrote, what the viewer must show, so this checks the wiring (the file read, the time mapping,
+  // the reference, the puzzle object set and rendered). The demo's gyroscope starts over at each
+  // replay (a new fake cube, its angle from 0), so the file's first samples are the previous cube's:
+  // the reference is that cube's orientation, and the solve's turn runs from about 37° away back
+  // towards it. The turns follow the moves: a seek rebuilds the state at once, playing adds them.
   const video = viewer.getByTestId('clip-video');
   await expect(video).toHaveAttribute('data-state', 'loaded', { timeout: 10_000 });
   await expect(viewer.getByTestId('clip-orientation')).toHaveText(
@@ -499,7 +513,7 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
   await expect(viewer.getByTestId('clip-rezero')).toBeEnabled();
   await expect(viewer.getByTestId('clip-raw')).not.toBeChecked();
   const cube = viewer.getByTestId('clip-cube-player');
-  const quaternion = (): Promise<number[]> =>
+  const quaternion = (): Promise<Quat> =>
     cube.evaluate(async (element) => {
       const player = element as unknown as {
         experimentalCurrentThreeJSPuzzleObject(): Promise<{
@@ -507,7 +521,7 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
         }>;
       };
       const { quaternion: q } = await player.experimentalCurrentThreeJSPuzzleObject();
-      return [q.x, q.y, q.z, q.w];
+      return [q.x, q.y, q.z, q.w] as [number, number, number, number];
     });
   const algShown = (): Promise<string> =>
     cube.evaluate(async (element) => {
@@ -516,27 +530,71 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
       };
       return (await player.experimentalGet.alg()).toString();
     });
-  const atStart = await quaternion();
-  expect(atStart.map((c) => Math.round(c * 1000) / 1000)).toEqual([0, 0, 0, 1]);
-  expect(await algShown()).toBe('');
   const highlighted = viewer.locator('[data-testid="clip-move"] button[aria-current="true"]');
+  const solveClip = second.video[1];
+  const track = gyroTrack(
+    parseGyro(JSON.parse(await attemptText(page, sessionId, 2, 'gyro.json'))),
+  );
+  const reference = referenceAt(track, clipHostMs(solveClip, 0));
+  const shownAt = (seconds: number): Quat =>
+    shownOrientation(orientationAt(track, clipHostMs(solveClip, seconds)) ?? IDENTITY, reference);
+  const solveMoves = second.moves.filter((move) => move.phase === 'solve');
+  const madeBy = (seconds: number): string =>
+    solveMoves
+      .filter((move) => move.hostMs <= clipHostMs(solveClip, seconds))
+      .map((move) => move.m)
+      .join(' ');
+  const duration = await video.evaluate((element: HTMLVideoElement) => element.duration);
+  const middle = clipSeconds(
+    solveClip,
+    ((second.events.solveStart ?? 0) + (second.events.solveEnd ?? 0)) / 2,
+  );
+  // The expectations themselves: upright at the first frame, turned at the solve's middle, turned
+  // on by its end (the fake cube turns about its white axis while it replays: about cubing.js's Y).
+  expect(angleBetween(shownAt(0), IDENTITY)).toBeLessThan(0.01);
+  expect(angleBetween(shownAt(middle), shownAt(duration))).toBeGreaterThan(5);
+  expect(Math.abs(shownAt(duration)[0]) + Math.abs(shownAt(duration)[2])).toBeLessThan(1e-6);
+  expect(madeBy(middle).length).toBeGreaterThan(0);
+  expect(madeBy(middle)).not.toBe(madeBy(duration));
+
+  // At the first frame: upright, nothing made.
+  expect(angleBetween(await quaternion(), IDENTITY)).toBeLessThan(0.01);
+  expect(await algShown()).toBe('');
   await expect(highlighted).toHaveCount(0);
+
+  // A seek into the middle of the solve: the state rebuilt at once, the orientation of that moment.
+  await video.evaluate((element: HTMLVideoElement, seconds) => {
+    element.currentTime = seconds;
+  }, middle);
+  await expect
+    .poll(async () => angleBetween(await quaternion(), shownAt(middle)), { timeout: 10_000 })
+    .toBeLessThan(0.5);
+  await expect.poll(algShown, { timeout: 10_000 }).toBe(madeBy(middle));
+  await expect(highlighted).toHaveCount(1);
+  await expect(highlighted).toHaveText(new RegExp(`${madeBy(middle).split(' ').at(-1) ?? ''}$`));
+
+  // Playing on to the end: the cube turns with the picture to the orientation of the clip's last
+  // frame, and makes the rest of the moves; the last one is highlighted.
   await video.evaluate((element: HTMLVideoElement) => element.play());
   await expect
-    .poll(async () => Math.max(...(await quaternion()).map((c, k) => Math.abs(c - atStart[k]))), {
-      timeout: 15_000,
-    })
-    .toBeGreaterThan(0.05);
-  await expect(highlighted).toHaveCount(1, { timeout: 15_000 });
-  await expect
-    .poll(() => video.evaluate((element: HTMLVideoElement) => element.ended), {
-      timeout: 20_000,
-    })
+    .poll(() => video.evaluate((element: HTMLVideoElement) => element.ended), { timeout: 30_000 })
     .toBe(true);
-  const solveMoves = second.moves.filter((move) => move.phase === 'solve').map((move) => move.m);
-  await expect.poll(algShown, { timeout: 5_000 }).toBe(solveMoves.join(' '));
-  await expect(highlighted).toHaveText(new RegExp(`${solveMoves[solveMoves.length - 1]}$`));
-  expect(await quaternion()).not.toEqual(atStart);
+  await expect
+    .poll(async () => angleBetween(await quaternion(), shownAt(duration)), { timeout: 10_000 })
+    .toBeLessThan(0.5);
+  await expect.poll(algShown, { timeout: 10_000 }).toBe(madeBy(duration));
+  expect(madeBy(duration)).toBe(solveMoves.map((move) => move.m).join(' '));
+  await expect(highlighted).toHaveText(new RegExp(`${solveMoves[solveMoves.length - 1].m}$`));
+
+  // Back to the start: upright again, nothing made (the seek rebuilds the state).
+  await video.evaluate((element: HTMLVideoElement) => {
+    element.currentTime = 0;
+  });
+  await expect
+    .poll(async () => angleBetween(await quaternion(), IDENTITY), { timeout: 10_000 })
+    .toBeLessThan(0.01);
+  await expect.poll(algShown, { timeout: 10_000 }).toBe('');
+  await expect(highlighted).toHaveCount(0);
   await viewer.getByRole('button', { name: 'Close' }).click();
 
   // The export: valid against schema 2, both attempts with their gyro summaries.

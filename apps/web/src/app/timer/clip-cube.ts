@@ -3,7 +3,7 @@
 // and its orientation set on the puzzle's three.js object. Plain TypeScript around the few members of
 // the player's API the viewer uses, so that the tests drive it with a fake player and the viewer
 // does without the element where the browser gave none (the unit tests' jsdom).
-import { IDENTITY, type CubeStep, type Quat, cubeStep, sameOrientation } from './cube-orientation';
+import { type CubeStep, IDENTITY, type Quat, cubeStep, sameOrientation } from '@cubetrace/core';
 
 /** The puzzle's three.js `Object3D`, as far as the viewer touches it: its rotation. */
 export interface PuzzleObject {
@@ -46,7 +46,7 @@ export function cubePlayerOf(element: object): CubePlayer | null {
 
 /**
  * The 3D cube of one clip: the state after each move of the clip's segment, from the segment's
- * starting state, and the orientation the gyro file gives (`cube-orientation.ts`). `show` moves the
+ * starting state, and the orientation the gyro file gives (core's `orientation.ts`). `show` moves the
  * cube to the state after a move, animating the next move as the video passes it and rebuilding
  * the state otherwise ({@link cubeStep}); `orient` rotates it, rendering only when the orientation
  * changed. The puzzle's object and the vantages come from the player's promises once, and whatever

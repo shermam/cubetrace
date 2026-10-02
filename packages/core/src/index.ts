@@ -122,6 +122,31 @@ export {
   gyroIntervals,
   gyroSummary,
 } from './gyro';
+// T3.8 — the clip viewer's 3D cube: the cube's orientation from a gyro file, and a clip's time on the host clock
+export type { CubeStep, GyroTrack, Quat, Vec3 } from './orientation';
+export {
+  CUBE_TO_PLAYER,
+  IDENTITY,
+  SAME_ORIENTATION,
+  angleBetween,
+  conjugate,
+  cubeStep,
+  dot,
+  firstSampleAtOrAfter,
+  fromAxisAngle,
+  gyroTrack,
+  multiply,
+  normalize,
+  orientationAt,
+  referenceAt,
+  rotate,
+  sameOrientation,
+  sampleAt,
+  shownOrientation,
+  slerp,
+  toPlayerFrame,
+} from './orientation';
+export { clipHostMs, clipLagMs, clipSeconds } from './clip';
 // T3.0 — the account's record in Firestore
 export type { UserRecord, UserRecordInput } from './user';
 export { userRecord } from './user';

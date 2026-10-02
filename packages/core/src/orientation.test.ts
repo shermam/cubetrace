@@ -1,5 +1,6 @@
-import type { GyroJson } from '@cubetrace/core';
+import { describe, expect, it } from 'vitest';
 
+import type { GyroJson } from './gyro';
 import {
   CUBE_TO_PLAYER,
   IDENTITY,
@@ -17,10 +18,11 @@ import {
   referenceAt,
   rotate,
   sameOrientation,
+  sampleAt,
   shownOrientation,
   slerp,
   toPlayerFrame,
-} from './cube-orientation';
+} from './orientation';
 
 /** The cube's axes (docs/DATA-MODEL.md §11) and cubing.js's. */
 const RED: Vec3 = [1, 0, 0];
@@ -154,9 +156,20 @@ describe('the orientation over a gyro file', () => {
   const q2 = fromAxisAngle(WHITE, 90 + 60);
   const track = gyroTrack(file([1000, 1020, 1040.5], [q0, q1, q2]));
 
-  it('sums the intervals in tenths of a millisecond, as they were written', () => {
+  it('sums the intervals in tenths of a millisecond, as they were written, and normalizes the samples', () => {
     expect(Array.from(track.hostMs)).toEqual([1000, 1020, 1040.5]);
     expect(track.truncatedStart).toBe(false);
+    // The file's five decimals: a sample a little short of unit length is unit in the track, and the
+    // same orientation as itself, twice over.
+    const short: Quat = [0, 0, 0.70709, 0.70709];
+    const rounded = gyroTrack(file([0, 20], [short, short]));
+    expect(Math.hypot(...sampleAt(rounded, 0))).toBeCloseTo(1, 12);
+    expect(sameOrientation(short, short)).toBe(true);
+    expect(sameOrientation(orientationAt(rounded, 10) ?? IDENTITY, sampleAt(rounded, 1))).toBe(
+      true,
+    );
+    expect(sameOrientation([0, 0, 0, 0], IDENTITY)).toBe(false);
+    expect(sampleAt(gyroTrack(file([0], [[0, 0, 0, 0]])), 0)).toEqual([0, 0, 0, 1]);
     const drift = gyroTrack(
       file(
         Array.from({ length: 1000 }, (_, k) => 5000 + k * 20.1),
