@@ -1403,7 +1403,7 @@ or off (default on phones), and in any case oldest uploaded clips first when sto
 UI: a queue panel on the Sessions page (pending, uploading with progress, done, failed with
 Retry) and a header indicator.
 
-**Outcome (2026-10-02, PR #??).** `packages/upload` is the queue over three ports, tested in Node with
+**Outcome (2026-10-02, PR #46).** `packages/upload` is the queue over three ports, tested in Node with
 fakes (46 tests): the device (`UploadSource`, whose OPFS implementation reads the session store, the
 attempts' files and `uploads.json`, and deletes a clip once its record says so), the cloud
 (`UploadCloud`: the index's `upload`, `waitForPendingWrites`, `signUpload`, `confirmUpload`) and the PUT
