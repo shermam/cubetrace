@@ -1437,3 +1437,60 @@ the route of `/qa` (104 bytes, its path, title and lazy import). The index's cod
 share; the Sessions page's chunk is 15.1 kB (8.2 before), the session page's 11.0 kB (9.1), the QA
 page's 8.7 kB; Firebase's chunk is 637.3 kB raw, 160.8 kB transferred (619.1 and 156.6 before), for
 the queries and batches.
+
+## Uploads (T3.3)
+
+Added by T3.3 on 2026-10-02: the upload queue (`packages/upload`), its place in the app, Settings →
+Uploads, the queue's panel and indicator (`docs/ARCHITECTURE.md`, "Uploads"; `docs/DATA-MODEL.md` §7
+`local` and §10 `uploads.json`).
+
+**No new dependency.** `packages/upload` is a workspace of plain TypeScript over `@cubetrace/core` and
+`@cubetrace/storage`, tested by Vitest in Node with fakes of every port (`testing.ts`: the functions
+and their bucket, the PUTs, a clock with timers, storage and the network; `test-device.ts`: the session
+store over the fake origin private file system, with sessions recorded into it). The app's Firebase
+chunk gains `firebase/functions` for `httpsCallable` (`firebase-sdk.ts`, still the only file that
+imports Firebase).
+
+**`XMLHttpRequest` for the PUT.** `fetch()` gives no progress of an upload; an `XMLHttpRequest` does,
+and sends a `File` of the origin private file system from the disk, with the `Content-Length` its size
+(R2's signature binds it); the headers the signature asks for are set as given. The port types the
+request's event handlers as methods, whose parameters TypeScript compares both ways, so that the DOM's
+(`this` the request, a `ProgressEvent`) fit it.
+
+**The queue in a lazy chunk of its own, out of the prefetch.** `UploadService` loads
+`upload-runtime-<hash>.js` (27.2 kB raw, 9.3 kB transferred) through `UPLOAD_RUNTIME`, a dynamic import,
+once an account is signed in with uploads on; `ngsw-config.json` takes it out of the `app` group and
+into `uploads`, a lazy group, as `firebase-sdk-*.js` is in `account`. `account.spec.ts` checks on the
+production build, signed out, that it is neither requested nor cached.
+
+**The header's indicator, deferred twice.** `HeaderControls` holds `@if (signedIn) { @defer (on
+immediate) { <app-upload-indicator /> } }`, so that the indicator (1.7 kB) and `UploadService` (a chunk
+of 6.7 kB that the Sessions page and a session's page share) load only with an account signed in, and
+the service, which starts the queue, exists on every page then. It injects what the queue needs
+(`SessionService`, the index, the store) rather than an `Injector` to reach them later, since a lazy
+chunk's use of `Injector` makes `main` export it: tried first, it reshuffled `main`'s exports and added
+11 bytes. Without it `main` is byte for byte the same but for the build's commit and the lazy chunks'
+hashes: the initial bundle is 264.63 kB raw, 72.51 kB transferred, as before (`ng build`, 2026-10-02,
+against `main` at 9ad784b). The header's controls are 2.6 kB (2.3), the Sessions page 21.2 kB (15.1, the
+panel), a session's page 11.4 kB (11.0), Settings 21.0 kB (18.9), Firebase 646.8 kB raw (637.3).
+
+**One tab uploads: a Web Lock.** The queue holds `cubetrace.uploads` (`navigator.locks`) while it runs;
+another tab's queue waits for it, its status `waiting`, and the browser releases it when the tab goes.
+
+**The end-to-end suite's bucket.** The fake of Firebase (`e2e/helpers/account.ts`) plays the two
+functions over its index; their URLs are on the app's own origin (`/e2e-bucket/<key>`), which a
+Playwright route answers before the dev server sees them (`fakeBucket`): the same origin, so no CORS
+preflight, and `route.request().postDataBuffer()` has the whole body of an `XMLHttpRequest` PUT of a
+`Blob` or an origin private file system `File` (checked with 3 MB of each); the page's fake
+`confirmUpload` asks the test for an object's size through `page.exposeFunction`. A test that runs no
+bucket gets `functions/unavailable` from `signUpload`, which the queue tries again later, so the other
+specs' documents stay as they were. `uploads.spec.ts` records with Chrome's fake camera, in the
+`encoding` project.
+
+**A page that goes away takes its last write with it.** The first runs of `uploads.spec.ts` sent
+`session.json` again at each page load: the next page, which holds the lock once the old document is
+gone, read `uploads.json` before the old page's last write had landed. The queue now writes its state
+100 ms after a change rather than 1 s, and at once on
+`pagehide` (`UploadQueue.flush`), and asks the index about every attempt `uploads.json` does not show as
+all done, so that what the index confirmed is not sent again; the test waits until `uploads.json` says
+the attempt is done before its next page load.

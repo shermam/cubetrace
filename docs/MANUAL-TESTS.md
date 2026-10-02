@@ -621,3 +621,47 @@ documents.
   at" a time of today.
 - [ ] Signed out on one device: the Sessions page shows only that device's sessions, without badges,
   filter or QA link, as before T3.1.
+
+## T3.3 — uploads
+
+On https://shermam.github.io/cubetrace/, signed in with the same Google account on the MacBook
+(Chrome) and on the ThinkPhone (the installed app), a real cube on each, with the functions and the
+bucket deployed (`functions/README.md`, `bucket/README.md`). Next to each item, write the device,
+Chrome's version and what happened. The Google Cloud console (Cloud Storage → `cubetrace-data`) shows
+the objects, the Firebase console (Firestore Database → Data) the documents, and the functions' logs
+each call.
+
+- [ ] The MacBook, Settings → Uploads: Upload sessions and Keep local copies on, no Wi-Fi only (Chrome
+  on a laptop does not say the network's type).
+- [ ] A solve with the camera on: once its clips are saved (a second or two), the header shows ↑ 1,
+  then nothing; Sessions → Uploads says "Up to date: every attempt of this device is uploaded." and
+  "Uploaded last: attempt 1 of …"; the session's page says "uploaded" on the attempt's row. In the
+  bucket, `users/<uid>/sessions/<id>/attempts/0001/` has `attempt.json`, `laptop.scramble.mp4`, its
+  `.frames.json`, `laptop.solve.mp4` and its `.frames.json`, each of the size the clip viewer and the
+  device say, and `users/<uid>/sessions/<id>/session.json` beside `attempts/`. The attempt's document
+  says `upload.state: 'done'`, every file with its `doneMs`. A downloaded MP4 plays.
+- [ ] The QA view (Sessions → QA view): today's MacBook row counts the attempt, its bytes uploaded,
+  and Pending 0 B once the uploads are done.
+- [ ] Twenty solves or so in a row: the attempts upload as they come; `session.json` goes again about
+  two minutes after the last one (the functions' log: one `signUpload: signed` for it, not one per
+  attempt).
+- [ ] During an upload of several attempts, Wi-Fi off: the panel says "Offline: the uploads go on once
+  the network is back.", the indicator is dashed; Wi-Fi on: it goes on by itself. Then reload during an
+  upload: it resumes where it was, and the functions' log has no second signature of a file already
+  confirmed.
+- [ ] Keep local copies off: the clips of the attempts uploaded leave the device (Settings → Storage
+  goes down by their size), their badges say "2 clips in the cloud", the clip viewer says "In the
+  cloud: …" in place of the video, and Download gives the frame times and attempt.json.
+- [ ] The ThinkPhone (the installed app), Settings → Uploads: Wi-Fi only shown and on, Keep local
+  copies off. On mobile data (Wi-Fi off), a solve with the camera on: the panel says "Waiting for
+  Wi-Fi", the indicator is dashed, nothing reaches the bucket; Wi-Fi on: the attempt is uploaded, then
+  its clips say "in the cloud", and Settings → Storage goes down.
+- [ ] Wi-Fi only off on the phone, on mobile data: it uploads. If it waited anyway, or did not wait
+  with Wi-Fi only on, write what `navigator.connection.type` and `.effectiveType` say there
+  (chrome://inspect from the MacBook, the app's console).
+- [ ] A demo session (`?demo=0&speed=20`) signed in: nothing of it in the panel, nothing in the bucket.
+- [ ] Settings → Uploads → Upload sessions off: the panel says the uploads are off, and a new solve
+  stays on the device; on again: it goes. Sign out during an upload: the indicator goes and nothing
+  more is sent; sign in again: the upload resumes.
+- [ ] If the browser's storage passes 70% on the phone (Settings → Storage), the oldest uploaded clips
+  are deleted until it is under 60%, newest kept; write the usage before and after.

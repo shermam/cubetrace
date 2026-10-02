@@ -11,26 +11,25 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
 
 - A Google account, optional (T3.0): Sign in, in the header and in Settings → Account, signs in with
   Google, in a popup (in the app installed on Android, the page goes to Google's and comes back), and
-  the header then shows the account's photo and name, with Sign out in its menu. For now the account
-  only records the name, the email and each device's label (`users/{uid}` in Firestore); nothing is
-  uploaded yet: it is there for the cloud index of the sessions and their uploads, which come next.
-  Signed out, the app works as before and never downloads Firebase, which loads once the account is
-  used; signed in, it opens offline too.
+  the header then shows the account's photo and name, with Sign out in its menu. The account records
+  the name, the email and each device's label (`users/{uid}` in Firestore), and is there for the
+  cloud index of the sessions and their uploads (below). Signed out, the app works as before and
+  never downloads Firebase, which loads once the account is used; signed in, it opens offline too.
 - Development: the Firestore rules (`firebase/firestore.rules`: an account reads and writes only its
   own record and its own sessions), tested against the Firestore emulator (`npm run test:rules`, in
   CI with Java 21), and a workflow that deploys them when a merge changes them
   (`.github/workflows/firebase.yml`).
-- Development: the Cloud Functions the uploads will go through (T3.2, `functions/`). `signUpload`
+- Development: the Cloud Functions the uploads go through (T3.2, `functions/`). `signUpload`
   gives a signed-in account, for one of its own attempts, a URL per file into the dataset's bucket
   (Google Cloud Storage for now, Cloudflare R2 by configuration), valid 15 minutes for that file's
   type and exact size, within a daily quota per account (2 GB and 400 files by default, kept in the
   account's record, which the app can read and not change); `confirmUpload` checks that the files
-  arrived with their sizes and marks the attempt uploaded. The app does not call them yet: the upload
-  queue (T3.3) will. Their tests run against the Firestore emulator (`npm run test:functions`, in CI),
-  the Firebase workflow deploys them with the rules, and `bucket/` has the bucket's CORS policies.
+  arrived with their sizes and marks the attempt uploaded; the upload queue (T3.3, below) calls them.
+  Their tests run against the Firestore emulator (`npm run test:functions`, in CI), the Firebase
+  workflow deploys them with the rules, and `bucket/` has the bucket's CORS policies.
 - The session index (T3.1): signed in, every session of a real cube goes to the account's index in
   the cloud as it is recorded, its record and each attempt's without the moves, with the device that
-  recorded it and its files, all pending (nothing is uploaded yet): the saves never wait for it, and
+  recorded it and its files, each pending until it is uploaded: the saves never wait for it, and
   offline it waits on the device and goes when the network is back. Demo sessions stay on the device.
   The sessions recorded signed out are added when the account signs in (at most 300 documents at a
   time, the rest at the next start). A write the cloud refuses is said once, on the Sessions page and
@@ -47,11 +46,38 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
   readers and `cloud-session.schema.json`, `cloud-attempt.schema.json`), the rules' checks of their
   shape (an attempt without moves, its place, its owner) with their tests, the composite index of the
   sessions query (`firebase/firestore.indexes.json`), and the end-to-end suite's fake index.
+- Uploads (T3.3): signed in, every attempt of a real cube's session goes to your account's storage in
+  the cloud once it is over (its clips saved): its attempt.json with the moves, its clips and their
+  frame times, and its session's session.json (again when it changed, once the session has been quiet
+  for two minutes). Two files at a time; a failure of the network or the server is tried again after
+  1 s, 2 s, 4 s, … up to 5 minutes; a file the storage refuses waits for Retry; when the day's upload
+  quota is used up the uploads wait for the next day; a reload, or the next start, goes on where they
+  were, without sending a file twice. Demo sessions, anything signed out and the cubes' MAC addresses
+  are never uploaded.
+- Settings → Uploads: Upload sessions (on), Wi-Fi only (on a phone whose browser tells Wi-Fi from
+  mobile data; on by default there) and Keep local copies (on for a laptop, off for a phone: off, an
+  attempt's clips are deleted from the device once all its files are uploaded, attempt.json and the
+  frame times staying). In any case, once the browser's storage is 70% full, the oldest uploaded clips
+  are deleted until it is under 60%.
+- The Sessions page, signed in, has the uploads' panel: where they are (uploading, up to date, paused
+  by the quota until a time, waiting for Wi-Fi or the network, off), each attempt still to upload with
+  its progress and its last error, Retry for those that failed, the attempts uploaded last and the
+  clips deleted from the device. The header shows an arrow with the attempts still to upload (dashed
+  while paused, red when some failed), which opens it. A session's page says each attempt's upload.
+- A clip deleted from the device once uploaded says "in the cloud" on its badges and in the clip
+  viewer, in place of the video; Download gives what is still on the device.
+- Development: `packages/upload`, the queue, tested in Node with fakes of the device, the functions,
+  the bucket and the PUTs; `uploads.json`, its state, at the root of the origin private file system
+  (`docs/DATA-MODEL.md` §10); `video[].local` in `attempt.json` (§7), an optional field of version 2;
+  the end-to-end suite's fake of the functions with a bucket that the test runs (`uploads.spec.ts`).
 
 ### Changed
 
 - The current session's row on the Sessions page follows the timer's attempts while the page is open
-  (T3.1). Settings → Account says what the account keeps now.
+  (T3.1). Settings → Account says what the account keeps now, and that the files are uploaded as
+  Settings → Uploads says (T3.3).
+- The clip counts on the Sessions page and a session's page count the bytes still on the device, and
+  say how many clips are in the cloud (T3.3).
 
 ## 0.2.0 — 2026-09-27
 

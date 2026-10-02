@@ -1403,6 +1403,37 @@ or off (default on phones), and in any case oldest uploaded clips first when sto
 UI: a queue panel on the Sessions page (pending, uploading with progress, done, failed with
 Retry) and a header indicator.
 
+**Outcome (2026-10-02, PR #??).** `packages/upload` is the queue over three ports, tested in Node with
+fakes (46 tests): the device (`UploadSource`, whose OPFS implementation reads the session store, the
+attempts' files and `uploads.json`, and deletes a clip once its record says so), the cloud
+(`UploadCloud`: the index's `upload`, `waitForPendingWrites`, `signUpload`, `confirmUpload`) and the PUT
+(`XMLHttpRequest`, for progress), with the clock, storage, network and Web Lock beside them; its rules
+are `docs/ARCHITECTURE.md` "Uploads", its state `docs/DATA-MODEL.md` §10. Three refinements of the
+contract: `session.json` goes again once it has stayed the same for two minutes (every attempt changes
+its summary; each upload of it is a file of the 400-a-day quota), not with every attempt; 408 and 429,
+which say to come back, are tried again as a 5xx; a quota pause lasts at least a minute, whatever
+`resetsAtMs` says, so that a device whose clock runs ahead does not ask again and again. A reload asks
+the index about every attempt `uploads.json` does not show as all done: a page that goes away takes
+its last write of the file with it (the e2e met it: the next page, holding the lock, read the file
+before the old page's write landed), so the state is written 100 ms after a change and at once on
+`pagehide`, and what the index confirmed with the same size is not sent again. `video[].local` (false
+once a clip's MP4 left the device) is an optional field of version 2, in both attempt schemas and the
+reader; the rules check no field of `video`, so none changed (a test writes such an attempt again over
+an upload the functions marked done). In the app, `UploadService` loads the queue from its own lazy
+chunk (`upload-runtime-<hash>.js`, 27.2 kB raw, a lazy group of the service worker) once an account is
+signed in with uploads on; it injects what the queue needs (`SessionService`, the index, the store)
+rather than an `Injector`, which `main` would have had to export, and only the header's indicator, a
+nested deferred block that a signed-in account loads, makes it on every page; `main` is byte for byte
+the same but for the build's commit and the lazy chunks' hashes (the initial bundle 264.63 kB raw,
+72.51 kB transferred, as before). `SessionChanges` turns the store's writes into events (after the
+index's), `ClipsInFlight` holds an attempt back while the recording has a clip of it to save, and
+`SessionService.markClipsGone` saves `local: false` before a clip is deleted. Firebase's chunk gains
+`firebase/functions` (646.8 kB raw, 637.3 before). The e2e fake of Firebase plays the two functions
+over its index and a bucket that the test runs (a route on the app's own origin keeps each PUT's
+bytes, `exposeFunction` lets the fake `confirmUpload` ask for a size); T3.5 replaces it with the
+emulators. Open for the manual round (`docs/MANUAL-TESTS.md`, T3.3): GCS's CORS and signatures with
+`XMLHttpRequest` on both devices, Wi-Fi only on the ThinkPhone, and the 70% rule on a phone's quota.
+
 ### T3.4 — cube MAC addresses synced per user
 
 Issue #21: `users/{uid}/cubes/{name}` mirrors Settings' cube list; union on sign-in, newest

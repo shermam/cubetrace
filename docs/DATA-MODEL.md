@@ -17,10 +17,11 @@ builds after cubetrace 0.1.0) changed, from version 1 (written by 0.1.0):
   coarse summary: the fit that places a move on the host clock is its attempt's.
 - `<camera>.<segment>.frames.json`, the frame times of a clip, is new (§9).
 
-Within version 2, two optional fields were added, so that the version 2 files written before them
-stay valid, and no new version: a clip in `attempt.json` gained `truncatedStart` (§7, `docs/PLAN.md`
-T2.9; the readers take a missing one as false), and a camera in `session.json` gained `microphone`
-(§6, T2.12; the readers take a missing one as null).
+Within version 2, optional fields were added, so that the version 2 files written before them stay
+valid, and no new version: a clip in `attempt.json` gained `truncatedStart` (§7, `docs/PLAN.md` T2.9;
+the readers take a missing one as false) and `local` (§7, T3.3: false once its MP4 left the device
+after its upload; a missing one means the file is there), and a camera in `session.json` gained
+`microphone` (§6, T2.12; the readers take a missing one as null).
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -154,6 +155,7 @@ sessions/<sessionId>/
     ├── <camera>.scramble.frames.json
     ├── <camera>.solve.mp4
     └── <camera>.solve.frames.json
+uploads.json                           phase 3: the upload queue's state (§10)
 ```
 
 `sessionId` is a UUID v4; `<camera>` is the camera's `label` (§6), unique within the session:
@@ -307,6 +309,7 @@ camera's clock sync (phase 4); a local camera shares the host's clock and has 0 
      "crop": {"x": 480, "y": 120, "w": 960, "h": 840}, "fpsNominal": 30, "frames": 721,
      "firstFrameHostMs": 1730640017211.9, "framesFile": "laptop.solve.frames.json",
      "syncResidualMs": 41.5, "truncatedStart": false}
+                                         // "local": false once the MP4 left the device (T3.3)
   ]
 }
 ```
@@ -377,6 +380,15 @@ number of frames in the clip; the actual frame times are in the frames file, and
 deliver fewer frames than its track says (`docs/DEVICES.md`). `firstFrameHostMs` is the host time of
 the first frame (`t0HostMs` of the frames file), and `syncResidualMs` the camera's lag behind the
 cube when the clip was recorded (`offsetMs` of `clock.cameras`, §6), null before a sync check.
+
+`local` is false once the clip's MP4 is no longer on the device that recorded it: the upload queue
+deleted it after the bucket confirmed it, by policy (`docs/PLAN.md` T3.3: "Keep local copies" off,
+or the browser's storage past 70%); its frames file stays, and so does `attempt.json`, which the queue
+saves with `local` false before it deletes the file. While the MP4 is there the field is absent, true
+is never written, and the files written before T3.3 have none. The `attempt.json` uploaded to the
+bucket never has it, since every clip is beside it there: the queue uploads the record without it, so
+deleting a clip does not change the uploaded file. The pages say "in the cloud" for such a clip, in
+place of playing or downloading it.
 
 `packages/core/schema/session.schema.json` and `attempt.schema.json` (JSON Schema draft
 2020-12) are §6 and this section in machine-readable form, for version 2; the version 1 files
@@ -519,7 +531,8 @@ write `upload` (T3.2), and the rules refuse the app's changes to it.
 
 **Writing.** With an account signed in, every save of a session (its creation, its summary after each
 attempt, a note, a camera, a sync check) writes its document, and every save of an attempt (when it
-ends, and again when a clip is attached) writes the attempt's, each merged into the stored one
+ends, again when a clip is attached, and when its clips leave the device once uploaded, T3.3) writes
+the attempt's, each merged into the stored one
 (Firestore's `set` with `merge`: a field the server added stays): the first write of an attempt's
 document carries its `upload`, the later ones every field but `upload`; the timer's Delete last
 deletes the attempt's document. Firestore applies the writes to its cache in IndexedDB at once and
@@ -590,6 +603,64 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
 - The objects are `users/{uid}/sessions/{id}/attempts/{index}/<path>`, and
   `users/{uid}/sessions/{id}/session.json` for the session's file, in the bucket of the configuration
   (`bucket/README.md`).
+
+### The upload queue on the device: `uploads.json` (T3.3)
+
+Not a cloud record, but what this device knows of its uploads: the upload queue
+(`docs/ARCHITECTURE.md`, "Uploads") keeps its state in `uploads.json`, at the root of the origin
+private file system beside `sessions/` (§5), written whole under a temporary name and moved into
+place as the records are, a tenth of a second after a change (and at once when the page goes away),
+so that a reload, or the next start, resumes where the queue was. Its own version is 1; a file of
+another version, or not JSON, reads as empty, and an entry that is not well formed is left out (the
+index then says what is uploaded, below).
+
+```jsonc
+{
+  "schema": 1,
+  "accounts": {                          // by uid: each account's uploads apart
+    "Xb3…uid": {
+      "pausedUntilMs": null,             // the day's quota used up until then (resetsAtMs); null
+      "sessions": {
+        "3f1c…": {
+          "sessionJson": {"hash": "6229c326114b0d16", "bytes": 2714},   // last confirmed; null before
+          "attempts": {
+            "0001": {                    // the attempt's folder
+              "scrambleShown": 1790898235052.3,
+              "files": {
+                "attempt.json": {"bytes": 16210, "hash": "a8bfb37157785f79", "state": "done",
+                                 "tries": 1, "doneMs": 1790898238715},
+                "laptop.solve.mp4": {"bytes": 913384, "state": "done", "tries": 1,
+                                     "doneMs": 1790898238779, "local": false},
+                "laptop.solve.frames.json": {"bytes": 948, "state": "pending", "tries": 1,
+                                             "error": "the bucket answered 503"},
+                "session.json": {"bytes": 2714, "hash": "6229c326114b0d16", "state": "uploading",
+                                 "tries": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+A file's `state` is `pending` (to sign and send), `uploading` (signed and being sent, or sent and
+being confirmed), `done` (confirmed in the bucket) or `failed` (refused for good, until Retry);
+`bytes` is its size, what it is signed for; `tries` the PUTs begun (and the confirmations asked for a
+file that may have been sent before a reload); `error` why its last try failed; `doneMs` when the
+bucket confirmed it, on the server's clock (`upload.files[path].doneMs` of the index); `local` false
+for a clip's MP4 deleted from the device; `hash` for `attempt.json` and `session.json`, made from
+their records, a 64-bit hash of the text uploaded (two FNV-1a passes), by which the queue tells that
+a record changed since. `tries` 0, `error` null and `doneMs` null are left out. `scrambleShown` is
+the attempt's `events.scrambleShown`, which tells it from another attempt that took its index after
+Delete last (whose upload starts afresh). `session.json` is listed with the attempt it rides with,
+and `sessionJson` is the session's file last confirmed. A file `uploading` when the page went is
+confirmed first at the next start (its PUT may have finished) and sent again only when the bucket
+does not have it. For an attempt this file does not know, or not as all done, the queue asks the
+index for its `upload`, and takes as done a file that the index confirmed with the same size: a device
+whose `uploads.json` was lost, or written late, sends nothing twice. A session deleted from the device
+leaves the file at the queue's next look.
 
 ### The rules
 

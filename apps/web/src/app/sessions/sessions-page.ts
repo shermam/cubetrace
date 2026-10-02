@@ -51,7 +51,8 @@ function lastCloudNote(notes: string): string | null {
  * account signed in, the page also lists the sessions of the account's index in the cloud, merged
  * with this device's by id, each with a badge (this device, cloud, both), a filter by device (the
  * host labels seen) and a link to the QA view; a session of the cloud alone opens a read-only page.
- * Signed out, it is as before.
+ * Since T3.3, signed in, the upload queue's panel comes before the list, and a row's clips say how
+ * many are in the cloud only. Signed out, it is as before.
  */
 @Component({
   selector: 'app-sessions-page',
