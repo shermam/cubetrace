@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+import { SINK_PORT } from './helpers/emulators';
+
 // End-to-end tests of apps/web, run from the repository root with `npm run e2e`.
 // Relative paths below are resolved against this directory (apps/web/e2e).
 const port = 4200;
@@ -12,6 +14,13 @@ const inCi = Boolean(process.env['CI']);
 // frames, the timing with the camera on and off). The other specs run beside them.
 const encoding =
   /\/(camera-labels|capture|microphone|recording|session-clips|sync-check|uploads|video-quality)\.spec\.ts$/;
+// The specs of the cloud project: the app's own Firebase SDK against the Auth, Firestore and Functions
+// emulators, the uploads into the bucket sink (helpers/emulators.ts). `npm run e2e:cloud` runs
+// Playwright inside `firebase emulators:exec`, which says so in FIREBASE_EMULATOR_HUB: only then is
+// there a cloud project, with the sink, and without the production build, which only the other
+// projects use. `npm run e2e` runs the others, with the fakes of Firebase.
+const cloud = /\.cloud\.spec\.ts$/;
+const emulators = process.env['FIREBASE_EMULATOR_HUB'] !== undefined;
 
 export default defineConfig({
   testDir: '.',
@@ -28,7 +37,10 @@ export default defineConfig({
   projects: [
     // First, so that the next of its specs starts as soon as one ends.
     { name: 'encoding', testMatch: encoding, workers: 1, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium', testIgnore: encoding, use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', testIgnore: [encoding, cloud], use: { ...devices['Desktop Chrome'] } },
+    ...(emulators
+      ? [{ name: 'cloud', testMatch: cloud, use: { ...devices['Desktop Chrome'] } }]
+      : []),
   ],
   webServer: [
     {
@@ -39,14 +51,24 @@ export default defineConfig({
       reuseExistingServer: !inCi,
       timeout: 120_000,
     },
-    {
-      // The production build with the base href of the Pages deploy (service worker on), served
-      // under /cubetrace/ as GitHub Pages serves it (serve-pages.mts).
-      command: `npm run build -- --base-href /cubetrace/ --output-path dist/pages && node e2e/serve-pages.mts dist/pages/browser ${String(pagesPort)}`,
-      cwd: '..',
-      url: `http://localhost:${String(pagesPort)}/cubetrace/`,
-      reuseExistingServer: !inCi,
-      timeout: 120_000,
-    },
+    emulators
+      ? {
+          // The functions' bucket in the emulators (BUCKET_PROVIDER=local), on this machine
+          // (helpers/bucket-sink.mts, on the port of functions/.env.demo-cubetrace).
+          command: `node e2e/helpers/bucket-sink.mts ${String(SINK_PORT)}`,
+          cwd: '..',
+          url: `http://127.0.0.1:${String(SINK_PORT)}/`,
+          reuseExistingServer: !inCi,
+          timeout: 30_000,
+        }
+      : {
+          // The production build with the base href of the Pages deploy (service worker on), served
+          // under /cubetrace/ as GitHub Pages serves it (serve-pages.mts).
+          command: `npm run build -- --base-href /cubetrace/ --output-path dist/pages && node e2e/serve-pages.mts dist/pages/browser ${String(pagesPort)}`,
+          cwd: '..',
+          url: `http://localhost:${String(pagesPort)}/cubetrace/`,
+          reuseExistingServer: !inCi,
+          timeout: 120_000,
+        },
   ],
 });

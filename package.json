@@ -24,6 +24,7 @@
     "test:rules": "npm run firebase -- emulators:exec --only firestore --project demo-cubetrace \"vitest run --config firebase/vitest.config.ts\"",
     "test:functions": "npm run build -w @cubetrace/functions && npm run firebase -- emulators:exec --only firestore --project demo-cubetrace \"vitest run --config functions/vitest.config.ts\"",
     "e2e": "playwright test -c apps/web/e2e/playwright.config.ts",
+    "e2e:cloud": "npm run build -w @cubetrace/functions && npm run firebase -- emulators:exec --only auth,firestore,functions --project demo-cubetrace \"playwright test -c apps/web/e2e/playwright.config.ts --project cloud\"",
     "firebase": "npx --yes firebase-tools@15.32.1",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

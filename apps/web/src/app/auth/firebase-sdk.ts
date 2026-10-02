@@ -3,7 +3,8 @@
 // (T3.4), and the upload's two callable functions (T3.3), through the modular API. This is the only
 // file that imports Firebase, and only ACCOUNT_LOADER's dynamic import loads it, so the SDK is a
 // lazy chunk of its own, firebase-sdk-<hash>.js, which the service worker caches only once it has
-// been used (ngsw-config.json): a device that never signs in never downloads it.
+// been used (ngsw-config.json): a device that never signs in never downloads it. In development builds
+// the end-to-end suite's cloud project can point it at the Firebase emulators (FirebaseEmulators).
 import {
   attemptDocumentId,
   type CloudAttempt,
@@ -16,17 +17,21 @@ import {
   GoogleAuthProvider,
   browserLocalPersistence,
   browserPopupRedirectResolver,
+  connectAuthEmulator,
   getRedirectResult,
   indexedDBLocalPersistence,
   initializeAuth,
   onAuthStateChanged,
+  signInWithCredential,
   signInWithPopup,
   signInWithRedirect,
   signOut,
+  type Auth,
   type User,
 } from 'firebase/auth';
 import {
   collection,
+  connectFirestoreEmulator,
   deleteDoc,
   doc,
   getDoc,
@@ -46,10 +51,21 @@ import {
   type Firestore,
   type QuerySnapshot,
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import {
+  connectFunctionsEmulator,
+  getFunctions,
+  httpsCallable,
+  type Functions,
+} from 'firebase/functions';
 
 import { FIREBASE_CONFIG } from '../../environments/firebase';
-import type { AccountBackend, BackendUser, CloudDocument, CloudListing } from './account-backend';
+import type {
+  AccountBackend,
+  BackendUser,
+  CloudDocument,
+  CloudListing,
+  FirebaseEmulators,
+} from './account-backend';
 
 /** The most writes one batch may hold (Firestore's limit). */
 const BATCH_WRITES = 500;
@@ -57,9 +73,15 @@ const BATCH_WRITES = 500;
 /** Where the functions run (functions/README.md). */
 const FUNCTIONS_REGION = 'us-central1';
 
-/** Starts Firebase: call once per page (`AuthService` keeps the backend). */
-export function connectFirebase(): AccountBackend {
-  const app = initializeApp(FIREBASE_CONFIG);
+/**
+ * Starts Firebase: call once per page (`AuthService` keeps the backend). With `emulators` (the
+ * end-to-end suite's, in development builds only: account-backend.ts), against the emulators' offline
+ * project rather than Google's servers.
+ */
+export function connectFirebase(emulators: FirebaseEmulators | null = null): AccountBackend {
+  const app = initializeApp(
+    emulators === null ? FIREBASE_CONFIG : { ...FIREBASE_CONFIG, projectId: emulators.projectId },
+  );
   // The account is kept in IndexedDB across reloads. No popup and redirect resolver here: the calls
   // that open Google's page pass it, so that a remembered sign-in starts without Google's iframe.
   const auth = initializeAuth(app, {
@@ -76,6 +98,9 @@ export function connectFirebase(): AccountBackend {
   // The upload's functions (T3.2), called with the account's token; their errors keep the
   // HttpsError's code (`functions/resource-exhausted`) and details.
   const functions = getFunctions(app, FUNCTIONS_REGION);
+  if (emulators !== null) {
+    useEmulators(emulators, auth, firestore, functions);
+  }
   const sign = httpsCallable<SignRequest, SignedFile[]>(functions, 'signUpload');
   const confirm = httpsCallable<ConfirmRequest, ConfirmResult>(functions, 'confirmUpload');
   return {
@@ -88,6 +113,12 @@ export function connectFirebase(): AccountBackend {
         error,
       ),
     signInWithPopup: async () => {
+      if (emulators !== null) {
+        // The end-to-end suite: the Auth emulator's Google provider takes the account's claims as they
+        // are, so no window opens.
+        await signInWithCredential(auth, GoogleAuthProvider.credential(emulators.googleIdToken));
+        return;
+      }
       await signInWithPopup(auth, google, browserPopupRedirectResolver);
     },
     signInWithRedirect: () => signInWithRedirect(auth, google, browserPopupRedirectResolver),
@@ -152,6 +183,30 @@ export function connectFirebase(): AccountBackend {
     saveCube: (uid, cube) => setDoc(doc(firestore, 'users', uid, 'cubes', cube.name), cube),
     deleteCube: (uid, name) => deleteDoc(doc(firestore, 'users', uid, 'cubes', name)),
   };
+}
+
+/**
+ * Points Authentication, Firestore and the functions at the end-to-end suite's emulators, before
+ * anything is asked of them. The Auth emulator's banner, which would cover the bottom of the page, is
+ * left out.
+ */
+function useEmulators(
+  emulators: FirebaseEmulators,
+  auth: Auth,
+  firestore: Firestore,
+  functions: Functions,
+): void {
+  connectAuthEmulator(auth, `http://${emulators.auth}`, { disableWarnings: true });
+  const store = hostAndPort(emulators.firestore);
+  connectFirestoreEmulator(firestore, store.host, store.port);
+  const callable = hostAndPort(emulators.functions);
+  connectFunctionsEmulator(functions, callable.host, callable.port);
+}
+
+/** `127.0.0.1:8080` as its host and port. */
+function hostAndPort(address: string): { host: string; port: number } {
+  const url = new URL(`http://${address}`);
+  return { host: url.hostname, port: Number(url.port) };
 }
 
 /** sessions/{id}/attempts/{index}, its id the index zero-padded as the attempt's folder. */
