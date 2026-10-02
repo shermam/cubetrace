@@ -1,5 +1,11 @@
 import { InjectionToken, inject, isDevMode } from '@angular/core';
-import type { CloudAttempt, CloudAttemptFields, CloudSession, UserRecord } from '@cubetrace/core';
+import type {
+  CloudAttempt,
+  CloudAttemptFields,
+  CloudCube,
+  CloudSession,
+  UserRecord,
+} from '@cubetrace/core';
 import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
@@ -21,11 +27,20 @@ export interface BackendUser extends AccountUser {
   readonly createdMs: number | null;
 }
 
-/** A document of the session index as Firestore gives it back (docs/DATA-MODEL.md §10, T3.1). */
+/**
+ * A document as Firestore gives it back (docs/DATA-MODEL.md §10): of the session index (T3.1), or a
+ * cube of the account's list (T3.4).
+ */
 export interface CloudDocument {
-  /** The document's id: a session's id, or an attempt's index zero-padded to 4 digits (`0001`). */
+  /**
+   * The document's id: a session's id, an attempt's index zero-padded to 4 digits (`0001`), or a
+   * cube's name.
+   */
   readonly id: string;
-  /** Its fields as Firestore holds them, unchecked: core's parseCloudSession and parseCloudAttempt read them. */
+  /**
+   * Its fields as Firestore holds them, unchecked: core's parseCloudSession, parseCloudAttempt and
+   * parseCloudCube read them.
+   */
   readonly data: unknown;
   /**
    * It holds writes of this device that the server has not confirmed yet (Firestore's
@@ -34,7 +49,7 @@ export interface CloudDocument {
   readonly pending: boolean;
 }
 
-/** The documents a query of the session index found. */
+/** The documents a query of the session index, or of the account's cubes, found. */
 export interface CloudListing {
   readonly documents: readonly CloudDocument[];
   /** They come from this device's cache, the server being out of reach (Firestore's `fromCache`). */
@@ -43,9 +58,10 @@ export interface CloudListing {
 
 /**
  * The few calls the app makes into Firebase: Authentication with the Google provider, Firestore for
- * users/{uid} and the session index (docs/ARCHITECTURE.md, "Account"), and the upload's two callable
- * functions (T3.2, T3.3). `firebase-sdk.ts` implements it with the SDK, in a lazy chunk of its own;
- * the unit tests and the end-to-end suite give fakes, so that neither loads Firebase.
+ * users/{uid}, the session index and the account's cubes (docs/ARCHITECTURE.md, "Account"), and the
+ * upload's two callable functions (T3.2, T3.3). `firebase-sdk.ts` implements it with the SDK, in a
+ * lazy chunk of its own; the unit tests and the end-to-end suite give fakes, so that neither loads
+ * Firebase.
  */
 export interface AccountBackend {
   /**
@@ -105,6 +121,23 @@ export interface AccountBackend {
   signUpload(request: SignRequest): Promise<SignedFile[]>;
   /** `confirmUpload` (functions/README.md): the files found in the bucket; rejects as `signUpload`. */
   confirmUpload(request: ConfirmRequest): Promise<ConfirmResult>;
+
+  // ---- The cubes (T3.4): users/{uid}/cubes/{name}, Settings' list of MAC addresses ----
+
+  /**
+   * The cubes of the account `uid` (users/{uid}/cubes): from the server, or from the cache when the
+   * server is out of reach (`fromCache`), with this device's writes that the server has not confirmed
+   * (`pending`).
+   */
+  listCubes(uid: string): Promise<CloudListing>;
+  /**
+   * Writes users/{uid}/cubes/{cube.name}, replacing what it held. As `saveUser`, Firestore applies it
+   * to its cache at once and sends it when it can; the promise settles when the server has it, and
+   * rejects when it refuses it (the rules).
+   */
+  saveCube(uid: string, cube: CloudCube): Promise<void>;
+  /** Deletes users/{uid}/cubes/{name}; settles as `saveCube`. */
+  deleteCube(uid: string, name: string): Promise<void>;
 }
 
 /** Loads the account's backend: the Firebase SDK, from its lazy chunk. */

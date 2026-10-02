@@ -1,9 +1,9 @@
 // The account's backend on the Firebase SDK (docs/ARCHITECTURE.md, "Account"): Authentication with
-// the Google provider, Firestore for users/{uid} and the session index (T3.1), and the upload's two
-// callable functions (T3.3), through the modular API. This is the only file that imports Firebase,
-// and only ACCOUNT_LOADER's dynamic import loads it, so the SDK is a lazy chunk of its own,
-// firebase-sdk-<hash>.js, which the service worker caches only once it has been used
-// (ngsw-config.json): a device that never signs in never downloads it.
+// the Google provider, Firestore for users/{uid}, the session index (T3.1) and the account's cubes
+// (T3.4), and the upload's two callable functions (T3.3), through the modular API. This is the only
+// file that imports Firebase, and only ACCOUNT_LOADER's dynamic import loads it, so the SDK is a
+// lazy chunk of its own, firebase-sdk-<hash>.js, which the service worker caches only once it has
+// been used (ngsw-config.json): a device that never signs in never downloads it.
 import {
   attemptDocumentId,
   type CloudAttempt,
@@ -147,6 +147,10 @@ export function connectFirebase(): AccountBackend {
     waitForIndexWrites: () => waitForPendingWrites(firestore),
     signUpload: async (request) => (await sign(request)).data,
     confirmUpload: async (request) => (await confirm(request)).data,
+    // The cubes (T3.4): users/{uid}/cubes/{name}, each written whole.
+    listCubes: async (uid) => listing(await getDocs(collection(firestore, 'users', uid, 'cubes'))),
+    saveCube: (uid, cube) => setDoc(doc(firestore, 'users', uid, 'cubes', cube.name), cube),
+    deleteCube: (uid, name) => deleteDoc(doc(firestore, 'users', uid, 'cubes', name)),
   };
 }
 

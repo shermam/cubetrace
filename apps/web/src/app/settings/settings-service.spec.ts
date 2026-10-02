@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
-import { FakeLocalStorage } from '../device/fake-browser';
+import { FakeLocalStorage, FakePerformance } from '../device/fake-browser';
 import { SETTINGS_STORAGE_KEY, SettingsService, defaultHostLabel } from './settings-service';
 
 const MAC_USER_AGENT =
@@ -10,10 +10,16 @@ const MAC_USER_AGENT =
 
 describe('SettingsService', () => {
   let storage: FakeLocalStorage;
+  /** The host clock: the cube entries' times (T3.4). */
+  let clock: FakePerformance;
 
   /** A new service over `globals`, as after a page load. */
   function load(
-    globals: BrowserGlobals = { navigator: { userAgent: MAC_USER_AGENT }, localStorage: storage },
+    globals: BrowserGlobals = {
+      navigator: { userAgent: MAC_USER_AGENT },
+      localStorage: storage,
+      performance: clock,
+    },
   ): SettingsService {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({
@@ -28,6 +34,7 @@ describe('SettingsService', () => {
 
   beforeEach(() => {
     storage = new FakeLocalStorage();
+    clock = new FakePerformance();
   });
 
   it('starts from the defaults', () => {
@@ -126,9 +133,9 @@ describe('SettingsService', () => {
     settings.setKeepLocalCopies(false);
 
     expect(stored()).toEqual({
-      version: 1,
+      version: 2,
       hostLabel: 'office-mbp',
-      cubeMacs: [{ name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56' }],
+      cubeMacs: [{ name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56', updatedMs: clock.hostMs }],
       demoSpeed: 20,
       inspection: true,
       autoAdvance: false,
@@ -165,7 +172,9 @@ describe('SettingsService', () => {
     expect(reloaded.wifiOnly()).toBe(false);
     expect(reloaded.keepLocalCopies()).toBe(false);
     expect(reloaded.hostLabel()).toBe('office-mbp');
-    expect(reloaded.cubeMacs()).toEqual([{ name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56' }]);
+    expect(reloaded.cubeMacs()).toEqual([
+      { name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56', updatedMs: clock.hostMs },
+    ]);
     expect(reloaded.demoSpeed()).toBe(20);
     expect(reloaded.inspection()).toBe(true);
     expect(reloaded.autoAdvance()).toBe(false);
@@ -403,8 +412,9 @@ describe('SettingsService', () => {
 
     expect(settings.saveCubeMac('GAN356i3_Z', 'ab12cd34ef56')).toEqual({
       ok: true,
-      entry: { name: 'GAN356i3_Z', mac: 'AB:12:CD:34:EF:56' },
+      entry: { name: 'GAN356i3_Z', mac: 'AB:12:CD:34:EF:56', updatedMs: clock.hostMs },
     });
+    clock.advance(1_000);
     expect(settings.saveCubeMac('GAN12ui_A', 'Ab:12:cD:34:eF:57').ok).toBe(true);
     const refused = settings.saveCubeMac('GAN12ui_B', 'AB:12:CD:34:EF');
     expect(refused).toEqual({
@@ -414,8 +424,8 @@ describe('SettingsService', () => {
     expect(settings.saveCubeMac('   ', 'AB:12:CD:34:EF:56').ok).toBe(false);
 
     expect(settings.cubeMacs()).toEqual([
-      { name: 'GAN12ui_A', mac: 'AB:12:CD:34:EF:57' },
-      { name: 'GAN356i3_Z', mac: 'AB:12:CD:34:EF:56' },
+      { name: 'GAN12ui_A', mac: 'AB:12:CD:34:EF:57', updatedMs: clock.hostMs },
+      { name: 'GAN356i3_Z', mac: 'AB:12:CD:34:EF:56', updatedMs: clock.hostMs - 1_000 },
     ]);
   });
 
@@ -427,15 +437,98 @@ describe('SettingsService', () => {
     expect(settings.macFor('GAN12ui_FFFF')).toBeNull();
     expect(settings.macFor(null)).toBeNull();
 
-    // The same name again replaces the address; editing may rename the entry.
+    // The same name again replaces the address; editing may rename the entry. Each change is later
+    // than the entry it replaces, even within the same millisecond.
+    clock.advance(60_000);
     settings.saveCubeMac('gan12ui_ab12', '11:22:33:44:55:66');
-    expect(settings.cubeMacs()).toEqual([{ name: 'gan12ui_ab12', mac: '11:22:33:44:55:66' }]);
+    expect(settings.cubeMacs()).toEqual([
+      { name: 'gan12ui_ab12', mac: '11:22:33:44:55:66', updatedMs: clock.hostMs },
+    ]);
     settings.saveCubeMac('GAN12ui_CD34', '11:22:33:44:55:66', 'gan12ui_ab12');
-    expect(settings.cubeMacs()).toEqual([{ name: 'GAN12ui_CD34', mac: '11:22:33:44:55:66' }]);
+    expect(settings.cubeMacs()).toEqual([
+      { name: 'GAN12ui_CD34', mac: '11:22:33:44:55:66', updatedMs: clock.hostMs + 1 },
+    ]);
 
     settings.removeCubeMac('gan12ui_cd34');
     expect(settings.cubeMacs()).toEqual([]);
     expect(load().cubeMacs()).toEqual([]);
+  });
+
+  it('dates the MAC addresses stored before T3.4 at their first read, and keeps that date', () => {
+    // What 0.2.0 stored: version 1, entries without updatedMs.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        hostLabel: 'thinkphone',
+        cubeMacs: [
+          { name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56' },
+          { name: 'GAN356i3_Z', mac: '11:22:33:44:55:66', updatedMs: 1_700_000_000_000 },
+        ],
+        inspection: true,
+      }),
+    );
+    const migratedAt = clock.hostMs;
+    const settings = load();
+
+    const migrated = [
+      { name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56', updatedMs: migratedAt },
+      { name: 'GAN356i3_Z', mac: '11:22:33:44:55:66', updatedMs: 1_700_000_000_000 },
+    ];
+    expect(settings.cubeMacs()).toEqual(migrated);
+    expect(settings.saveError()).toBeNull();
+    // Written back at once, with the rest as it was: a later read finds the same time.
+    expect(stored()).toMatchObject({
+      version: 2,
+      hostLabel: 'thinkphone',
+      cubeMacs: migrated,
+      inspection: true,
+    });
+    clock.advance(86_400_000);
+    expect(load().cubeMacs()).toEqual(migrated);
+    expect(load().hostLabel()).toBe('thinkphone');
+  });
+
+  it('dates a stored entry whose time is not one when it reads it, and writes nothing otherwise', () => {
+    const entries = [
+      { name: 'A', mac: 'AB:12:CD:34:EF:56', updatedMs: -5 },
+      { name: 'B', mac: 'AB:12:CD:34:EF:57', updatedMs: 'yesterday' },
+      { name: 'C', mac: 'AB:12:CD:34:EF:58', updatedMs: 1_790_000_000_000.5 },
+    ];
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ version: 2, cubeMacs: entries }));
+    clock.advance(42);
+
+    expect(
+      load()
+        .cubeMacs()
+        .map((entry) => entry.updatedMs),
+    ).toEqual([clock.hostMs, clock.hostMs, 1_790_000_000_000.5]);
+    const kept = storage.getItem(SETTINGS_STORAGE_KEY);
+    storage.failWith = new DOMException('No writes expected.', 'InvalidStateError');
+    expect(load().saveError()).toBeNull();
+    expect(storage.getItem(SETTINGS_STORAGE_KEY)).toBe(kept);
+  });
+
+  it('dates an edit later than the entry it replaces, even when that one is from a clock ahead', () => {
+    const settings = load();
+    // As a merge with the account's list left it (T3.4): a copy changed on a device whose clock is
+    // an hour ahead.
+    const ahead = clock.hostMs + 3_600_000;
+    settings.setCubeMacs([
+      { name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56', updatedMs: ahead },
+      { name: 'gan12ui_ab12', mac: 'ab:12:cd:34:ef:57', updatedMs: ahead - 1 },
+      { name: 'GAN356i3_Z', mac: 'zz', updatedMs: 1 },
+    ]);
+    // One entry per name ignoring case (the later in the list), normalized; anything else dropped.
+    expect(settings.cubeMacs()).toEqual([
+      { name: 'gan12ui_ab12', mac: 'AB:12:CD:34:EF:57', updatedMs: ahead - 1 },
+    ]);
+    expect(load().cubeMacs()).toEqual(settings.cubeMacs());
+
+    expect(settings.saveCubeMac('GAN12ui_AB12', '11:22:33:44:55:66')).toEqual({
+      ok: true,
+      entry: { name: 'GAN12ui_AB12', mac: '11:22:33:44:55:66', updatedMs: ahead },
+    });
   });
 
   it('restores the default host label when it is emptied', () => {
@@ -490,7 +583,9 @@ describe('SettingsService', () => {
     const settings = load();
 
     expect(settings.hostLabel()).toBe('macOS laptop');
-    expect(settings.cubeMacs()).toEqual([{ name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56' }]);
+    expect(settings.cubeMacs()).toEqual([
+      { name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56', updatedMs: clock.hostMs },
+    ]);
     expect(settings.demoSpeed()).toBe(1);
     expect(settings.inspection()).toBe(false);
     expect(settings.autoAdvance()).toBe(false);

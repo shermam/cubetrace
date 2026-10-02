@@ -2,6 +2,7 @@ import { Component, computed, inject } from '@angular/core';
 
 import { AccountControl } from './auth/account-control';
 import { AuthService } from './auth/auth-service';
+import { CubeSyncService } from './cloud/cube-sync';
 import { CubeStatusPill } from './connect/cube-status-pill';
 import { UploadIndicator } from './upload/upload-indicator';
 
@@ -10,7 +11,9 @@ import { UploadIndicator } from './upload/upload-indicator';
  * cube's status pill and the account's control. One component, so that the shell's deferred block
  * imports one chunk and the initial bundle stays as it was. With an account signed in, the uploads'
  * indicator comes between them (T3.3), from a deferred block of its own: it starts the upload queue,
- * and a device signed out never loads it.
+ * and a device signed out never loads it. With the account comes the sync of the cubes' MAC
+ * addresses (T3.4), which starts here on every page, so that a start signed in merges the cube list
+ * before a cube is connected; signed out, it does nothing.
  */
 @Component({
   selector: 'app-header-controls',
@@ -35,4 +38,8 @@ export class HeaderControls {
   private readonly auth = inject(AuthService);
 
   protected readonly signedIn = computed(() => this.auth.cloud() !== null);
+
+  constructor() {
+    inject(CubeSyncService);
+  }
 }

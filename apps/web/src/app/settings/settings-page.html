@@ -71,6 +71,12 @@
     the connect dialog is on; otherwise the dialog asks for it, and it can be kept here. The name is
     the one in Chrome's list of devices, such as GAN12ui_AB12.
   </p>
+  @if (cubeSyncText(); as text) {
+    <p class="status" data-testid="cube-macs-sync">{{ text }}</p>
+  }
+  @if (cubeSync.error(); as error) {
+    <p class="error" data-testid="cube-macs-sync-error">{{ error }}</p>
+  }
   <ul class="macs" data-testid="cube-macs">
     @for (entry of settings.cubeMacs(); track entry.name) {
       <li>
