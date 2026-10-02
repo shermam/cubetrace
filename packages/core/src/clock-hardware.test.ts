@@ -214,8 +214,17 @@ describe('the cube clock of the real-hardware exports (fixtures/hardware)', () =
       expect(record.result.timeMs, at).toBe(attempt.result.timeMs);
       expect(record.result.movesQtm, at).toBe(attempt.result.movesQtm);
       // Everything else as recorded on the day, too: events, phases, the whole result. The clips
-      // of a schema-2 export are the camera's, not the machine's.
-      expect({ ...record, clock: null, video: [] }, at).toEqual({
+      // of a schema-2 export are the camera's, not the machine's; the moves' counters and packet
+      // flags (T3.7) were not kept on the day, so the replay's are left out.
+      expect(
+        {
+          ...record,
+          moves: record.moves.map(({ serial: _serial, packetLast: _packetLast, ...move }) => move),
+          clock: null,
+          video: [],
+        },
+        at,
+      ).toEqual({
         ...attempt,
         clock: null,
         video: [],

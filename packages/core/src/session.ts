@@ -14,12 +14,34 @@ export interface HostInfo {
   isPhone: boolean;
 }
 
+/** The build of the app that wrote a record: `app` in every JSON file the app writes (T3.7). */
+export interface AppBuild {
+  /** The version of the root package.json. */
+  version: string;
+  /** The short SHA of the build's commit. */
+  commit: string;
+}
+
 /** What the cube says it is, from its `hardware` event (`cube` in session.json). */
 export interface CubeInfo {
   model: string;
   hardware: string;
   firmware: string;
   gyro: boolean;
+  /**
+   * The production date, as the cube's hardware message has it (a Gen4 cube says it; a Gen2 cube
+   * does not); null when the cube does not say. Optional in the files (those written before T3.7
+   * have none); `parseSession` reads a missing one as null.
+   */
+  productDate: string | null;
+}
+
+/** A battery report of the cube: an entry of `battery` in session.json (T3.7). */
+export interface BatteryReading {
+  /** When the cube reported it, on the host clock. */
+  hostMs: number;
+  /** In percent, 0 to 100. */
+  level: number;
 }
 
 /** The timer settings the session runs with (`settings` in session.json). */
@@ -171,6 +193,12 @@ export interface SessionRecord {
   settings: SessionSettings;
   notes: string;
   summary: SessionSummary;
+  /**
+   * The cube's battery reports over the session's connections, in order, consecutive equal levels
+   * coalesced (T3.7); empty when the cube reported none. Optional in the files (those written before
+   * T3.7 have none); `parseSession` reads a missing one as empty.
+   */
+  battery: BatteryReading[];
 }
 
 /** A UUID v4 as `crypto.randomUUID()` writes it: lowercase hexadecimal. */
@@ -188,16 +216,20 @@ const NO_CLOCK_FIT: CubeClockParams = { a: 1, b: 0, residualP95Ms: 0, samples: 0
  * @param input.id the session's id, for tests; by default `crypto.randomUUID()`. Throws if it is
  *   not a lowercase UUID v4.
  * @param input.audio whether the cameras record audio (phase 2); default true.
+ * @param input.cube the cube; its `productDate` may be left out (a cube that does not say it, the
+ *   driver's `hardware` event), which is null in the record.
+ * @param input.battery the cube's battery reports so far on the connection (T3.7); default none.
  */
 export function createSession(input: {
   host: HostInfo;
-  cube: CubeInfo;
+  cube: Omit<CubeInfo, 'productDate'> & { productDate?: string | null };
   settings: SessionSettings;
   appVersion: string;
   commit: string;
   nowMs: number;
   id?: string;
   audio?: boolean;
+  battery?: readonly BatteryReading[];
 }): SessionRecord {
   const id = input.id ?? crypto.randomUUID();
   if (!UUID_V4.test(id)) {
@@ -215,14 +247,35 @@ export function createSession(input: {
       platform: host.platform,
       isPhone: host.isPhone,
     },
-    cube: { model: cube.model, hardware: cube.hardware, firmware: cube.firmware, gyro: cube.gyro },
+    cube: {
+      model: cube.model,
+      hardware: cube.hardware,
+      firmware: cube.firmware,
+      gyro: cube.gyro,
+      productDate: cube.productDate ?? null,
+    },
     cameras: [],
     clock: { cube: { ...NO_CLOCK_FIT }, cameras: {} },
     audio: input.audio ?? true,
     settings: { inspection15s: settings.inspection15s, autoAdvance: settings.autoAdvance },
     notes: '',
     summary: { attempts: 0, solved: 0, dnf: 0 },
+    battery: (input.battery ?? []).map(({ hostMs, level }) => ({ hostMs, level })),
   };
+}
+
+/**
+ * `readings` with `reading` added, unless its level is the last one's: the session's `battery`
+ * keeps every report of the cube with consecutive equal levels coalesced (docs/DATA-MODEL.md §6).
+ */
+export function withBattery(
+  readings: readonly BatteryReading[],
+  reading: BatteryReading,
+): BatteryReading[] {
+  const last = readings.at(-1);
+  return last !== undefined && last.level === reading.level
+    ? [...readings]
+    : [...readings, { hostMs: reading.hostMs, level: reading.level }];
 }
 
 /**

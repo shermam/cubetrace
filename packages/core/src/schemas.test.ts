@@ -6,16 +6,19 @@ import {
   ATTEMPT_SCHEMA,
   ATTEMPT_SCHEMA_V1,
   FRAMES_SCHEMA,
+  GYRO_SCHEMA,
   PHASE_NAMES,
   SESSION_SCHEMA,
   SESSION_SCHEMA_V1,
 } from './index';
 import {
+  APP,
   asVersion1Attempt,
   asVersion1Session,
   attemptWithVideo,
   dnfAttempt,
   framesJson,
+  gyroJson,
   sessionRecord,
   sessionWithCamera,
   solvedAttempt,
@@ -69,22 +72,37 @@ const SCHEMAS: [string, JsonSchema][] = [
   ['session.json version 1', SESSION_SCHEMA_V1],
   ['attempt.json version 1', ATTEMPT_SCHEMA_V1],
   ['frames.json', FRAMES_SCHEMA],
+  ['gyro.json', GYRO_SCHEMA],
 ];
 
 /** The objects that are not closed records: browser snapshots, and camera clocks by label. */
 const SNAPSHOTS = /\/\$defs\/camera\/properties\/(settings|capabilities|constraints)$/;
 const BY_LABEL = '#/properties/clock/properties/cameras';
 /**
- * The only fields that may be absent: a phase's slot, a camera clock's samples, a clip's
- * truncatedStart (the clips written before T2.9 have none) and its local (only a clip whose MP4 was
- * deleted after its upload has it, T3.3), and a camera's microphone (the cameras written before
- * T2.12 have none).
+ * The only fields that may be absent, by schema and object: a phase's slot, a camera clock's
+ * samples, a clip's truncatedStart (the clips written before T2.9 have none) and its local (only a
+ * clip whose MP4 was deleted after its upload has it, T3.3), a camera's microphone (the cameras
+ * written before T2.12 have none), and the fields of T3.7, which the files written before have none
+ * of: an attempt's app, gyro and resyncs and its moves' serial and packetLast, a session's battery
+ * and its cube's productDate, and a frames file's app.
  */
-const OPTIONAL: Readonly<Record<string, readonly string[]>> = {
-  '#/$defs/phase': ['slot'],
-  '#/$defs/cameraClock': ['samples'],
-  '#/$defs/clip': ['truncatedStart', 'local'],
-  '#/$defs/camera': ['microphone'],
+const OPTIONAL: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  'session.json version 2': {
+    '#': ['battery'],
+    '#/properties/cube': ['productDate'],
+    '#/$defs/cameraClock': ['samples'],
+    '#/$defs/camera': ['microphone'],
+  },
+  'attempt.json version 2': {
+    '#': ['app', 'gyro', 'resyncs'],
+    '#/$defs/move': ['serial', 'packetLast'],
+    '#/$defs/phase': ['slot'],
+    '#/$defs/clip': ['truncatedStart', 'local'],
+  },
+  'session.json version 1': { '#/$defs/cameraClock': ['samples'] },
+  'attempt.json version 1': { '#/$defs/phase': ['slot'] },
+  'frames.json': { '#': ['app'] },
+  'gyro.json': {},
 };
 
 describe('the JSON Schemas of the records', () => {
@@ -112,16 +130,18 @@ describe('the JSON Schemas of the records', () => {
   });
 
   it.each([
-    ['session.json version 2', SESSION_SCHEMA, 17],
-    ['attempt.json version 2', ATTEMPT_SCHEMA, 8],
+    ['session.json version 2', SESSION_SCHEMA, 18],
+    ['attempt.json version 2', ATTEMPT_SCHEMA, 11],
     ['session.json version 1', SESSION_SCHEMA_V1, 9],
     ['attempt.json version 1', ATTEMPT_SCHEMA_V1, 5],
-    ['frames.json', FRAMES_SCHEMA, 2],
+    ['frames.json', FRAMES_SCHEMA, 3],
+    ['gyro.json', GYRO_SCHEMA, 2],
   ] as [string, JsonSchema, number][])(
-    'the schema of %s closes every record and requires every field but a slot, samples, truncatedStart, local and a microphone',
-    (_, schema, count) => {
+    'the schema of %s closes every record and requires every field but the optional ones',
+    (title, schema, count) => {
       const objects = objectSchemas(schema);
       expect(objects).toHaveLength(count);
+      const optional = OPTIONAL[title];
       for (const { at, node } of objects) {
         if (SNAPSHOTS.test(at)) {
           // What the browser reports, as it is: any keys.
@@ -132,7 +152,7 @@ describe('the JSON Schemas of the records', () => {
         } else {
           expect(node['additionalProperties'], at).toBe(false);
           const properties = Object.keys(node['properties'] ?? {}).filter(
-            (k) => !(OPTIONAL[at] ?? []).includes(k),
+            (k) => !(optional[at] ?? []).includes(k),
           );
           const required = (node['required'] ?? []) as string[];
           expect([...required].sort(), at).toEqual(properties.sort());
@@ -154,22 +174,48 @@ describe('the JSON Schemas of the records', () => {
   );
 
   it('keeps version 1 as it was, but for its $id: version 2 adds to it', () => {
-    // The version 2 definitions of version 1's parts are version 1's.
+    // The version 2 definitions of version 1's parts are version 1's, but where version 2 added
+    // optional fields (T3.7: a move's serial and packetLast, the cube's productDate).
     const v1 = ATTEMPT_SCHEMA_V1 as Readonly<Record<string, Record<string, unknown>>>;
     const v2 = ATTEMPT_SCHEMA as Readonly<Record<string, Record<string, unknown>>>;
-    for (const def of ['facelets', 'move', 'phase']) {
+    for (const def of ['facelets', 'phase']) {
       expect(v2['$defs'][def], def).toEqual(v1['$defs'][def]);
     }
+    const move1 = v1['$defs']['move'] as Record<string, Record<string, unknown>>;
+    const move2 = v2['$defs']['move'] as Record<string, Record<string, unknown>>;
+    expect(move2['required']).toEqual(move1['required']);
+    for (const field of Object.keys(move1['properties'])) {
+      expect(move2['properties'][field], field).toEqual(move1['properties'][field]);
+    }
+    expect(Object.keys(move2['properties'])).toEqual([
+      ...Object.keys(move1['properties']),
+      'serial',
+      'packetLast',
+    ]);
     for (const field of ['session', 'index', 'scramble', 'crossFace', 'events', 'result']) {
       expect(v2['properties'][field], field).toEqual(v1['properties'][field]);
     }
-    const s1 = SESSION_SCHEMA_V1['properties'] as Record<string, unknown>;
-    const s2 = SESSION_SCHEMA['properties'] as Record<string, unknown>;
-    for (const field of ['id', 'createdMs', 'app', 'host', 'cube', 'audio', 'settings', 'notes']) {
+    const s1 = SESSION_SCHEMA_V1['properties'] as Record<string, Record<string, unknown>>;
+    const s2 = SESSION_SCHEMA['properties'] as Record<string, Record<string, unknown>>;
+    for (const field of ['id', 'createdMs', 'app', 'host', 'audio', 'settings', 'notes']) {
       expect(s2[field], field).toEqual(s1[field]);
     }
+    expect(s2['cube']['required']).toEqual(s1['cube']['required']);
+    expect(Object.keys(s2['cube']['properties'] as object)).toEqual([
+      ...Object.keys(s1['cube']['properties'] as object),
+      'productDate',
+    ]);
     expect(ATTEMPT_SCHEMA_V1['$id']).toMatch(/\/attempt\.v1\.schema\.json$/);
     expect(SESSION_SCHEMA_V1['$id']).toMatch(/\/session\.v1\.schema\.json$/);
+  });
+
+  it("gives the frames files and the gyro files the build's shape of session.json (T3.7)", () => {
+    const app = (SESSION_SCHEMA['properties'] as Record<string, unknown>)['app'];
+    expect((FRAMES_SCHEMA['$defs'] as Record<string, unknown>)['app']).toMatchObject(app as object);
+    expect((GYRO_SCHEMA['$defs'] as Record<string, unknown>)['app']).toMatchObject(app as object);
+    expect((ATTEMPT_SCHEMA['$defs'] as Record<string, unknown>)['app']).toMatchObject(
+      app as object,
+    );
   });
 });
 
@@ -177,8 +223,9 @@ describe('version 2', () => {
   const validateAttempt = newAjv().compile(ATTEMPT_SCHEMA);
   const validateSession = newAjv().compile(SESSION_SCHEMA);
   const validateFrames = newAjv().compile(FRAMES_SCHEMA);
+  const validateGyro = newAjv().compile(GYRO_SCHEMA);
 
-  it('accepts the records the package makes, and the phase 2 fields filled', () => {
+  it('accepts the records the package makes, the phase 2 fields filled, and the files of T3.7', () => {
     for (const record of [solvedAttempt(), dnfAttempt(), untouchedAttempt(), attemptWithVideo()]) {
       expect(validateAttempt(record), JSON.stringify(validateAttempt.errors)).toBe(true);
     }
@@ -186,6 +233,8 @@ describe('version 2', () => {
       expect(validateSession(record), JSON.stringify(validateSession.errors)).toBe(true);
     }
     expect(validateFrames(framesJson()), JSON.stringify(validateFrames.errors)).toBe(true);
+    expect(validateFrames({ ...framesJson(), app: APP })).toBe(true);
+    expect(validateGyro(gyroJson()), JSON.stringify(validateGyro.errors)).toBe(true);
   });
 
   const attemptCases: [string, readonly (string | number)[], unknown][] = [
@@ -208,7 +257,23 @@ describe('version 2', () => {
     ['the slice move M', ['moves', 0, 'm'], 'M'],
     ['a move of another phase', ['moves', 0, 'phase'], 'inspection'],
     ['a move without its cube time', ['moves', 0, 'cubeMs'], undefined],
-    ['a move that says whether it ended its packet', ['moves', 0, 'packetLast'], true],
+    ['a move counter of 256', ['moves', 0, 'serial'], 256],
+    ['a negative move counter', ['moves', 0, 'serial'], -1],
+    ['a fractional move counter', ['moves', 0, 'serial'], 1.5],
+    ['a packet flag that is text', ['moves', 0, 'packetLast'], 'true'],
+    ['a packet flag of null', ['moves', 0, 'packetLast'], null],
+    ['a build without its commit', ['app', 'commit'], undefined],
+    ['a build that is text', ['app'], '0.3.0'],
+    ['a gyro summary that is text', ['gyro'], 'gyro.json'],
+    ['a gyro summary of another file', ['gyro', 'file'], 'laptop.gyro.json'],
+    ['a gyro summary without samples', ['gyro', 'samples'], 0],
+    ['a gyro summary with a negative rate', ['gyro', 'rateHz'], -1],
+    ['a gyro summary without its span', ['gyro', 'toHostMs'], undefined],
+    ['a gyro summary with an unknown field', ['gyro', 'bytes'], 1],
+    ['resyncs that are an object', ['resyncs'], {}],
+    ['a resync without its state', ['resyncs', 0, 'state'], undefined],
+    ['a resync of a solved attempt', ['resyncs', 0, 'state'], 'solved'],
+    ['a resync of 53 facelets', ['resyncs', 0, 'facelets'], 'U'.repeat(53)],
     ['a clock without its slope', ['clock', 'a'], undefined],
     ['a clock fit of one sample', ['clock', 'samples'], 1],
     ['a clock with a negative residual', ['clock', 'residualP95Ms'], -1],
@@ -265,6 +330,22 @@ describe('version 2', () => {
 
   it.each(clipCases)('rejects a clip with %s', (_, field, value) => {
     expect(validateAttempt(changed(attempt, ['video', 1, field], value))).toBe(false);
+  });
+
+  it("accepts an attempt written before T3.7, without the build, the gyro file, the resyncs and the moves' counters", () => {
+    const record = attemptWithVideo();
+    const before = {
+      ...record,
+      moves: record.moves.map(({ m, hostMs, cubeMs, phase }) => ({ m, hostMs, cubeMs, phase })),
+    };
+    Reflect.deleteProperty(before, 'app');
+    Reflect.deleteProperty(before, 'gyro');
+    Reflect.deleteProperty(before, 'resyncs');
+    expect(validateAttempt(before), JSON.stringify(validateAttempt.errors)).toBe(true);
+    expect(validateAttempt({ ...record, gyro: null, resyncs: [] })).toBe(true);
+    expect(validateAttempt(changed(record, ['moves', 0, 'serial'], null))).toBe(true);
+    expect(validateAttempt(changed(record, ['moves', 0, 'serial'], 255))).toBe(true);
+    expect(validateAttempt(changed(record, ['moves', 0, 'packetLast'], false))).toBe(true);
   });
 
   it('accepts a clip without audio, crop or sync check, one of a phone camera, one written before truncatedStart, and one whose MP4 is no longer on the device', () => {
@@ -338,6 +419,12 @@ describe('version 2', () => {
     ['fractional attempts', ['summary', 'attempts'], 0.5],
     ['a missing setting', ['settings', 'autoAdvance'], undefined],
     ['audio that is not a boolean', ['audio'], 'on'],
+    ['a production date that is a number', ['cube', 'productDate'], 20_250_314],
+    ['battery reports that are an object', ['battery'], {}],
+    ['a battery report without its time', ['battery', 0, 'hostMs'], undefined],
+    ['a battery level over 100', ['battery', 0, 'level'], 101],
+    ['a fractional battery level', ['battery', 0, 'level'], 82.5],
+    ['a battery report with an unknown field', ['battery', 0, 'charging'], true],
   ];
 
   const session = sessionWithCamera();
@@ -345,6 +432,15 @@ describe('version 2', () => {
   it.each(sessionCases)('rejects a session with %s', (_, path, value) => {
     expect(validateSession(session)).toBe(true);
     expect(validateSession(changed(session, path, value))).toBe(false);
+  });
+
+  it('accepts a session written before T3.7, without battery reports and a production date', () => {
+    const before: Record<string, unknown> = { ...session, cube: { ...session.cube } };
+    Reflect.deleteProperty(before, 'battery');
+    Reflect.deleteProperty(before['cube'] as object, 'productDate');
+    expect(validateSession(before), JSON.stringify(validateSession.errors)).toBe(true);
+    expect(validateSession({ ...session, battery: [] })).toBe(true);
+    expect(validateSession(changed(session, ['cube', 'productDate'], null))).toBe(true);
   });
 
   it('accepts any JSON in the browser snapshots, and a camera clock without its samples', () => {
@@ -388,11 +484,45 @@ describe('version 2', () => {
     ['an arrival fit without its residual', ['arrival', 'residualP95Ms'], undefined],
     ['a negative arrival residual', ['arrival', 'residualP95Ms'], -1],
     ['an unknown field', ['fps'], 30],
+    ['a build without its version', ['app'], { commit: 'abc1234' }],
+    ['a build that is text', ['app'], '0.3.0'],
   ];
 
   it.each(framesCases)('rejects a frames file with %s', (_, path, value) => {
     expect(validateFrames(framesJson())).toBe(true);
     expect(validateFrames(changed(framesJson(), path, value))).toBe(false);
+  });
+
+  const gyroCases: [string, readonly (string | number)[], unknown][] = [
+    ['schema version 2', ['schema'], 2],
+    ['a session id that is not a UUID v4', ['session'], 'session-1'],
+    ['index 0', ['index'], 0],
+    ['no build', ['app'], undefined],
+    ['a build without its commit', ['app', 'commit'], undefined],
+    ['no first sample time', ['t0HostMs'], undefined],
+    ['no samples', ['dtMs'], []],
+    ['a sample before the previous one', ['dtMs', 2], -20],
+    ['an interval that is text', ['dtMs', 1], '20'],
+    ['no quaternion', ['q'], []],
+    ['a quaternion component over 1', ['q', 3], 1.5],
+    ['a quaternion component that is text', ['q', 0], '0'],
+    ['a velocity of 8', ['v', 2], 8],
+    ['a velocity of −9', ['v', 2], -9],
+    ['a fractional velocity', ['v', 2], 1.5],
+    ['velocities that are an object', ['v'], {}],
+    ['no velocity field', ['v'], undefined],
+    ['a truncated start that is text', ['truncatedStart'], 'false'],
+    ['an unknown field', ['rateHz'], 50],
+  ];
+
+  it.each(gyroCases)('rejects a gyro file with %s', (_, path, value) => {
+    expect(validateGyro(gyroJson())).toBe(true);
+    expect(validateGyro(changed(gyroJson(), path, value))).toBe(false);
+  });
+
+  it('accepts a gyro file without velocities (a cube that gives none) and a truncated one', () => {
+    expect(validateGyro({ ...gyroJson(), v: null })).toBe(true);
+    expect(validateGyro({ ...gyroJson(), truncatedStart: true })).toBe(true);
   });
 });
 

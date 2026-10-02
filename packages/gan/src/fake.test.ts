@@ -14,8 +14,15 @@ import {
   type Move,
 } from '@cubetrace/core';
 
-import type { CubeEvent, CubeMoveEvent, ScheduledMove } from './index';
-import { FAKE_CUBE_BATTERY, FAKE_CUBE_HARDWARE, FakeCube } from './index';
+import type { CubeEvent, CubeGyroEvent, CubeMoveEvent, ScheduledMove } from './index';
+import {
+  FAKE_CUBE_BATTERY,
+  FAKE_CUBE_HARDWARE,
+  FAKE_GYRO_DEG_PER_S,
+  FAKE_GYRO_HZ,
+  FAKE_GYRO_VELOCITY,
+  FakeCube,
+} from './index';
 
 // ---- Fixtures (read-only, docs/DATA-MODEL.md §8) ----
 
@@ -343,10 +350,78 @@ describe('FakeCube requests and events$', () => {
     const late = record(cube);
     await cube.requestBattery();
     const hardware = { ...FAKE_CUBE_HARDWARE };
-    const battery = { type: 'battery', level: FAKE_CUBE_BATTERY };
+    const battery = { type: 'battery', level: FAKE_CUBE_BATTERY, hostMs: 1234 };
     expect(early.events.map((e) => e.type)).toEqual(['hardware', 'battery', 'move', 'battery']);
     expect(early.events[0]).toEqual(hardware);
     expect(late.events).toEqual([hardware, battery, battery]);
+  });
+
+  it('has no gyroscope unless asked: no gyro event, and the hardware says so', async () => {
+    const cube = new FakeCube({ now: () => Date.now() });
+    const { events } = record(cube);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(events.filter((e) => e.type === 'gyro')).toEqual([]);
+    expect(events[0]).toMatchObject({ type: 'hardware', gyro: false });
+    await cube.disconnect();
+  });
+
+  it('with gyro on, reports a gyroscope at 50 Hz: still while idle, turning while a replay turns, until disconnected (T3.7)', async () => {
+    let nowMs = 1_790_000_000_000;
+    const cube = new FakeCube({ now: () => nowMs, gyro: true });
+    const { events } = record(cube);
+    expect(events[0]).toMatchObject({ type: 'hardware', gyro: true });
+    const gyros = (): CubeGyroEvent[] =>
+      events.filter((e): e is CubeGyroEvent => e.type === 'gyro');
+
+    // Idle: a report every 20 ms, the orientation at rest, the velocity zero.
+    for (let k = 0; k < 10; k++) {
+      nowMs += 1000 / FAKE_GYRO_HZ;
+      await vi.advanceTimersByTimeAsync(1000 / FAKE_GYRO_HZ);
+    }
+    expect(gyros()).toHaveLength(10);
+    expect(gyros()[0]).toEqual({
+      type: 'gyro',
+      q: [0, 0, 0, 1],
+      v: [0, 0, 0],
+      hostMs: nowMs - 180,
+    });
+    expect(gyros()[9].q).toEqual([0, 0, 0, 1]);
+
+    // A replay of one second: the cube turns at 30°/s about its white axis, with its velocity, for
+    // the 49 reports inside it (the 50th comes with the replay's last move, which ends it first).
+    const playing = cube.play([
+      { m: R, ms: 0 },
+      { m: parseMove('U'), ms: 1000 },
+    ]);
+    for (let k = 0; k < 49; k++) {
+      nowMs += 1000 / FAKE_GYRO_HZ;
+      await vi.advanceTimersByTimeAsync(1000 / FAKE_GYRO_HZ);
+    }
+    const turning = gyros().slice(10);
+    expect(turning).toHaveLength(49);
+    expect(turning.every((e) => e.v === FAKE_GYRO_VELOCITY)).toBe(true);
+    const last = turning[turning.length - 1];
+    const angleDeg = (2 * Math.atan2(last.q[2], last.q[3]) * 180) / Math.PI;
+    expect(angleDeg).toBeCloseTo((FAKE_GYRO_DEG_PER_S * 49) / FAKE_GYRO_HZ, 5);
+    expect(Math.hypot(...last.q)).toBeCloseTo(1, 9);
+    expect(last.q[0]).toBe(0);
+    expect(last.q[1]).toBe(0);
+    nowMs += 1000 / FAKE_GYRO_HZ;
+    await vi.advanceTimersByTimeAsync(1000 / FAKE_GYRO_HZ);
+    await playing;
+
+    // Idle again: the orientation holds where the replay left it; disconnected, no report comes.
+    nowMs += 20;
+    await vi.advanceTimersByTimeAsync(20);
+    const held = gyros().at(-1);
+    expect(held?.q).toEqual(gyros().at(-2)?.q);
+    expect(held?.v).toEqual([0, 0, 0]);
+    await cube.disconnect();
+    const count = gyros().length;
+    nowMs += 100;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(gyros()).toHaveLength(count);
+    expect(events.at(-1)?.type).toBe('disconnected');
   });
 
   it('requestFacelets() emits the simulated state with the host time', async () => {

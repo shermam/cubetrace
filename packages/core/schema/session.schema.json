@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/session.schema.json",
   "title": "session.json",
-  "description": "One cubetrace session, schema version 2 (docs/DATA-MODEL.md §6; version 1 is session.v1.schema.json). Times are host milliseconds: performance.timeOrigin + performance.now() on the host device.",
+  "description": "One cubetrace session, schema version 2 (docs/DATA-MODEL.md §6; version 1 is session.v1.schema.json). Times are host milliseconds: performance.timeOrigin + performance.now() on the host device. The fields of T3.7 (cube.productDate, battery) are optional: the files written before have none.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,20 +20,30 @@
     "summary"
   ],
   "properties": {
-    "schema": { "const": 2 },
+    "schema": {
+      "const": 2
+    },
     "id": {
       "description": "A lowercase UUID v4; it names the session's folder (docs/DATA-MODEL.md §5).",
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
-    "createdMs": { "description": "Host clock at creation.", "type": "number" },
+    "createdMs": {
+      "description": "Host clock at creation.",
+      "type": "number"
+    },
     "app": {
       "type": "object",
       "additionalProperties": false,
       "required": ["version", "commit"],
       "properties": {
-        "version": { "type": "string" },
-        "commit": { "description": "Short SHA of the build's commit.", "type": "string" }
+        "version": {
+          "type": "string"
+        },
+        "commit": {
+          "description": "Short SHA of the build's commit.",
+          "type": "string"
+        }
       }
     },
     "host": {
@@ -42,10 +52,18 @@
       "additionalProperties": false,
       "required": ["label", "userAgent", "platform", "isPhone"],
       "properties": {
-        "label": { "type": "string" },
-        "userAgent": { "type": "string" },
-        "platform": { "type": "string" },
-        "isPhone": { "type": "boolean" }
+        "label": {
+          "type": "string"
+        },
+        "userAgent": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "isPhone": {
+          "type": "boolean"
+        }
       }
     },
     "cube": {
@@ -54,16 +72,30 @@
       "additionalProperties": false,
       "required": ["model", "hardware", "firmware", "gyro"],
       "properties": {
-        "model": { "type": "string" },
-        "hardware": { "type": "string" },
-        "firmware": { "type": "string" },
-        "gyro": { "type": "boolean" }
+        "model": {
+          "type": "string"
+        },
+        "hardware": {
+          "type": "string"
+        },
+        "firmware": {
+          "type": "string"
+        },
+        "gyro": {
+          "type": "boolean"
+        },
+        "productDate": {
+          "description": "The production date, as the cube's hardware message has it (a Gen4 cube says it; a Gen2 cube does not); null when the cube does not say (T3.7). Absent from the files written before, which read as null.",
+          "type": ["string", "null"]
+        }
       }
     },
     "cameras": {
       "description": "The cameras of the session (docs/DATA-MODEL.md §6); in phase 2, the host's own.",
       "type": "array",
-      "items": { "$ref": "#/$defs/camera" }
+      "items": {
+        "$ref": "#/$defs/camera"
+      }
     },
     "clock": {
       "type": "object",
@@ -76,8 +108,12 @@
           "additionalProperties": false,
           "required": ["a", "b", "residualP95Ms", "samples"],
           "properties": {
-            "a": { "type": "number" },
-            "b": { "type": "number" },
+            "a": {
+              "type": "number"
+            },
+            "b": {
+              "type": "number"
+            },
             "residualP95Ms": {
               "description": "95th percentile (nearest rank) of the absolute residuals of the last 2000 samples.",
               "type": "number",
@@ -93,8 +129,12 @@
         "cameras": {
           "description": "The clock sync of each camera, by its label (docs/DATA-MODEL.md §6).",
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/cameraLabel" },
-          "additionalProperties": { "$ref": "#/$defs/cameraClock" }
+          "propertyNames": {
+            "$ref": "#/$defs/cameraLabel"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/cameraClock"
+          }
         }
       }
     },
@@ -107,20 +147,42 @@
       "additionalProperties": false,
       "required": ["inspection15s", "autoAdvance"],
       "properties": {
-        "inspection15s": { "type": "boolean" },
-        "autoAdvance": { "type": "boolean" }
+        "inspection15s": {
+          "type": "boolean"
+        },
+        "autoAdvance": {
+          "type": "boolean"
+        }
       }
     },
-    "notes": { "type": "string" },
+    "notes": {
+      "type": "string"
+    },
     "summary": {
       "description": "Counts of the session's attempts: each is solved or a DNF.",
       "type": "object",
       "additionalProperties": false,
       "required": ["attempts", "solved", "dnf"],
       "properties": {
-        "attempts": { "type": "integer", "minimum": 0 },
-        "solved": { "type": "integer", "minimum": 0 },
-        "dnf": { "type": "integer", "minimum": 0 }
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "solved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dnf": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "battery": {
+      "description": "The cube's battery reports over the session's connections, in order, consecutive equal levels coalesced (T3.7); empty when the cube reported none. Absent from the files written before, which read as empty.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/batteryReading"
       }
     }
   },
@@ -136,10 +198,22 @@
       "additionalProperties": false,
       "required": ["x", "y", "w", "h"],
       "properties": {
-        "x": { "type": "integer", "minimum": 0 },
-        "y": { "type": "integer", "minimum": 0 },
-        "w": { "type": "integer", "minimum": 1 },
-        "h": { "type": "integer", "minimum": 1 }
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "w": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "h": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "camera": {
@@ -158,9 +232,16 @@
         "mode"
       ],
       "properties": {
-        "label": { "$ref": "#/$defs/cameraLabel" },
-        "local": { "description": "The host's own camera (phase 2 has no other).", "const": true },
-        "facing": { "enum": ["user", "environment", "unknown"] },
+        "label": {
+          "$ref": "#/$defs/cameraLabel"
+        },
+        "local": {
+          "description": "The host's own camera (phase 2 has no other).",
+          "const": true
+        },
+        "facing": {
+          "enum": ["user", "environment", "unknown"]
+        },
         "deviceLabel": {
           "description": "The camera's name as the browser gives it (MediaDeviceInfo.label).",
           "type": "string"
@@ -177,12 +258,16 @@
           "description": "The constraints the app opened the camera with, as JSON.",
           "type": "object"
         },
-        "crop": { "$ref": "#/$defs/crop" },
+        "crop": {
+          "$ref": "#/$defs/crop"
+        },
         "mode": {
           "description": "full: whole frames are recorded (phase 2); crop: only the crop rectangle.",
           "enum": ["full", "crop"]
         },
-        "microphone": { "$ref": "#/$defs/microphone" }
+        "microphone": {
+          "$ref": "#/$defs/microphone"
+        }
       }
     },
     "microphone": {
@@ -208,16 +293,27 @@
           "description": "What the app asked for: raw, the browser's voice processing off (echo cancellation, noise suppression, automatic gain control, voice isolation); voice, the browser's defaults.",
           "enum": ["raw", "voice"]
         },
-        "echoCancellation": { "type": ["boolean", "null"] },
-        "noiseSuppression": { "type": ["boolean", "null"] },
-        "autoGainControl": { "type": ["boolean", "null"] },
-        "voiceIsolation": { "type": ["boolean", "null"] },
+        "echoCancellation": {
+          "type": ["boolean", "null"]
+        },
+        "noiseSuppression": {
+          "type": ["boolean", "null"]
+        },
+        "autoGainControl": {
+          "type": ["boolean", "null"]
+        },
+        "voiceIsolation": {
+          "type": ["boolean", "null"]
+        },
         "sampleRate": {
           "description": "In hertz.",
           "type": ["number", "null"],
           "exclusiveMinimum": 0
         },
-        "channelCount": { "type": ["integer", "null"], "minimum": 1 }
+        "channelCount": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        }
       }
     },
     "cameraClock": {
@@ -258,7 +354,9 @@
         "samples": {
           "description": "The matched pairs, when kept.",
           "type": "array",
-          "items": { "$ref": "#/$defs/clapperboardSample" }
+          "items": {
+            "$ref": "#/$defs/clapperboardSample"
+          }
         }
       }
     },
@@ -267,10 +365,31 @@
       "additionalProperties": false,
       "required": ["moveHostMs", "onsetHostMs"],
       "properties": {
-        "moveHostMs": { "description": "The turn, on the host clock.", "type": "number" },
+        "moveHostMs": {
+          "description": "The turn, on the host clock.",
+          "type": "number"
+        },
         "onsetHostMs": {
           "description": "The middle of the turn's motion in the camera's frames, on the host clock (its first rise before T2.11).",
           "type": "number"
+        }
+      }
+    },
+    "batteryReading": {
+      "description": "One battery report of the cube.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostMs", "level"],
+      "properties": {
+        "hostMs": {
+          "description": "When the cube reported it, on the host clock.",
+          "type": "number"
+        },
+        "level": {
+          "description": "In percent.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
         }
       }
     }

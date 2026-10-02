@@ -21,4 +21,11 @@ export {
 export { loadGanDriver } from './driver';
 export { MAC_FLAG_URL, checkBluetoothSupport } from './support';
 export type { FakeCubeOptions, ScheduledMove } from './fake';
-export { FAKE_CUBE_BATTERY, FAKE_CUBE_HARDWARE, FakeCube } from './fake';
+export {
+  FAKE_CUBE_BATTERY,
+  FAKE_CUBE_HARDWARE,
+  FAKE_GYRO_DEG_PER_S,
+  FAKE_GYRO_HZ,
+  FAKE_GYRO_VELOCITY,
+  FakeCube,
+} from './fake';

@@ -12,6 +12,7 @@ import type {
   AttemptPhase,
   AttemptRecord,
   AttemptResult,
+  AttemptResync,
   CropRect,
   VideoClip,
 } from './attempt';
@@ -26,12 +27,16 @@ import type {
 import { CLOUD_UPLOAD_STATES } from './cloud';
 import type { CloudCube } from './cloud-cube';
 import { CUBE_NAME, MAC_ADDRESS } from './cloud-cube';
+import type { GyroJson, GyroSummary } from './gyro';
+import { GYRO_FILE } from './gyro';
 import type { Face } from './notation';
 import type { PhaseName } from './phases';
 import { PHASE_NAMES } from './phases';
 import type { EdgePos } from './pieces';
 import { EDGE_FACELETS } from './pieces';
 import type {
+  AppBuild,
+  BatteryReading,
   CameraClock,
   CameraInfo,
   ClapperboardSample,
@@ -45,12 +50,13 @@ import type {
 import { UUID_V4 } from './session';
 
 /**
- * The files the readers read, and the documents of the session index in Firestore (T3.1) and of the
- * account's cubes (T3.4), named by their paths.
+ * The files the readers read (the gyro file since T3.7), and the documents of the session index in
+ * Firestore (T3.1) and of the account's cubes (T3.4), named by their paths.
  */
 export type RecordFile =
   | 'session.json'
   | 'attempt.json'
+  | 'gyro.json'
   | 'sessions/{id}'
   | 'sessions/{id}/attempts/{index}'
   | 'users/{uid}/cubes/{name}';
@@ -134,6 +140,16 @@ export function parseCloudCube(json: unknown): CloudCube {
   return parseDocument('users/{uid}/cubes/{name}', json, CLOUD_CUBE, 1);
 }
 
+/**
+ * gyro.json of an attempt (docs/DATA-MODEL.md §11, T3.7), schema version 1, the only one: the
+ * samples of the attempt's gyro window. Beyond the schema, the quaternions must be four numbers per
+ * sample and the velocities, when there are any, three. Throws a {@link RecordError} naming the field
+ * on anything else.
+ */
+export function parseGyro(json: unknown): GyroJson {
+  return parseDocument('gyro.json', json, GYRO, 1);
+}
+
 function parse<T>(
   file: RecordFile,
   json: unknown,
@@ -157,8 +173,8 @@ function parse<T>(
 }
 
 /**
- * A document of Firestore of one schema version, the only one ever written: 2 for the session index,
- * 1 for the cubes.
+ * A record of one schema version, the only one ever written: 2 for the documents of the session
+ * index, 1 for the cubes' documents and for the gyro files.
  */
 function parseDocument<T>(
   file: RecordFile,
@@ -189,15 +205,32 @@ function parseDocument<T>(
 
 // ---- The versions ----
 
-/** attempt.json of schema version 1: no `clock`, and `video` always empty. */
-type AttemptRecordV1 = Omit<AttemptRecord, 'schema' | 'clock' | 'video'> & {
+/** A move of schema version 1: without the counter and the packet flag of T3.7. */
+type AttemptMoveV1 = Omit<AttemptMove, 'serial' | 'packetLast'>;
+
+/**
+ * attempt.json of schema version 1: no `clock`, `video` always empty, and none of T3.7's fields (the
+ * build, the gyro file, the resyncs, the moves' counters and packet flags).
+ */
+type AttemptRecordV1 = Omit<
+  AttemptRecord,
+  'schema' | 'app' | 'moves' | 'clock' | 'video' | 'gyro' | 'resyncs'
+> & {
   schema: 1;
+  moves: AttemptMoveV1[];
   video: never[];
 };
 
-/** session.json of schema version 1: `cameras` and `clock.cameras` always empty. */
-type SessionRecordV1 = Omit<SessionRecord, 'schema' | 'cameras' | 'clock'> & {
+/** The cube of schema version 1: without the production date of T3.7. */
+type CubeInfoV1 = Omit<CubeInfo, 'productDate'>;
+
+/**
+ * session.json of schema version 1: `cameras` and `clock.cameras` always empty, no battery reports
+ * and no production date (T3.7).
+ */
+type SessionRecordV1 = Omit<SessionRecord, 'schema' | 'cube' | 'cameras' | 'clock' | 'battery'> & {
   schema: 1;
+  cube: CubeInfoV1;
   cameras: never[];
   clock: { cube: CubeClockParams; cameras: Record<string, never> };
 };
@@ -217,6 +250,8 @@ function upgradeAttempt(a: AttemptRecordV1): AttemptRecord {
     result: a.result,
     phases: a.phases,
     video: [],
+    gyro: null,
+    resyncs: [],
   };
 }
 
@@ -227,13 +262,14 @@ function upgradeSession(s: SessionRecordV1): SessionRecord {
     createdMs: s.createdMs,
     app: s.app,
     host: s.host,
-    cube: s.cube,
+    cube: { ...s.cube, productDate: null },
     cameras: [],
     clock: { cube: s.clock.cube, cameras: {} },
     audio: s.audio,
     settings: s.settings,
     notes: s.notes,
     summary: s.summary,
+    battery: [],
   };
 }
 
@@ -336,11 +372,17 @@ function num(bound: { min?: number; above?: number } = {}): Reader<number> {
   );
 }
 
-function int(min: number): Reader<number> {
+/** An integer from `min`, and at most `max` when given. */
+function int(min: number, max?: number): Reader<number> {
   return leaf(
-    `an integer ≥ ${String(min)}`,
+    max === undefined
+      ? `an integer ≥ ${String(min)}`
+      : `an integer from ${String(min)} to ${String(max)}`,
     (value): value is number =>
-      typeof value === 'number' && Number.isInteger(value) && value >= min,
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= min &&
+      (max === undefined || value <= max),
   );
 }
 
@@ -399,9 +441,9 @@ function defaulted<T>(read: Reader<T>, absent: T): Defaulted<T> {
   return { optional: read, absent };
 }
 
-/** An array of `item`s, with at most `max` of them. */
-function list<T>(item: Reader<T>, opts: { max?: number } = {}): Reader<T[]> {
-  const { max } = opts;
+/** An array of `item`s, with at most `max` of them, and at least `min`. */
+function list<T>(item: Reader<T>, opts: { max?: number; min?: number } = {}): Reader<T[]> {
+  const { max, min } = opts;
   const what = max === 0 ? 'an empty array' : 'an array';
   return {
     what,
@@ -417,6 +459,9 @@ function list<T>(item: Reader<T>, opts: { max?: number } = {}): Reader<T[]> {
             ? `must be empty, got ${String(items.length)} item${items.length === 1 ? '' : 's'}`
             : `must have at most ${String(max)} items, got ${String(items.length)}`,
         );
+      }
+      if (min !== undefined && items.length < min) {
+        fail(at, `must have at least ${String(min)} items, got ${String(items.length)}`);
       }
       const out: T[] = [];
       for (let i = 0; i < items.length; i++) {
@@ -519,6 +564,9 @@ const uuid = text('a lowercase UUID v4', UUID_V4);
 
 const crop = nullable(object<CropRect>({ x: int(0), y: int(0), w: int(1), h: int(1) }));
 
+/** The build of the app that wrote a record (T3.7), as session.json has had it since version 1. */
+const app = object<AppBuild>({ version: text(), commit: text() });
+
 function clockFit(minSamples: number): Reader<CubeClockParams> {
   return object<CubeClockParams>({
     a: num(),
@@ -568,11 +616,35 @@ const events = object<AttemptEvents>({
   solveEnd: nullable(num()),
 });
 
-const move = object<AttemptMove>({
+const moveFields = {
   m: text("a face turn such as R, U' or F2", /^[UDRLFB][2']?$/u),
   hostMs: num(),
   cubeMs: num(),
   phase: oneOf('scramble', 'solve'),
+};
+
+const moveV1 = object<AttemptMoveV1>(moveFields);
+
+/** Since T3.7 a move has the cube's counter and its packet flag; the moves written before have none. */
+const move = object<AttemptMove>({
+  ...moveFields,
+  serial: optional(nullable(int(0, 255))),
+  packetLast: optional(bool),
+});
+
+const resync = object<AttemptResync>({
+  hostMs: num(),
+  facelets: text('54 facelets, each one of U R F D L B', /^[URFDLB]{54}$/u),
+  state: oneOf('scrambling', 'armed', 'solving'),
+});
+
+const gyroSummary = object<GyroSummary>({
+  file: oneOf(GYRO_FILE),
+  samples: int(1),
+  fromHostMs: num(),
+  toHostMs: num(),
+  rateHz: num({ min: 0 }),
+  truncatedStart: bool,
 });
 
 const result = object<AttemptResult>({
@@ -611,34 +683,47 @@ const clip = object<VideoClip>({
   local: optional(bool),
 });
 
-/** The fields both versions share up to the moves, in the order of the schemas. */
+/** The fields both versions share before the moves, in the order of the schemas. */
 const attemptHead = {
-  session: uuid,
-  index: int(1),
   scramble: text('face turns separated by single spaces', /^[UDRLFB][2']?( [UDRLFB][2']?)*$/u),
   scrambledFacelets: text('54 facelets, each one of U R F D L B', /^[URFDLB]{54}$/u),
   crossFace: oneOf<(Face | null)[]>('U', 'R', 'F', 'D', 'L', 'B', null),
   events,
 };
 
-/** The fields both versions share, in the order of the schemas. */
-const attemptStart = { ...attemptHead, moves: list(move) };
-
 const attemptEnd = { result, phases: list(phase, { max: 8 }) };
+
+/**
+ * The fields of version 2 since T3.7 (the records written before have none): the gyro file, read as
+ * null, and the resyncs, read as none.
+ */
+const attemptTail = {
+  gyro: defaulted(nullable(gyroSummary), null),
+  resyncs: defaulted(list(resync), []),
+};
 
 const ATTEMPT_V1 = object<AttemptRecordV1>({
   schema: oneOf(1),
-  ...attemptStart,
+  session: uuid,
+  index: int(1),
+  ...attemptHead,
+  moves: list(moveV1),
   ...attemptEnd,
   video: list(nothing, { max: 0 }),
 });
 
 const ATTEMPT_V2 = object<AttemptRecord>({
   schema: oneOf(2),
-  ...attemptStart,
+  session: uuid,
+  index: int(1),
+  // Since T3.7; the records written before name no build.
+  app: optional(app),
+  ...attemptHead,
+  moves: list(move),
   clock: nullable(clockFit(2)),
   ...attemptEnd,
   video: list(clip),
+  ...attemptTail,
 });
 
 // ---- session.json (docs/DATA-MODEL.md §6) ----
@@ -680,13 +765,17 @@ const cameraClock = object<CameraClock>({
   samples: optional(list(object<ClapperboardSample>({ moveHostMs: num(), onsetHostMs: num() }))),
 });
 
+const cubeFields = { model: text(), hardware: text(), firmware: text(), gyro: bool };
+
 const sessionStart = {
   id: uuid,
   createdMs: num(),
-  app: object<SessionRecord['app']>({ version: text(), commit: text() }),
+  app,
   host: object<HostInfo>({ label: text(), userAgent: text(), platform: text(), isPhone: bool }),
-  cube: object<CubeInfo>({ model: text(), hardware: text(), firmware: text(), gyro: bool }),
 };
+
+/** The cube since T3.7: with its production date, null when it does not say; absent before. */
+const cube = object<CubeInfo>({ ...cubeFields, productDate: defaulted(nullable(text()), null) });
 
 const sessionEnd = {
   audio: bool,
@@ -695,9 +784,13 @@ const sessionEnd = {
   summary: object<SessionSummary>({ attempts: int(0), solved: int(0), dnf: int(0) }),
 };
 
+/** The battery reports since T3.7 (the records written before have none, read as none). */
+const battery = defaulted(list(object<BatteryReading>({ hostMs: num(), level: int(0, 100) })), []);
+
 const SESSION_V1 = object<SessionRecordV1>({
   schema: oneOf(1),
   ...sessionStart,
+  cube: object<CubeInfoV1>(cubeFields),
   cameras: list(nothing, { max: 0 }),
   clock: object<SessionRecordV1['clock']>({
     cube: clockFit(0),
@@ -709,9 +802,11 @@ const SESSION_V1 = object<SessionRecordV1>({
 const SESSION_V2 = object<SessionRecord>({
   schema: oneOf(2),
   ...sessionStart,
+  cube,
   cameras: list(camera),
   clock: object<SessionRecord['clock']>({ cube: clockFit(0), cameras: byLabel(cameraClock) }),
   ...sessionEnd,
+  battery,
 });
 
 // ---- The session index in Firestore (docs/DATA-MODEL.md §10) ----
@@ -722,9 +817,11 @@ const owner = nonEmpty;
 const CLOUD_SESSION = object<CloudSession>({
   schema: oneOf(2),
   ...sessionStart,
+  cube,
   cameras: list(camera),
   clock: object<SessionRecord['clock']>({ cube: clockFit(0), cameras: byLabel(cameraClock) }),
   ...sessionEnd,
+  battery,
   owner,
 });
 
@@ -733,16 +830,20 @@ const CLOUD_SESSION = object<CloudSession>({
  * file, which its upload records on the attempt it went with (T3.2).
  */
 const attemptFile = text(
-  'attempt.json, session.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json',
-  /^(attempt\.json|session\.json|[a-z0-9]+(-[a-z0-9]+)*\.(scramble|solve)\.(mp4|frames\.json))$/u,
+  'attempt.json, session.json, gyro.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json',
+  /^(attempt\.json|session\.json|gyro\.json|[a-z0-9]+(-[a-z0-9]+)*\.(scramble|solve)\.(mp4|frames\.json))$/u,
 );
 
 const CLOUD_ATTEMPT = object<CloudAttempt>({
   schema: oneOf(2),
+  session: uuid,
+  index: int(1),
+  app: optional(app),
   ...attemptHead,
   clock: nullable(clockFit(2)),
   ...attemptEnd,
   video: list(clip),
+  ...attemptTail,
   owner,
   device: object<CloudDevice>({ host: text(), cameras: list(label) }),
   upload: object<CloudUpload>({
@@ -750,6 +851,48 @@ const CLOUD_ATTEMPT = object<CloudAttempt>({
     files: byKey(attemptFile, object<CloudUploadFile>({ bytes: int(1), doneMs: nullable(num()) })),
   }),
 });
+
+// ---- gyro.json (docs/DATA-MODEL.md §11, T3.7) ----
+
+/** A number from −1 to 1: a unit quaternion's component. */
+const component = leaf(
+  'a number from -1 to 1',
+  (value): value is number => typeof value === 'number' && value >= -1 && value <= 1,
+);
+
+const gyroFields = object<GyroJson>({
+  schema: oneOf(1),
+  session: uuid,
+  index: int(1),
+  app,
+  t0HostMs: num(),
+  dtMs: list(num({ min: 0 }), { min: 1 }),
+  q: list(component, { min: 4 }),
+  v: nullable(list(int(-8, 7))),
+  truncatedStart: bool,
+});
+
+/** The gyro file, whose arrays are four quaternion components and three velocities per sample. */
+const GYRO: Reader<GyroJson> = {
+  what: 'an object',
+  read: (value, at) => {
+    const file = gyroFields.read(value, at);
+    const samples = file.dtMs.length;
+    if (file.q.length !== samples * 4) {
+      fail(
+        join(at, 'q'),
+        `must have four numbers per sample (${String(samples * 4)}), got ${String(file.q.length)}`,
+      );
+    }
+    if (file.v !== null && file.v.length !== samples * 3) {
+      fail(
+        join(at, 'v'),
+        `must have three integers per sample (${String(samples * 3)}), got ${String(file.v.length)}`,
+      );
+    }
+    return file;
+  },
+};
 
 // ---- The account's cubes in Firestore (docs/DATA-MODEL.md §10, T3.4) ----
 

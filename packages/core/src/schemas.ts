@@ -1,7 +1,7 @@
-// The JSON Schemas (draft 2020-12) of the records (docs/DATA-MODEL.md §6, §7, §9 and §10):
+// The JSON Schemas (draft 2020-12) of the records (docs/DATA-MODEL.md §6, §7, §9, §10 and §11):
 // session.json and attempt.json in schema version 2, which the app writes, and in version 1, which it
-// still reads, the frames files of the video clips, users/{uid}, the account's record in Firestore,
-// the documents of the session index there (T3.1), and the account's cubes (T3.4). They live as JSON
+// still reads, the frames files of the video clips, the gyro files (T3.7), users/{uid}, the account's
+// record in Firestore, the documents of the session index there (T3.1), and the account's cubes (T3.4). They live as JSON
 // files in packages/core/schema/, imported here as JSON modules (TypeScript resolves them with the
 // base tsconfig's `moduleResolution: bundler`; the bundlers inline them). The app itself reads
 // records with records.ts, which checks the same rules without a validator.
@@ -11,6 +11,7 @@ import cloudAttemptSchema from '../schema/cloud-attempt.schema.json';
 import cloudCubeSchema from '../schema/cloud-cube.schema.json';
 import cloudSessionSchema from '../schema/cloud-session.schema.json';
 import framesSchema from '../schema/frames.schema.json';
+import gyroSchema from '../schema/gyro.schema.json';
 import sessionSchemaV1 from '../schema/session.v1.schema.json';
 import sessionSchema from '../schema/session.schema.json';
 import userSchema from '../schema/user.schema.json';
@@ -38,6 +39,9 @@ export const ATTEMPT_SCHEMA_V1: JsonSchema = attemptSchemaV1;
 
 /** The schema of `<camera>.<segment>.frames.json`, the frame times of a clip (version 2). */
 export const FRAMES_SCHEMA: JsonSchema = framesSchema;
+
+/** The schema of `gyro.json`, the gyroscope samples of an attempt (its own version 1, §11, T3.7). */
+export const GYRO_SCHEMA: JsonSchema = gyroSchema;
 
 /** The schema of users/{uid} in Firestore, the account's record (schema version 1, §10). */
 export const USER_SCHEMA: JsonSchema = userSchema;

@@ -61,6 +61,7 @@ function attemptDocument(): CloudAttempt {
       'laptop.scramble.frames.json': 2_048,
       'laptop.solve.mp4': 4_412_345,
       'laptop.solve.frames.json': 2_210,
+      'gyro.json': 61_440,
     }),
   });
 }
@@ -83,6 +84,10 @@ describe('the documents of the session index', () => {
     const { owner, device, upload, ...rest } = document;
     expect({ ...rest, moves: attempt.moves }).toEqual(attempt);
     expect(owner).toBe(OWNER);
+    // The fields of T3.7 reach the index with the record: the build, the gyro file, the resyncs.
+    expect(document.app).toEqual(attempt.app);
+    expect(document.gyro).toEqual(attempt.gyro);
+    expect(document.resyncs).toEqual(attempt.resyncs);
     // The session's host label and its cameras' labels, in their order.
     expect(device).toEqual({ host: 'laptop', cameras: ['laptop', 'phone-rear'] });
     expect(upload.state).toBe('pending');
@@ -109,14 +114,16 @@ describe('the documents of the session index', () => {
     }
   });
 
-  it("list an attempt's files: attempt.json, then each clip's MP4 and frames file", () => {
+  it("list an attempt's files: attempt.json, then each clip's MP4 and frames file, then its gyro file", () => {
     expect(attemptFiles(attemptWithVideo())).toEqual([
       'attempt.json',
       'laptop.scramble.mp4',
       'laptop.scramble.frames.json',
       'laptop.solve.mp4',
       'laptop.solve.frames.json',
+      'gyro.json',
     ]);
+    expect(attemptFiles({ ...attemptWithVideo(), gyro: null })).toHaveLength(5);
     expect(attemptFiles(dnfAttempt())).toEqual(['attempt.json']);
     expect(pendingUpload({ 'attempt.json': 10 })).toEqual({
       state: 'pending',
@@ -268,6 +275,11 @@ describe('the JSON Schemas of the documents', () => {
       { upload: { state: 'pending', files: { 'attempt.json': { bytes: 1 } } } },
     ],
     ['schema version 3', 'attempt', { schema: 3 }],
+    ['a build that is text', 'attempt', { app: '0.3.0' }],
+    ['a gyro summary of another file', 'attempt', { gyro: { file: 'laptop.gyro.json' } }],
+    ['resyncs that are an object', 'attempt', { resyncs: {} }],
+    ['battery reports that are an object', 'session', { battery: {} }],
+    ['a production date that is a number', 'session', { cube: { productDate: 2025 } }],
   ] as [string, 'session' | 'attempt', Record<string, unknown>][])(
     'refuse a document with %s (%s)',
     (_, kind, change) => {
@@ -379,12 +391,13 @@ describe('parseCloudSession and parseCloudAttempt', () => {
     const session = sessionDocument();
     const read = parseCloudSession(structuredClone(session));
     expect(read).toEqual(session);
-    expect(Object.keys(read)).toEqual(CLOUD_SESSION_SCHEMA['required']);
+    // In the order of the schemas' fields (the optional ones of T3.7 among them).
+    expect(Object.keys(read)).toEqual(Object.keys(CLOUD_SESSION_SCHEMA['properties'] as object));
     const attempt = attemptDocument();
     const input = structuredClone(attempt);
     const parsed = parseCloudAttempt(input);
     expect(parsed).toEqual(attempt);
-    expect(Object.keys(parsed)).toEqual(CLOUD_ATTEMPT_SCHEMA['required']);
+    expect(Object.keys(parsed)).toEqual(Object.keys(CLOUD_ATTEMPT_SCHEMA['properties'] as object));
     expect(parsed.upload.files).not.toBe(input.upload.files);
     expect(parsed.device.cameras).not.toBe(input.device.cameras);
   });
@@ -419,7 +432,7 @@ describe('parseCloudSession and parseCloudAttempt', () => {
       'a file outside the folder',
       'attempt',
       changed(attemptDocument(), ['upload', 'files', '../x.mp4'], { bytes: 1, doneMs: null }),
-      'sessions/{id}/attempts/{index} (schema 2): upload.files.../x.mp4 is not attempt.json, session.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json.',
+      'sessions/{id}/attempts/{index} (schema 2): upload.files.../x.mp4 is not attempt.json, session.json, gyro.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json.',
     ],
   ] as [string, Kind, unknown, string][])(
     'throw on %s, naming the field',

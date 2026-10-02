@@ -37,9 +37,9 @@ export interface CloudUploadFile {
 export interface CloudUpload {
   state: CloudUploadState;
   /**
-   * The files of the attempt's folder (docs/DATA-MODEL.md §5) by their name: `attempt.json`, and each
-   * clip's `<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`; and `session.json`, the
-   * session's file, on the attempt it was uploaded with.
+   * The files of the attempt's folder (docs/DATA-MODEL.md §5) by their name: `attempt.json`, each
+   * clip's `<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`, and `gyro.json` (T3.7); and
+   * `session.json`, the session's file, on the attempt it was uploaded with.
    */
   files: Record<string, CloudUploadFile>;
 }
@@ -100,10 +100,14 @@ export function isSimulated(session: Pick<SessionRecord, 'cube'>): boolean {
 
 /**
  * The files of an attempt's folder that its upload sends, in order: `attempt.json`, then each clip's
- * MP4 and frames file.
+ * MP4 and frames file, then its gyro file when it has one (T3.7).
  */
-export function attemptFiles(attempt: Pick<AttemptRecord, 'video'>): string[] {
-  return [ATTEMPT_FILE_NAME, ...attempt.video.flatMap((clip) => [clip.file, clip.framesFile])];
+export function attemptFiles(attempt: Pick<AttemptRecord, 'video' | 'gyro'>): string[] {
+  return [
+    ATTEMPT_FILE_NAME,
+    ...attempt.video.flatMap((clip) => [clip.file, clip.framesFile]),
+    ...(attempt.gyro === null ? [] : [attempt.gyro.file]),
+  ];
 }
 
 /** An upload that has not begun: each file of `bytes` (sizes by file name) pending. */

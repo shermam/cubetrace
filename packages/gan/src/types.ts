@@ -36,18 +36,29 @@ export interface CubeFaceletsEvent {
   reset?: true;
 }
 
-/** Orientation from the gyroscope, for cubes that have one. */
+/**
+ * Orientation from the gyroscope, for cubes that have one. The cube's frame, as the driver states
+ * it: right-handed, +X through the red face, +Y through the blue face, +Z through the white face;
+ * the yaw has an arbitrary reference and drifts (docs/DATA-MODEL.md §11).
+ */
 export interface CubeGyroEvent {
   type: 'gyro';
   /** Unit quaternion `[x, y, z, w]` (scalar last), in the cube's frame as the driver reports it. */
   q: [number, number, number, number];
+  /**
+   * The angular velocity per axis as the cube reports it, raw integers (the Gen2 cubes, such as
+   * the GAN 12 ui and the GAN 356 i3, send 4-bit signed values, −7 to 7, per packet); absent when
+   * the cube gives none.
+   */
+  v?: readonly [number, number, number];
   hostMs: number;
 }
 
-/** Battery level, in percent (0–100). */
+/** Battery level, in percent (0–100), and when the cube reported it, on the host clock. */
 export interface CubeBatteryEvent {
   type: 'battery';
   level: number;
+  hostMs: number;
 }
 
 /** What the cube says it is; the fields of `cube` in `session.json` (docs/DATA-MODEL.md §6). */
@@ -57,6 +68,8 @@ export interface CubeHardwareEvent {
   hardware: string;
   firmware: string;
   gyro: boolean;
+  /** The production date, as the cube's hardware message has it (Gen4 cubes); absent when it does not say. */
+  productDate?: string;
 }
 
 /** The connection is over; `events$` completes right after this event. */

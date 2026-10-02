@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/cloud-session.schema.json",
   "title": "sessions/{id}",
-  "description": "A session's document in the session index in Firestore, schema version 2 (docs/DATA-MODEL.md §10): its session.json (session.schema.json, version 2) with owner. Times are host milliseconds, as in session.json.",
+  "description": "A session's document in the session index in Firestore, schema version 2 (docs/DATA-MODEL.md §10): its session.json (session.schema.json, version 2) with owner; since T3.7 with the record's battery and cube.productDate where the record has them. Times are host milliseconds, as in session.json.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -84,6 +84,10 @@
         },
         "gyro": {
           "type": "boolean"
+        },
+        "productDate": {
+          "description": "The production date, as the cube's hardware message has it (a Gen4 cube says it; a Gen2 cube does not); null when the cube does not say (T3.7). Absent from the files written before, which read as null.",
+          "type": ["string", "null"]
         }
       }
     },
@@ -173,6 +177,13 @@
           "type": "integer",
           "minimum": 0
         }
+      }
+    },
+    "battery": {
+      "description": "The cube's battery reports over the session's connections, in order, consecutive equal levels coalesced (T3.7); empty when the cube reported none. Absent from the files written before, which read as empty.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/batteryReading"
       }
     },
     "owner": {
@@ -367,6 +378,24 @@
         "onsetHostMs": {
           "description": "The middle of the turn's motion in the camera's frames, on the host clock (its first rise before T2.11).",
           "type": "number"
+        }
+      }
+    },
+    "batteryReading": {
+      "description": "One battery report of the cube.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostMs", "level"],
+      "properties": {
+        "hostMs": {
+          "description": "When the cube reported it, on the host clock.",
+          "type": "number"
+        },
+        "level": {
+          "description": "In percent.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
         }
       }
     }
