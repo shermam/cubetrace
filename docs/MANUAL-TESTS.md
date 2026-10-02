@@ -109,6 +109,103 @@ to create the `v0.2.0` release from GitHub after it.
   way can lose its clips. So does a change of Video quality, Record audio or Microphone: change them
   between attempts.
 
+## Round 3 (v0.3.0)
+
+The third release's round (`docs/PLAN.md`, T3.5): the cloud, two devices and one dataset, on
+https://shermam.github.io/cubetrace/ once its footer reads `cubetrace 0.3.0 · <commit>`, on the
+MacBook Pro 2021 (Chrome, its FaceTime camera, and the Logitech C930e for T2.14) and on the
+ThinkPhone (the installed app, its front camera; a Chrome tab where an item says so), both signed in
+with the same Google account, with the GAN 12 ui FreePlay. Before it, the coordinator deploys the
+rules, the indexes and the functions, sets the bucket `cubetrace-data` up and runs the T3.2 check
+(`docs/USER-ACTIONS.md`, phase 3); after it, the coordinator asks the owner to create the `v0.3.0`
+release from GitHub.
+
+1. Before starting, fill in one row of the table per device. Chrome's version is the first line of
+   `chrome://version`; the cube's strings are in its details (click the cube pill once it is
+   connected); the app's version and commit are in the page footer.
+2. Go through the sections below in this order, on both devices unless an item names one: **T3.0**
+   (the account; on the ThinkPhone, do the first item of **T3.4** before signing in), **T3.4** (the
+   cubes' MAC addresses), **T3.1** (the session index), **T3.3** (uploads), then **T2.14** (two
+   cameras in one session, on the MacBook). The round as a whole, which those sections detail:
+   - Sign in on the MacBook (a popup) and on the ThinkPhone, in the installed app (a redirect to
+     Google's page): write down whether the app comes back signed in, the open question of T3.0, and
+     if it says "Signing in did not finish", whether a Chrome tab signs in there.
+   - The cube's MAC address typed on the phone in round 1 is in the MacBook's Settings → Cube MAC
+     addresses, which says "Synced with your account"; with the flag off on the MacBook, the cube
+     connects without asking for it.
+   - Two attempts on each device with the camera on and the real cube (a demo session never leaves
+     the device): once each attempt's clips are saved, the header shows ↑ with the attempts to
+     upload, then nothing.
+   - One merged Sessions list on both devices: its own sessions "both", the other device's "cloud"
+     (opening read-only), the device filter with both labels; Sessions → Uploads, the queue's panel,
+     says "Up to date: every attempt of this device is uploaded." and lists the attempts uploaded
+     last.
+   - The files in the bucket, under `users/<uid>/sessions/<session id>/`: each attempt's folder
+     (`attempts/0001/`) with `attempt.json`, the two MP4s and their two frames files, and
+     `session.json` beside `attempts/`. In Cloud Shell (the Google Cloud console of
+     `cubetrace-cacd9`, the terminal button at the top right): `gcloud storage ls -l -r
+     gs://cubetrace-data/users/` lists them with their sizes, and `gcloud storage du -s
+     gs://cubetrace-data/users/` totals them. From the training machine: `rclone ls
+     cubetrace:cubetrace-data/users/` with a remote set up as below.
+   - The QA view (Sessions → QA view) on each device: today's row for each device with its two
+     attempts, the bytes uploaded, Pending 0 B, and "This device … last synced at" a time of today.
+   - Settings → Uploads → Keep local copies off on the ThinkPhone: the clips of its uploaded
+     attempts leave it (Settings → Storage goes down by their size), and their badges say "2 clips
+     in the cloud".
+   - The T2.14 check on the MacBook with both cameras: the export has `laptop` and `laptop-2`.
+3. Tick an item when it passes on every row. When it fails or does something unexpected on a row,
+   write the row and what happened next to it. Every failure becomes a GitHub issue with the row's
+   device, Chrome version and network, the steps, what happened and what was expected (a screenshot,
+   the panel's error, or the console's line, when it shows it). The known limitations below are
+   expected.
+4. At the end, attach to one issue (zip the files if GitHub refuses them): each device's session
+   export (Sessions → Export); the bucket's listing (`gcloud storage ls -l -r …` or `rclone ls …`);
+   every console line that starts with `cubetrace:` (Ctrl+Shift+J, or ⌥⌘J on a Mac; for the phone,
+   `chrome://inspect` on the MacBook); and, on each device, screenshots of the Sessions page with
+   its badges and the queue's panel, and of the QA view.
+5. Write into `docs/DEVICES.md`, "Manual round 3", or paste into the round's issue for the
+   coordinator, per device and network (the MacBook on Wi-Fi; the ThinkPhone on Wi-Fi, and on mobile
+   data with Wi-Fi only off): the upload speed seen (DevTools → Network, or `chrome://inspect` for
+   the phone: a solve clip's PUT, its size over its time), the bytes per attempt (one attempt's five
+   files in the bucket's listing), and the time to confirm (in the Firebase console, Firestore
+   Database → `sessions/<id>/attempts/0001`: the latest `doneMs` of `upload.files` minus
+   `events.solveEnd`, both in ms since 1970, on the server's clock and on the device's).
+
+**rclone on the training machine.** rclone (https://rclone.org) reads the bucket as the owner's
+Google account: `rclone config create cubetrace "google cloud storage" bucket_policy_only=true`
+opens Google's page in the browser to allow it (on a machine without a browser, `rclone authorize
+"google cloud storage"` on another one prints the token to paste). Then `rclone ls
+cubetrace:cubetrace-data/users/` lists every object with its size, `rclone size
+cubetrace:cubetrace-data/users/` totals them, and `rclone copy cubetrace:cubetrace-data/users/
+<folder>` downloads them: about US$ 0.12 per GiB of egress, paid by the trial's credit until
+2026-12-27 (`docs/USER-ACTIONS.md`).
+
+| Date | Device, OS | Chrome | Cube: model, hardware, firmware | Camera | App (footer) | Result |
+|---|---|---|---|---|---|---|
+| | MacBook Pro 2021, macOS: | | GAN 12 ui FreePlay: | FaceTime HD; Logitech C930e | | |
+| | ThinkPhone, Android: | | GAN 12 ui FreePlay: | front | | |
+
+**Known limitations** (from the phase 3 pull requests), not to be reported as surprises:
+
+- The installed app on Android signs in with a redirect, whose outcome Chrome's partitioned
+  third-party storage can keep from the app (`docs/ARCHITECTURE.md`, "Account"); this round finds
+  out whether it does. A Chrome tab signs in with a popup.
+- An attempt uploads once its clips are saved, a second or two after it ends; `session.json` goes
+  again about two minutes after the session's last change, not with every attempt.
+- The day's quota, per account and UTC day: 2 GB and 400 files signed, every signature counted. An
+  attempt with its clips is five files, so at most 80 attempts a day upload (fewer with
+  `session.json`); past it, the uploads wait until 00:00 UTC (21:00 in Brasília), and the panel says
+  until when.
+- Only one tab uploads at a time (a Web Lock); another tab's attempts go at the queue's next look at
+  the device's sessions, within 10 minutes, or at the next start.
+- The QA view's "last synced" is this device's; another device's is not stored.
+- Wi-Fi only is shown only where Chrome tells Wi-Fi from mobile data (the phone): a laptop uploads
+  on any network.
+- A session of the other device opens read-only, without its clips and moves, which are on that
+  device and in the bucket.
+- Demo sessions never leave the device, and the cubes' MAC addresses are the account's, never the
+  dataset's: no export, upload or document of the index holds one.
+
 ## T1.5 — cube connection
 
 In a current Chrome (the driver needs the Observable API). Connecting takes one click (T1.12):
