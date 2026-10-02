@@ -1337,7 +1337,7 @@ second key. Phase 3 starts after T2.4, because it changes the same `SessionServi
 | T3.3 | `upload`: the upload queue: per attempt JSON and clips, resumable, retried, throttled, persistent; local clips deleted after confirmation by policy | T3.1, T3.2 | ✅ #46 |
 | T3.4 | `web`: cube MAC addresses synced per user (issue #21) | T3.0 | ✅ #47 |
 | T3.5 | e2e against the emulators, docs, `v0.3.0`, manual round 3 (two devices, one dataset, `rclone ls` on the training machine) | T3.3, T3.4 | ✅ #49 |
-| T3.6 | `web`: the app installed on Android signs in with the popup; the redirect flow removed (issue #50) | T3.0 | ✅ #51 (2026-10-02; the owner confirms the Custom Tab on the ThinkPhone) |
+| T3.6 | `web`: the app installed on Android signs in with the popup; the redirect flow removed (issue #50) | T3.0 | ✅ #51 (2026-10-02; confirmed by the owner on the ThinkPhone the same day: the installed app signs in, issue #50 closed) |
 | T3.7 | `gan`, `core`, `storage`, `upload`, `functions`, `web`: the cube's whole record — the gyroscope stream in a `gyro.json` per attempt, each move's counter and packet flag, a resync log, the battery readings and the production date, and the app's version and commit in every file it writes (found by the owner in the first downloads) | T3.5 | ⬜ |
 | T3.8 | `web`: a 3D cube in the clip viewer that follows the video: its orientation from `gyro.json`, its turns from the moves, the camera's lag applied; no live 3D cube on the timer page (the owner's decision: the solver watches the real cube, and WebGL would compete with the capture) | T3.7 | ⬜ |
 
