@@ -77,8 +77,8 @@ end-to-end suite's bucket (below, "The local bucket") and which deploys neither 
 | `BUCKET_PROVIDER` | `gcs` | `gcs` (Google Cloud Storage) or `r2` (Cloudflare R2); `local` in the Functions emulator only |
 | `BUCKET_NAME` | `cubetrace-data` | the bucket at the provider |
 | `R2_ACCOUNT_ID` | empty | Cloudflare's account id, for R2's endpoint |
-| `QUOTA_BYTES_PER_DAY` | `2000000000` | 2 GB signed per account per UTC day |
-| `QUOTA_FILES_PER_DAY` | `400` | files signed per account per UTC day |
+| `QUOTA_BYTES_PER_DAY` | `6000000000` | 6 GB signed per account per UTC day |
+| `QUOTA_FILES_PER_DAY` | `1200` | files signed per account per UTC day |
 | `MAX_FILE_BYTES` | `512000000` | the largest file, 512 MB |
 
 Secrets, with `BUCKET_PROVIDER=r2` only: `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, an R2 API

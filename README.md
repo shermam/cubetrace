@@ -223,7 +223,7 @@ copies, on by default on a laptop and off on a phone, keeps the clips on the dev
 uploaded: off, an attempt's clips are deleted from it once all its files are uploaded (its
 `attempt.json` and frame times stay, and the clip says "in the cloud"). In any case, once the
 browser's storage is 70% full, the oldest uploaded clips are deleted until it is under 60%. Each
-account may have 2 GB and 400 files signed per UTC day, every signature counted: at most 80 attempts
+account may have 6 GB and 1,200 files signed per UTC day, every signature counted: at most 240 attempts
 with their clips (five files each); past it, the uploads wait for the next UTC day, and the panel
 says until when.
 

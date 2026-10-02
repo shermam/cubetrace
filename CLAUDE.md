@@ -33,7 +33,7 @@ readable at `/home/user/aulas-mestrado/random-research/cube-capture-app/DESIGN.m
   results), the acceptance criteria from `docs/PLAN.md` with each one checked or marked
   not done and why, and anything that needs a human with a real cube or phone.
 - CI must be green before review. Run `npm run lint && npm test && npm run build` (and
-  `npm run e2e` when the app changes) locally before pushing.
+  `npm run e2e` when the app changes, `npm run e2e:cloud` when the cloud code does) locally before pushing.
 - The coordinator reviews and merges. If you are blocked, or a criterion cannot be met,
   write it in the PR body and stop; do not widen the task to work around it.
 - Update `docs/PLAN.md` only in the "Status" column of your own task, and `docs/DATA-MODEL.md`

@@ -32,7 +32,7 @@ the owner's Firebase project `cubetrace-cacd9` and the Google Cloud Storage buck
 - Development: the Cloud Functions the uploads go through (T3.2, `functions/`). `signUpload`
   gives a signed-in account, for one of its own attempts, a URL per file into the dataset's bucket
   (Google Cloud Storage for now, Cloudflare R2 by configuration), valid 15 minutes for that file's
-  type and exact size, within a daily quota per account (2 GB and 400 files by default, kept in the
+  type and exact size, within a daily quota per account (6 GB and 1,200 files by default since 2026-10-02, 2 GB and 400 at first, kept in the
   account's record, which the app can read and not change); `confirmUpload` checks that the files
   arrived with their sizes and marks the attempt uploaded; the upload queue (T3.3, below) calls them.
   Their tests run against the Firestore emulator (`npm run test:functions`, in CI), the Firebase

@@ -15,7 +15,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 |---|---|---|
 | **1. The timer, on any device** | cube connection, scrambles, state tracking, mis-scramble guidance, timer, colour-neutral CFOP breakdown validated against the Cubeast fixtures, session records staged in OPFS, PWA, probe page, fake cube, e2e suite, GitHub Pages deploy. Replaces Cubeast for daily practice. | ✅ v0.1.0 (2026-09-27) |
 | **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ✅ 0.2.0 (2026-10-01: the fixes from the owner's first recordings, T2.8–T2.13, merged; the full round 2 skipped by the owner's decision; the tag from the GitHub UI pending) |
-| 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | 🟦 board below (T3.0 merged 2026-10-01) |
+| 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ✅ 0.3.0 (2026-10-02: T3.0–T3.5 merged and deployed; the tag from the GitHub UI after the owner's round 3) |
 | 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ⬜ |
 | 5. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
@@ -1336,7 +1336,7 @@ second key. Phase 3 starts after T2.4, because it changes the same `SessionServi
 | T3.2 | `functions`: `signUpload` and `confirmUpload` with presigned URLs for R2 (S3 SigV4) or GCS by configuration, quotas, secrets, bucket CORS | T3.0 | ✅ #44 (deployed 2026-10-01: rules, functions, bucket `cubetrace-data`) |
 | T3.3 | `upload`: the upload queue: per attempt JSON and clips, resumable, retried, throttled, persistent; local clips deleted after confirmation by policy | T3.1, T3.2 | ✅ #46 |
 | T3.4 | `web`: cube MAC addresses synced per user (issue #21) | T3.0 | ✅ #47 |
-| T3.5 | e2e against the emulators, docs, `v0.3.0`, manual round 3 (two devices, one dataset, `rclone ls` on the training machine) | T3.3, T3.4 | ⬜ |
+| T3.5 | e2e against the emulators, docs, `v0.3.0`, manual round 3 (two devices, one dataset, `rclone ls` on the training machine) | T3.3, T3.4 | ✅ #49 |
 
 Waves: T3.0 → {T3.1, T3.2, T3.4} → T3.3 → T3.5.
 
@@ -1439,7 +1439,7 @@ document id, and the `{index}` of its objects, is its folder's name (`0001`), wh
 `session.json` rides with an attempt (a `files[].path`, recorded on that attempt, its object the
 session's); each URL binds the content type and the exact size (GCS `x-goog-content-length-range`, R2
 `content-length`), so the bucket never holds more than the quota counted; the quota counts every
-signature, a file signed again included (`users/{uid}.quota = {day, bytes, files}`, UTC, 2 GB and 400
+signature, a file signed again included (`users/{uid}.quota = {day, bytes, files}`, UTC, 6 GB and 1,200
 files; a call that does not fit is refused whole, with `resetsAtMs`); the attempt is checked before
 anything is signed, and the URLs are signed before the quota is counted, so a bucket that cannot sign
 records and counts nothing; `confirmUpload` answers
@@ -1561,7 +1561,7 @@ account's flow allows. The cloud project takes 37 to 43 s locally (57 to 62 s wi
 emulators) and 45 s in CI (31 s of tests), where the whole job took 7 min 47 s (7 min 52 s before
 it); `main` is unchanged but for its stamps, and Firebase's chunk is 3.7 kB larger. Open: the round
 (`docs/MANUAL-TESTS.md`, "Round 3"), then the `v0.3.0` release from the GitHub UI; and the daily
-quota, 400 files, at most 80 attempts with their clips, below the design's cadence
+quota, 400 files, at most 80 attempts with their clips, below the design's cadence (raised to 6 GB and 1,200 files a day by the coordinator on 2026-10-02)
 (`functions/.env`).
 
 ## Phases 4 and 5
