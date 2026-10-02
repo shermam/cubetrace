@@ -437,7 +437,7 @@ clips of the timer.
   ends about 1 s after its last turn; the solve clip begins about 3 s (at most 4 s) before the first
   turn of the solve and ends about 1 s after the cube is solved. Check it in the viewer: the first
   move's time in the list is the lead (2.xx s for the scramble, 3.xx s for the solve).
-- [ ] Download in the viewer gives five files: both MP4s, both frames files and attempt.json (Chrome
+- [ ] Download in the viewer gives five files, six with `gyro.json` since T3.7: both MP4s, both frames files and attempt.json (Chrome
   may ask once to allow multiple downloads: Allow). The MP4s play in the system's player (QuickTime,
   VLC or the phone's gallery).
 - [ ] A DNF (Esc) during a solve: its row gets both clips, the solve clip ending about 1 s after the
@@ -513,7 +513,7 @@ the device, Chrome's version and the window's size (`innerWidth` × `innerHeight
   session · See all"; See all opens the session's page with all of them and the same ao12 as the
   Timer page (ao100 says "–" until the session has 100 attempts).
 - [ ] The session's page: its date, device, cube, camera and clips with their size; a clip badge opens
-  the viewer, which plays the clip and downloads the five files. The same for an older session,
+  the viewer, which plays the clip and downloads the five files (six with `gyro.json`, T3.7). The same for an older session,
   opened from the Sessions page (its date is a link). Reload the page: the same. Export saves the
   session's JSON; Delete… then Delete removes it and goes back to the Sessions page.
 - [ ] Camera settings: closed the first time, until the camera is on; then open by themselves. Closed

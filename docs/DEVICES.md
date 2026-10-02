@@ -278,7 +278,8 @@ above, and the capture lab's frame timestamps under "VideoFrame.timestamp".
 What the owner's third round measures of the uploads, per device and network
 (`docs/MANUAL-TESTS.md`, "Round 3"), to fill in after it: the upload speed seen (a solve clip's PUT
 in DevTools → Network, or in `chrome://inspect` for the phone: its size over its time), the bytes
-per attempt (one attempt's five files in the bucket's listing, at Standard quality, T2.10) and the
+per attempt (one attempt's six files in the bucket's listing, at Standard quality, T2.10; five before
+T3.7's `gyro.json`) and the
 time to confirm (the latest `upload.files[…].doneMs` of the attempt's document minus its
 `events.solveEnd`, in the Firebase console). The networks' upstream, measured apart
 (`docs/USER-ACTIONS.md`), is the speed to compare with.
