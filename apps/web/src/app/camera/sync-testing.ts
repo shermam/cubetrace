@@ -26,7 +26,7 @@ export interface Rig {
   readonly camera: CameraService;
 }
 
-/** The timer, the recording and the sync check, with the cameras `cameras` (the first one chosen). */
+/** The timer, the recording and the sync check, with these cameras (the first one is chosen). */
 export function rig(cameras: readonly FakeCamera[] = [FAKE_WEBCAM]): Rig {
   const media = new FakeMediaDevices(cameras);
   const starter = new FakeCaptureStarter();

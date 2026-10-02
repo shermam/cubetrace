@@ -8,11 +8,11 @@ import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from 
 // the first camera, one with the second, one with the first again. Both are `laptop` by the host;
 // the session gives the second one `laptop-2`, so that session.json has an entry for each, each
 // attempt's clips are named after the label of the camera that recorded them, and the first camera
-// gets its label back. `device-count=3` gives three fake cameras of the same test pattern at 30 fps:
-// "fake_device_0" and "fake_device_2" send I420 frames, while "fake_device_1" sends 16-bit depth
-// frames (Y16, a `VideoFrame` without a format), which the video encoder refuses ("OperationError:
-// Encoding error"), so the second camera here is "fake_device_2". Launch options force a browser of
-// their own for this file.
+// gets its label back. `device-count=3` gives three fake cameras of the same test pattern at
+// 30 fps: "fake_device_0" and "fake_device_2" send I420 frames, while "fake_device_1" sends 16-bit
+// depth frames (Y16, a `VideoFrame` without a format), which the video encoder refuses
+// ("OperationError: Encoding error"), so the second camera here is "fake_device_2". Launch options
+// force a browser of their own for this file.
 test.use({
   launchOptions: {
     args: [

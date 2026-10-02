@@ -248,7 +248,7 @@ describe('RecordingService', () => {
       clapperboardResidualMs: 9,
       clapperboardSamples: 8,
     });
-    /** A solve recorded by `pipeline`: the attempt's scramble, then its inverse, each clip saved. */
+    /** A solve recorded by `pipeline`: the attempt's scramble, its inverse, each clip saved. */
     const solve = async (pipeline: FakeCapture): Promise<void> => {
       const scramble = r.s.service.attempt()?.scramble ?? '';
       turn(r.s, fake, scramble);
@@ -269,8 +269,8 @@ describe('RecordingService', () => {
       return r.starter.last;
     };
 
-    // The first camera, `laptop`, and its sync check; then the FaceTime camera, also `laptop` by the
-    // host (issue #40): `laptop-2`, which has no check until its own; then the first one again.
+    // The first camera, `laptop`, and its sync check; then the FaceTime camera, also `laptop` by
+    // the host (issue #40): `laptop-2`, which has no check until its own; then the first one again.
     r.s.service.putCameraClock('laptop', lag(20));
     await solve(capture);
     const facetime = await switchTo('facetime');
@@ -309,8 +309,8 @@ describe('RecordingService', () => {
       clips('laptop', 20),
     ]);
 
-    // The records validate, and so do the documents of the session index (T3.1), whose attempts name
-    // the session's two cameras as their device's.
+    // The records validate, and so do the documents of the session index (T3.1), whose attempts
+    // name the session's two cameras as their device's.
     const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
     const validators = new Map(
       [SESSION_SCHEMA, ATTEMPT_SCHEMA, CLOUD_SESSION_SCHEMA, CLOUD_ATTEMPT_SCHEMA].map((schema) => [

@@ -452,11 +452,11 @@ export function facingFromLabel(label: string): CameraFacing {
 /**
  * The camera's own short label: `phone` when the host label says phone (the default labels of
  * phones all do: "Android phone", "iPhone", "Phone"), `laptop` otherwise, followed by `-front` or
- * `-rear` when the facing is known: `laptop`, `phone-front`, `phone-rear`. Lowercase words joined by
- * hyphens, as the camera labels that name clip files must be. Two cameras of a host can have one
+ * `-rear` when the facing is known: `laptop`, `phone-front`, `phone-rear`. Lowercase words joined
+ * by hyphens, as the camera labels that name clip files must be. Two cameras of a host can have one
  * own label (a laptop's built-in camera and a USB webcam): in a session each device gets a label of
- * its own from it, `laptop` for the first and `laptop-2` for another (@cubetrace/core's
- * `labelFor`, docs/PLAN.md T2.14).
+ * its own from it, `laptop` for the first and `laptop-2` for another (@cubetrace/core's `labelFor`,
+ * docs/PLAN.md T2.14).
  */
 export function cameraLabel(hostLabel: string, facing: CameraFacing): string {
   const base = /phone/i.test(hostLabel) ? 'phone' : 'laptop';
