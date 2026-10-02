@@ -1717,7 +1717,7 @@ index (one more read). The initial bundle is 264.57 kB raw
 against `main`'s 264.63 (its transfer estimate within a few tens of bytes of 72.6 kB, as before):
 the same code but for the minifier's names; the writer rides in the chunk of `SettingsService` and
 the services, which every page loads
-right after the first render, 68.8 kB raw against 57.7 (21.3 kB transferred against 18.2), and the
+right after the first render, 68.7 kB raw against 57.7 (21.3 kB transferred against 18.2), and the
 QA page grows by its section, 16.2 kB raw against 9.5.
 
 ## Phases 4 and 5

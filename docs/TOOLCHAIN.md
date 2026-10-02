@@ -1665,7 +1665,7 @@ tier's 20,000 writes a day; the index's writes (a session's, about three per att
 with the commit stamp and the hashes): `main` is the same code but for the minifier's names (62
 bytes fewer), since the header's controls only inject the writer, which the bundler puts in the
 chunk of `SettingsService` and the services, loaded by every page right after the first render:
-68.78 kB raw, 21.26 kB transferred (57.67 and 18.19 before), with the writer, its ring and cap, and
+68.74 kB raw, 21.27 kB transferred (57.67 and 18.19 before), with the writer, its ring and cap, and
 the services' calls. The QA page's chunk is 16.2 kB raw against 9.5 (its section and the summary),
 the Settings page's 23.0 against 22.1, the Firebase chunk 650.47 kB raw against 650.19 (`saveEvents`,
 `listEvents`), and the chunks of the recording services grow by their calls, one to three kB each;
