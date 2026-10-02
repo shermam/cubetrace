@@ -1690,7 +1690,7 @@ services write into, with no dependency on them (no cycle): `AuthService` hands 
 and records `attempt.done` only once the attempt's clips and gyro file are in (`ClipsInFlight`, at
 most 15 s), so that one event counts them; `CubeService` records how the address came, never which,
 and a failure's kind, never its message (which may name the address typed); `UploadService` diffs
-the queue's views into `upload.state` per transition; the service itself watches the settings the
+the queue's views into `upload.state` once per state reached; the service itself watches the settings the
 checklists name, the wake lock, the storage's persistence and the network, and records the pages
 from the router (injected optionally, so the services' unit tests need none). `cloudEvent` in core
 sanitizes every event (a list reads as one text) and scrubs MAC addresses and emails out of every

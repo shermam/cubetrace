@@ -169,7 +169,8 @@ export class UploadService {
   private freed = 0;
   private freedBytes = 0;
   /** Each attempt's upload state as the view last said it (`<session>/<index>`), for `upload.state`. */
-  private readonly states = new Map<string, AttemptView['state']>();
+  /** The states each attempt's upload has been seen in by this page load, for `upload.state`. */
+  private readonly states = new Map<string, Set<AttemptView['state']>>();
   /** What held the queue as the view last said it, for `upload.paused`. */
   private pause: string | null = null;
   /** The queue's last error said, for `error.app`. */
@@ -334,18 +335,21 @@ export class UploadService {
   }
 
   /**
-   * The events of the queue's progress (T3.9, docs/DIAGNOSTICS.md): `upload.state` at each change
-   * of an attempt's state (pending, uploading, done, failed; not waiting for its clips),
-   * `upload.paused` and `upload.resumed` as what holds the queue changes, and `error.app` for an
-   * error of the queue itself, each once.
+   * The events of the queue's progress (T3.9, docs/DIAGNOSTICS.md): `upload.state` the first time
+   * an attempt's upload is seen in each state (pending, uploading, done, failed; not waiting for its
+   * clips; the queue moves an attempt between pending and uploading as it works through its files,
+   * which is not repeated: `tries` and `sent` tell), `upload.paused` and `upload.resumed` as what
+   * holds the queue changes, and `error.app` for an error of the queue itself, each once.
    */
   private followView(view: QueueView): void {
     for (const attempt of [...view.active, ...view.recent]) {
       const key = `${attempt.sessionId}/${String(attempt.index)}`;
-      if (this.states.get(key) === attempt.state) {
+      const seen = this.states.get(key) ?? new Set<AttemptView['state']>();
+      if (seen.has(attempt.state)) {
         continue;
       }
-      this.states.set(key, attempt.state);
+      seen.add(attempt.state);
+      this.states.set(key, seen);
       if (attempt.state === 'waiting') {
         continue;
       }

@@ -117,7 +117,7 @@ know it (a camera without a frame rate, a cube without a production date).
 | `clip.failed` | A clip could not be saved (`cubetrace: clip failed: …`). | `segment`, `reason` |
 | `audio.missing` | A clip has no sound although the sound is recorded. | `segment`, `cause` |
 | `sync.check` | A sync check ended (`cubetrace: sync check …`). | `outcome` (`ok`, `failed`), `reason` and `message` (failed), `camera` (the label in the session), `offsetMs`, `spreadMs`, `previousOffsetMs`, `matched`, `of` (turns), `kept`, `moves`, `frames`, `durationMs`, `frameIntervalMs`, `wide` (the framing rectangle was the whole frame), `costMs` (per frame), `saved` (into the session) |
-| `upload.state` | An attempt's upload changed state (`pending`, `uploading`, `done`, `failed`; not `waiting` for its clips). | `state`, `files`, `bytes`, `sent`, `tries`, `error`, `failedFile` |
+| `upload.state` | An attempt's upload reached a state for the first time in this page load (`pending`, `uploading`, `done`, `failed`; not `waiting` for its clips; the queue's moves back and forth between pending and uploading as it works through the files are not repeated). | `state`, `files`, `bytes`, `sent`, `tries`, `error`, `failedFile` |
 | `upload.paused` | What holds the queue changed: paused. | `reason` (`offline`, `wifi`, `quota`), `untilMs` (quota), `left` (attempts) |
 | `upload.resumed` | The queue goes on. | – |
 | `storage.deleted` | Uploaded clips were deleted from the device by policy. | `files`, `bytes`, `usageBefore`, `usageAfter`, `percent` (after) |
