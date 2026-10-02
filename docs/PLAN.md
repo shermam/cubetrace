@@ -1703,10 +1703,17 @@ states, the files searched for an address) and stay the owner's with the round, 
 keep something for the owner's eyes beside their evidence. The script lives under `functions/scripts/`
 (firebase-admin is the functions' dependency; the deploy ignores the folder), runs on Node 22 as it
 is, reads each account's events in turn rather than a collection group (no index to deploy), and
-names an account by its uid's first characters. Measured in the end-to-end flow: 3 events per
-attempt without uploads (`attempt.done` and two `clip.saved`), 6 with them (three `upload.state`),
-so about 1,000 a day at 150 attempts, under the cap and far under Firestore's 20,000 free writes.
-The QA view reads the events beside the index (one more read). The initial bundle is 264.57 kB raw
+names an account by its uid's first characters. Measured in the end-to-end flows (annotated
+`events per attempt`): 3 events per attempt without uploads (`attempt.done` and two `clip.saved`),
+6 with them (three `upload.state`); the demo flow's steady-state attempt shows 7, four of them the
+demo cube's reconnection at each replay, which a real cube does not do. So about 1,000 a day at
+150 attempts, under the cap and far under Firestore's 20,000 free writes.
+Found on the way: a batch flushed at `pagehide` is not sure to reach the SDK's cache when the page
+unloads at once (a reload, a closed tab), so the last seconds of events before one can be lost
+(`docs/DIAGNOSTICS.md`; the cloud e2e awaits the attempt's events on the timer page for that reason);
+and the kind `download` had no dot, so `cloudEvent` refused it in silence until the type of
+`record`'s kind asked for one (it is `files.downloaded`). The QA view reads the events beside the
+index (one more read). The initial bundle is 264.57 kB raw
 against `main`'s 264.63 (72.65 kB transferred against 72.57): the same code but for the minifier's
 names; the writer rides in the chunk of `SettingsService` and the services, which every page loads
 right after the first render, 68.8 kB raw against 57.7 (21.3 kB transferred against 18.2), and the

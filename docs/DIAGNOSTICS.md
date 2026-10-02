@@ -52,7 +52,12 @@ services, never a template), never throws and never waits. An event is queued in
 queue goes to Firestore in one batch (`AccountBackend.saveEvents`, a `writeBatch`) 5 s after its
 first event, as soon as 20 are queued, and when the page is hidden (`visibilitychange`) or goes away
 (`pagehide`); offline, Firestore's persistent cache carries the batch until the network is back,
-across reloads. The session and attempt under way (which `SessionService` keeps) go on every event
+across reloads. A batch flushed as the page goes away is not sure to arrive, though: the SDK
+persists it in a moment the page may not have when it unloads at once (a reload, a closed tab), so
+the last seconds of events before one can be lost; a page hidden and alive (a phone backgrounded,
+another tab in front) has that moment, and the app's own navigation never unloads. An attempt's
+`attempt.done` waits for its clips and gyro file (at most 15 s) and is lost the same way if the page
+unloads before. The session and attempt under way (which `SessionService` keeps) go on every event
 recorded without a scope of its own.
 
 - **Signed in only.** With no account signed in, the events wait in a ring of the last 500 and go
@@ -64,11 +69,15 @@ recorded without a scope of its own.
   on again, it records `settings.changed` (`diagnostics` true) and goes on.
 - **The daily cap.** A device writes at most 2,000 events a local day, counted in `localStorage`
   (`cubetrace.diagnostics`, with the build last seen, for `app.start`); past it, only the `error.*`
-  kinds go until the next day. At the owner's cadence (130 to 150 attempts a day) a device writes
-  about 7 events per attempt with a camera and uploads (`attempt.done`, two `clip.saved`, three
-  `upload.state`, with a `page.viewed` or `cube.*` now and then), so about 1,000 to 1,100 a day,
-  within the cap and far under Firestore's free tier of 20,000 writes a day (the session index's
-  writes, about three per attempt, come on top).
+  kinds go until the next day. An attempt with the camera on costs 3 events (`attempt.done`, two
+  `clip.saved`), 6 with uploads (three `upload.state`): the end-to-end flows measure it and annotate
+  their reports (`events per attempt`; the demo flow shows 7, four of them the demo cube's
+  reconnection at each replay, `cube.disconnected`, `cube.connected` and the wake lock going and
+  coming with it, which a real cube's session does not have). At the owner's cadence (130 to 150
+  attempts a day) a device writes about 900 events of its attempts and about a hundred of the rest
+  (the starts, the pages, the cube, the camera, the settings), so about 1,000 a day, within the cap
+  and far under Firestore's free tier of 20,000 writes a day (the session index's writes, about
+  three per attempt, come on top).
 - **What goes wrong stays out.** A kind that is not one, facts that cannot be made into an event, a
   batch the server refuses: said once in the console (`cubetrace: diagnostics: …`) and dropped; the
   diagnostics never record themselves.
@@ -85,7 +94,7 @@ know it (a camera without a frame rate, a cube without a production date).
 | `account.signout` | Sign out, written before the account goes. | `installed` |
 | `network.changed` | The window's `online` or `offline` event. | `online` |
 | `page.viewed` | The router ended a navigation (a session page carries the session viewed). | `page` (`timer`, `sessions`, `session`, `qa`, `settings`, `probe`, `capture-lab`), `demo` (the address asked for the demo) |
-| `settings.changed` | A setting the checklists name changed (not its first value): `hostLabel`, `inspection`, `autoAdvance`, `scrambleOverPicture`, `idleDisconnectMinutes`, `cameraResolution`, `cameraFrameRate`, `sharpnessThreshold`, `recordAudio`, `microphoneProcessing`, `videoQuality`, `demoSpeed`, `uploadSessions`, `wifiOnly`, `keepLocalCopies`, `keepScreenOn` (Settings → Keep the screen on), `diagnostics`. | `key`, `value` |
+| `settings.changed` | A setting the checklists name changed (not its first value): `hostLabel`, `inspection`, `autoAdvance`, `scrambleOverPicture`, `idleDisconnectMinutes`, `cameraResolution`, `cameraFrameRate`, `sharpnessThreshold`, `recordAudio`, `microphoneProcessing`, `videoQuality`, `demoSpeed`, `uploadSessions`, `wifiOnly`, `keepLocalCopies`, `diagnostics`. Settings → Keep the screen on is no setting: `wake.lock` says whether the lock is wanted. | `key`, `value` |
 | `wake.lock` | The screen wake lock's status changed. | `status` (`active`, `inactive`, `error`, `unsupported`), `wanted` (the Settings switch) |
 | `storage.persistence` | The browser's answer on keeping the data changed (Keep my data, the first session). | `state` (`persistent`, `best-effort`, `unsupported`), `refused` |
 | `cube.connected` | A cube said what it is, right after connecting. | `kind` (`gan`, or `fake` for the demo cube), `model`, `hardware`, `firmware`, `gyro`, `productDate`, `mac` (`stored`: Settings' list, typed here before or synced from the account; `driver`: read by Chrome from the advertisement, the flag; `typed`: the connect dialog; `none`: the demo), `ms` (from the click to the connection), `battery` |
@@ -168,7 +177,7 @@ with the camera on and signed in, on both devices, is the round.
 |---|---|---|---|
 | 1.7.1 | Installed on the ThinkPhone: opened from the home screen, standalone | `app.start` | the icon and the name on the home screen |
 | 1.7.2 | Rotate the phone: the app follows, nothing scrolls sideways | – | the layout in landscape |
-| 1.7.3 | Keep the screen on: "Screen on", kept past the timeout and across apps; off: "Screen may sleep" | `settings.changed`, `wake.lock` | the screen staying on past the timeout |
+| 1.7.3 | Keep the screen on: "Screen on", kept past the timeout and across apps; off: "Screen may sleep" | `wake.lock` | the screen staying on past the timeout |
 | 1.7.4 | Keep my data in the installed app: Persistent | `app.start`, `storage.persistence` | – |
 | 1.7.5 | The footer shows the build; after a deploy the new commit appears from the second launch | `app.start` | – |
 | 1.7.6 | Airplane mode, opened from the home screen: it opens from the cache | `app.start` | – |

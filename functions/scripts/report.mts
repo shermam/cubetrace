@@ -914,22 +914,16 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     section: 'T1.7 — PWA on the phone',
     title:
       'Keep the screen on: "Screen on", kept past the timeout and across apps; off: "Screen may sleep"',
-    kinds: ['settings.changed', 'wake.lock'],
+    kinds: ['wake.lock'],
     eyes: 'the screen staying on past the timeout',
     check: (q) => {
-      const on = q.onPhone(
-        'settings.changed',
-        (e) => text(e, 'key') === 'keepScreenOn' && e.data['value'] === true,
-      );
-      const off = q.onPhone(
-        'settings.changed',
-        (e) => text(e, 'key') === 'keepScreenOn' && e.data['value'] === false,
-      );
       const locks = q.onPhone('wake.lock');
+      const on = locks.filter((e) => e.data['wanted'] === true);
+      const off = locks.filter((e) => e.data['wanted'] === false);
       return found(
         on,
-        `switched on ${String(on.length)} times and off ${String(off.length)} on a phone; ${count(locks, 'lock change')}: ${[...new Set(locks.map((e) => text(e, 'status')))].join(', ')}`,
-        'the switch never turned on on a phone',
+        `wanted ${String(on.length)} times and released ${String(off.length)} on a phone; ${count(locks, 'lock change')}: ${[...new Set(locks.map((e) => text(e, 'status')))].join(', ')}`,
+        'the lock was never wanted on a phone',
       );
     },
   },

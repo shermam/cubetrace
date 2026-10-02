@@ -1650,11 +1650,15 @@ of `fake-browser.ts`, with `FakeAccountBackend.saveEvents` keeping the batches; 
 that already ran now also runs the writer, with the events in the ring (no account) or in the fake.
 
 **What an attempt costs.** The end-to-end flows annotate their reports with the events of one
-attempt: 3 without uploads (`attempt.done`, two `clip.saved`) and 6 with them (`upload.state`
-pending, uploading, done), so a day of 150 attempts writes about 900 events of the attempts and
-about a hundred of the rest (the starts, the pages, the cube, the camera), within the cap of 2,000
-a device and far under the free tier's 20,000 writes a day; the index's writes (a session's, about
-three per attempt) come on top.
+attempt (`events per attempt`): 3 without uploads (`attempt.done`, two `clip.saved`) and 6 with
+them (`upload.state` pending, uploading, done). The demo flow measures a second, steady-state
+attempt and shows 7: the 3, plus the demo cube's reconnection at each replay (`cube.disconnected`,
+`cube.connected`, and `wake.lock` twice, the lock going and coming with the cube), which a real
+cube's session does not have; the cloud flow's first attempt carries its session's setup too (the
+camera's and the recording's start, the cubes synced, the attempt deleted). So a day of 150
+attempts writes about 900 events of the attempts and about a hundred of the rest (the starts, the
+pages, the cube, the camera, the settings), within the cap of 2,000 a device and far under the free
+tier's 20,000 writes a day; the index's writes (a session's, about three per attempt) come on top.
 
 **Sizes** (`ng build`, 2026-10-02, against `main` at eccedc1): the initial bundle is 264.57 kB raw,
 72.65 kB transferred (264.63 and 72.57 before): `main` is the same code but for the minifier's names

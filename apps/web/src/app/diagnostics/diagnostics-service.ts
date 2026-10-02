@@ -405,7 +405,6 @@ export class DiagnosticsService {
       uploadSessions: () => settings.uploadSessions(),
       wifiOnly: () => settings.wifiOnlySetting(),
       keepLocalCopies: () => settings.keepLocalCopies(),
-      keepScreenOn: () => this.wakeLock.wanted(),
     };
     let last: Record<string, string | number | boolean> | null = null;
     effect(() => {

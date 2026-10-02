@@ -394,7 +394,7 @@ describe('DiagnosticsService', () => {
     settings.setVideoQuality('high');
     settings.setHostLabel('office-mbp');
     TestBed.tick();
-    // Settings → Keep the screen on: the switch, and the lock it takes.
+    // Settings → Keep the screen on: the lock it takes (wake.lock says it is wanted; no setting).
     await TestBed.inject(WakeLockService).request();
     TestBed.tick();
     diagnostics.flush();
@@ -407,7 +407,6 @@ describe('DiagnosticsService', () => {
       { key: 'inspection', value: true },
       { key: 'idleDisconnectMinutes', value: 1 },
       { key: 'videoQuality', value: 'high' },
-      { key: 'keepScreenOn', value: true },
     ]);
     expect(events().find((event) => event.kind === 'wake.lock')?.data).toEqual({
       status: 'active',

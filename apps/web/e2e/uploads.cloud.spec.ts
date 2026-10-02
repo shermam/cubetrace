@@ -150,6 +150,33 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
   );
   await expect(page.getByTestId('save-status')).toHaveText('Saved');
 
+  // The attempt's diagnostics events (T3.9) reach the emulator from this page: attempt.done waits
+  // for the clips and the gyro file (at most 15 s), and a batch goes within 5 s of its first event.
+  // They are awaited here because a batch flushed as the page goes away is not sure to reach the
+  // SDK's cache before the unload (docs/DIAGNOSTICS.md).
+  const { uid } = (await authAccount(GRACE.email)) ?? { uid: '' };
+  expect(uid).not.toBe('');
+  type EventDocument = {
+    kind: string;
+    session?: string;
+    attempt?: number;
+    data: Record<string, unknown>;
+  };
+  const eventsOf = async (): Promise<Record<string, EventDocument>> =>
+    (await firestoreCollection(`users/${uid}/events`)) as Record<string, EventDocument>;
+  await expect
+    .poll(
+      async () =>
+        Object.values(await eventsOf()).filter(
+          (event) =>
+            event.session === sessionId &&
+            event.attempt === 1 &&
+            (event.kind === 'attempt.done' || event.kind === 'clip.saved'),
+        ).length,
+      { timeout: 30_000 },
+    )
+    .toBe(3);
+
   // Marked as a real cube's session, the next page load indexes it (the catch-up) and uploads it.
   await markReal(page, sessionId);
   await page.goto('/sessions');
@@ -166,8 +193,6 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
   ).toHaveText('both');
 
   // The index, as the rules let the app write it and the functions completed it.
-  const { uid } = (await authAccount(GRACE.email)) ?? { uid: '' };
-  expect(uid).not.toBe('');
   const session = (await firestoreDocument(`sessions/${sessionId}`)) ?? {};
   expect(isSessionDocument(session), JSON.stringify(isSessionDocument.errors)).toBe(true);
   expect(session).toMatchObject({
@@ -246,6 +271,21 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
     files: 7,
   });
 
+  // The upload's states are events of this page; their batch goes within 5 s of the first and is
+  // awaited before the page is left (a batch flushed at pagehide is not sure to arrive).
+  await expect
+    .poll(
+      async () =>
+        Object.values(await eventsOf()).some(
+          (event) =>
+            event.kind === 'upload.state' &&
+            event.session === sessionId &&
+            event.data['state'] === 'done',
+        ),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+
   // The session's page: its attempt's row says it is uploaded.
   await page.goto(`/sessions/${sessionId}`);
   await expect(solveRows(page)).toHaveCount(1);
@@ -262,25 +302,34 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
 
   // The diagnostics events (T3.9), under the account through the rules: the start, the sign-in,
   // the session, the cube, the camera, the attempt, its clips and its upload's states, each valid
-  // against the schema, in batches the page wrote within 5 s or as it went away.
-  type EventDocument = {
-    kind: string;
-    session?: string;
-    attempt?: number;
-    data: Record<string, unknown>;
-  };
-  const eventsOf = async (): Promise<Record<string, EventDocument>> =>
-    (await firestoreCollection(`users/${uid}/events`)) as Record<string, EventDocument>;
+  // against the schema, in batches the pages wrote within 5 s.
+  // The upload's states come from the pages since; the attempt's events are in already.
+  const expectedKinds = [
+    'app.start',
+    'account.signin',
+    'session.started',
+    'cube.connected',
+    'camera.on',
+    'recording.started',
+    'attempt.done',
+    'clip.saved',
+    'upload.state',
+    'page.viewed',
+  ];
   await expect
     .poll(
-      async () =>
-        Object.values(await eventsOf()).some(
+      async () => {
+        const written = Object.values(await eventsOf());
+        const kinds = new Set(written.map((event) => event.kind));
+        const uploaded = written.some(
           (event) =>
             event.kind === 'upload.state' &&
             event.session === sessionId &&
             event.data['state'] === 'done',
-        ),
-      { timeout: 20_000 },
+        );
+        return uploaded && expectedKinds.every((kind) => kinds.has(kind));
+      },
+      { timeout: 30_000 },
     )
     .toBe(true);
   const events = await eventsOf();
@@ -291,20 +340,7 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
     );
   }
   const kinds = Object.values(events).map((event) => event.kind);
-  expect(kinds).toEqual(
-    expect.arrayContaining([
-      'app.start',
-      'account.signin',
-      'session.started',
-      'cube.connected',
-      'camera.on',
-      'recording.started',
-      'attempt.done',
-      'clip.saved',
-      'upload.state',
-      'page.viewed',
-    ]),
-  );
+  expect(kinds).toEqual(expect.arrayContaining(expectedKinds));
   const ofAttempt = Object.values(events).filter(
     (event) => event.session === sessionId && event.attempt === 1,
   );

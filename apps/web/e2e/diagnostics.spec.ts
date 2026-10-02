@@ -63,12 +63,30 @@ test('signed in, a demo attempt with the camera on leaves its events in the acco
 }) => {
   test.setTimeout(150_000);
   await fakeAccount(page);
+  // Every event carries the device's label of its moment, the start's included, so the label is in
+  // the settings before the first page loads (and left alone from then on: the page writes them).
+  await page.addInitScript((key: string) => {
+    if (localStorage.getItem(key) === null) {
+      localStorage.setItem(key, JSON.stringify({ hostLabel: 'e2e-laptop' }));
+    }
+  }, 'cubetrace.settings');
 
-  // The start and the sign-in: the events raised before the sign-in wait in memory and go with it.
+  // The start and the sign-in: the events raised before the sign-in wait in memory and go with it,
+  // a setting changed among them.
   await page.goto('/settings');
-  const label = page.getByTestId('host-label');
-  await label.fill('e2e-laptop');
-  await label.blur();
+  await expect(page.getByTestId('host-label')).toHaveValue('e2e-laptop');
+  const idle = page.getByTestId('idle-minutes');
+  await idle.fill('30');
+  await idle.blur();
+  await expect(idle).toHaveValue('30');
+  const platform = await page.evaluate(() => {
+    // As hostPlatform (settings-service.ts) reads it: the client hints, which Chromium has.
+    const hints: unknown = Reflect.get(navigator, 'userAgentData');
+    const hinted: unknown =
+      typeof hints === 'object' && hints !== null ? Reflect.get(hints, 'platform') : undefined;
+    return typeof hinted === 'string' ? hinted : '';
+  });
+  expect(platform).not.toBe('');
   const account = page.getByRole('region', { name: 'Account' });
   await expect(account.getByTestId('diagnostics')).toBeChecked();
   await expect(account.getByTestId('diagnostics-hint')).toContainText(
@@ -119,7 +137,7 @@ test('signed in, a demo attempt with the camera on leaves its events in the acco
     expect(id).toMatch(/^\d{13}-[0-9a-f]{8}$/);
     expect(id.slice(0, 13)).toBe(String(Math.floor(event.tsMs)));
     expect(isEvent(event), `${event.kind}: ${JSON.stringify(isEvent.errors)}`).toBe(true);
-    expect(event.device).toEqual({ label: 'e2e-laptop', platform: 'Linux', installed: false });
+    expect(event.device).toEqual({ label: 'e2e-laptop', platform, installed: false });
     expect(event.app).toEqual({ version: build[0], commit: build[1] });
   }
   const kinds = events.map((entry) => entry.event.kind);
@@ -141,10 +159,12 @@ test('signed in, a demo attempt with the camera on leaves its events in the acco
   );
   const of = (kind: string): Kept['event'][] =>
     events.filter((entry) => entry.event.kind === kind).map((entry) => entry.event);
-  expect(of('account.signin')).toEqual([
-    expect.objectContaining({ data: { outcome: 'ok', installed: false } }),
+  // The click signed in; the one page load since (the demo's) resumed the account.
+  expect(of('account.signin').map((event) => event.data)).toEqual([
+    { outcome: 'ok', installed: false },
+    { outcome: 'resumed', installed: false },
   ]);
-  expect(of('settings.changed')[0].data).toEqual({ key: 'hostLabel', value: 'e2e-laptop' });
+  expect(of('settings.changed')[0].data).toEqual({ key: 'idleDisconnectMinutes', value: 30 });
   expect(of('session.started').at(-1)).toMatchObject({
     session: sessionId,
     data: { host: 'e2e-laptop', hardware: 'simulated', gyro: true, storage: 'opfs' },
@@ -200,18 +220,56 @@ test('signed in, a demo attempt with the camera on leaves its events in the acco
     expect(clip.data['bytes']).toEqual(expect.any(Number));
     expect(clip.data['frames']).toEqual(expect.any(Number));
   }
-  // The events of this one attempt, for the costs (docs/DIAGNOSTICS.md): the done, its clips, and
-  // nothing else of it in this flow (the uploads' events come with a real cube's session).
-  const perAttempt = events.filter(
+  // The events in the scope of this first attempt include the camera's and the recording's start,
+  // which happened while it was under way. The cost of an attempt (docs/DIAGNOSTICS.md) is measured
+  // on a second one, in the steady state: its done and its clips, and nothing else of it in this
+  // flow (the uploads' events come with a real cube's session).
+  const firstAttempt = events.filter(
     (entry) => entry.event.session === sessionId && entry.event.attempt === 1,
   );
   test.info().annotations.push({
-    type: 'events per attempt',
-    description: `${String(perAttempt.length)}: ${perAttempt.map((entry) => entry.event.kind).join(', ')}`,
+    type: 'events of the first attempt',
+    description: `${String(firstAttempt.length)}: ${firstAttempt.map((entry) => entry.event.kind).join(', ')}`,
   });
-  expect(perAttempt.length).toBeLessThanOrEqual(8);
+  await replayDemo(page);
+  await expectSolves(page, 2);
+  await expect(solveRows(page).getByTestId('clip-badge')).toHaveCount(2, { timeout: 20_000 });
+  await expect
+    .poll(
+      async () =>
+        (await kept(page)).some(
+          (entry) => entry.event.kind === 'attempt.done' && entry.event.attempt === 2,
+        ),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+  const perAttempt = (await kept(page)).filter(
+    (entry) => entry.event.session === sessionId && entry.event.attempt === 2,
+  );
+  const perAttemptKinds = perAttempt.map((entry) => entry.event.kind);
+  test.info().annotations.push({
+    type: 'events per attempt',
+    description: `${String(perAttempt.length)}: ${perAttemptKinds.join(', ')}`,
+  });
+  expect(perAttemptKinds.filter((kind) => kind === 'attempt.done')).toHaveLength(1);
+  expect(perAttemptKinds.filter((kind) => kind === 'clip.saved')).toHaveLength(2);
+  // The rest is the demo's replay, which disconnects and reconnects the demo cube (the wake lock
+  // goes and comes with it); a real cube stays connected across attempts.
+  expect(
+    perAttemptKinds.filter(
+      (kind) =>
+        ![
+          'attempt.done',
+          'clip.saved',
+          'cube.connected',
+          'cube.disconnected',
+          'wake.lock',
+        ].includes(kind),
+    ),
+  ).toEqual([]);
+  expect(perAttempt.length).toBeLessThanOrEqual(7);
   // Nothing an event must never carry: no address, no email, no user agent.
-  const text = JSON.stringify(events);
+  const text = JSON.stringify(await kept(page));
   expect(text).not.toMatch(/[0-9a-f]{2}(:[0-9a-f]{2}){5}/iu);
   expect(text).not.toContain('@example.com');
   expect(text).not.toContain('Mozilla/');
@@ -224,7 +282,7 @@ test('signed in, a demo attempt with the camera on leaves its events in the acco
   await expect(device).toHaveAttribute('data-device', 'e2e-laptop');
   await expect(device.getByTestId('diag-build')).toHaveText(`${build[0]} · ${build[1]}`);
   await expect(page.locator('[data-testid="diag-kind"][data-kind="attempt.done"]')).toContainText(
-    '1',
+    '2',
   );
   await expect(page.locator('[data-testid="diag-kind"][data-kind="app.start"]')).toBeVisible();
   await expect(page.getByTestId('diag-no-failures')).toHaveText('No failure among them.');
