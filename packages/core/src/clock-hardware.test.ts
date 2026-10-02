@@ -47,6 +47,15 @@ const ATTEMPTS = EXPORTS.flatMap(({ file, cube, attempts }) =>
   attempts.map((attempt) => ({ at: `${file} #${String(attempt.index)}`, cube, attempt })),
 );
 
+/** `record` without the fields `keys` (the ones T3.7 added, which the files written before lack). */
+function without<T extends object>(record: T, ...keys: (keyof T)[]): Partial<T> {
+  const copy: Partial<T> = { ...record };
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
+  return copy;
+}
+
 /** The fit of `moves`, every one of them a sample. */
 function clockOf(moves: AttemptRecord['moves']): CubeClockFit {
   const fit = new CubeClockFit();
@@ -219,7 +228,7 @@ describe('the cube clock of the real-hardware exports (fixtures/hardware)', () =
       expect(
         {
           ...record,
-          moves: record.moves.map(({ serial: _serial, packetLast: _packetLast, ...move }) => move),
+          moves: record.moves.map((move) => without(move, 'serial', 'packetLast')),
           clock: null,
           video: [],
         },

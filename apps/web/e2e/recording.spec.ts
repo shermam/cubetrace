@@ -3,8 +3,10 @@ import { readFile, stat } from 'node:fs/promises';
 import { type Download, type Page, expect, test } from '@playwright/test';
 import {
   FRAMES_SCHEMA,
+  GYRO_SCHEMA,
   type AttemptRecord,
   type FramesJson,
+  type GyroJson,
   type VideoClip,
 } from '@cubetrace/core';
 import { Ajv2020 } from 'ajv/dist/2020';
@@ -326,6 +328,168 @@ test('demo solves with the camera on get their two clips, which play and downloa
   console.log(`recording: ${JSON.stringify(report)}`);
   test.info().annotations.push({ type: 'recording', description: JSON.stringify(report) });
   expect(Math.abs(middle(on) - middle(off))).toBeLessThan(15);
+});
+
+test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with the camera off and on; the record names it and the download has it (T3.7)", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const isGyro = new Ajv2020({ allowUnionTypes: true, allErrors: true }).compile(GYRO_SCHEMA);
+  const isFrames = new Ajv2020({ allowUnionTypes: true, allErrors: true }).compile(FRAMES_SCHEMA);
+
+  /** The gyro file of attempt `index`, checked against its record and the window asked for. */
+  async function checkGyro(sessionId: string, index: number): Promise<AttemptRecord> {
+    const record = JSON.parse(
+      await attemptText(page, sessionId, index, 'attempt.json'),
+    ) as AttemptRecord;
+    const what = `attempt ${String(index)}`;
+    expect(record.app, what).toEqual({
+      version: expect.any(String) as unknown,
+      commit: expect.any(String) as unknown,
+    });
+    expect(record.gyro, what).not.toBeNull();
+    const gyro = JSON.parse(await attemptText(page, sessionId, index, 'gyro.json')) as GyroJson;
+    expect(isGyro(gyro), JSON.stringify(isGyro.errors)).toBe(true);
+    expect(gyro).toMatchObject({ schema: 1, session: sessionId, index, app: record.app });
+    const { scrambleStart, scrambleShown, solveEnd } = record.events;
+    const from = (scrambleStart ?? scrambleShown) - SCRAMBLE_LEAD_MS;
+    const to = (solveEnd ?? 0) + TAIL_MS;
+    const samples = gyro.dtMs.length;
+    const last = gyro.t0HostMs + gyro.dtMs.reduce((sum, dt) => sum + dt, 0);
+    // The window asked for, to a sample's interval (20 ms at 50 Hz, a little more on a busy
+    // machine): the first sample at or after its start, the last at or before its end.
+    expect(
+      gyro.t0HostMs,
+      `${what}: begins ${String(gyro.t0HostMs - from)} ms after the window`,
+    ).toBeGreaterThanOrEqual(from);
+    expect(
+      last,
+      `${what}: ends ${String(to - last)} ms before the window's end`,
+    ).toBeLessThanOrEqual(to);
+    expect(to - last, what).toBeLessThan(200);
+    expect(gyro.q, what).toHaveLength(samples * 4);
+    expect(gyro.v, what).toHaveLength(samples * 3);
+    expect(gyro.dtMs[0]).toBe(0);
+    // Turning while the replay turns: a velocity, and an orientation that changes.
+    expect(
+      gyro.v?.some((v) => v !== 0),
+      what,
+    ).toBe(true);
+    expect(new Set(gyro.q.filter((_, k) => k % 4 === 2)).size, what).toBeGreaterThan(1);
+    expect(record.gyro, what).toEqual({
+      file: 'gyro.json',
+      samples,
+      fromHostMs: gyro.t0HostMs,
+      toHostMs: expect.closeTo(last, 1) as unknown,
+      rateHz: expect.any(Number) as unknown,
+      truncatedStart: gyro.truncatedStart,
+    });
+    expect(record.gyro?.rateHz, what).toBeGreaterThan(30);
+    expect(record.gyro?.rateHz, what).toBeLessThan(70);
+    return record;
+  }
+
+  // Attempt 1, without a camera: the demo starts with the page, so its window begins before the
+  // first sample (truncatedStart), and the file comes a second after the solve.
+  await page.goto(demoPath(0, SPEED, undefined, true));
+  await expectSolves(page, 1);
+  await expect(page.getByTestId('timer-status')).toHaveAttribute('data-phase', 'scrambling', {
+    timeout: 30_000,
+  });
+  const sessionId = (await currentSessionId(page)) ?? '';
+  await expect
+    .poll(async () => Object.keys(await attemptFiles(page, sessionId, 1)).sort(), {
+      timeout: 15_000,
+    })
+    .toEqual(['attempt.json', 'gyro.json']);
+  await expect(page.getByTestId('save-status')).toHaveText('Saved');
+  const first = await checkGyro(sessionId, 1);
+  expect(first.video).toEqual([]);
+  expect(first.gyro?.truncatedStart).toBe(true);
+  expect(first.moves.every((move) => typeof move.serial === 'number' && move.packetLast)).toBe(
+    true,
+  );
+  expect(first.resyncs).toEqual([]);
+
+  // Attempt 2, with the camera on: the clips, their frames files naming the build, and the gyro
+  // file, whose window reaches back 2 s (the samples of the connection before the replay).
+  await page.getByTestId('camera-section').locator('summary').click();
+  await page.getByTestId('camera-toggle').click();
+  await expect(page.getByTestId('recording-state')).toHaveAttribute('data-status', 'recording', {
+    timeout: 15_000,
+  });
+  const stats = page.getByTestId('recording-stats');
+  await expect
+    .poll(async () => Number(await stats.getAttribute('data-buffer-seconds')), { timeout: 20_000 })
+    .toBeGreaterThanOrEqual(4);
+  await replayDemo(page);
+  await expectSolves(page, 2);
+  const badges = solveRows(page).getByTestId('clip-badge');
+  await expect(badges.first()).toHaveText(/^\s*2 clips, [\d.]+ [kM]B\s*$/, { timeout: 20_000 });
+  await expect
+    .poll(async () => Object.keys(await attemptFiles(page, sessionId, 2)).length, {
+      timeout: 15_000,
+    })
+    .toBe(6);
+  await expect(page.getByTestId('save-status')).toHaveText('Saved');
+  const second = await checkGyro(sessionId, 2);
+  const camera = second.video[0].camera;
+  expect(Object.keys(await attemptFiles(page, sessionId, 2)).sort()).toEqual(
+    [
+      'attempt.json',
+      'gyro.json',
+      `${camera}.scramble.mp4`,
+      `${camera}.scramble.frames.json`,
+      `${camera}.solve.mp4`,
+      `${camera}.solve.frames.json`,
+    ].sort(),
+  );
+  expect(second.gyro?.truncatedStart).toBe(false);
+  for (const clip of second.video) {
+    const frames = JSON.parse(await attemptText(page, sessionId, 2, clip.framesFile)) as FramesJson;
+    expect(isFrames(frames), JSON.stringify(isFrames.errors)).toBe(true);
+    expect(frames.app).toEqual(second.app);
+  }
+
+  // The download names the six files.
+  const downloads: Download[] = [];
+  page.on('download', (download) => downloads.push(download));
+  await badges.first().click();
+  const viewer = page.getByTestId('clip-viewer');
+  await expect(viewer).toBeVisible();
+  await expect(viewer).toContainText(
+    'both clips, their frame times, the gyroscope and attempt.json',
+  );
+  await viewer.getByTestId('clip-download').click();
+  await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(6);
+  const prefix = `cubetrace-session-${sessionId}-attempt-0002-`;
+  expect(downloads.map((download) => download.suggestedFilename()).sort()).toEqual(
+    [
+      `${prefix}${camera}.scramble.mp4`,
+      `${prefix}${camera}.scramble.frames.json`,
+      `${prefix}${camera}.solve.mp4`,
+      `${prefix}${camera}.solve.frames.json`,
+      `${prefix}gyro.json`,
+      `${prefix}attempt.json`,
+    ].sort(),
+  );
+  const downloadedGyro = downloads.find((download) =>
+    download.suggestedFilename().endsWith('gyro.json'),
+  );
+  expect(JSON.parse(await readFile((await downloadedGyro?.path()) ?? '', 'utf8'))).toEqual(
+    JSON.parse(await attemptText(page, sessionId, 2, 'gyro.json')),
+  );
+  await viewer.getByRole('button', { name: 'Close' }).click();
+
+  // The export: valid against schema 2, both attempts with their gyro summaries.
+  const exported = await exportSession(page);
+  expect(exported.attempts.map((attempt) => attempt.gyro?.samples)).toEqual([
+    first.gyro?.samples,
+    second.gyro?.samples,
+  ]);
+  expect(exported.session.cube.gyro).toBe(true);
+  expect(exported.session.battery).toEqual([{ hostMs: expect.any(Number) as unknown, level: 100 }]);
+  expect(exported.session.notes).toBe('');
 });
 
 test('saving a 10 s clip while recording loses no frame: none dropped, no double interval after it', async ({

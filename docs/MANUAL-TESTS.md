@@ -197,9 +197,9 @@ cubetrace:cubetrace-data/users/` totals them, and `rclone copy cubetrace:cubetra
 - An attempt uploads once its clips are saved, a second or two after it ends; `session.json` goes
   again about two minutes after the session's last change, not with every attempt.
 - The day's quota, per account and UTC day: 6 GB and 1,200 files signed, every signature counted. An
-  attempt with its clips is five files, so at most 80 attempts a day upload (fewer with
-  `session.json`); past it, the uploads wait until 00:00 UTC (21:00 in Brasília), and the panel says
-  until when.
+  attempt with its clips and its gyro file is six files (T3.7), so at most 200 attempts a day upload
+  (fewer with `session.json`); past it, the uploads wait until 00:00 UTC (21:00 in Brasília), and the
+  panel says until when.
 - Only one tab uploads at a time (a Web Lock); another tab's attempts go at the queue's next look at
   the device's sessions, within 10 minutes, or at the next start.
 - The QA view's "last synced" is this device's; another device's is not stored.
@@ -811,3 +811,20 @@ the documents under `users/<uid>/cubes`.
 - [ ] A session's export (Sessions → Export) from each device, and the `attempt.json` and
   `session.json` of an uploaded attempt in the bucket (T3.3): search them for the address, with and
   without its colons: it is in none.
+
+## After T3.7 — the cube's whole record
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T3.7, on the MacBook
+with the GAN 12 ui FreePlay (and once with the GAN 356 i3), signed in. Next to the item, write the
+device, the cube and what happened.
+
+- [ ] One attempt with the camera on. A second after the solve, its folder has `gyro.json` beside
+  the record: the clip viewer's Download gives six files (both MP4s, both frames files, `gyro.json`
+  and `attempt.json`), and `attempt.json` says `gyro` with `samples`, a `rateHz` and
+  `truncatedStart` false, `app` with this build's version and commit, each move with its `serial`
+  and `packetLast`, and `resyncs` (`[]` unless the cube reported a state the app did not know). The
+  frames files name the build too. Sessions → QA view: today's row's Gyro column counts the attempt
+  and says its rate; write the rate into `docs/DEVICES.md` (round 1's paragraph). In the bucket,
+  the attempt's folder has the six files; the session's document in the Firebase console has
+  `battery` (one entry per level the cube reported) and `cube.productDate` null (a Gen2 cube says
+  none).

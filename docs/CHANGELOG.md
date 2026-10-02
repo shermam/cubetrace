@@ -5,7 +5,33 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- The cube's whole record (T3.7; `docs/DATA-MODEL.md` §5, §6, §7, §11): everything the cube sends
+  is kept now, to be trimmed later if useless. Each attempt of a cube with a gyroscope gets a
+  `gyro.json` in its folder, written a second after the attempt ends, with or without a camera: the
+  gyroscope's orientation (unit quaternions, as the cube reports them) and, on the Gen2 cubes, its
+  angular velocity (raw 4-bit integers), from 2 s before the first scramble turn to 1 s after the
+  end, from a ring buffer of the last 10 minutes of reports; `attempt.json` says what the file holds
+  (`gyro`: its samples, span and rate). `attempt.json` also keeps each move's counter (`serial`) and
+  whether its host time is its own packet's arrival (`packetLast`), and logs the states the app
+  adopted from the cube when moves went unseen (`resyncs`); `session.json` keeps the cube's
+  production date (`cube.productDate`, null on the Gen2 cubes, which say none) and its battery
+  reports (`battery`, consecutive equal levels coalesced). Every JSON file the app writes names the
+  build that wrote it (`app`: `attempt.json`, the frames files and `gyro.json`, as `session.json`
+  always has), so that the files of a buggy or an older build can be told apart later. All of it is
+  optional in the schemas: every file written so far still validates, and reads with the fields
+  absent, null or empty.
+- `gyro.json` is uploaded as the attempt's sixth file, after the clips, counted by the day's quota
+  like any file (an attempt with its clips is six files now: at most 200 a day with the default
+  1,200), and stays on the device with the frames files when the clips are deleted by policy; the
+  functions accept it (33 files a call); the session index's documents carry the new fields, and the
+  rules check their shape. The clip viewer's Download includes it, and the QA view's new Gyro column
+  counts the attempts with one and says the median of their rates.
+- Development: the fake cube reports a gyroscope when asked (`?gyro=1` in demo mode: a slow steady
+  turn at 50 Hz while a replay turns, with a velocity), which the end-to-end suite uses;
+  `GyroBuffer`, `gyroFile`, `gyroSummary`, `parseGyro` and `gyro.schema.json` in `packages/core`,
+  `writeAttemptFile` in `packages/storage`.
 
 ## 0.3.0 — 2026-10-02
 

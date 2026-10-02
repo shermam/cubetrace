@@ -41,6 +41,15 @@ function flush(): Promise<void> {
   });
 }
 
+/** `record` without the fields `keys` (the ones T3.7 added, which the files written before lack). */
+function without<T extends object>(record: T, ...keys: (keyof T)[]): Partial<T> {
+  const copy: Partial<T> = { ...record };
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
+  return copy;
+}
+
 describe('attemptFolder', () => {
   it('pads the 1-based index to four digits', () => {
     expect([1, 17, 999, 9999, 12345].map(attemptFolder)).toEqual([
@@ -350,14 +359,20 @@ describe('OpfsSessionStore', () => {
     // As cubetrace 0.1 wrote them: schema 1, an attempt without its clock fit, and none of the
     // fields of T3.7 (the cube's production date, the battery, the gyro file, the resyncs, the
     // moves' counters and packet flags).
-    const { battery: _battery, ...first } = session(A, 1000);
-    const { productDate: _productDate, ...cube } = first.cube;
-    const oldSession = JSON.stringify({ ...first, cube, schema: 1 }, null, 2);
-    const { gyro: _gyro, resyncs: _resyncs, ...recorded } = attempt(A, 1);
-    const oldMoves = recorded.moves.map(
-      ({ serial: _serial, packetLast: _packetLast, ...move }) => move,
+    const first = session(A, 1000);
+    const oldSession = JSON.stringify(
+      { ...without(first, 'battery'), cube: without(first.cube, 'productDate'), schema: 1 },
+      null,
+      2,
     );
-    const oldAttempt = { ...recorded, moves: oldMoves, schema: 1, clock: undefined };
+    const recorded = attempt(A, 1);
+    const oldMoves = recorded.moves.map((move) => without(move, 'serial', 'packetLast'));
+    const oldAttempt = {
+      ...without(recorded, 'gyro', 'resyncs'),
+      moves: oldMoves,
+      schema: 1,
+      clock: undefined,
+    };
     await root.plant(`sessions/${A}/session.json`, oldSession);
     await root.plant(`sessions/${A}/attempts/0001/attempt.json`, JSON.stringify(oldAttempt));
 

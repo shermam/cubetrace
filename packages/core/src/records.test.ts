@@ -74,6 +74,15 @@ function hardware(name: string): (typeof HARDWARE)[number] {
   return found;
 }
 
+/** `record` without the fields `keys` (the ones T3.7 added, which the files written before lack). */
+function without<T extends object>(record: T, ...keys: (keyof T)[]): Partial<T> {
+  const copy: Partial<T> = { ...record };
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
+  return copy;
+}
+
 /** What ajv says of `value`: valid against the schema of the version it claims, or not, and where. */
 function schemaSays(kind: Kind, value: unknown): { valid: boolean; paths: string[] } {
   const version: unknown =
@@ -318,10 +327,9 @@ describe('parseAttempt and parseSession', () => {
       const before = JSON.stringify(v1);
       const parsed = parseAttempt(v1);
       // Version 1 kept no build and no move counters; the gyro file and the resyncs read as none.
-      const { app: _app, ...expected } = record;
       expect(parsed).toEqual({
-        ...expected,
-        moves: record.moves.map(({ serial: _serial, packetLast: _packetLast, ...move }) => move),
+        ...without(record, 'app'),
+        moves: record.moves.map((move) => without(move, 'serial', 'packetLast')),
         clock: null,
         gyro: null,
         resyncs: [],

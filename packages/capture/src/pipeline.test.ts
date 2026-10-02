@@ -459,7 +459,7 @@ describe('CaptureHandle', () => {
     await expect(third).rejects.toThrow('RangeError: Nothing is buffered yet.');
 
     // The build goes with the request when the caller names one (T3.7), and not otherwise.
-    expect('app' in (worker.messages().at(-1) ?? {})).toBe(false);
+    expect(worker.messages().at(-1)).not.toHaveProperty('app');
     const app = { version: '0.4.0', commit: 'abc1234' };
     const fourth = capture.saveClip({ ...PARAMS, app });
     expect(worker.messages().at(-1)).toEqual({ type: 'mux-and-write', id: 4, ...PARAMS, app });

@@ -50,6 +50,12 @@ firmware `8.62`, gyroscope present. 12 solves on the laptop (mean 17.2 s) and 3 
 from the gyroscope on every attempt (inspection 2.2–6.8 s). Both exports validate against the
 schemas. The GAN 356 i3 was flat that morning; its round is below.
 
+The gyroscope's rate, in reports per second as the cube sends them, is measured by the first
+capture after T3.7 (`gyro.rateHz` of an attempt's record, or the Gyro column of the QA view; the
+cubes send 4-bit velocities with each report, `docs/DATA-MODEL.md` §11): GAN 12 ui FreePlay: ___ Hz
+on the MacBook, ___ Hz on the ThinkPhone; GAN 356 i3: ___ Hz. Both are Gen2 cubes, which say no
+production date.
+
 What the exports show about the cube's clock (a fit of host time on cube time, per attempt and per
 session, over all 1,802 moves; `fixtures/hardware/README.md`):
 

@@ -116,8 +116,9 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
   await expect(uploads.getByTestId('keep-local-copies')).toBeChecked();
 
   // One attempt recorded with the camera on (the demo solve that starts with the page is recorded
-  // before the camera is on, and Delete last removes it), as uploads.spec.ts records it.
-  await page.goto(demoPath(0, 20));
+  // before the camera is on, and Delete last removes it), as uploads.spec.ts records it, with the
+  // demo cube's gyroscope on, so that the attempt has its gyro file (T3.7: its sixth file).
+  await page.goto(demoPath(0, 20, undefined, true));
   await expectSolves(page, 1);
   await expect(page.getByTestId('timer-status')).toHaveAttribute('data-phase', 'scrambling', {
     timeout: 30_000,
@@ -184,16 +185,24 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
     device: { host: 'e2e-laptop', cameras: ['laptop'] },
   });
 
-  // The attempt's files and session.json, each in the bucket under the account's prefix with the size
-  // and type the device has, each confirmed in the attempt's upload, which is done.
+  // The attempt's six files and session.json, each in the bucket under the account's prefix with the
+  // size and type the device has, each confirmed in the attempt's upload, which is done.
   const files = await folderFiles(page, sessionId, ['attempts', '0001']);
   expect(Object.keys(files).sort()).toEqual([
     'attempt.json',
+    'gyro.json',
     'laptop.scramble.frames.json',
     'laptop.scramble.mp4',
     'laptop.solve.frames.json',
     'laptop.solve.mp4',
   ]);
+  expect(attempt).toMatchObject({
+    gyro: { file: 'gyro.json', truncatedStart: false },
+    app: { version: expect.any(String) as unknown, commit: expect.any(String) as unknown },
+    resyncs: [],
+  });
+  expect(session).toMatchObject({ cube: { gyro: true, productDate: null } });
+  expect(Array.isArray(session['battery'])).toBe(true);
   const sessionBytes = (await folderFiles(page, sessionId, []))['session.json'];
   const sizes: Record<string, number> = { ...files, 'session.json': sessionBytes };
   const prefix = `users/${uid}/sessions/${sessionId}`;
@@ -230,7 +239,7 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
   expect(quota).toEqual({
     day: new Date().toISOString().slice(0, 10),
     bytes: Object.values(sizes).reduce((sum, bytes) => sum + bytes, 0),
-    files: 6,
+    files: 7,
   });
 
   // The session's page: its attempt's row says it is uploaded.

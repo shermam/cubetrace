@@ -52,6 +52,26 @@ actions (skip scramble, mark DNF, delete last). Outputs are the events of §3 of
 model and, on `solved`, a complete `attempt.json` with phases. The machine is pure and
 synchronous so it can be unit-tested by replaying fixtures through it.
 
+**What the cube's events become** (T3.7, the cube's whole record; `docs/DATA-MODEL.md` §6, §7,
+§11). Everything the driver decodes is kept now, to be trimmed later if useless:
+
+```
+GAN driver ─▶ GanEventMapper ─▶ CubeService.events$ ─▶ SessionService
+  move (serial, cube and host time, packetLast) ─▶ AttemptMachine ─▶ attempt.json moves[] (with serial, packetLast)
+  facelets that differ from the machine's state ─▶ resync ─▶ attempt.json resyncs[] (the state adopted, when, in which state)
+  gyro (quaternion, Gen2 velocity) ─▶ GyroBuffer (10 min, typed arrays, no allocation) ─▶ pickup detection, and
+       1 s after the attempt ─▶ gyro.json (2 s before the first turn to 1 s after the end) + attempt.json gyro
+  battery (level, host time) ─▶ session.json battery[] (equal levels coalesced)
+  hardware (model, versions, gyro, production date) ─▶ session.json cube
+every JSON file ─▶ app: the build that wrote it (session.json, attempt.json, frames.json, gyro.json)
+```
+
+The gyro file waits for its window's end margin as the clips do, with or without a camera, and
+`ClipsInFlight` holds the attempt back from the upload queue meanwhile; it goes to the bucket as the
+attempt's sixth file and stays on the device with the frames files when the clips are deleted by
+policy. The fake cube reports a gyroscope when asked (`?gyro=1` in demo mode), for the end-to-end
+suite.
+
 ## Time
 
 All timestamps are host milliseconds. Cube time is mapped by a linear fit of (cubeMs, hostMs) pairs
@@ -309,13 +329,15 @@ per attempt, once its record is final (solved or DNF, its clips saved or known a
 ```
 
 - **What goes.** Per attempt its `attempt.json` (the record as the store writes it, without the clips'
-  `local`), each clip's MP4 and frames file, and the session's `session.json`, which rides with the
+  `local`), each clip's MP4 and frames file, its `gyro.json` when it has one (T3.7, after the clips:
+  the sixth file with one camera), and the session's `session.json`, which rides with the
   newest of its attempts still to send, again whenever it changed since it was last confirmed, once
   it has stayed the same for two minutes: every attempt changes its summary, so a session being
   recorded sends it in its pauses and at its end rather than with every attempt (each upload of it is a
   file of the day's quota). An attempt waits until its record is final: the recording says which
-  attempts still have a clip to come (`ClipsInFlight`). Never a demo session (a simulated cube), never
-  anything signed out, and nothing but the records and the clips: no cube MAC address, no setting.
+  attempts still have a clip, or a gyro file, to come (`ClipsInFlight`). Never a demo session (a
+  simulated cube), never anything signed out, and nothing but the records, the clips and the gyro
+  files: no cube MAC address, no setting.
 - **Order and throttling.** The oldest session first, its attempts by index, an attempt's files in
   their order; two PUTs at a time. A file is signed right before it goes, with its attempt's other
   files still to send in the same call (the quota counts every signature); a signature is used until a
@@ -341,8 +363,8 @@ per attempt, once its record is final (solved or DNF, its clips saved or known a
   (a phone's default; a laptop keeps them), the clips of an attempt once all its files are confirmed;
   in any case, once the browser's storage is 70% full, the oldest uploaded clips first, until it would
   be under 60%. The record says so first (`video[].local` false, saved through `SessionService`, which
-  also writes it to the index), then the MP4 is deleted; `attempt.json` and the frames files stay, and
-  the pages say "in the cloud" for such a clip.
+  also writes it to the index), then the MP4 is deleted; `attempt.json`, the frames files and
+  `gyro.json` stay, and the pages say "in the cloud" for such a clip.
 - **The pages.** The Sessions page has the queue's panel (where the uploads are, the attempts still to
   upload with their progress, their errors and Retry, those uploaded last, the clips freed); the
   header, an arrow with the attempts to upload (dashed while paused, red with failures), which opens
