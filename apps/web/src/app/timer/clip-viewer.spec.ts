@@ -446,6 +446,15 @@ describe('ClipViewer', () => {
     await update();
     expect(frames.waiting).toBe(0);
 
+    // Playing again, then another clip chosen: the loop goes with the video it followed.
+    state.paused = false;
+    player.dispatchEvent(new Event('play'));
+    expect(frames.waiting).toBe(1);
+    element.querySelector<HTMLButtonElement>('[data-segment="scramble"]')?.click();
+    await update();
+    expect(frames.waiting).toBe(0);
+    expect(current(element)).toEqual([]);
+
     fixture.destroy();
     expect(frames.waiting).toBe(0);
   });

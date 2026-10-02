@@ -62,7 +62,9 @@ async function settled(): Promise<void> {
 describe('cubePlayerOf', () => {
   it('takes an element with the player’s API, and nothing else', () => {
     expect(cubePlayerOf(new FakePlayer())).not.toBeNull();
-    expect(cubePlayerOf(document.createElement('twisty-player'))).toBeNull();
+    // An element without the API (the viewer's spec defines a fake `twisty-player` in this jsdom,
+    // so that name is not the example).
+    expect(cubePlayerOf(document.createElement('div'))).toBeNull();
     expect(cubePlayerOf({ experimentalAddMove: () => undefined })).toBeNull();
   });
 

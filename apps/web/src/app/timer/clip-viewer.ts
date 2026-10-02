@@ -740,14 +740,21 @@ export class ClipViewer {
    */
   protected follow(video: HTMLVideoElement): void {
     this.stopFollowing?.();
+    // A frame of this video, while it is the one shown and plays: its time, and the next frame.
+    const frame = (seconds: number, next: () => void): void => {
+      if (this.video()?.nativeElement !== video) {
+        return;
+      }
+      this.sync(seconds, false);
+      if (!video.paused && !video.ended) {
+        next();
+      }
+    };
     if (typeof video.requestVideoFrameCallback === 'function') {
       let handle = 0;
       const next = (): void => {
         handle = video.requestVideoFrameCallback((_now, metadata) => {
-          this.sync(metadata.mediaTime, false);
-          if (!video.paused && !video.ended) {
-            next();
-          }
+          frame(metadata.mediaTime, next);
         });
       };
       next();
@@ -763,10 +770,7 @@ export class ClipViewer {
     let handle = 0;
     const next = (): void => {
       handle = request(() => {
-        this.sync(video.currentTime, false);
-        if (!video.paused && !video.ended) {
-          next();
-        }
+        frame(video.currentTime, next);
       });
     };
     next();
@@ -870,6 +874,9 @@ export class ClipViewer {
 
   private async read(clip: VideoClip | null, session: string, index: number): Promise<void> {
     const read = ++this.reads;
+    // The previous clip's video goes with its URL: nothing follows it any more.
+    this.stopFollowing?.();
+    this.stopFollowing = null;
     this.setUrl(null);
     this.readError.set(null);
     this.loaded.set(false);
