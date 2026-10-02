@@ -5,10 +5,11 @@ import type { CubePlayerModel, Orbit, OrbitCoordinates } from './clip-cube';
 
 /**
  * The player's model as far as the orbit goes, as cubing.js's behaves: a request merges into the
- * orbit, the latitude clamped to ±90 and the longitude brought into [−180, 180), and the fresh
- * listeners hear each change in a later task, and the orbit as it is when they are added (cubing.js
- * calls a fresh listener once at first). `drag` is the user moving the camera: the orbit changes
- * without a request.
+ * orbit, the latitude clamped to ±90 and the longitude brought into (−180, 180] (cubing.js's
+ * `modIntoRange(v, 180, −180)`: a view from behind reads 180, as the real player reported it in the
+ * end-to-end run), and the fresh listeners hear each change in a later task, and the orbit as it is
+ * when they are added (cubing.js calls a fresh listener once at first). `drag` is the user moving
+ * the camera: the orbit changes without a request.
  */
 export class FakeOrbitModel implements CubePlayerModel {
   orbit: OrbitCoordinates = { latitude: 0, longitude: 0, distance: 5 };
@@ -22,9 +23,10 @@ export class FakeOrbitModel implements CubePlayerModel {
         this.requests.push(request);
         const latitude = Math.min(90, Math.max(-90, request.latitude ?? this.orbit.latitude));
         const longitude = request.longitude ?? this.orbit.longitude;
+        const wrapped = ((((longitude + 180) % 360) + 360) % 360) - 180;
         this.move({
           latitude,
-          longitude: ((((longitude + 180) % 360) + 360) % 360) - 180,
+          longitude: wrapped === -180 ? 180 : wrapped,
           distance: request.distance ?? this.orbit.distance,
         });
       },

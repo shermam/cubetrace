@@ -27,7 +27,8 @@ export interface Renderable {
 /**
  * Where the player's camera looks at the cube from (T3.10): cubing.js's orbit coordinates, in
  * degrees. `latitude` 0 is level with the cube, 90 straight above it; `longitude` 0 is in front of
- * it, 90 to its right, 180 (or −180, as cubing.js reports it) behind it.
+ * it, 90 to its right, 180 behind it (cubing.js keeps it in (−180, 180], as the viewer's choice
+ * does; {@link sameOrbit} takes −180 and 180 for one longitude all the same).
  */
 export interface Orbit {
   readonly latitude: number;
@@ -43,7 +44,7 @@ export interface OrbitCoordinates extends Orbit {
  * The player's camera orbit as its model keeps it (`experimentalModel.twistySceneModel`, cubing.js's
  * `TwistySceneModel`): `orbitCoordinatesRequest`, which a request is set on (the angles not named
  * keep their values; the model clamps the latitude to its limit and brings the longitude into
- * [−180, 180)), and `orbitCoordinates`, the orbit as it is, which reports each change to its fresh
+ * (−180, 180]), and `orbitCoordinates`, the orbit as it is, which reports each change to its fresh
  * listeners, once at first with the orbit then: the player's own requests and the user's drags
  * alike.
  */
@@ -197,7 +198,8 @@ export class ClipCube {
   /**
    * Calls `listener` with the orbit each time the user moved the camera (a drag of the cube with the
    * mouse or a finger, its inertia included), as the model reports it: not with the echoes of
-   * {@link view}'s requests, nor with the model's own orbit before the first request. One listener.
+   * {@link view}'s requests, nor with the model's own orbit before the first request, nor with a
+   * report that moves the camera by nothing (a model's −180 for 180). One listener.
    */
   onDrag(listener: (orbit: Orbit) => void): void {
     this.#dragListener = listener;
@@ -268,6 +270,7 @@ export class ClipCube {
       return;
     }
     const orbit: Orbit = { latitude: coordinates.latitude, longitude: coordinates.longitude };
+    const previous = this.#orbit;
     this.#orbit = orbit;
     if (this.#requested === null) {
       return;
@@ -276,6 +279,10 @@ export class ClipCube {
       if (sameOrbit(orbit, this.#requested, ECHO_TOLERANCE)) {
         this.#echoed = true;
       }
+      return;
+    }
+    // A report that moves the camera by nothing (−180 for 180, say) is no drag.
+    if (previous !== null && sameOrbit(orbit, previous, ECHO_TOLERANCE)) {
       return;
     }
     this.#dragListener?.(orbit);

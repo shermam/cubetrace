@@ -1862,8 +1862,8 @@ default orbit, racing the first request) is not a drag, the echo opens the gate,
 the user's; a view is not requested when the camera is within a tenth of a degree of it (the orbit a
 drag leaves is saved rounded to a tenth, and asking for it again would move nothing), and the
 presets build on `target`, the request on its way when there is one, so that two quick clicks add up.
-cubing.js keeps the longitude in [−180, 180); the choice keeps it in (−180, 180], so "Behind" reads
-180. The mirror is applied after the frame change, in cubing.js's axes (reflecting the relative
+cubing.js keeps the longitude in (−180, 180], as the choice does, so "Behind" reads 180 on both
+sides, and `sameOrbit` takes −180 and 180 for one longitude all the same. The mirror is applied after the frame change, in cubing.js's axes (reflecting the relative
 orientation before the frame change across the corresponding plane of the cube's frame gives the
 same, which a test shows). The choice is normalized (tenths of a degree) and compared by what it
 shows; the defaults for a camera without an entry are never stored (so a drag back to the front, or
@@ -1895,9 +1895,13 @@ and Settings' map); the Settings page's chunk unchanged; all the scripts togethe
 against 3,540.7 (1,017.6 kB gzipped against 1,014.7). Per frame nothing was added to T3.8's loop but
 the mirror's four sign changes; a drag costs, per report, a settings write (one JSON of a few
 kilobytes in `localStorage`) and, signed in, nothing until a second after the last one.
-Found on the way: the clip viewer's spec, the sync's and the settings' each caught a test written
-against a stale assumption (the lag of the fake clip in an expected angle, two preset clicks before
-the model's report, the defaults rule); the component's dialog scrolls on a short laptop screen (a
+Found on the way: the fake of the player's model first kept the longitude in [−180, 180), as
+cubing.js's `modIntoRange(v, 180, −180)` reads at a glance, and the real player, in the end-to-end
+run, reported a view from behind as 180: the fake now does as the player does, and the orbit's
+comparison took ±180 for one longitude from the start, so nothing in the viewer depended on it; the
+clip viewer's spec, the sync's and the settings' each caught a test written against a stale
+assumption (the lag of the fake clip in an expected angle, two preset clicks before the model's
+report, the defaults rule); the component's dialog scrolls on a short laptop screen (a
 16:9 video at the column's width plus half of it again exceed 790 px of viewport), which the video's
 and the cube's maximum heights limit. Left for the owner: the calibration on a real recording
 (`docs/MANUAL-TESTS.md`, "After T3.10"), the drag with a finger on the ThinkPhone, and whether the

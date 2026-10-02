@@ -477,10 +477,10 @@ describe('ClipViewer', () => {
     click(element, 'clip-tilt-down');
     await update();
     expect(orbit()).toEqual([-90, -90]);
-    // Behind: longitude 180, kept as 180 and held by the model as −180, one direction.
+    // Behind: longitude 180, kept as 180 and held by the model as 180.
     click(element, 'clip-behind');
     await update();
-    expect(orbit()).toEqual([-90, -180]);
+    expect(orbit()).toEqual([-90, 180]);
     expect(kept('laptop')).toEqual({ latitude: -90, longitude: 180, mirror: 'none' });
     click(element, 'clip-reset-view');
     await update();
@@ -519,7 +519,7 @@ describe('ClipViewer', () => {
     // A preset from where the drag left the camera, kept to a tenth of a degree.
     click(element, 'clip-tilt-down');
     await update();
-    expect(orbit()).toEqual([-44.4, -180]);
+    expect(orbit()).toEqual([-44.4, 180]);
     expect(kept('laptop')).toEqual({ latitude: -44.4, longitude: 180, mirror: 'none' });
   });
 
@@ -531,7 +531,7 @@ describe('ClipViewer', () => {
     });
     const model = cube().experimentalModel;
     expect(model.requests).toEqual([{ latitude: 90, longitude: 180 }]);
-    expect(orbit()).toEqual([90, -180]);
+    expect(orbit()).toEqual([90, 180]);
     expect(mirrorSelect(element).value).toBe('up-down');
     expect(kept('laptop')).toEqual(choice);
     // The orientation in the mirror: at 2.45 s (host time 1450, no lag), 245° about the vertical
@@ -558,7 +558,7 @@ describe('ClipViewer', () => {
     expect(mirrorSelect(element).value).toBe('all');
     element.querySelector<HTMLButtonElement>('[data-segment="solve"]')?.click();
     await update();
-    expect(orbit()).toEqual([90, -180]);
+    expect(orbit()).toEqual([90, 180]);
     expect(mirrorSelect(element).value).toBe('up-down');
   });
 

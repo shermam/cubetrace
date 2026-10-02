@@ -15,6 +15,7 @@ import {
   clipSeconds,
   gyroTrack,
   mirrored,
+  normalizeLongitude,
   orientationAt,
   parseGyro,
   referenceAt,
@@ -272,8 +273,9 @@ test('demo solves with the camera on get their two clips, which play and downloa
   const spanMs = (frameTimes(solveFrames).at(-1) ?? 0) - solveClip.firstFrameHostMs;
   expect(played.duration * 1000).toBeGreaterThan(0.9 * spanMs);
   await expect(viewer.getByTestId('clip-move')).toHaveCount(solve.moves.length);
-  // The 3D cube beside the video (T3.8); these attempts have no gyro file (the demo cube's
-  // gyroscope is off), so its line says the orientation is not recorded, and nothing re-zeroes.
+  // The 3D cube under the video (T3.8; beside it until T3.10); these attempts have no gyro file
+  // (the demo cube's gyroscope is off), so its line says the orientation is not recorded, and
+  // nothing re-zeroes.
   await expect(viewer.getByTestId('clip-cube-player')).toBeVisible();
   await expect(viewer.getByTestId('clip-orientation')).toHaveText(
     'Orientation not recorded: the attempt has no gyroscope file. The cube turns with the moves, upright.',
@@ -632,13 +634,14 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
     }, camera);
   expect(await keptChoice()).toBeNull();
 
-  // The presets move the camera in quarter turns; cubing.js keeps the longitude in [−180, 180).
+  // The presets move the camera in quarter turns; cubing.js keeps the longitude in (−180, 180],
+  // as the choice does: a view from behind is 180 on both sides.
   await viewer.getByTestId('clip-turn-right').click();
   await expect.poll(orbit).toEqual([0, 90]);
   await viewer.getByTestId('clip-tilt-up').click();
   await expect.poll(orbit).toEqual([90, 90]);
   await viewer.getByTestId('clip-behind').click();
-  await expect.poll(orbit).toEqual([90, -180]);
+  await expect.poll(orbit).toEqual([90, 180]);
   await expect.poll(keptChoice).toEqual({ latitude: 90, longitude: 180, mirror: 'none' });
   await viewer.getByTestId('clip-reset-view').click();
   await expect.poll(orbit).toEqual([0, 0]);
@@ -693,7 +696,7 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
   await expect(video).toHaveAttribute('data-state', 'loaded', { timeout: 10_000 });
   await expect
     .poll(orbit, { timeout: 10_000 })
-    .toEqual([tenth(resting[0]), tenth(resting[1]) === 180 ? -180 : tenth(resting[1])]);
+    .toEqual([tenth(resting[0]), normalizeLongitude(tenth(resting[1]))]);
   await expect(mirror).toHaveValue('left-right');
   await expect(viewer.getByTestId('clip-raw')).not.toBeChecked();
   await expect(viewer.getByTestId('clip-orientation')).toHaveText(

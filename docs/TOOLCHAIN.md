@@ -1674,8 +1674,8 @@ all the scripts together, 3531.1 kB raw against 3502.5 (1029.2 kB gzipped agains
 
 ## The clip viewer's 3D cube (T3.8)
 
-Added by T3.8 on 2026-10-02: a 3D cube beside the clip in the viewer, following the video
-(`docs/ARCHITECTURE.md` "The clip viewer", `docs/DATA-MODEL.md` §11).
+Added by T3.8 on 2026-10-02: a 3D cube beside the clip in the viewer (under it since T3.10),
+following the video (`docs/ARCHITECTURE.md` "The clip viewer", `docs/DATA-MODEL.md` §11).
 
 **No new dependency, no new chunk.** The cube is cubing.js's `<twisty-player>`, from the scramble
 view's lazy chunk (`TWISTY_LOADER`, the dynamic import of `cubing/twisty`), with `visualization="3D"`:

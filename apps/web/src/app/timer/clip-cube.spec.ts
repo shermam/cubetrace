@@ -230,9 +230,9 @@ describe('ClipCube and the orbit (T3.10)', () => {
     expect(cube.orbit).toBeNull();
     expect(cube.target).toEqual({ latitude: 90, longitude: 180 });
     await settled();
-    // The model reports its orbit, the longitude as it keeps it.
-    expect(cube.orbit).toEqual({ latitude: 90, longitude: -180 });
-    expect(cube.target).toEqual({ latitude: 90, longitude: -180 });
+    // The model reports its orbit; a view from behind is 180 there as here, and −180 is the same.
+    expect(cube.orbit).toEqual({ latitude: 90, longitude: 180 });
+    expect(cube.target).toEqual({ latitude: 90, longitude: 180 });
     cube.view({ latitude: 90, longitude: 180 });
     cube.view({ latitude: 90, longitude: -180 });
     cube.view({ latitude: 89.95, longitude: 180 });
@@ -288,16 +288,27 @@ describe('ClipCube and the orbit (T3.10)', () => {
     expect(heard[3]).toEqual({ latitude: 1, longitude: 91 });
   });
 
-  it('takes the echo of a view from behind, which the model reports as −180', async () => {
+  it('takes the echo of a view from behind asked as −180, which the model reports as 180', async () => {
     const player = new FakePlayer();
     const cube = new ClipCube(player);
     const heard = dragged(cube);
-    cube.view({ latitude: 0, longitude: 180 });
+    cube.view({ latitude: 0, longitude: -180 });
     await settled();
-    expect(cube.orbit).toEqual({ latitude: 0, longitude: -180 });
+    expect(cube.orbit).toEqual({ latitude: 0, longitude: 180 });
+    expect(heard).toEqual([]);
     player.experimentalModel.drag({ latitude: 0, longitude: -170 });
     await settled();
     expect(heard).toEqual([{ latitude: 0, longitude: -170 }]);
+    // And a report of −180 where the model holds 180 moves the camera by nothing: no drag.
+    cube.view({ latitude: 0, longitude: 180 });
+    await settled();
+    expect(heard).toHaveLength(1);
+    for (const listener of player.experimentalModel.listeners) {
+      listener({ latitude: 0, longitude: -180, distance: 5 });
+    }
+    await settled();
+    expect(heard).toHaveLength(1);
+    expect(cube.orbit).toEqual({ latitude: 0, longitude: -180 });
   });
 
   it('hears nothing once disposed, and leaves the model its listener no more', async () => {

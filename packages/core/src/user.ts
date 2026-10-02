@@ -47,8 +47,8 @@ export function clampLatitude(latitude: number): number {
 }
 
 /**
- * `longitude` brought into (−180, 180]: cubing.js keeps its longitude in [−180, 180), so a view from
- * behind reads 180 here and −180 there, the same direction.
+ * `longitude` brought into (−180, 180], as cubing.js keeps its own (a view from behind reads 180 on
+ * both sides; −180 is the same direction, and reads 180 too).
  */
 export function normalizeLongitude(longitude: number): number {
   if (longitude > -180 && longitude <= 180) {
