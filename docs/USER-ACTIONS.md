@@ -136,10 +136,10 @@ adds items; the owner ticks them when done (date and any detail that others need
      the `FIREBASE_SERVICE_ACCOUNT` secret is there (its account needs the roles of step 1).
 - [ ] Run `python ferramentas/banda.py` (private repo) at home and at the office and record
   the upstream in `docs/DEVICES.md`; it sets the upload queue's expectations.
-- [ ] **Manual round 3 (v0.3.0)**, once the coordinator has deployed the rules, the indexes and the
-  functions, set the bucket up and run the T3.2 check (the items above): open
-  https://shermam.github.io/cubetrace/ on the MacBook Pro 2021 (Chrome) and in the installed app on
-  the ThinkPhone, sign in on both with the same Google account, and go through the "Round 3
+- [ ] **Manual round 3 (v0.3.0)**, once the coordinator has made sure that `main`'s rules, indexes
+  and functions are deployed and the bucket is set up, and run the T3.2 check (the items above):
+  open https://shermam.github.io/cubetrace/ on the MacBook Pro 2021 (Chrome) and in the installed
+  app on the ThinkPhone, sign in on both with the same Google account, and go through the "Round 3
   (v0.3.0)" block at the top of `docs/MANUAL-TESTS.md` (T3.0, T3.4, T3.1, T3.3, then T2.14) with the
   GAN 12 ui FreePlay: two attempts on each device with the camera on, one merged Sessions list on
   both, the queue's panel, the files in the bucket (`gcloud storage ls -r

@@ -1533,6 +1533,37 @@ Playwright against the Auth and Firestore emulators in CI and a local `PUT` sink
 e2e config); `docs/MANUAL-TESTS.md` "Round 3" (sign in on both devices, record on both, one merged
 list, uploads reach R2, `rclone ls` from the training machine); README; CHANGELOG 0.3.0.
 
+**Outcome (2026-10-02, PR #49).** `npm run e2e:cloud` builds the functions and runs Playwright's
+project `cloud` inside `firebase emulators:exec --only auth,firestore,functions --project
+demo-cubetrace`, in CI after `npm run e2e`; the config has that project, and the bucket sink in
+place of the production build, only when `FIREBASE_EMULATOR_HUB` says the emulators run, so
+`npm run e2e` keeps its 73 tests, and `firebase.json` names the Auth emulator, which the CLI does
+not start otherwise. The app is the dev server's with the real Firebase chunk: in development builds
+`ACCOUNT_LOADER` reads `window.cubetraceE2eEmulators`, and `connectFirebase` starts the app under
+the emulators' project and connects Authentication (without its banner), Firestore and the functions
+to them; Sign in is then `signInWithCredential` with a Google ID token of unsigned claims, which the
+Auth emulator's Google provider takes: no window, the provider and the account's name kept, and the
+same `sub` the same uid in a second browser context (a custom token, or an email and password, were
+the other ways). The functions gained `BUCKET_PROVIDER=local` (`local.ts`): URLs
+`http://127.0.0.1:4600/<key>` that carry the type, the exact size and the expiry, with GCS's
+headers, and sizes by `HEAD`, every call failing unless `FUNCTIONS_EMULATOR` is `true`;
+`functions/.env.demo-cubetrace` gives it to the emulators' project alone, the server's address a
+variable rather than a parameter, so that the production `.env` and the deploy's parameters are
+unchanged (and `firebase.json` keeps the file out of the deployed source). The sink
+(`apps/web/e2e/helpers/bucket-sink.mts`) holds each PUT to what its URL says and answers the
+preflights from `bucket/cors.json`; the tests read the emulators through their REST APIs. Three
+specs, an account each: the account and `users/{uid}` through the rules; a session recorded with the
+fake camera, indexed, its six files in the sink and confirmed, the quota, the Sessions page, the
+session's page and the QA view; two browser contexts of one account (the session as "cloud", the
+cube's MAC address). The one request off the machine is Firestore's network probe
+(`www.google.com/images/cleardot.gif`, after a connection error of its transport), which the
+account's flow allows. The cloud project takes 37 to 43 s locally (57 to 62 s with the build and the
+emulators) and 45 s in CI (31 s of tests), where the whole job took 7 min 47 s (7 min 52 s before
+it); `main` is unchanged but for its stamps, and Firebase's chunk is 3.7 kB larger. Open: the round
+(`docs/MANUAL-TESTS.md`, "Round 3"), then the `v0.3.0` release from the GitHub UI; and the daily
+quota, 400 files, at most 80 attempts with their clips, below the design's cadence
+(`functions/.env`).
+
 ## Phases 4 and 5
 
 Outlines only, written into boards when phase 3 ends: **4. Remote cameras** — WebRTC pairing by

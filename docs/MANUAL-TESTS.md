@@ -115,10 +115,10 @@ The third release's round (`docs/PLAN.md`, T3.5): the cloud, two devices and one
 https://shermam.github.io/cubetrace/ once its footer reads `cubetrace 0.3.0 · <commit>`, on the
 MacBook Pro 2021 (Chrome, its FaceTime camera, and the Logitech C930e for T2.14) and on the
 ThinkPhone (the installed app, its front camera; a Chrome tab where an item says so), both signed in
-with the same Google account, with the GAN 12 ui FreePlay. Before it, the coordinator deploys the
-rules, the indexes and the functions, sets the bucket `cubetrace-data` up and runs the T3.2 check
-(`docs/USER-ACTIONS.md`, phase 3); after it, the coordinator asks the owner to create the `v0.3.0`
-release from GitHub.
+with the same Google account, with the GAN 12 ui FreePlay. Before it, the coordinator makes sure
+that `main`'s rules, indexes and functions are deployed and the bucket `cubetrace-data` is set up
+(done on 2026-10-01, `docs/USER-ACTIONS.md`, phase 3), and runs the T3.2 check; after it, the
+coordinator asks the owner to create the `v0.3.0` release from GitHub.
 
 1. Before starting, fill in one row of the table per device. Chrome's version is the first line of
    `chrome://version`; the cube's strings are in its details (click the cube pill once it is

@@ -1591,7 +1591,11 @@ with a listing, and answers the browser's preflights from `bucket/cors.json`: th
 
 **Times.** Locally on four CPUs, over five runs, the three tests took 37.3 to 42.6 s in Playwright
 (two workers; the uploads flow 19.4 to 20.9 s), and `npm run e2e:cloud` 57 to 62 s with the
-functions' build (about 11 s), the emulators' start (about 8 s) and `ng serve`'s.
+functions' build (about 11 s), the emulators' start (about 8 s) and `ng serve`'s. In CI, in the pull
+request's first run, the `npm run e2e:cloud` step took 45 s: 31.0 s of tests (the uploads flow 17.7
+s), the rest the build, the emulators and the servers; the `npm run e2e` step 3 min 55 s, and the
+whole job 7 min 47 s (7 min 52 s in T2.14's last run, without the cloud step: a run's time varies by
+more than the step adds).
 
 **Firestore's network probe.** After a connection error of its transport (the closure library's
 WebChannel, in `@firebase/webchannel-wrapper`), as when a page reloads or signs out, Firestore loads
