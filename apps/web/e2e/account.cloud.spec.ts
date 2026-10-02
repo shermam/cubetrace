@@ -12,7 +12,7 @@ import {
 // The account (docs/PLAN.md T3.0) with the app's own Firebase SDK, against the emulators
 // (npm run e2e:cloud): Sign in signs in a Google account of the Auth emulator, users/{uid} reaches the
 // Firestore emulator through the project's rules as the app writes it, the account stays across a
-// reload and its device is seen again, Sign out forgets it; and no request leaves this machine.
+// reload and its device is seen again, Sign out forgets it; and no request reaches Google's services.
 
 const ADA: GoogleAccount = { sub: 'e2e-ada', email: 'ada@example.com', name: 'Ada Lovelace' };
 
@@ -22,13 +22,16 @@ function banner(page: Page) {
   return page.getByRole('banner');
 }
 
-test('Sign in through the Auth emulator writes users/{uid} through the rules; the account stays across a reload and Sign out forgets it; nothing leaves the machine', async ({
+test('Sign in through the Auth emulator writes users/{uid} through the rules; the account stays across a reload and Sign out forgets it; nothing reaches Google’s services', async ({
   context,
   page,
 }) => {
-  const hosts = new Set<string>();
+  const remote: string[] = [];
   context.on('request', (request) => {
-    hosts.add(new URL(request.url()).hostname);
+    const url = new URL(request.url());
+    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+      remote.push(url.href);
+    }
   });
   await useEmulators(page, ADA);
   await page.goto('/settings');
@@ -80,6 +83,10 @@ test('Sign in through the Auth emulator writes users/{uid} through the rules; th
   await page.reload();
   await expect(banner(page).getByRole('button', { name: 'Sign in' })).toBeVisible();
 
-  // The dev server, the emulators: every request stayed on this machine.
-  expect([...hosts].sort()).toEqual(['127.0.0.1', 'localhost']);
+  // The dev server and the emulators had every request, but for the image that Firestore's transport
+  // loads from www.google.com to test the network after a connection error (its WebChannel's), which
+  // reaches no service.
+  expect(
+    remote.filter((url) => !url.startsWith('https://www.google.com/images/cleardot.gif?')),
+  ).toEqual([]);
 });
