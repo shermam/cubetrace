@@ -4,7 +4,7 @@
 // The window starts both workers and gives each an end of a channel between them: the capture
 // worker cuts a clip and moves the cut through it to the clip worker, which muxes and writes it and
 // answers the window. Plain TypeScript: nothing here touches a browser API.
-import type { VideoClip, VideoSegment } from '@cubetrace/core';
+import type { AppBuild, VideoClip, VideoSegment } from '@cubetrace/core';
 
 import type { VideoQuality } from './bitrate';
 import { cutBuffers, type Cut } from './cut';
@@ -184,6 +184,11 @@ export interface SaveClipParams {
   readonly segment: VideoSegment;
   /** The frame rate the camera's track reports, for the entry's `fpsNominal`. */
   readonly fpsNominal: number;
+  /**
+   * The build of the app, which the clip's frames file names as `app` (T3.7: every JSON file the app
+   * writes names the build that wrote it); absent, the frames file names none.
+   */
+  readonly app?: AppBuild;
 }
 
 /**

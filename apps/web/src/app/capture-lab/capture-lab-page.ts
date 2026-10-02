@@ -406,6 +406,7 @@ export class CaptureLabPage {
         camera: LAB_CAMERA,
         segment: 'solve',
         fpsNominal: this.frameRate,
+        app: APP_BUILD,
       });
       const latencyMs = hostNow(this.globals) - endHostMs;
       let folder = session;

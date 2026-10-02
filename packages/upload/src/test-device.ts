@@ -8,6 +8,7 @@ import {
   createSession,
   parseMoves,
   type AttemptRecord,
+  type GyroSummary,
   type SessionRecord,
   type VideoClip,
   type VideoSegment,
@@ -85,6 +86,19 @@ export function attempt(
 /** The frames file of a clip, as many bytes as `bytes`. */
 export const FRAMES_BYTES = 120;
 
+/** The gyro file of an attempt that has one (`record` plants it), summed up (T3.7). */
+export const GYRO: GyroSummary = {
+  file: 'gyro.json',
+  samples: 200,
+  fromHostMs: 1_790_000_000_000,
+  toHostMs: 1_790_000_004_000,
+  rateHz: 49.8,
+  truncatedStart: false,
+};
+
+/** The gyro file's bytes on the device. */
+export const GYRO_BYTES = 9_000;
+
 export interface Device {
   readonly root: FakeDirectoryHandle;
   readonly store: OpfsSessionStore;
@@ -161,6 +175,9 @@ export async function record(
     for (const c of a.video) {
       await d.root.plant(`${folder}/${c.file}`, 'v'.repeat(c.bytes));
       await d.root.plant(`${folder}/${c.framesFile}`, 'f'.repeat(FRAMES_BYTES));
+    }
+    if (a.gyro !== null) {
+      await d.root.plant(`${folder}/${a.gyro.file}`, 'g'.repeat(GYRO_BYTES));
     }
   }
 }

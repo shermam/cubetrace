@@ -38,6 +38,7 @@ import {
   DemoSolves,
   chooseDemo,
   demoParts,
+  parseDemoGyro,
   parseDemoMisscramble,
   type DemoPart,
   type DemoRequest,
@@ -87,6 +88,8 @@ type Source =
       readonly solve: DemoSolve;
       readonly speed: number;
       readonly misscramble: number | null;
+      /** The demo cube reports a gyroscope (T3.7). */
+      readonly gyro: boolean;
     };
 
 /**
@@ -276,22 +279,28 @@ export class CubeService {
    * Connects the demo cube (a `FakeCube` at `speed`): it starts solved, turns the scramble at one
    * move per 100 ms, then the solution on its recorded timings, every gap divided by `speed`. With
    * `misscramble` k, it makes one wrong turn after scramble move k and undoes it (`demoParts`).
+   * With `gyro`, it reports a gyroscope, turning while it replays (T3.7).
    */
-  connectDemo(solve: DemoSolve, speed: number, misscramble: number | null = null): void {
-    const cube = new FakeCube({ speed });
+  connectDemo(
+    solve: DemoSolve,
+    speed: number,
+    misscramble: number | null = null,
+    gyro = false,
+  ): void {
+    const cube = new FakeCube({ speed, gyro });
     this.begin('fake');
     this.demoSignal.set(solve);
     this.demoSpeedSignal.set(speed);
-    this.attach(cube, { kind: 'demo', solve, speed, misscramble });
+    this.attach(cube, { kind: 'demo', solve, speed, misscramble, gyro });
     this.replaying = cube;
     void this.replay(cube, demoParts(solve, misscramble), speed);
   }
 
   /**
    * Downloads the demo solves (once) and connects the demo cube with the one `request` asks for
-   * (`?demo=<index>&speed=<n>`, and `&misscramble=<k>` for a wrong turn after scramble move k): a
-   * random one, and the speed from Settings, where it asks for nothing valid. Never rejects: a
-   * failure sets `lastError`.
+   * (`?demo=<index>&speed=<n>`, `&misscramble=<k>` for a wrong turn after scramble move k, and
+   * `&gyro=1` for a gyroscope, T3.7): a random one, and the speed from Settings, where it asks for
+   * nothing valid. Never rejects: a failure sets `lastError`.
    */
   async startDemo(request: DemoRequest = ANY_DEMO): Promise<void> {
     const generation = this.begin('fake');
@@ -308,7 +317,12 @@ export class CubeService {
       return;
     }
     const { index, speed } = chooseDemo(request, solves.length, this.settings.demoSpeed());
-    this.connectDemo(solves[index], speed, parseDemoMisscramble(request.misscramble ?? null));
+    this.connectDemo(
+      solves[index],
+      speed,
+      parseDemoMisscramble(request.misscramble ?? null),
+      parseDemoGyro(request.gyro ?? null),
+    );
   }
 
   /** Starts the demo that the page's address asks for, unless a cube is (being) connected. */
@@ -322,7 +336,7 @@ export class CubeService {
   reconnect(): Promise<void> {
     const source = this.sourceSignal();
     if (source?.kind === 'demo') {
-      this.connectDemo(source.solve, source.speed, source.misscramble);
+      this.connectDemo(source.solve, source.speed, source.misscramble, source.gyro);
       return Promise.resolve();
     }
     return this.connect();

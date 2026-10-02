@@ -11,26 +11,35 @@ import {
 import {
   AttemptMachine,
   CubeClockFit,
+  GYRO_FILE,
+  GYRO_LEAD_MS,
+  GYRO_TAIL_MS,
+  GyroBuffer,
   createSession,
   formatMove,
   generateScramble,
+  gyroFile,
+  gyroSummary,
   isSolved,
   labelFor,
   summarize,
+  withBattery,
   type AttemptEvents,
   type AttemptRecord,
   type AttemptState,
+  type BatteryReading,
   type CameraClock,
   type CameraIdentity,
   type CameraInfo,
   type CubeInfo,
   type Facelets,
+  type GyroSummary,
   type ScrambleProgress,
   type SessionRecord,
   type SessionStore,
   type VideoClip,
 } from '@cubetrace/core';
-import type { CubeEvent, CubeMoveEvent } from '@cubetrace/gan';
+import type { CubeBatteryEvent, CubeEvent, CubeGyroEvent, CubeMoveEvent } from '@cubetrace/gan';
 import type { StorageProblem } from '@cubetrace/storage';
 import { Subject, type Observable } from 'rxjs';
 
@@ -42,6 +51,8 @@ import { StorageService } from '../device/storage-service';
 import { WakeLockService } from '../device/wake-lock-service';
 import { SettingsService, hostPlatform } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
+import { ATTEMPT_FILES } from './attempt-files';
+import { ClipsInFlight } from './clips-in-flight';
 import { PICKUP_THRESHOLD_DEG, rotationDeg, type Quaternion } from './pickup';
 import { SessionChanges } from './session-changes';
 import { SESSION_STORAGE } from './session-storage';
@@ -73,12 +84,20 @@ export const SYNC_SETTLE_MS = 2000;
  */
 export const SYNC_GRACE_MS = 1000;
 
+/**
+ * The gyro file of an attempt is written this long after its window ends (1 s after the attempt,
+ * `GYRO_TAIL_MS`, as the clips' margin), so that the samples up to the window's end have arrived from
+ * the cube (T3.7): the time the recording gives the encoder (`ENCODER_SETTLE_MS`).
+ */
+export const GYRO_SETTLE_MS = 250;
+
 /** The cube of a session created before the cube said what it is. */
 export const UNKNOWN_CUBE: CubeInfo = {
   model: 'Unknown cube',
   hardware: '',
   firmware: '',
   gyro: false,
+  productDate: null,
 };
 
 /** Makes the scrambles: @cubetrace/core's `generateScramble`; the unit tests give fixed ones. */
@@ -255,7 +274,10 @@ function refOf(current: Current): AttemptRef {
   };
 }
 
-function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
+/** The cube as the connection describes it: a `CubeInfo`, or the driver's `hardware` event. */
+type CubeDescription = Omit<CubeInfo, 'productDate'> & { productDate?: string | null };
+
+function sameCube(cube: CubeInfo, hardware: CubeDescription): boolean {
   return (
     cube.model === hardware.model &&
     cube.hardware === hardware.hardware &&
@@ -295,6 +317,17 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  *   cube to say what it is, up to {@link HARDWARE_WAIT_MS}); its id is kept in `localStorage`, so a
  *   reload resumes it. The screen is kept on while a cube is connected and a session is open, and
  *   persistent storage is asked for once, with the first session created.
+ * - The cube's whole record (T3.7): every `gyro` event goes into a ring buffer of the last 10
+ *   minutes (`GyroBuffer`, nothing allocated per event), and once an attempt ends, a second after
+ *   it (its window's end margin, `GYRO_TAIL_MS`, plus `GYRO_SETTLE_MS`), the samples from 2 s
+ *   before its first scramble turn to that second after its end are written to its folder as
+ *   `gyro.json` and the record is saved again with `gyro`, their summary; meanwhile `ClipsInFlight`
+ *   holds the attempt back from the upload queue, as a clip still to come does. No file for a cube
+ *   without a gyroscope, or an attempt without a sample in its window; a file that cannot be
+ *   written is noted in the session's `notes` (`gyro failed: …`). Each move's counter and packet
+ *   flag go to the machine, which keeps them with the move and logs the states it adopts at a
+ *   resync; each attempt names the build. The cube's battery reports go to the session's `battery`
+ *   (consecutive equal levels coalesced), its production date to the session's `cube`.
  * - For the recording (T2.4, `RecordingService`): `milestones$` says when an attempt's scramble is
  *   done, when it ended and when it went without a record; `attachClip` adds a clip to the
  *   attempt's record (saved again, nothing else changed), `putCamera` the camera to the session's
@@ -317,6 +350,10 @@ export class SessionService {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly sessionStorage = inject(SESSION_STORAGE);
   private readonly cloudIndex = inject(SessionIndexService);
+  /** Where the gyro file goes: the attempt's folder in the origin private file system (T3.7). */
+  private readonly files = inject(ATTEMPT_FILES);
+  /** The attempts whose gyro file is still to be written, for the upload queue (T3.7). */
+  private readonly inFlight = inject(ClipsInFlight);
   /**
    * The store, whose writes also go to the session index in the cloud while an account is signed in
    * (T3.1, `SessionIndexService`): never awaited, and a refusal is noted in the session; and then to
@@ -475,6 +512,12 @@ export class SessionService {
   /** The cube's latest orientation, and the one the pickup is measured from. */
   private lastGyro: Quaternion | null = null;
   private pickupFrom: Quaternion | null = null;
+  /** The cube's gyroscope reports of the last 10 minutes, for the attempts' gyro files (T3.7). */
+  private readonly gyro = new GyroBuffer();
+  /** The gyro files waiting for their attempt's window to end, by attempt. */
+  private readonly gyroTimers = new Map<string, number>();
+  /** The connection's latest battery report, which a session created now begins with (T3.7). */
+  private lastBattery: BatteryReading | null = null;
   /** Between a connection's first event and its `disconnected`. */
   private connectionOpen = false;
   /** Set when the connection's cube has not said what it is within {@link HARDWARE_WAIT_MS}. */
@@ -505,6 +548,10 @@ export class SessionService {
       clearTimeout(this.hardwareTimer);
       this.clearTimer(this.settleTimer);
       this.clearTimer(this.graceTimer);
+      for (const timer of this.gyroTimers.values()) {
+        this.clearTimer(timer);
+      }
+      this.gyroTimers.clear();
     });
     effect(() => {
       const active = this.cube.status() === 'connected' && this.sessionSignal() !== null;
@@ -754,6 +801,44 @@ export class SessionService {
       if (record !== undefined) {
         const attached = withSyncResidual(clip, stored.session);
         await store.saveAttempt({ ...record, video: withClip(record.video, attached) });
+        outcome = 'saved';
+      }
+    });
+    return outcome;
+  }
+
+  /**
+   * Puts `gyro`, the summary of the gyro file written into the attempt `ref`'s folder (T3.7), in
+   * the attempt's record and saves it again, nothing else changed, also when its session is no
+   * longer the current one. Resolves to `saved`, or to `gone`, changing nothing, when the attempt
+   * went without a record or was deleted. Rejects when the record could not be saved.
+   */
+  async attachGyro(ref: AttemptRef, gyro: GyroSummary): Promise<Exclude<ClipAttachment, 'kept'>> {
+    const session = this.sessionSignal();
+    if (session?.id === ref.session) {
+      const record = this.attemptsSignal().find((attempt) => isAttempt(attempt, ref));
+      if (record === undefined) {
+        return 'gone';
+      }
+      const updated: AttemptRecord = { ...record, gyro: { ...gyro } };
+      this.attemptsSignal.update((attempts) => attempts.map((a) => (a === record ? updated : a)));
+      if (this.lastResultSignal() === record) {
+        this.lastResultSignal.set(updated);
+      }
+      await this.save((store) => store.saveAttempt(updated));
+      return 'saved';
+    }
+    let outcome: Exclude<ClipAttachment, 'kept'> = 'gone';
+    await this.save(async (store) => {
+      let attempts: AttemptRecord[];
+      try {
+        attempts = await store.loadAttempts(ref.session);
+      } catch {
+        return;
+      }
+      const record = attempts.find((a) => isAttempt(a, ref));
+      if (record !== undefined) {
+        await store.saveAttempt({ ...record, gyro: { ...gyro } });
         outcome = 'saved';
       }
     });
@@ -1050,13 +1135,14 @@ export class SessionService {
         }
         break;
       case 'gyro':
-        this.onGyro(event.q, event.hostMs);
+        this.onGyro(event);
         break;
       case 'hardware':
         // A new session records the cube: an attempt may have been waiting for it.
         this.ensureAttempt();
         break;
       case 'battery':
+        this.onBattery(event);
         break;
     }
   }
@@ -1066,6 +1152,7 @@ export class SessionService {
     this.clockFit = new CubeClockFit();
     this.lastGyro = null;
     this.pickupFrom = null;
+    this.lastBattery = null;
     this.pausedAtSignal.set(null);
     this.hardwareWaitOver = false;
     clearTimeout(this.hardwareTimer);
@@ -1121,8 +1208,25 @@ export class SessionService {
       cubeMs: event.cubeMs,
       hostMs: event.hostMs,
       packetLast: event.packetLast,
+      serial: event.serial ?? null,
     });
     this.afterChange(current, before);
+  }
+
+  /**
+   * A battery report of the cube (T3.7): kept for the session begun on this connection, and added to
+   * the current session's `battery` unless its level is the last one's, with session.json saved.
+   */
+  private onBattery(event: CubeBatteryEvent): void {
+    const reading: BatteryReading = { hostMs: event.hostMs, level: event.level };
+    this.lastBattery = reading;
+    const session = this.sessionSignal();
+    if (session === null || session.battery.at(-1)?.level === reading.level) {
+      return;
+    }
+    const saved: SessionRecord = { ...session, battery: withBattery(session.battery, reading) };
+    this.sessionSignal.set(saved);
+    void this.save((store) => store.saveSession(saved));
   }
 
   private onFacelets(facelets: Facelets, hostMs: number): void {
@@ -1169,7 +1273,10 @@ export class SessionService {
     this.afterChange(current, before);
   }
 
-  private onGyro(q: Quaternion, hostMs: number): void {
+  /** A gyro report: into the buffer (nothing allocated), then the pickup detection as before. */
+  private onGyro(event: CubeGyroEvent): void {
+    const { q, hostMs } = event;
+    this.gyro.push(hostMs, q, event.v);
     this.lastGyro = q;
     const current = this.activeCurrent();
     if (current?.machine.state !== 'armed' || current.machine.events.pickup !== null) {
@@ -1239,13 +1346,73 @@ export class SessionService {
       await store.saveAttempt(record);
       await store.saveSession(saved);
     });
-    this.milestones.next({
-      type: 'ended',
-      attempt: refOf(current),
-      record,
-      endMs: record.events.solveEnd ?? current.machine.dnfMs ?? this.now(),
-    });
+    const endMs = record.events.solveEnd ?? current.machine.dnfMs ?? this.now();
+    if (saved.cube.gyro) {
+      this.planGyro(refOf(current), record, endMs);
+    }
+    this.milestones.next({ type: 'ended', attempt: refOf(current), record, endMs });
     this.ensureAttempt();
+  }
+
+  /**
+   * Writes the gyro file of the attempt `ref` once its window is over (T3.7): a second after its
+   * end, as the clips' margin, plus {@link GYRO_SETTLE_MS} for the last reports to arrive. The
+   * upload queue waits for it as for a clip (`ClipsInFlight`).
+   */
+  private planGyro(ref: AttemptRef, record: AttemptRecord, endMs: number): void {
+    const key = `${ref.session}/${String(ref.index)}/${String(ref.scrambleShown)}`;
+    const previous = this.gyroTimers.get(key);
+    if (previous !== undefined) {
+      this.clearTimer(previous);
+      this.inFlight.end(ref.session, ref.index);
+    }
+    this.inFlight.begin(ref.session, ref.index);
+    const delay = Math.max(0, endMs + GYRO_TAIL_MS + GYRO_SETTLE_MS - this.now());
+    const timer = this.setTimer(() => {
+      this.gyroTimers.delete(key);
+      void this.writeGyro(ref, record, endMs).finally(() => {
+        this.inFlight.end(ref.session, ref.index);
+      });
+    }, delay);
+    this.gyroTimers.set(key, timer);
+  }
+
+  /**
+   * The gyro file of the attempt `ref`: the buffer's samples from 2 s before its first scramble turn
+   * (`GYRO_LEAD_MS`; the scramble shown, for an attempt without a turn) to a second after `endMs`
+   * (`GYRO_TAIL_MS`), written to its folder as `gyro.json`, then its summary into the record. Nothing
+   * for an attempt that is gone, or without a sample in its window; a failure is noted in the
+   * session's notes.
+   */
+  private async writeGyro(ref: AttemptRef, record: AttemptRecord, endMs: number): Promise<void> {
+    if (!this.hasAttempt(ref)) {
+      return;
+    }
+    const { scrambleStart, scrambleShown } = record.events;
+    const window = this.gyro.window(
+      (scrambleStart ?? scrambleShown) - GYRO_LEAD_MS,
+      endMs + GYRO_TAIL_MS,
+    );
+    if (window.hostMs.length === 0) {
+      return;
+    }
+    try {
+      const file = gyroFile({ session: ref.session, index: ref.index, app: APP_BUILD, window });
+      // The session's folder exists once its creation is written.
+      await this.whenSaved();
+      if (!this.hasAttempt(ref)) {
+        return;
+      }
+      await this.files.write(ref.session, ref.index, GYRO_FILE, `${JSON.stringify(file)}\n`);
+      await this.attachGyro(ref, gyroSummary(file));
+    } catch (error: unknown) {
+      if (!this.hasAttempt(ref)) {
+        return;
+      }
+      const line = `gyro failed: attempt ${String(ref.index)}: ${errorMessage(error)}`;
+      console.warn(`cubetrace: ${line}`);
+      this.addNote(ref.session, line).catch(() => undefined);
+    }
   }
 
   /**
@@ -1344,6 +1511,7 @@ export class SessionService {
         index,
         scramble,
         scrambleShownMs: this.now(),
+        app: APP_BUILD,
       });
     } catch (error: unknown) {
       this.scrambleErrorSignal.set(
@@ -1369,7 +1537,7 @@ export class SessionService {
     }
   }
 
-  private startSession(cube: CubeInfo): SessionRecord {
+  private startSession(cube: CubeDescription): SessionRecord {
     const navigator = this.globals.navigator;
     const { platform, mobile } = hostPlatform(navigator);
     const session = createSession({
@@ -1388,6 +1556,7 @@ export class SessionService {
       appVersion: APP_BUILD.version,
       commit: APP_BUILD.commit,
       nowMs: this.now(),
+      battery: this.lastBattery === null ? [] : [this.lastBattery],
     });
     this.sessionSignal.set(session);
     this.attemptsSignal.set([]);

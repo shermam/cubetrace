@@ -387,12 +387,42 @@ describe('sessions/{id}', () => {
     await assertFails(nobody().firestore().doc(session).set(sessionDoc('alice')));
   });
 
+  it("takes the fields of T3.7 in their shape: the battery reports and the cube's production date", async () => {
+    const db = alice().firestore();
+    const cube = {
+      model: 'GAN 12 ui FreePlay',
+      hardware: 'GAN Gen2',
+      firmware: '2.3.1',
+      gyro: true,
+    };
+    await assertSucceeds(
+      db.doc(session).set(
+        sessionDoc('alice', SESSION_ID, {
+          cube: { ...cube, productDate: null },
+          battery: [{ hostMs: 1_790_000_000_100.5, level: 83 }],
+        }),
+      ),
+    );
+    await assertSucceeds(
+      db
+        .doc(session)
+        .set(sessionDoc('alice', SESSION_ID, { cube: { ...cube, productDate: '2025-03-14' } })),
+    );
+    // A session recorded before T3.7, written by the catch-up: neither field.
+    await assertSucceeds(db.doc(session).set(sessionDoc('alice', SESSION_ID, { cube })));
+    await assertSucceeds(db.doc(session).update({ battery: [] }));
+  });
+
   it.each([
     ['no schema', { schema: undefined }],
     ['a schema that is text', { schema: '2' }],
     ['an owner that is a number', { owner: 42 }],
     ['the id of another session', { id: BOBS_ID }],
     ['no id', { id: undefined }],
+    ['a cube that is text', { cube: 'GAN 12 ui' }],
+    ['a production date that is a number', { cube: { model: 'GAN 12 ui', productDate: 2025 } }],
+    ['battery reports that are a map', { battery: { level: 83 } }],
+    ['battery reports that are a number', { battery: 83 }],
   ])('refuses a session document with %s', async (_, change) => {
     const document = sessionDoc('alice');
     for (const [field, value] of Object.entries(change)) {
@@ -511,6 +541,40 @@ describe('sessions/{id}/attempts/{index}', () => {
     );
   });
 
+  it("takes the fields of T3.7 in their shape: the build, the gyro file's summary and the resyncs", async () => {
+    await seed(session, sessionDoc('alice'));
+    const db = alice().firestore();
+    const gyro = {
+      file: 'gyro.json',
+      samples: 1234,
+      fromHostMs: 1_789_999_999_012.5,
+      toHostMs: 1_790_000_024_340.7,
+      rateHz: 48.7,
+      truncatedStart: false,
+    };
+    const resync = {
+      hostMs: 1_790_000_001_450.5,
+      facelets: 'UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB',
+      state: 'scrambling',
+    };
+    await assertSucceeds(
+      db.doc(attempt).set(
+        attemptDoc('alice', SESSION_ID, {
+          app: { version: '0.4.0', commit: 'abc1234' },
+          gyro,
+          resyncs: [resync],
+        }),
+      ),
+    );
+    // Written again as the record changes (the gyro file attached a second after the end).
+    await assertSucceeds(db.doc(attempt).set({ gyro: null }, { merge: true }));
+    await assertSucceeds(db.doc(attempt).set({ gyro, resyncs: [] }, { merge: true }));
+    // An attempt recorded before T3.7, written by the catch-up: none of the fields.
+    await assertSucceeds(
+      db.doc(`${session}/attempts/0002`).set(attemptDoc('alice', SESSION_ID, { index: 2 })),
+    );
+  });
+
   it.each([
     ['its moves', { moves: [{ m: 'R', hostMs: 1, cubeMs: 1, phase: 'solve' }] }],
     ['no moves but an empty list of them', { moves: [] }],
@@ -523,6 +587,69 @@ describe('sessions/{id}/attempts/{index}', () => {
     ['no device', { device: undefined }],
     ['a device that is text', { device: 'office-mbp' }],
     ['no upload', { upload: undefined }],
+    ['a build that is text', { app: '0.4.0' }],
+    ['a build without its commit', { app: { version: '0.4.0' } }],
+    ['a build with a field more', { app: { version: '0.4.0', commit: 'abc1234', branch: 'main' } }],
+    ['a gyro summary that is text', { gyro: 'gyro.json' }],
+    [
+      'a gyro summary of another file',
+      {
+        gyro: {
+          file: 'laptop.gyro.json',
+          samples: 1,
+          fromHostMs: 0,
+          toHostMs: 0,
+          rateHz: 0,
+          truncatedStart: false,
+        },
+      },
+    ],
+    [
+      'a gyro summary without samples',
+      {
+        gyro: {
+          file: 'gyro.json',
+          samples: 0,
+          fromHostMs: 0,
+          toHostMs: 0,
+          rateHz: 0,
+          truncatedStart: false,
+        },
+      },
+    ],
+    [
+      'a gyro summary without its span',
+      { gyro: { file: 'gyro.json', samples: 1, fromHostMs: 0, rateHz: 0, truncatedStart: false } },
+    ],
+    [
+      'a gyro summary with a negative rate',
+      {
+        gyro: {
+          file: 'gyro.json',
+          samples: 1,
+          fromHostMs: 0,
+          toHostMs: 0,
+          rateHz: -1,
+          truncatedStart: false,
+        },
+      },
+    ],
+    [
+      'a gyro summary with a field more',
+      {
+        gyro: {
+          file: 'gyro.json',
+          samples: 1,
+          fromHostMs: 0,
+          toHostMs: 0,
+          rateHz: 0,
+          truncatedStart: false,
+          bytes: 1,
+        },
+      },
+    ],
+    ['resyncs that are a map', { resyncs: { hostMs: 1 } }],
+    ['resyncs that are a number', { resyncs: 1 }],
   ])('refuses an attempt document with %s', async (_, change) => {
     await seed(session, sessionDoc('alice'));
     const document = attemptDoc('alice');

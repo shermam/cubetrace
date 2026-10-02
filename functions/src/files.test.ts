@@ -34,6 +34,7 @@ describe('the files of the dataset', () => {
   it.each([
     ['attempt.json', 'application/json'],
     ['session.json', 'application/json'],
+    ['gyro.json', 'application/json'],
     ['laptop.solve.mp4', 'video/mp4'],
     ['laptop.scramble.mp4', 'video/mp4'],
     ['phone-front.solve.frames.json', 'application/json'],
@@ -44,6 +45,8 @@ describe('the files of the dataset', () => {
 
   it.each([
     'frames.json',
+    'laptop.gyro.json',
+    'gyro.json.tmp',
     'laptop.mp4',
     'laptop.warmup.mp4',
     'laptop.solve.webm',
@@ -93,6 +96,7 @@ describe('parseSignRequest', () => {
       { path: 'attempt.json', bytes: 18_220, contentType: 'application/json' },
       { path: 'laptop.solve.mp4', bytes: 23_734_012, contentType: 'video/mp4' },
       { path: 'laptop.solve.frames.json', bytes: 41_003, contentType: 'application/json' },
+      { path: 'gyro.json', bytes: 98_765, contentType: 'application/json' },
       { path: 'session.json', bytes: 4_100, contentType: 'application/json' },
     ];
     expect(parseSignRequest(sign(files), MAX)).toEqual({ sessionId, attemptIndex: 1, files });
@@ -143,6 +147,7 @@ describe('parseSignRequest', () => {
       [{ path: 'laptop.solve.mp4', bytes: MAX + 1, contentType: 'video/mp4' }],
     ],
     ['a clip as JSON', [{ path: 'laptop.solve.mp4', bytes: 10, contentType: 'application/json' }]],
+    ['the gyro file as a clip', [{ path: 'gyro.json', bytes: 10, contentType: 'video/mp4' }]],
     ['JSON as a clip', [{ path: 'attempt.json', bytes: 10, contentType: 'video/mp4' }]],
     ['JSON as text', [{ path: 'attempt.json', bytes: 10, contentType: 'text/plain' }]],
     ['a file without a type', [{ path: 'attempt.json', bytes: 10 }]],
@@ -174,6 +179,8 @@ describe('parseSignRequest', () => {
       contentType: 'video/mp4',
     }));
     expect(parseSignRequest(sign(files), MAX).files).toHaveLength(MAX_FILES_PER_CALL);
+    // One more than before T3.7, for the attempt's gyro file.
+    expect(MAX_FILES_PER_CALL).toBe(33);
   });
 });
 

@@ -1,8 +1,10 @@
 // What the queue uploads of an attempt (docs/DATA-MODEL.md §5): its attempt.json as the dataset holds
-// it, each clip's MP4 and frames file, and session.json, the session's, which rides with one of the
-// session's attempts. The JSON records are uploaded as the session store writes them (`recordJson`):
-// the bytes the URL is signed for are made from the record when it is signed.
+// it, each clip's MP4 and frames file, its gyro file when it has one (T3.7), and session.json, the
+// session's, which rides with one of the session's attempts. The JSON records are uploaded as the
+// session store writes them (`recordJson`): the bytes the URL is signed for are made from the record
+// when it is signed.
 import type { AttemptRecord, SessionRecord, VideoClip } from '@cubetrace/core';
+import { GYRO_FILE } from '@cubetrace/core';
 import { recordJson } from '@cubetrace/storage';
 
 import { JSON_TYPE, MP4_TYPE } from './api';
@@ -10,9 +12,14 @@ import { JSON_TYPE, MP4_TYPE } from './api';
 /** The name of an attempt's record, and of its session's, in their folders. */
 export const ATTEMPT_JSON = 'attempt.json';
 export const SESSION_JSON = 'session.json';
+/** The name of an attempt's gyro file in its folder (T3.7). */
+export const GYRO_JSON = GYRO_FILE;
 
-/** The kind of a file of the upload: a record (made from it), or a clip's file (read from OPFS). */
-export type UploadFileKind = 'attempt' | 'session' | 'clip' | 'frames';
+/**
+ * The kind of a file of the upload: a record (made from it), a clip's file or the gyro file (read
+ * from OPFS as they are).
+ */
+export type UploadFileKind = 'attempt' | 'session' | 'clip' | 'frames' | 'gyro';
 
 /** The content type of each kind, which the signature binds. */
 export const CONTENT_TYPES: Readonly<Record<UploadFileKind, string>> = {
@@ -20,6 +27,7 @@ export const CONTENT_TYPES: Readonly<Record<UploadFileKind, string>> = {
   session: JSON_TYPE,
   clip: MP4_TYPE,
   frames: JSON_TYPE,
+  gyro: JSON_TYPE,
 };
 
 /**
@@ -74,18 +82,25 @@ export function textHash(text: string): string {
 export interface AttemptFile {
   readonly path: string;
   readonly kind: UploadFileKind;
-  /** The clip the file belongs to (its MP4 or its frames file); null for attempt.json. */
+  /** The clip the file belongs to (its MP4 or its frames file); null for attempt.json and gyro.json. */
   readonly clip: VideoClip | null;
 }
 
-/** The files of `attempt` that its upload sends, in order: attempt.json, then each clip's MP4 and frames file. */
-export function attemptUploadFiles(attempt: Pick<AttemptRecord, 'video'>): AttemptFile[] {
+/**
+ * The files of `attempt` that its upload sends, in order: attempt.json, then each clip's MP4 and
+ * frames file, then its gyro file when the record names one (T3.7: the attempt's sixth file with one
+ * camera). A clip's MP4 deleted from the device is still listed: the queue knows it as done.
+ */
+export function attemptUploadFiles(attempt: Pick<AttemptRecord, 'video' | 'gyro'>): AttemptFile[] {
   return [
     { path: ATTEMPT_JSON, kind: 'attempt', clip: null },
     ...attempt.video.flatMap((clip): AttemptFile[] => [
       { path: clip.file, kind: 'clip', clip },
       { path: clip.framesFile, kind: 'frames', clip },
     ]),
+    ...(attempt.gyro === null
+      ? []
+      : [{ path: attempt.gyro.file, kind: 'gyro' as const, clip: null }]),
   ];
 }
 
@@ -96,6 +111,9 @@ export function kindOf(path: string): UploadFileKind {
   }
   if (path === SESSION_JSON) {
     return 'session';
+  }
+  if (path === GYRO_JSON) {
+    return 'gyro';
   }
   return path.endsWith('.mp4') ? 'clip' : 'frames';
 }

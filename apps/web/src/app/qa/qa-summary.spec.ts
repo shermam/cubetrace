@@ -53,6 +53,8 @@ describe('qaSummary', () => {
         uploadedBytes: 0,
         pendingBytes: 5_309_000,
         unsent: 0,
+        gyro: 0,
+        gyroRateHz: null,
       },
       {
         day: 'day 0',
@@ -63,6 +65,8 @@ describe('qaSummary', () => {
         uploadedBytes: 5_309_000,
         pendingBytes: 5_309_000,
         unsent: 0,
+        gyro: 0,
+        gyroRateHz: null,
       },
       {
         day: 'day 0',
@@ -73,6 +77,8 @@ describe('qaSummary', () => {
         uploadedBytes: 0,
         pendingBytes: 5_000,
         unsent: 1,
+        gyro: 0,
+        gyroRateHz: null,
       },
     ]);
     expect(summary.total).toEqual({
@@ -82,7 +88,37 @@ describe('qaSummary', () => {
       uploadedBytes: 5_309_000,
       pendingBytes: 10_623_000,
       unsent: 1,
+      gyro: 0,
+      gyroRateHz: null,
     });
+  });
+
+  it('counts the attempts with a gyro file and the median rate of those files (T3.7)', () => {
+    const withRate = (index: number, rateHz: number): CloudAttempt => ({
+      ...attemptDocument(attemptWithClips(index), laptop, OWNER),
+      gyro: {
+        file: 'gyro.json',
+        samples: 1000,
+        fromHostMs: 1_790_000_000_000,
+        toHostMs: 1_790_000_020_000,
+        rateHz,
+        truncatedStart: false,
+      },
+    });
+    const summary = qaSummary(
+      [
+        at(1_000, withRate(1, 49.8)),
+        at(2_000, withRate(2, 50.4)),
+        at(3_000, attemptDocument(attemptWithClips(3), laptop, OWNER)),
+        at(DAY_MS + 1, withRate(4, 97.9)),
+      ],
+      dayOf,
+    );
+    expect(summary.rows.map((row) => [row.day, row.gyro, row.gyroRateHz])).toEqual([
+      ['day 1', 1, 97.9],
+      ['day 0', 2, 50.1],
+    ]);
+    expect(summary.total).toMatchObject({ attempts: 4, gyro: 3, gyroRateHz: 50.4 });
   });
 
   it("counts as pending the clips that the attempt's upload does not name yet", () => {
@@ -127,6 +163,8 @@ describe('qaSummary', () => {
         uploadedBytes: 0,
         pendingBytes: 0,
         unsent: 0,
+        gyro: 0,
+        gyroRateHz: null,
       },
     });
   });

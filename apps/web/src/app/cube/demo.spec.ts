@@ -14,6 +14,7 @@ import {
   demoParts,
   demoRequestFrom,
   misscrambleMove,
+  parseDemoGyro,
   parseDemoIndex,
   parseDemoMisscramble,
   parseDemoSolves,
@@ -76,19 +77,36 @@ describe('demo query parameters', () => {
       demo: '3',
       speed: '20',
       misscramble: null,
+      gyro: null,
     });
     expect(demoRequestFrom(convertToParamMap({ demo: '3', misscramble: '5' }))).toEqual({
       demo: '3',
       speed: null,
       misscramble: '5',
+      gyro: null,
     });
-    expect(demoRequestFrom(convertToParamMap({ demo: '' }))).toEqual({
+    expect(demoRequestFrom(convertToParamMap({ demo: '', gyro: '1' }))).toEqual({
       demo: '',
       speed: null,
       misscramble: null,
+      gyro: '1',
     });
     expect(demoRequestFrom(convertToParamMap({ speed: '20', misscramble: '5' }))).toBeNull();
     expect(demoRequestFrom(convertToParamMap({}))).toBeNull();
+  });
+
+  it.each([
+    ['1', true],
+    ['true', true],
+    [' On ', true],
+    ['yes', true],
+    ['0', false],
+    ['false', false],
+    ['', false],
+    [null, false],
+    ['gyro', false],
+  ])('reads ?gyro=%j as %s (T3.7)', (text, on) => {
+    expect(parseDemoGyro(text)).toBe(on);
   });
 
   it('plays the requested solve at the requested speed when both are valid', () => {

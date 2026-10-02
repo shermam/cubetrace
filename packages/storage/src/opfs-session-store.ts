@@ -465,6 +465,36 @@ export async function writeTextFile(
   }
 }
 
+/**
+ * Writes `text` as the whole content of the file `name` in the folder of attempt `index` of
+ * session `sessionId` (docs/DATA-MODEL.md §5), in one step as {@link writeTextFile} writes: the gyro
+ * file of an attempt (T3.7), which the app writes beside the record once the attempt's window is
+ * over, as the capture's clip worker writes the clips. The attempt's folders are made if needed;
+ * the session's must exist (its `session.json` was written first), else this rejects with
+ * "No session <id>: its folder is missing.". Rejects with a RangeError for an index that is not a
+ * positive integer, or a session id that cannot name a folder.
+ */
+export async function writeAttemptFile(
+  root: OpfsDirectoryHandle,
+  sessionId: string,
+  index: number,
+  name: string,
+  text: string,
+): Promise<void> {
+  const folder = attemptFolder(index);
+  if (sessionFolder(sessionId) === null) {
+    throw new RangeError(`"${sessionId}" cannot name a session folder.`);
+  }
+  const sessions = await folderIn(root, SESSIONS_FOLDER);
+  const session = sessions === null ? null : await folderIn(sessions, sessionId);
+  if (session === null) {
+    throw new Error(`No session ${sessionId}: its folder is missing.`);
+  }
+  const attempts = await session.getDirectoryHandle(ATTEMPTS_FOLDER, { create: true });
+  const attempt = await attempts.getDirectoryHandle(folder, { create: true });
+  await writeTextFile(attempt, name, text);
+}
+
 /** Replaces the content of `file` with `text` through a writable stream. */
 async function writeText(file: OpfsFileHandle, text: string): Promise<void> {
   const writable = await file.createWritable();

@@ -164,6 +164,33 @@ describe('writeClip', () => {
     expect(clip.file).toBe('phone-front.scramble.mp4');
   });
 
+  it("names the build that wrote the frames file, after the clip's names (T3.7), when it is given", async () => {
+    const root = await withSession({ syncAccessHandle: true });
+    const validateFrames = new Ajv2020({ allowUnionTypes: true }).compile(FRAMES_SCHEMA);
+    const app = { version: '0.4.0', commit: 'abc1234' };
+    await writeClip(root, SESSION, 7, 'laptop', 'solve', mp4Bytes(), FRAMES, { ...DETAILS, app });
+    const written = JSON.parse(
+      file(root, `${FOLDER}/laptop.solve.frames.json`)?.text ?? '',
+    ) as Record<string, unknown>;
+    expect(validateFrames(written), JSON.stringify(validateFrames.errors)).toBe(true);
+    expect(written).toEqual({ ...FRAMES, app });
+    expect(Object.keys(written)).toEqual([
+      'schema',
+      'camera',
+      'segment',
+      'app',
+      't0HostMs',
+      'dtMs',
+      'keyframes',
+      'arrival',
+    ]);
+    // Without one (the tests of the muxer, a caller that names none): the file as it was.
+    await write(root);
+    expect(JSON.parse(file(root, `${FOLDER}/laptop.solve.frames.json`)?.text ?? '')).toEqual(
+      FRAMES,
+    );
+  });
+
   it('pads the attempt folder to four digits and makes it, next to the attempt.json already there', async () => {
     const root = await withSession({ syncAccessHandle: true });
     await root.plant(`sessions/${SESSION}/attempts/0012/attempt.json`, '{"index":12}');

@@ -2,9 +2,11 @@ import { Injectable, signal } from '@angular/core';
 
 /**
  * The attempts whose clips the recording is still to save (T2.4: each clip a second after its
- * segment, then added to the attempt's record), so that the upload queue (T3.3) sends an attempt
- * once its record is final: both clips saved, or known absent. The recording says when a clip is
- * planned and when it is saved, failed or dropped; nothing else imports the recording.
+ * segment, then added to the attempt's record), and whose gyro file the session service is still to
+ * write (T3.7: a second after the attempt, then its summary added to the record), so that the upload
+ * queue (T3.3) sends an attempt once its record is final: both clips and the gyro file saved, or
+ * known absent. The recording and the session service say when one is planned and when it is saved,
+ * failed or dropped; nothing else imports the recording.
  */
 @Injectable({ providedIn: 'root' })
 export class ClipsInFlight {

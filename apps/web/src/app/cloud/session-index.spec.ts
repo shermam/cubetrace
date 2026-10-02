@@ -55,6 +55,7 @@ describe('SessionIndexService', () => {
         name.endsWith('.frames.json')
           ? Promise.resolve(new Blob(['x'.repeat(FRAMES_BYTES)]))
           : Promise.reject(new DOMException('No such file.', 'NotFoundError')),
+      write: () => Promise.reject(new Error('The index writes no file.')),
     };
     TestBed.configureTestingModule({
       providers: [

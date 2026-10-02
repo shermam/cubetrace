@@ -67,7 +67,8 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
  * the video of one (the solve's first), read from the origin private file system behind an object
  * URL that goes when it closes, next to the attempt's moves of that segment by their time into the
  * clip, the one the video shows highlighted (a click on a move goes to it); "Download" gives both
- * clips' MP4s and frames files and the attempt's record, attempt.json. A clip deleted from the
+ * clips' MP4s and frames files, the attempt's gyro file when it has one (T3.7) and the attempt's
+ * record, attempt.json. A clip deleted from the
  * device once uploaded (`local` false, T3.3) says it is in the cloud in place of its video, and its
  * MP4 is not among the files downloaded.
  */
@@ -355,18 +356,22 @@ export class ClipViewer {
   });
   protected readonly downloading = signal(false);
   protected readonly downloadError = signal<string | null>(null);
-  /** What Download gives: the clips still on this device (T3.3), their frame times and the record. */
+  /**
+   * What Download gives: the clips still on this device (T3.3), their frame times, the gyroscope
+   * file when the attempt has one (T3.7) and the record.
+   */
   protected readonly downloadText = computed(() => {
-    const video = this.attempt().video;
+    const { video, gyro } = this.attempt();
+    const rest = gyro === null ? ' and attempt.json' : ', the gyroscope and attempt.json';
     const here = video.filter((clip) => clip.local !== false).length;
     if (here === video.length) {
       return video.length === 1
-        ? 'the clip, its frame times and attempt.json'
-        : 'both clips, their frame times and attempt.json';
+        ? `the clip, its frame times${rest}`
+        : `both clips, their frame times${rest}`;
     }
     return here === 0
-      ? 'the frame times and attempt.json (the clips are in the cloud)'
-      : 'the clip on this device, the frame times and attempt.json';
+      ? `the frame times${rest} (the clips are in the cloud)`
+      : `the clip on this device, the frame times${rest}`;
   });
   /** Incremented by every clip read: a slower, older read then knows it lost. */
   private reads = 0;
@@ -456,16 +461,20 @@ export class ClipViewer {
     }
   }
 
-  /** Downloads both clips' MP4s and frames files, and attempt.json. */
+  /** Downloads both clips' MP4s and frames files, the gyro file when there is one, and attempt.json. */
   protected async download(): Promise<void> {
     const record = this.attempt();
     this.downloading.set(true);
     this.downloadError.set(null);
     try {
-      // A clip deleted once uploaded (T3.3) has its frames file here, not its MP4.
-      const names = record.video.flatMap((clip) =>
-        clip.local === false ? [clip.framesFile] : [clip.file, clip.framesFile],
-      );
+      // A clip deleted once uploaded (T3.3) has its frames file here, not its MP4; the gyro file
+      // (T3.7) stays on the device with the frames files.
+      const names = [
+        ...record.video.flatMap((clip) =>
+          clip.local === false ? [clip.framesFile] : [clip.file, clip.framesFile],
+        ),
+        ...(record.gyro === null ? [] : [record.gyro.file]),
+      ];
       const blobs = await Promise.all(
         names.map((name) => this.files.read(record.session, record.index, name)),
       );

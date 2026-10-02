@@ -316,18 +316,10 @@ describe('GanEventMapper', () => {
       gyro: true,
     });
     // A Gen4 cube's hardware message says its production date; blank, it is as if unsaid.
-    expect(
-      mapper.map({
-        type: 'HARDWARE',
-        timestamp: 10,
-        productDate: '2025-03-14',
-        gyroSupported: true,
-      }).productDate,
-    ).toBe('2025-03-14');
-    expect(
-      'productDate' in
-        (mapper.map({ type: 'HARDWARE', timestamp: 10, productDate: ' \u0000' }) ?? {}),
-    ).toBe(false);
+    const dated = mapper.map({ type: 'HARDWARE', timestamp: 10, productDate: '2025-03-14' });
+    expect(dated).toMatchObject({ type: 'hardware', productDate: '2025-03-14' });
+    const blank = mapper.map({ type: 'HARDWARE', timestamp: 10, productDate: ' \u0000' });
+    expect(blank !== null && 'productDate' in blank).toBe(false);
     expect(mapper.map({ type: 'DISCONNECT', timestamp: 10 })).toEqual({
       type: 'disconnected',
       reason: 'The cube closed the connection.',

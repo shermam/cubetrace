@@ -10,10 +10,10 @@ import {
   textHash,
   utf8Bytes,
 } from './files';
-import { A, attempt, clip, session } from './test-device';
+import { A, GYRO, attempt, clip, session } from './test-device';
 
 describe('the files of an attempt', () => {
-  it('are attempt.json, then each clip and its frames file', () => {
+  it('are attempt.json, then each clip and its frames file, then the gyro file when there is one (T3.7)', () => {
     const files = attemptUploadFiles(attempt(A, 1, [clip('scramble', 10), clip('solve', 20)]));
     expect(files.map((file) => [file.path, file.kind])).toEqual([
       ['attempt.json', 'attempt'],
@@ -24,6 +24,15 @@ describe('the files of an attempt', () => {
     ]);
     expect(files.map((file) => kindOf(file.path))).toEqual(files.map((file) => file.kind));
     expect(kindOf('session.json')).toBe('session');
+    const withGyro = attemptUploadFiles({
+      ...attempt(A, 1, [clip('scramble', 10), clip('solve', 20)]),
+      gyro: GYRO,
+    });
+    expect(withGyro.map((file) => [file.path, file.kind, file.clip])).toEqual([
+      ...files.map((file) => [file.path, file.kind, file.clip]),
+      ['gyro.json', 'gyro', null],
+    ]);
+    expect(kindOf('gyro.json')).toBe('gyro');
   });
 
   it("upload attempt.json without the clips' local, as the store writes it", () => {

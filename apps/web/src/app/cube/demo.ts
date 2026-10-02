@@ -38,14 +38,16 @@ export interface DemoSolve {
 }
 
 /**
- * A demo as the page's address asks for it: the raw values of `?demo=`, `?speed=` and
- * `?misscramble=`.
+ * A demo as the page's address asks for it: the raw values of `?demo=`, `?speed=`,
+ * `?misscramble=` and `?gyro=`.
  */
 export interface DemoRequest {
   readonly demo: string | null;
   readonly speed: string | null;
   /** The scramble move after which the demo cube goes wrong once; absent or null: it does not. */
   readonly misscramble?: string | null;
+  /** Whether the demo cube reports a gyroscope (T3.7, `?gyro=1`); absent or null: it does not. */
+  readonly gyro?: string | null;
 }
 
 /** No preference: a random demo solve at the speed from Settings. */
@@ -111,13 +113,26 @@ export function parseDemoMisscramble(text: string | null): number | null {
   return after >= 1 ? after : null;
 }
 
+/**
+ * `?gyro=`: whether the demo cube has a gyroscope (T3.7): `1`, `true`, `on` or `yes` turn it on;
+ * anything else, or nothing, leaves it off, as the fake cube is by default.
+ */
+export function parseDemoGyro(text: string | null): boolean {
+  return text !== null && ['1', 'true', 'on', 'yes'].includes(text.trim().toLowerCase());
+}
+
 /** The demo that `query` (the page's query parameters) asks for; null without `?demo`. */
 export function demoRequestFrom(query: {
   has(name: string): boolean;
   get(name: string): string | null;
 }): DemoRequest | null {
   return query.has('demo')
-    ? { demo: query.get('demo'), speed: query.get('speed'), misscramble: query.get('misscramble') }
+    ? {
+        demo: query.get('demo'),
+        speed: query.get('speed'),
+        misscramble: query.get('misscramble'),
+        gyro: query.get('gyro'),
+      }
     : null;
 }
 

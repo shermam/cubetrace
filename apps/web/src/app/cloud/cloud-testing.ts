@@ -23,6 +23,7 @@ export const GAN_12_UI = {
   hardware: 'GAN Gen2',
   firmware: '2.3.1',
   gyro: true,
+  productDate: null,
 };
 
 /** The laptop's camera, as the camera panel records it. */

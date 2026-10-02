@@ -1,8 +1,10 @@
+import type { Provider } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   MemorySessionStore,
   SOLVED,
   applyMoves,
+  parseGyro,
   parseMoves,
   type CameraClock,
   type CameraInfo,
@@ -13,10 +15,13 @@ import { FakeCube, type CubeConnection, type CubeEvent } from '@cubetrace/gan';
 import { FakeDirectoryHandle, OpfsSessionStore } from '@cubetrace/storage';
 import { Subject } from 'rxjs';
 
+import { APP_BUILD } from '../../environments/version';
 import { DEMO_FILE, asGanCube } from '../cube/cube-testing';
 import { parseDemoSolves } from '../cube/demo';
 import { FakeLocalStorage, settle } from '../device/fake-browser';
-import { connect, inverse, ready, scripted, setup, turn } from './session-harness';
+import { ATTEMPT_FILES } from './attempt-files';
+import { ClipsInFlight } from './clips-in-flight';
+import { connect, inverse, ready, scripted, setup, turn, type Setup } from './session-harness';
 import {
   CURRENT_SESSION_KEY,
   HARDWARE_WAIT_MS,
@@ -70,6 +75,7 @@ describe('SessionService', () => {
       hardware: 'simulated',
       firmware: 'simulated',
       gyro: false,
+      productDate: null,
     });
     expect(session?.host).toMatchObject({ platform: 'macOS', isPhone: false });
     expect(s.localStorage.getItem(CURRENT_SESSION_KEY)).toBe(session?.id);
@@ -386,7 +392,7 @@ describe('SessionService', () => {
     const store = new MemorySessionStore();
     await store.createSession({
       ...testSession(),
-      cube: { model: 'GAN 356 i3', hardware: '1', firmware: '2', gyro: false },
+      cube: { model: 'GAN 356 i3', hardware: '1', firmware: '2', gyro: false, productDate: null },
     });
     const localStorage = new FakeLocalStorage();
     localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
@@ -612,6 +618,297 @@ describe('SessionService', () => {
     expect(s.service.attempt()?.events.pickup).toBe(pickup);
   });
 
+  describe("the cube's whole record (T3.7)", () => {
+    /** A fake of the attempts' files: what was written, by path; `failWith` set, every write refuses. */
+    function fakeFiles(): {
+      provider: Provider;
+      written: Map<string, string>;
+      failWith: string | null;
+    } {
+      const written = new Map<string, string>();
+      const fake = {
+        provider: {} as Provider,
+        written,
+        failWith: null as string | null,
+      };
+      fake.provider = {
+        provide: ATTEMPT_FILES,
+        useValue: {
+          read: () => Promise.reject(new Error('not read here')),
+          write: (sessionId: string, index: number, name: string, text: string) => {
+            if (fake.failWith !== null) {
+              return Promise.reject(new Error(fake.failWith));
+            }
+            written.set(`${sessionId}/${String(index)}/${name}`, text);
+            return Promise.resolve();
+          },
+        },
+      };
+      return fake;
+    }
+
+    /** A fake cube with a gyroscope (its hardware says so), connected as a GAN cube, scripted. */
+    async function gyroCube(s: Setup): Promise<{
+      fake: FakeCube;
+      emit: (event: CubeEvent) => void;
+      gyro: (q: [number, number, number, number], v?: readonly [number, number, number]) => void;
+    }> {
+      await s.service.whenReady();
+      s.service.prepare();
+      await settle();
+      const fake = new FakeCube({ now: () => s.perf.hostMs, gyro: true });
+      const { connection, emit } = scripted(fake);
+      await connect(s, connection);
+      return {
+        fake,
+        emit,
+        gyro: (q, v) => {
+          emit(
+            v === undefined
+              ? { type: 'gyro', q, hostMs: s.perf.hostMs }
+              : { type: 'gyro', q, v, hostMs: s.perf.hostMs },
+          );
+        },
+      };
+    }
+
+    it("writes the attempt's gyro.json a second after its end, from 2 s before its first turn, and puts its summary in the record", async () => {
+      const files = fakeFiles();
+      const s = setup({ providers: [files.provider] });
+      const inFlight = TestBed.inject(ClipsInFlight);
+      const { fake, gyro } = await gyroCube(s);
+      expect(s.service.session()?.cube.gyro).toBe(true);
+      // Samples every 20 ms from 3 s before the first turn: the window begins 2 s before it.
+      for (let k = 0; k < 150; k++) {
+        s.perf.advance(20);
+        gyro([0, 0, 0, 1], [0, 0, 0]);
+      }
+      const scrambleStart = s.perf.hostMs + 100;
+      turn(s, fake, 'R U F');
+      for (let k = 0; k < 10; k++) {
+        s.perf.advance(20);
+        gyro([0, 0, Math.sin(0.2), Math.cos(0.2)], [0, 0, 2]);
+      }
+      turn(s, fake, inverse('R U F'), 200);
+      const solveEnd = s.perf.hostMs;
+      const record = s.service.attempts()[0];
+      expect(record.result.status).toBe('solved');
+      expect(record.gyro).toBeNull();
+      // Its record is saved, its gyro file still to come: the upload waits.
+      expect(inFlight.has(record.session, 1)).toBe(true);
+      // The second after the end: more samples, and some after the window, which stay out.
+      for (let k = 0; k < 60; k++) {
+        s.perf.advance(20);
+        gyro([0, 0, 0, 1], [0, 0, 0]);
+      }
+      expect(s.perf.hostMs).toBe(solveEnd + 1200);
+      expect(files.written.size).toBe(0);
+      s.timers.advance(50);
+      await settle();
+      await s.service.whenSaved();
+
+      const text = files.written.get(`${record.session}/1/gyro.json`);
+      expect(text?.endsWith('\n')).toBe(true);
+      const file = parseGyro(JSON.parse(text ?? '{}'));
+      expect(file).toMatchObject({
+        schema: 1,
+        session: record.session,
+        index: 1,
+        app: APP_BUILD,
+        truncatedStart: false,
+      });
+      // From the first sample at or after 2 s before the first turn, to the last one within a
+      // second after the end.
+      expect(file.t0HostMs).toBe(scrambleStart - 2000);
+      const last = file.t0HostMs + file.dtMs.reduce((sum, dt) => sum + dt, 0);
+      expect(last).toBeLessThanOrEqual(solveEnd + 1000);
+      expect(last).toBeGreaterThan(solveEnd + 980);
+      expect(file.dtMs[0]).toBe(0);
+      expect(file.dtMs[1]).toBe(20);
+      expect(file.q.length).toBe(file.dtMs.length * 4);
+      expect(file.v?.length).toBe(file.dtMs.length * 3);
+      expect(file.v?.slice(0, 3)).toEqual([0, 0, 0]);
+      expect(file.v).toContain(2);
+      // The record names the file, and the attempt is final for the upload. (The rate is below
+      // 50 Hz: the turns advanced the clock without a sample.)
+      const saved = s.service.attempts()[0];
+      expect(saved.gyro).toEqual({
+        file: 'gyro.json',
+        samples: file.dtMs.length,
+        fromHostMs: file.t0HostMs,
+        toHostMs: last,
+        rateHz: Math.round(((file.dtMs.length - 1) / (last - file.t0HostMs)) * 10_000) / 10,
+        truncatedStart: false,
+      });
+      expect(saved.gyro?.rateHz).toBeGreaterThan(35);
+      expect(s.service.lastResult()?.gyro).toEqual(saved.gyro);
+      const stored = (await s.store.exportSession(record.session)).attempts[0];
+      expect(stored.gyro).toEqual(saved.gyro);
+      expect(stored.app).toEqual(APP_BUILD);
+      expect(inFlight.has(record.session, 1)).toBe(false);
+      expect(s.service.session()?.notes).toBe('');
+    });
+
+    it('says truncatedStart when the samples do not reach back 2 s before the first turn, and writes nothing without a sample or a gyroscope', async () => {
+      const files = fakeFiles();
+      const s = setup({ providers: [files.provider] });
+      const { fake, gyro } = await gyroCube(s);
+      // The first sample comes with the first turn.
+      s.perf.advance(1000);
+      gyro([0, 0, 0, 1]);
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 200);
+      const [record] = s.service.attempts();
+      s.timers.advance(2000);
+      await settle();
+      await s.service.whenSaved();
+      const file = parseGyro(
+        JSON.parse(files.written.get(`${record.session}/1/gyro.json`) ?? '{}'),
+      );
+      expect(file.truncatedStart).toBe(true);
+      expect(file.v).toBeNull();
+      expect(file.dtMs).toEqual([0]);
+      expect(s.service.attempts()[0].gyro).toMatchObject({
+        samples: 1,
+        rateHz: 0,
+        truncatedStart: true,
+      });
+
+      // The next attempt, 15 s later with no sample in its window: no file, nothing in the record.
+      await settle();
+      s.perf.advance(15_000);
+      turn(s, fake, "L2 D B'");
+      turn(s, fake, inverse("L2 D B'"), 200);
+      s.timers.advance(2000);
+      await settle();
+      await s.service.whenSaved();
+      expect(files.written.size).toBe(1);
+      expect(s.service.attempts()[1].gyro).toBeNull();
+      expect(TestBed.inject(ClipsInFlight).has(record.session, 2)).toBe(false);
+    });
+
+    it('plans no gyro file for a cube without a gyroscope', async () => {
+      const files = fakeFiles();
+      const s = setup({ providers: [files.provider] });
+      const cube = await ready(s);
+      expect(s.service.session()?.cube.gyro).toBe(false);
+      turn(s, cube, 'R U F');
+      turn(s, cube, inverse('R U F'), 200);
+      expect(s.service.attempts()[0].result.status).toBe('solved');
+      expect(TestBed.inject(ClipsInFlight).has(s.service.session()?.id ?? '', 1)).toBe(false);
+      s.timers.advance(5000);
+      await settle();
+      await s.service.whenSaved();
+      expect(files.written.size).toBe(0);
+      expect(s.service.attempts()[0].gyro).toBeNull();
+    });
+
+    it('notes a gyro file that could not be written in the session, and leaves the record without one', async () => {
+      const files = fakeFiles();
+      files.failWith = 'the disk is full';
+      const s = setup({ providers: [files.provider] });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { fake, gyro } = await gyroCube(s);
+      gyro([0, 0, 0, 1]);
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 200);
+      const [record] = s.service.attempts();
+      s.timers.advance(2000);
+      await settle();
+      await s.service.whenSaved();
+      expect(s.service.attempts()[0].gyro).toBeNull();
+      expect(s.service.session()?.notes).toBe('gyro failed: attempt 1: the disk is full');
+      expect(TestBed.inject(ClipsInFlight).has(record.session, 1)).toBe(false);
+      expect(warn).toHaveBeenCalledWith('cubetrace: gyro failed: attempt 1: the disk is full');
+      warn.mockRestore();
+    });
+
+    it("keeps the cube's battery reports in the session, consecutive equal levels coalesced, and its production date", async () => {
+      const s = setup();
+      await s.service.whenReady();
+      s.service.prepare();
+      await settle();
+      const events = new Subject<CubeEvent>();
+      const connecting = s.cube.connect();
+      s.connector.last.resolve({
+        kind: 'gan',
+        events$: events,
+        facelets: SOLVED,
+        requestFacelets: () => Promise.resolve(),
+        requestBattery: () => Promise.resolve(),
+        resetToSolved: () => Promise.resolve(),
+        disconnect: () => Promise.resolve(),
+      });
+      await connecting;
+      // The battery before the session begins: the session begins with it.
+      events.next({ type: 'battery', level: 83, hostMs: s.perf.hostMs });
+      const at83 = s.perf.hostMs;
+      s.perf.advance(100);
+      events.next({
+        type: 'hardware',
+        model: 'GAN12uiM',
+        hardware: '1.0',
+        firmware: '2.1',
+        gyro: true,
+        productDate: '2025-03-14',
+      });
+      const session = s.service.session();
+      expect(session?.cube).toEqual({
+        model: 'GAN12uiM',
+        hardware: '1.0',
+        firmware: '2.1',
+        gyro: true,
+        productDate: '2025-03-14',
+      });
+      expect(session?.battery).toEqual([{ hostMs: at83, level: 83 }]);
+      // The same level again: nothing; a new level: a new entry, saved.
+      s.perf.advance(60_000);
+      events.next({ type: 'battery', level: 83, hostMs: s.perf.hostMs });
+      expect(s.service.session()?.battery).toHaveLength(1);
+      s.perf.advance(60_000);
+      events.next({ type: 'battery', level: 82, hostMs: s.perf.hostMs });
+      expect(s.service.session()?.battery).toEqual([
+        { hostMs: at83, level: 83 },
+        { hostMs: s.perf.hostMs, level: 82 },
+      ]);
+      await s.service.whenSaved();
+      const stored = (await s.store.exportSession(session?.id ?? '')).session;
+      expect(stored.battery).toHaveLength(2);
+      expect(stored.cube.productDate).toBe('2025-03-14');
+    });
+
+    it("keeps each move's counter and packet flag, the build, and the states adopted at a resync", async () => {
+      const s = setup();
+      await s.service.whenReady();
+      s.service.prepare();
+      await settle();
+      const fake = new FakeCube({ now: () => s.perf.hostMs });
+      const { connection, emit } = scripted(fake);
+      await connect(s, connection);
+      turn(s, fake, 'R');
+      // U went unseen: the cube reports the state after it, which is adopted.
+      s.perf.advance(300);
+      const reported = applyMoves(SOLVED, parseMoves('R U'));
+      emit({ type: 'facelets', facelets: reported, hostMs: s.perf.hostMs });
+      const resyncMs = s.perf.hostMs;
+      turn(s, fake, 'F');
+      turn(s, fake, inverse('R U F'), 200);
+      const [record] = s.service.attempts();
+      expect(record.app).toEqual(APP_BUILD);
+      expect(record.moves.map((m) => [m.m, m.serial, m.packetLast])).toEqual([
+        ['R', 1, true],
+        ['F', 2, true],
+        ["F'", 3, true],
+        ["U'", 4, true],
+        ["R'", 5, true],
+      ]);
+      expect(record.resyncs).toEqual([
+        { hostMs: resyncMs, facelets: reported, state: 'scrambling' },
+      ]);
+      expect(record.result.replayOk).toBe(true);
+    });
+  });
+
   it('counts the inspection down while armed when the setting is on', async () => {
     const s = setup();
     s.settings.setInspection(true);
@@ -679,7 +976,7 @@ describe('SessionService', () => {
       disconnect: () => Promise.resolve(),
     });
     await connecting;
-    events.next({ type: 'battery', level: 80 });
+    events.next({ type: 'battery', level: 80, hostMs: s.perf.hostMs });
 
     expect(s.service.phase()).toBe('cube-info');
     expect(s.service.attempt()).toBeNull();
@@ -1067,7 +1364,15 @@ describe('SessionService', () => {
       turn(s, fake, inverse('R U F'), 500);
       expect(await s.service.attachClip(attempt, clip('solve', 20))).toBe('saved');
       await s.service.whenSaved();
-      expect(changes).toEqual(['session 0', 'attempt 1 true', 'session 1', 'attempt 1 true,true']);
+      // The second write of the new session is the connection's battery report, which reaches the
+      // timer right after the hardware event that began the session (T3.7).
+      expect(changes).toEqual([
+        'session 0',
+        'session 0',
+        'attempt 1 true',
+        'session 1',
+        'attempt 1 true,true',
+      ]);
 
       // The current session: its record here and in the store, the last result too.
       expect(await s.service.markClipsGone(attempt, ['laptop.solve.mp4'])).toBe(true);

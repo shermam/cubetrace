@@ -63,7 +63,7 @@ export class ClipWorker {
   }
 
   async #save(job: ClipJob): Promise<void> {
-    const { id, sessionId, index, camera, segment, fpsNominal } = job.request;
+    const { id, sessionId, index, camera, segment, fpsNominal, app } = job.request;
     try {
       const { mp4, frames, info } = await muxClip(job.cut, { camera, segment, audio: job.audio });
       const root = await this.#env.opfsRoot();
@@ -74,6 +74,7 @@ export class ClipWorker {
         height: info.height,
         fpsNominal,
         truncatedStart: info.truncatedStart,
+        ...(app === undefined ? {} : { app }),
       });
       this.#answer({
         type: 'mux-and-write-done',
