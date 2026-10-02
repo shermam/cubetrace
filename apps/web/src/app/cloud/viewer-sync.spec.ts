@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { USER_SCHEMA, type ViewerChoice, type ViewerChoices } from '@cubetrace/core';
 import { Ajv2020 } from 'ajv/dist/2020';
+import type { MockInstance } from 'vitest';
 
 import { ACCOUNT_LOADER } from '../auth/account-backend';
 import { AuthService } from '../auth/auth-service';
@@ -12,9 +13,9 @@ import { VIEWER_WRITE_DELAY_MS, ViewerSyncService } from './viewer-sync';
 
 const isUserRecord = new Ajv2020({ allowUnionTypes: true, allErrors: true }).compile(USER_SCHEMA);
 
-const FRONT: ViewerChoice = { latitude: 0, longitude: 0, mirror: 'none' };
 const BEHIND: ViewerChoice = { latitude: 0, longitude: 180, mirror: 'left-right' };
 const ABOVE: ViewerChoice = { latitude: 90, longitude: 0, mirror: 'none' };
+const TILTED: ViewerChoice = { latitude: 45, longitude: 0, mirror: 'none' };
 
 /** A device of Ada's: its own storage, clock and timers, and its own backend over the account. */
 interface Device {
@@ -30,7 +31,7 @@ describe('ViewerSyncService', () => {
   let cloud: Map<string, Record<string, unknown>>;
   let laptop: Device;
   let phone: Device;
-  let warn: ReturnType<typeof vi.spyOn>;
+  let warn: MockInstance<typeof console.warn>;
 
   function device(label: string, timeOrigin: number): Device {
     const backend = new FakeAccountBackend();
@@ -144,7 +145,7 @@ describe('ViewerSyncService', () => {
     recordInCloud({ viewer: { laptop: ABOVE, 'phone-rear': BEHIND } });
     const { sync, auth, settings } = load(laptop);
     settings.setViewerChoice('laptop', { latitude: 0, longitude: 90, mirror: 'all' });
-    settings.setViewerChoice('phone-front', FRONT);
+    settings.setViewerChoice('phone-front', TILTED);
     await signIn(auth, sync);
 
     expect(sync.active()).toBe(true);
@@ -152,7 +153,7 @@ describe('ViewerSyncService', () => {
     expect(laptop.backend.reads).toEqual([`user ${ADA.uid}`]);
     expect(settings.viewerChoices()).toEqual({
       laptop: { latitude: 0, longitude: 90, mirror: 'all' },
-      'phone-front': FRONT,
+      'phone-front': TILTED,
       'phone-rear': BEHIND,
     });
     // The sign-in's record carries no choices; the write of the device's own waits for the delay.
@@ -163,7 +164,7 @@ describe('ViewerSyncService', () => {
     expect(viewerInCloud()).toEqual({
       laptop: { latitude: 0, longitude: 90, mirror: 'all' },
       'phone-rear': BEHIND,
-      'phone-front': FRONT,
+      'phone-front': TILTED,
     });
     expect(isUserRecord(cloud.get(ADA.uid)), JSON.stringify(isUserRecord.errors)).toBe(true);
     expect(sync.error()).toBeNull();
@@ -241,7 +242,7 @@ describe('ViewerSyncService', () => {
     const { sync, auth, settings } = load(laptop);
     settings.setViewerChoice('laptop', BEHIND);
     await signIn(auth, sync);
-    settings.setViewerChoice('phone-rear', FRONT);
+    settings.setViewerChoice('phone-rear', TILTED);
     await delay(laptop, sync);
 
     expect(sync.error()).toBe(
@@ -249,7 +250,7 @@ describe('ViewerSyncService', () => {
     );
     expect(warn).toHaveBeenCalledTimes(1);
     expect(laptop.backend.viewerWrites).toEqual([]);
-    expect(settings.viewerChoices()).toEqual({ laptop: BEHIND, 'phone-rear': FRONT });
+    expect(settings.viewerChoices()).toEqual({ laptop: BEHIND, 'phone-rear': TILTED });
     expect(viewerInCloud()).toEqual({ laptop: ABOVE });
   });
 
@@ -290,11 +291,11 @@ describe('ViewerSyncService', () => {
     // The phone, signed in later with a choice of its own for the laptop's camera, keeps it and
     // writes it, and takes the phone-rear choice made on the laptop.
     const second = load(phone);
-    second.settings.setViewerChoice('laptop', FRONT);
+    second.settings.setViewerChoice('laptop', TILTED);
     await signIn(second.auth, second.sync);
-    expect(second.settings.viewerChoices()).toEqual({ laptop: FRONT, 'phone-rear': ABOVE });
+    expect(second.settings.viewerChoices()).toEqual({ laptop: TILTED, 'phone-rear': ABOVE });
     await delay(phone, second.sync);
     expect(phone.backend.viewerWrites).toEqual([`users/${ADA.uid} viewer laptop`]);
-    expect(viewerInCloud()).toEqual({ laptop: FRONT, 'phone-rear': ABOVE });
+    expect(viewerInCloud()).toEqual({ laptop: TILTED, 'phone-rear': ABOVE });
   });
 });

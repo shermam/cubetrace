@@ -1804,7 +1804,95 @@ of the segment's moves (at most a few hundred), one binary search over the sampl
 `quaternion.set` and one `scheduleRender` when the orientation changed, plus cubing.js's own render
 of a move in progress. Left for the owner: the frame mapping on a real recording
 (`docs/MANUAL-TESTS.md`, "After T3.8"), since the driver's documentation of the gyro's axes is all
-it rests on.
+it rests on. The owner's first look at a real clip (issue #55, 2026-10-02, a screen capture) liked
+the cube but found its tilt not matching the hands' exactly, which two things in the viewer kept
+from a fair comparison — cubing.js's camera looks at the puzzle from above and to the right by
+default, so an upright cube already looked tilted, and the reference is the clip's first frame,
+where the cube is held at any angle — and asked for the cube under the video and for controls of the
+view; T3.10 below answers with the straight-on view, the presets, the drag and the mirror, kept per
+camera.
+
+### T3.10 — `web`, `core`, `firebase`: the clip viewer's cube under the video, seen straight on, with viewpoint presets, drag, a mirror switch and the choice saved per camera (issue #55)
+
+The owner's first look at the 3D cube on a real clip (issue #55) asked for three things: the cube
+under the video, not beside it; a view from which its tilt can be compared with the hands' (the
+default view of cubing.js looks from above and to the right, and the reference frame is wherever the
+cube was held at the clip's first frame); and controls to set the view by hand, since cameras in
+other places are coming (a phone behind the cube while the laptop films from the front), so that the
+face a video shows and the side a tilt goes differ per camera. The frame mapping (`CUBE_TO_PLAYER`,
+`(x, y, z) → (x, z, −y)`, the orientation relative to a reference as `conj(ref)·q`) matches the
+driver author's own three.js sample (`new THREE.Quaternion(qx, qz, -qy, qw)`, premultiplied by the
+conjugate of the first sample), so it stays the default. Contract: (1) layout: the cube under the
+video, as wide as it and about half its height on a laptop (the dialog `min(56rem, calc(100vw −
+2·gutter))` wide, the moves beside the player's column as before; on a phone the video, the cube,
+the moves), its controls under it in one or two rows, the segment buttons above the video. (2) A
+straight-on view by default: cubing.js's camera latitude 0 and longitude 0, so that "upright" is
+drawn upright and a tilt to the right shows to the right. (3) Presets and drag: "Turn ◀ / ▶" (90° of
+longitude), "Tilt ▲ / ▼" (90° of latitude, within what the camera allows), "Behind" (longitude 180°),
+"Reset view" (0, 0), and a drag with the mouse or a finger through cubing.js's own drag input (a
+click adds no move), the orbit read back after a drag so that it can be saved. (4) Mirror: a select
+under the cube, none | left–right | up–down | front–back | all, applied to the orientation shown
+(`orientation.ts`, pure, tested): a reflection across a plane turns a rotation about an axis `n` by
+`θ` into one about the reflected axis by `−θ`, so `(x, y, z, w)` becomes `(x, −y, −z, w)` across the
+plane normal to X, `(−x, y, −z, w)` for Y, `(−x, −y, z, w)` for Z, and the conjugate for all three,
+applied to the relative orientation in cubing.js's axes. (5) Saved per camera label (the clip's
+`camera`): in `SettingsService` (`localStorage`, a map by label) and, signed in, as a `viewer` map
+on `users/{uid}` (`{[label]: {latitude, longitude, mirror}}`, `docs/DATA-MODEL.md` §10, the
+record's schema, the rules' allow-list and a shape check with tests), written with a merge when the
+user changes it, read once at sign-in (`AccountBackend` gains a read of the record) and merged with
+the device's (the account's wins for a label the device has not set); "Re-zero" and "Raw" per clip,
+not saved; a clip of a camera with no saved choice uses the defaults. (6) One line of help under the
+controls. (7) Tests: the mirrors, the per-label merge, the record's `viewer` (parse, schema, rules),
+the viewer's controls, and T3.8's component and end-to-end tests updated for the layout, with the
+saved viewpoint restored on a second open. (8) Docs. (9) Nothing else: no version bump, no workflow
+change, no new dependency, no live 3D cube on the Timer page, the frame-mapping constant unchanged.
+
+**Outcome (2026-10-02).** As contracted, with these choices. The player's camera: the attributes
+`camera-latitude="0"`, `camera-longitude="0"`, `camera-latitude-limit="90"` and
+`camera-distance="5"` give the first render the straight-on view (cubing.js's defaults are 35° and
+30°, its latitude limit 35°, its distance 6; at 5 the cube is a fifth larger and its space diagonal,
+0.87 from the centre, still fits the 20° of vertical field, 0.88 at that distance, so no tilt clips a
+corner); every later view is one request of the model,
+`experimentalModel.twistySceneModel.orbitCoordinatesRequest.set({latitude, longitude})`, both
+angles at once, since the two setters would make the model report an intermediate orbit; and the
+orbit is read back through `orbitCoordinates.addFreshListener`, which reports once at first and
+then at each change, the drags and their inertia included. `ClipCube` keeps the orbit reported, the
+orbit requested and whether the model has echoed it: a report before the echo (the model's own
+default orbit, racing the first request) is not a drag, the echo opens the gate, and what follows is
+the user's; a view is not requested when the camera is within a tenth of a degree of it (the orbit a
+drag leaves is saved rounded to a tenth, and asking for it again would move nothing), and the
+presets build on `target`, the request on its way when there is one, so that two quick clicks add up.
+cubing.js keeps the longitude in [−180, 180); the choice keeps it in (−180, 180], so "Behind" reads
+180. The mirror is applied after the frame change, in cubing.js's axes (reflecting the relative
+orientation before the frame change across the corresponding plane of the cube's frame gives the
+same, which a test shows). The choice is normalized (tenths of a degree) and compared by what it
+shows; the defaults for a camera without an entry are never stored (so a drag back to the front, or
+Reset view on a fresh camera, leaves nothing), while Reset view on a camera with an entry keeps the
+defaults in it; at most 8 cameras, the oldest dropped first. The rules check each entry of `viewer`
+by its place in the map's list of values (the rules language cannot loop): 16 entries exceeded the
+engine's budget of 1,000 expressions per request in the emulator (both the create and the update
+statements are evaluated), 8 fit with room, so the cap is 8 in the rules, the schema and the device;
+Firestore itself refuses an empty label before the rules see it. The sync (`ViewerSyncService`,
+made by the header's controls as the cube sync is): the record read once per sign-in or start signed
+in, the merge as contracted, then the account written the device's choices that differ from or are
+missing in it, and from then on each change a second after the last (a drag is one write), the
+cameras changed in one merge, against what the account is known to hold; a write lost with the page
+is made up by the next start's merge; nothing is written at sign-in when the device has no choice, so
+the account's record stays exactly the sign-in's (the cloud end-to-end test of T3.5 still holds). The
+drag's `touch-action: none` keeps a finger on the cube from scrolling the dialog. A slice move (M, S,
+E) is a check of the orientation (the owner's second look at the capture): the cube reports a slice as
+two opposite outer-layer turns relative to its core (`docs/DATA-MODEL.md` §2) while the core itself
+rotates with the middle layer, which the gyro records, so that shown together the two turns and the
+core's rotation reproduce the middle layer turning in space; outer layers that seem to turn mean the
+orientation shown is off (or lags the turns' animation), which the "After T3.10" item says.
+Found on the way: the clip viewer's spec, the sync's and the settings' each caught a test written
+against a stale assumption (the lag of the fake clip in an expected angle, two preset clicks before
+the model's report, the defaults rule); the component's dialog scrolls on a short laptop screen (a
+16:9 video at the column's width plus half of it again exceed 790 px of viewport), which the video's
+and the cube's maximum heights limit. Left for the owner: the calibration on a real recording
+(`docs/MANUAL-TESTS.md`, "After T3.10"), the drag with a finger on the ThinkPhone, and whether the
+straight-on view and a mirror make the tilt match; a mapping that no mirror fixes is still
+`CUBE_TO_PLAYER` alone.
 
 ## Phases 4 and 5
 

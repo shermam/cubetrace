@@ -5,7 +5,6 @@ import {
   CUBE_TO_PLAYER,
   IDENTITY,
   MIRRORS,
-  type Mirror,
   type Quat,
   type Vec3,
   angleBetween,
@@ -225,7 +224,7 @@ describe('the mirrors (T3.10)', () => {
     expectSame(shownOrientation(tilted, reference, 'up-down'), fromAxisAngle(PLAYER_X, -30));
     expectSame(shownOrientation(tilted, reference, 'all'), fromAxisAngle(PLAYER_X, -30));
     // Raw too: the sample in the player's frame, then the mirror.
-    for (const mirror of MIRRORS as readonly Mirror[]) {
+    for (const mirror of MIRRORS) {
       expectSame(shownOrientation(tilted, null, mirror), mirrored(toPlayerFrame(tilted), mirror));
     }
     // Reflecting the relative orientation in the cube's frame by the corresponding plane gives the

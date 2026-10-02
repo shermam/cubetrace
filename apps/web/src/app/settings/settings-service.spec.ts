@@ -238,15 +238,20 @@ describe('SettingsService', () => {
     expect(storage.getItem(SETTINGS_STORAGE_KEY)).toBe(written);
     settings.setViewerChoice('laptop', { latitude: 12.3, longitude: 180, mirror: 'all' });
     expect(settings.viewerChoiceFor('laptop')?.mirror).toBe('all');
-    // Another camera's choice beside it; a camera without a label keeps nothing.
-    settings.setViewerChoice('phone-rear', VIEWER_DEFAULT);
-    settings.setViewerChoice('', VIEWER_DEFAULT);
+    // Another camera's choice beside it; a camera without a label keeps nothing, nor does one
+    // given the defaults, which a camera without an entry has.
+    settings.setViewerChoice('phone-front', VIEWER_DEFAULT);
+    settings.setViewerChoice('phone-rear', { ...VIEWER_DEFAULT, mirror: 'all' });
+    settings.setViewerChoice('', { ...VIEWER_DEFAULT, mirror: 'all' });
     expect(Object.keys(settings.viewerChoices())).toEqual(['laptop', 'phone-rear']);
+    // Back to the defaults for a camera with an entry: kept as such.
+    settings.setViewerChoice('phone-rear', VIEWER_DEFAULT);
+    expect(settings.viewerChoiceFor('phone-rear')).toEqual(VIEWER_DEFAULT);
 
     // A change makes the camera's entry the newest; past the cap the oldest goes.
     settings.setViewerChoice('laptop', { latitude: 0, longitude: 90, mirror: 'none' });
     expect(Object.keys(settings.viewerChoices())).toEqual(['phone-rear', 'laptop']);
-    for (let k = 0; k < MAX_VIEWER_CHOICES - 1; k++) {
+    for (let k = 1; k < MAX_VIEWER_CHOICES; k++) {
       settings.setViewerChoice(`camera-${String(k)}`, { ...VIEWER_DEFAULT, latitude: k });
     }
     expect(Object.keys(settings.viewerChoices())).toHaveLength(MAX_VIEWER_CHOICES);

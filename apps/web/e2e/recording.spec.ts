@@ -14,6 +14,7 @@ import {
   clipHostMs,
   clipSeconds,
   gyroTrack,
+  mirrored,
   orientationAt,
   parseGyro,
   referenceAt,
@@ -595,6 +596,109 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
     .toBeLessThan(0.01);
   await expect.poll(algShown, { timeout: 10_000 }).toBe('');
   await expect(highlighted).toHaveCount(0);
+
+  // The cube under the video, as wide as it and about half as tall (T3.10), seen straight on by
+  // default: the player's camera level with the cube and in front (its orbit's latitude and
+  // longitude 0), the mirror none.
+  const videoBox = (await video.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+  const cubeBox = (await cube.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+  expect(cubeBox.y).toBeGreaterThanOrEqual(videoBox.y + videoBox.height);
+  expect(Math.abs(cubeBox.width - videoBox.width)).toBeLessThan(2);
+  expect(cubeBox.height).toBeGreaterThan(0.4 * videoBox.height);
+  expect(cubeBox.height).toBeLessThan(0.6 * videoBox.height);
+  const orbit = (): Promise<[number, number]> =>
+    cube.evaluate(async (element) => {
+      const player = element as unknown as {
+        experimentalModel: {
+          twistySceneModel: {
+            orbitCoordinates: { get(): Promise<{ latitude: number; longitude: number }> };
+          };
+        };
+      };
+      const { latitude, longitude } =
+        await player.experimentalModel.twistySceneModel.orbitCoordinates.get();
+      return [latitude, longitude];
+    });
+  expect(await orbit()).toEqual([0, 0]);
+  const mirror = viewer.getByTestId('clip-mirror');
+  await expect(mirror).toHaveValue('none');
+  /** The choice kept for the clip's camera in Settings (localStorage), as the viewer keeps it. */
+  const keptChoice = (): Promise<unknown> =>
+    page.evaluate((label) => {
+      const settings = JSON.parse(localStorage.getItem('cubetrace.settings') ?? '{}') as {
+        viewer?: Record<string, unknown>;
+      };
+      return settings.viewer?.[label] ?? null;
+    }, camera);
+  expect(await keptChoice()).toBeNull();
+
+  // The presets move the camera in quarter turns; cubing.js keeps the longitude in [−180, 180).
+  await viewer.getByTestId('clip-turn-right').click();
+  await expect.poll(orbit).toEqual([0, 90]);
+  await viewer.getByTestId('clip-tilt-up').click();
+  await expect.poll(orbit).toEqual([90, 90]);
+  await viewer.getByTestId('clip-behind').click();
+  await expect.poll(orbit).toEqual([90, -180]);
+  await expect.poll(keptChoice).toEqual({ latitude: 90, longitude: 180, mirror: 'none' });
+  await viewer.getByTestId('clip-reset-view').click();
+  await expect.poll(orbit).toEqual([0, 0]);
+  await expect.poll(keptChoice).toEqual({ latitude: 0, longitude: 0, mirror: 'none' });
+
+  // A drag with the mouse orbits the camera (cubing.js's own drag input, with its inertia); once
+  // it comes to rest, the orbit it rests at is kept for the camera, to a tenth of a degree.
+  await page.mouse.move(cubeBox.x + cubeBox.width / 2, cubeBox.y + cubeBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(cubeBox.x + cubeBox.width / 2 + 60, cubeBox.y + cubeBox.height / 2 + 10, {
+    steps: 6,
+  });
+  await page.mouse.up();
+  await expect.poll(async () => (await orbit())[1]).not.toBe(0);
+  let resting = await orbit();
+  await expect
+    .poll(
+      async () => {
+        const now = await orbit();
+        const still = now[0] === resting[0] && now[1] === resting[1];
+        resting = now;
+        return still;
+      },
+      { timeout: 10_000, intervals: [400] },
+    )
+    .toBe(true);
+  const tenth = (degrees: number): number => Math.round(degrees * 10) / 10;
+  await expect
+    .poll(keptChoice)
+    .toEqual({ latitude: tenth(resting[0]), longitude: tenth(resting[1]), mirror: 'none' });
+  expect(await algShown()).toBe('');
+
+  // The mirror: the orientation at the solve's middle, reflected left–right, and kept.
+  await mirror.selectOption('left-right');
+  await expect.poll(keptChoice).toMatchObject({ mirror: 'left-right' });
+  await video.evaluate((element: HTMLVideoElement, seconds) => {
+    element.currentTime = seconds;
+  }, middle);
+  await expect
+    .poll(async () => angleBetween(await quaternion(), mirrored(shownAt(middle), 'left-right')), {
+      timeout: 10_000,
+    })
+    .toBeLessThan(0.5);
+  await expect.poll(algShown, { timeout: 10_000 }).toBe(madeBy(middle));
+
+  // Closed and opened again: the view and the mirror as they were left for this camera; Re-zero and
+  // Raw are per clip.
+  await viewer.getByRole('button', { name: 'Close' }).click();
+  await expect(viewer).toBeHidden();
+  await badges.first().click();
+  await expect(viewer).toBeVisible();
+  await expect(video).toHaveAttribute('data-state', 'loaded', { timeout: 10_000 });
+  await expect
+    .poll(orbit, { timeout: 10_000 })
+    .toEqual([tenth(resting[0]), tenth(resting[1]) === 180 ? -180 : tenth(resting[1])]);
+  await expect(mirror).toHaveValue('left-right');
+  await expect(viewer.getByTestId('clip-raw')).not.toBeChecked();
+  await expect(viewer.getByTestId('clip-orientation')).toHaveText(
+    'Orientation from the gyroscope, zeroed at 0.00 s.',
+  );
   await viewer.getByRole('button', { name: 'Close' }).click();
 
   // The export: valid against schema 2, both attempts with their gyro summaries.

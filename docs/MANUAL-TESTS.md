@@ -840,24 +840,40 @@ device, the cube and what happened.
   `battery` (one entry per level the cube reported) and `cube.productDate` null (a Gen2 cube says
   none).
 
-## After T3.8 — the 3D cube in the clip viewer
+## After T3.10 — the 3D cube's view in the clip viewer
 
-On https://shermam.github.io/cubetrace/ once its footer names a commit after T3.8, on the MacBook
-with the GAN 12 ui FreePlay, the camera on and a sync check made. The frame mapping of the gyroscope
-(the cube's +X through red, +Y through blue, +Z through white, as the driver documents it) has not
-been seen on a real recording: this item is how it gets corrected, from one file, if it is wrong.
-Next to the item, write the device, the cube and what happened.
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T3.10, on the MacBook
+with the GAN 12 ui FreePlay, the camera on, a sync check made and signed in. The 3D cube is under the
+video now and seen straight on (the player's camera level with the cube and in front), so that its
+tilt can be compared with the hands'; the frame mapping of the gyroscope (the cube's +X through red,
++Y through blue, +Z through white, as the driver documents it and the driver author's own sample
+has it) has still to be seen right on a real recording: this item is how it gets corrected, by a
+mirror in the viewer, or from one file if no mirror does. Next to the item, write the device, the
+cube and what happened.
 
-- [ ] One attempt in which, during the inspection, you tilt the cube to the right (its white face
-  leaning towards your right hand) for a second, bring it back, then tilt it forward (the white face
-  away from you), bring it back, and turn it a quarter about the vertical. Open its clip from the
-  solve list: the 3D cube beside the video starts upright (white up, green in front, whatever way the
-  real cube faces the camera) and, as the video plays, tilts to the right when the real one does,
-  forward when it does, and turns about the vertical with it; the turns of the solve follow the
-  picture, and the highlighted move changes when the picture shows the turn, not before. Write which
-  of the three motions the 3D cube made the same way, and which it mirrored or made about another
-  axis: the correction is `CUBE_TO_PLAYER` in `packages/core/src/orientation.ts` (one
-  constant), or a conjugation of `q` in `toPlayerFrame` beside it if every motion goes the opposite
-  way. "Raw" off and on; "Re-zero" at a moment the cube is tilted: it stands upright from there.
+- [ ] One attempt in which, during the inspection, you hold the cube square to the camera (its faces
+  straight on) for a second, tilt it to the right (its white face leaning towards your right hand)
+  for a second, bring it back, tilt it forward (the white face away from you), bring it back, and
+  turn it a quarter about the vertical. Open its clip from the solve list: pause where the cube is
+  square to the camera and press Re-zero; the 3D cube under the video stands upright (white up,
+  green in front). Play on: it tilts to the right when the real one does, forward when it does, and
+  turns about the vertical with it; the turns of the solve follow the picture, and the highlighted
+  move changes when the picture shows the turn, not before. If a tilt goes the other way, choose a
+  mirror under the cube (left–right for a tilt to the right shown to the left, up–down for a tilt
+  forward shown backward, all when every motion goes the opposite way) and play again. Write which
+  of the three motions the 3D cube made the same way with no mirror, and which mirror, if any, made
+  all three right; when none does, the correction is `CUBE_TO_PLAYER` in
+  `packages/core/src/orientation.ts` (one constant). The choice is kept for the camera: close the
+  viewer and open another clip of the same camera, and the view and the mirror are as you left them;
+  on the ThinkPhone, signed in, Settings' choices merge with the account's.
+- [ ] The view: Turn ▶ shows the cube from its right, Behind from behind, Tilt ▲ from above, Reset
+  view from the front, level; a drag with the mouse (and a finger on the ThinkPhone, which does not
+  scroll the dialog) turns the view freely, and closing and opening the viewer keeps where the drag
+  left it. A click on the cube adds no move. "Raw" off and on; "Re-zero" at a moment the cube is
+  tilted: it stands upright from there.
+- [ ] Play a clip with a slice move (M, S, E): the middle layer should turn while the outer layers
+  hold still in the picture and in the 3D cube; if the 3D cube's outer layers turn instead, the
+  orientation is still off (re-zero where the cube is square to the camera, or a mirror).
 - [ ] A clip of an attempt before T3.7 (no `gyro.json`): the cube turns with the moves, upright, and
-  the line under it says the orientation is not recorded.
+  the line under it says the orientation is not recorded; the view's presets and the drag work all
+  the same.

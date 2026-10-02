@@ -123,7 +123,7 @@ know it (a camera without a frame rate, a cube without a production date).
 | `storage.deleted` | Uploaded clips were deleted from the device by policy. | `files`, `bytes`, `usageBefore`, `usageAfter`, `percent` (after) |
 | `clips.viewed` | The clip viewer opened an attempt. | `clips`, `local` (still on the device), `gyro` |
 | `files.downloaded` | Files handed to the user. | `what` (`clips`: the viewer's Download; `export`: Sessions → Export or a session's page; `sync-check`: Download check data; `probe`: the probe's report), `files` (count), `names`, `attempts` (an export) |
-| `error.app` | What the app says in the console as `cubetrace: …` (a record that could not be saved, the index refusing a write, a cube's write refused, the camera refused, the recording stopped, the uploads not starting, a gyro file not written, the account's record not saved, the cube's state not reset). | `where` (`store`, `index`, `cubes`, `camera`, `recording`, `uploads`, `gyro`, `account`, `cube`), `message`, `label` (the camera) |
+| `error.app` | What the app says in the console as `cubetrace: …` (a record that could not be saved, the index refusing a write, a cube's write refused, the camera refused, the recording stopped, the uploads not starting, a gyro file not written, the account's record not saved, the cube's state not reset, the clip viewer's choices not read or saved). | `where` (`store`, `index`, `cubes`, `camera`, `recording`, `uploads`, `gyro`, `account`, `cube`, `viewer`), `message`, `label` (the camera) |
 
 ## The checklists, read from the events
 

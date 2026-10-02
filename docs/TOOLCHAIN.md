@@ -1708,7 +1708,14 @@ interface, which the spec checks against `TwistyPlayer` for the compiler, and th
 element as one only once it has them (`cubePlayerOf`), so that jsdom's unknown element in the unit
 tests, or the element before the chunk loaded, drives nothing; the viewer's spec defines a fake
 `twisty-player` custom element that records the algs, the moves added, the quaternions set and the
-renders asked.
+renders asked. T3.10 added the camera's orbit: the attributes `camera-latitude`, `camera-longitude`
+(0 and 0: straight on, where cubing.js's defaults are 35° and 30°), `camera-latitude-limit` (90) and
+`camera-distance` (5) for the first render, `experimental-drag-input="auto"` for the drag, and the
+model's props `experimentalModel.twistySceneModel.orbitCoordinatesRequest` (`set({latitude,
+longitude})`, one request for both angles) and `orbitCoordinates` (`addFreshListener`, which reports
+the orbit once at first and then at each change, the user's drags and the inertia after them
+included; `removeFreshListener` on dispose), named in `CubePlayerModel`; the fake model for the
+specs is `clip-cube-testing.ts`.
 
 **No live cube on the Timer page**, by the owner's decision: the solver watches the real cube, and a
 WebGL renderer would compete with the capture pipeline for the GPU and the main thread. The viewer

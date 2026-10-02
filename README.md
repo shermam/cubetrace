@@ -172,13 +172,18 @@ Timer page lists the session's last 12 solves; "See all" under them, or a sessio
 Sessions page, opens the session's page, with all its attempts, its statistics (ao100 too) and the
 storage its clips take. Each list shows a badge on each attempt with clips ("2 clips, 1.6 MB"),
 which opens the clip viewer: the clip plays next to the attempt's moves by time, the one on screen
-highlighted (a click on a move goes to it), and a 3D cube that follows the video (T3.8): it turns
-with the moves as the picture shows them (the camera's lag from the sync check applied) and, when
-the attempt has a `gyro.json`, tilts and turns as the real cube did, upright at the clip's first
-frame ("Re-zero" makes the current moment upright; "Raw" shows the gyroscope's own frame, whose yaw
-is arbitrary); without one, a line says the orientation is not recorded. Download saves the
-attempt's files: both MP4s, both frames files, `gyro.json` when there is one, and `attempt.json`
-(Chrome may ask once to allow multiple downloads).
+highlighted (a click on a move goes to it), and under the video a 3D cube follows it (T3.8): it
+turns with the moves as the picture shows them (the camera's lag from the sync check applied) and,
+when the attempt has a `gyro.json`, tilts and turns as the real cube did, upright at the clip's
+first frame ("Re-zero" makes the current moment upright; "Raw" shows the gyroscope's own frame, whose
+yaw is arbitrary); without one, a line says the orientation is not recorded. The cube is seen
+straight on, from the front (T3.10); under it, Turn ◀ ▶, Tilt ▲ ▼, Behind and Reset view move the
+viewpoint in quarter turns, a drag with the mouse or a finger turns it freely, and Mirror reflects
+the orientation shown, for a camera behind or beside the cube (or a cube whose gyroscope's axes
+differ): the view and the mirror are kept per camera, on the device and, signed in, in the account.
+To calibrate, pause where the cube is square to the camera and press Re-zero; if tilts go the other
+way, choose a mirror. Download saves the attempt's files: both MP4s, both frames files, `gyro.json`
+when there is one, and `attempt.json` (Chrome may ask once to allow multiple downloads).
 
 ## Cloud
 
@@ -207,6 +212,10 @@ sends it once the network is back:
   signs in and as it starts, the latest change of each cube winning, and sends each change as it is
   made, so that an address typed on the phone is known on the laptop, and a cube removed on one
   device goes on the others. Settings says when the list last merged.
+- **The clip viewer's view and mirror per camera** (T3.10): each device merges its choices with the
+  account's as it signs in and as it starts (its own for the cameras it has set, the account's for
+  the others) and sends each change a second after the last, so that a camera's view chosen once
+  opens the same on every device.
 
 **What uploads.** Each attempt of a real cube's session, once it is over and its clips are saved:
 its `attempt.json` (with the moves), each clip's MP4 and frame times, and the session's

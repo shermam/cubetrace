@@ -10,6 +10,7 @@ import type {
 import {
   MAX_VIEWER_CHOICES,
   type MicrophoneProcessing,
+  VIEWER_DEFAULT,
   type ViewerChoice,
   type ViewerChoices,
   parseViewerChoices,
@@ -522,13 +523,15 @@ export class SettingsService {
 
   /** The clip viewer's choice for the camera labelled `camera`, or null when it has none. */
   viewerChoiceFor(camera: string): ViewerChoice | null {
-    return (this.stored().viewer[camera] as ViewerChoice | undefined) ?? null;
+    const choices = this.stored().viewer;
+    return Object.hasOwn(choices, camera) ? choices[camera] : null;
   }
 
   /**
    * Keeps `choice` for the camera labelled `camera` (normalized: the angles to a tenth of a degree,
-   * the longitude in (−180, 180]); nothing when it is the choice kept. The camera's entry becomes the
-   * newest, and the oldest goes when there are more than 8.
+   * the longitude in (−180, 180]); nothing when it is the choice kept, nor when it is the defaults
+   * for a camera that has none (a camera without an entry has the defaults). The camera's entry
+   * becomes the newest, and the oldest goes when there are more than 8.
    */
   setViewerChoice(camera: string, choice: ViewerChoice): void {
     if (camera === '') {
@@ -536,13 +539,14 @@ export class SettingsService {
     }
     const next = viewerChoice(choice.latitude, choice.longitude, choice.mirror);
     const current = this.viewerChoiceFor(camera);
-    if (current !== null && sameViewerChoice(current, next)) {
+    if (sameViewerChoice(current ?? VIEWER_DEFAULT, next)) {
       return;
     }
-    const others = Object.entries(this.stored().viewer).filter(([label]) => label !== camera);
-    this.update({
-      viewer: Object.fromEntries([...others, [camera, next]].slice(-MAX_VIEWER_CHOICES)),
-    });
+    const entries: [string, ViewerChoice][] = [
+      ...Object.entries(this.stored().viewer).filter(([label]) => label !== camera),
+      [camera, next],
+    ];
+    this.update({ viewer: Object.fromEntries(entries.slice(-MAX_VIEWER_CHOICES)) });
   }
 
   /**

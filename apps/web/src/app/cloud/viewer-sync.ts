@@ -172,7 +172,11 @@ export class ViewerSyncService {
 
   private clearTimer(): void {
     if (this.timer !== null) {
-      const clear = this.globals.clearTimeout ?? ((handle: number) => clearTimeout(handle));
+      const clear =
+        this.globals.clearTimeout ??
+        ((handle: number) => {
+          clearTimeout(handle);
+        });
       clear(this.timer);
       this.timer = null;
     }
