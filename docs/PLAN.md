@@ -691,6 +691,7 @@ pipeline, §9 the data model).
 | T2.11 | `capture`+`web`: the sync check measures the middle of each turn's motion, with a trimmed spread | T2.8 | ✅ #39 |
 | T2.12 | `web`+`core`: the microphone recorded raw, the processing applied kept in the record | T2.9 | ✅ #43 |
 | T2.13 | `web`: on a phone, the picture and the scramble in view together: the scramble over the pinned picture | T2.7 | ✅ #41 |
+| T2.14 | `capture`+`web`+`core`: camera labels unique per device within a session | T2.1 | ⬜ |
 
 Waves: {T2.0, T2.1, T2.2} → T2.3 → T2.4 → {T2.5, T2.7} → T2.6 → {T2.8, T2.9, T2.10} (from the owner's
 first recordings, issues #33 and #34; all merged on 2026-09-27). Rules for every phase 2 task: nothing of
@@ -711,11 +712,12 @@ a turn's motion, falls between frames; (c) a quality, audio or microphone (T2.12
 mid-attempt restarts the pipeline and empties the buffer, so that attempt's clips begin late (flagged
 `truncatedStart` since T2.9): a guard could defer the restart to the end of the attempt;
 (d) crop-at-source (the design's later phase), the biggest lever left on clip size after T2.10;
-(e) camera labels unique per device within a session: `cameraLabel` derives `laptop`, `phone-front`
+(e) ~~camera labels unique per device within a session: `cameraLabel` derives `laptop`, `phone-front`
 and `phone-rear` from the host and the facing, so two cameras of a laptop (the FaceTime camera and a
 USB webcam, issue #40) share `laptop`, `putCamera` replaces the entry and `putCameraClock` the sync
 result, and earlier clips then point at the wrong device; a second device under a label should get
-`laptop-2`, or the clip should name the device.
+`laptop-2`, or the clip should name the device~~, done by T2.14: a second device under a label gets
+`laptop-2`.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -1255,6 +1257,67 @@ Screenshots in the PR.
 - [ ] CI green; the initial bundle within 2 kB of `main`'s.
 - [ ] Settings stored before this change read on.
 - [ ] Owner, on the ThinkPhone: the hands stay in view while reading the scramble.
+
+### T2.14 — `capture`+`web`+`core`: camera labels unique per device within a session
+
+**Goal.** Follow-up (e), from the owner's two laptop cameras (issue #40): the FaceTime camera and a
+Logitech C930e webcam both get the session label `laptop`, since the label comes from the host and
+the facing, not from the device. Within one session, a switch of cameras made `putCamera` replace
+the first camera's entry and `putCameraClock` its sync result (the Logitech lags 177 ms, the
+FaceTime 19 to 38), and the earlier clips, whose `camera` is `laptop`, then described the wrong
+device.
+
+**Scope.** `packages/core/src/session.ts` (`labelFor`, `sameCamera`, `CameraIdentity`),
+`packages/capture/src/camera.ts` (`cameraLabel` is a camera's own label),
+`apps/web/src/app/session/session-service.ts` (`cameraLabel`, `putCamera`),
+`apps/web/src/app/camera/{camera,recording,sync}-service.ts`, e2e `camera-labels.spec.ts` (in the
+`encoding` project), README,
+`docs/{ARCHITECTURE,DATA-MODEL,DEVICES,CHANGELOG,TOOLCHAIN,MANUAL-TESTS}.md`.
+
+**Behaviour.**
+- **The rule** (`labelFor(cameras, camera)`, pure, in core): a camera's own label is the host's and
+  the facing's (`cameraLabel`: `laptop`, `phone-front`); in a session it is that of the entry of the
+  same device when the session has one, else its own label when no entry has it, else the first free
+  `<label>-2`, `<label>-3`, …. Two cameras are the same device when the browser names them alike
+  (`deviceLabel`) and, when both ids are known, gives them the same device id. The records never
+  keep the id (an identifier of the browser's installation): the session service knows the ids of
+  the cameras put since the page loaded, so after a reload a camera of a shared name takes the first
+  label of that name. A new session starts again from the own label.
+- **The session decides.** `SessionService.cameraLabel(identity)` is a camera's label in the current
+  session; `putCamera(camera, audio, deviceId)` stores the camera under it, replacing the entry of
+  the same device, and returns the entry, whose label the recording gives the camera's clips
+  (`video[].camera`, `<label>.<segment>.mp4`). The recording puts the entry again when a pipeline
+  starts, so that a new run never cuts clips under the previous camera's label, and a clip saved
+  after a switch keeps the framing of its own camera (devices compared, not labels).
+- **What is keyed by label follows:** `clock.cameras[label]` (the sync check labels its result by
+  the session's label for the device: a camera switched to that has no check in the session is due
+  one, one switched back to finds its own, and the Timer's line under the picture says the check of
+  the camera that is on), `attachClip`'s `syncResidualMs`, the index documents' `device.cameras` and
+  the session page's cameras. Settings' choices per camera (the camera picked on a host, the manual
+  controls, the framing rectangles) are keyed by the browser's name for the device already, and
+  stay.
+
+**Tests.** Unit: `labelFor` (a session without cameras; a second device under `laptop` gets
+`laptop-2`, a third `laptop-3`, a free number first; each device its label back through switches; a
+device whose own label changed keeps its entry's; two cameras of one name told apart by their ids)
+and `sameCamera`; the session service (labels per device, the same device's entry replaced, the ids
+per session and never in the record, a new session starting again, a resumed session's labels by
+name); the camera service's identity; the recording (a switch and back: two entries; across switches
+the clips, their files, their lags and the index documents, valid against the schemas; a switch in
+the middle of an attempt: the scramble clip the first camera's, the solve clip the second's, each
+with its framing); the sync check per camera and the Timer's sync line. Playwright with Chromium's
+`device-count=3` (its `fake_device_1` sends Y16 frames that the encoder refuses, so the test uses
+`fake_device_0` and `fake_device_2`): a solve with each camera, then with the first again; the
+export has the two entries, `laptop` and `laptop-2`, each attempt's clips are named after its camera
+in its folder, and the session page names both.
+
+**Acceptance.**
+- [ ] CI green; the initial bundle unchanged (264.63 kB raw, as `main`'s: the services that label
+  the cameras are in lazy chunks).
+- [ ] Owner, on a laptop with two cameras (the FaceTime camera and the Logitech webcam): one
+  session, a solve and a sync check with each camera; the export has `laptop` and `laptop-2`, each
+  with its lag in `clock.cameras`, and each attempt's clips under the label of the camera that
+  recorded them (`docs/MANUAL-TESTS.md`, T2.14).
 
 ## Phase 3 task board — cloud
 

@@ -450,10 +450,13 @@ export function facingFromLabel(label: string): CameraFacing {
 }
 
 /**
- * The camera's short label in the session: `phone` when the host label says phone (the default
- * labels of phones all do: "Android phone", "iPhone", "Phone"), `laptop` otherwise, followed by
- * `-front` or `-rear` when the facing is known: `laptop`, `phone-front`, `phone-rear`. Lowercase
- * words joined by hyphens, as the camera labels that name clip files must be.
+ * The camera's own short label: `phone` when the host label says phone (the default labels of
+ * phones all do: "Android phone", "iPhone", "Phone"), `laptop` otherwise, followed by `-front` or
+ * `-rear` when the facing is known: `laptop`, `phone-front`, `phone-rear`. Lowercase words joined by
+ * hyphens, as the camera labels that name clip files must be. Two cameras of a host can have one
+ * own label (a laptop's built-in camera and a USB webcam): in a session each device gets a label of
+ * its own from it, `laptop` for the first and `laptop-2` for another (@cubetrace/core's
+ * `labelFor`, docs/PLAN.md T2.14).
  */
 export function cameraLabel(hostLabel: string, facing: CameraFacing): string {
   const base = /phone/i.test(hostLabel) ? 'phone' : 'laptop';
@@ -474,11 +477,12 @@ export interface CameraTrack extends SnapshotSource {
 
 /**
  * The session's entry (`session.json` `cameras[]`) for the camera open on `track`, which `choice`
- * opened, on the host labelled `hostLabel`: a camera of this device (`local`), its facing, its
- * label and the browser's, its settings and capabilities (`snapshot`), the constraints it was asked
- * for (without the device id), `crop`, the framing rectangle in frame pixels (null for the whole
- * frame), and `mode: 'full'`: in phase 2 the video keeps the whole frame. Its `microphone` is null:
- * the recording, which opens the microphone, puts its own (T2.12).
+ * opened, on the host labelled `hostLabel`: a camera of this device (`local`), its facing, its own
+ * label (`cameraLabel`, which the session makes one per device: T2.14) and the browser's, its
+ * settings and capabilities (`snapshot`), the constraints it was asked for (without the device id),
+ * `crop`, the framing rectangle in frame pixels (null for the whole frame), and `mode: 'full'`: in
+ * phase 2 the video keeps the whole frame. Its `microphone` is null: the recording, which opens the
+ * microphone, puts its own (T2.12).
  */
 export function cameraInfo(
   hostLabel: string,

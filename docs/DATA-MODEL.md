@@ -21,7 +21,9 @@ Within version 2, optional fields were added, so that the version 2 files writte
 valid, and no new version: a clip in `attempt.json` gained `truncatedStart` (§7, `docs/PLAN.md` T2.9;
 the readers take a missing one as false) and `local` (§7, T3.3: false once its MP4 left the device
 after its upload; a missing one means the file is there), and a camera in `session.json` gained
-`microphone` (§6, T2.12; the readers take a missing one as null).
+`microphone` (§6, T2.12; the readers take a missing one as null). Since T2.14 a camera's `label` is
+one per device within its session (§6), which the schema always allowed (`laptop-2`); in the files
+written before, two devices of one session could share a label, its entry then the last one's.
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -159,8 +161,8 @@ sessions/<sessionId>/
 uploads.json                           phase 3: the upload queue's state (§10)
 ```
 
-`sessionId` is a UUID v4; `<camera>` is the camera's `label` (§6), unique within the session:
-lowercase letters and digits in words joined by hyphens (`laptop`, `phone-front`, `phone-2`), so
+`sessionId` is a UUID v4; `<camera>` is the camera's `label` (§6), one per device of the session:
+lowercase letters and digits in words joined by hyphens (`laptop`, `phone-front`, `laptop-2`), so
 that the file names split at their dots; `<segment>` is `scramble` or `solve`. A JSON file is
 written whole under a temporary name next to it, `<name>.<random>.tmp`, then moved over `<name>`
 in one step, so a file holds its previous content or the new one even when the page goes away
@@ -234,7 +236,21 @@ and, since T3.1, once when the session index in the cloud refuses a write of the
 
 `cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
 come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in
-their file names (§5). `facing` is the camera's `facingMode` when the browser says it (`user` for
+their file names (§5), and there is one per device within the session (`docs/PLAN.md` T2.14,
+`labelFor` in `packages/core/src/session.ts`). A camera's own label comes from the host label and
+where the camera faces: `laptop`, or `phone` when the host label says phone, followed by `-front` or
+`-rear` when the facing is known (`phone-front`). The first device of the session with an own label
+gets that label, and another device with the same one the first of `<label>-2`, `<label>-3`, …
+that the session has not given (a laptop's built-in camera and a USB webcam used in one session
+are `laptop` and `laptop-2`); a device used again in the session gets its label back, its entry
+replaced by the camera as it was opened again, so that the session's entries, its `clock.cameras`
+and its clips always name the same device. The app tells two devices apart by the browser's name
+for them (`deviceLabel`) and, for two of one name (two webcams of one model), by the browser's id
+for them, which no record keeps (it identifies the browser's installation): it knows the ids of the
+cameras opened since the page loaded, so after a reload a camera of a shared name takes the first
+label of that name. A new session starts again from the camera's own label. In the files written
+before T2.14, a second device took the label of the first, whose entry it replaced, and the clips
+of both name it. `facing` is the camera's `facingMode` when the browser says it (`user` for
 a front camera, `environment` for a rear one), `unknown` otherwise; `deviceLabel` is the browser's
 name for it (`MediaDeviceInfo.label`). `settings`, `capabilities` and `constraints` are snapshots,
 as JSON, of `getSettings()` when the camera was opened, of `getCapabilities()`, and of the
@@ -381,6 +397,9 @@ number of frames in the clip; the actual frame times are in the frames file, and
 deliver fewer frames than its track says (`docs/DEVICES.md`). `firstFrameHostMs` is the host time of
 the first frame (`t0HostMs` of the frames file), and `syncResidualMs` the camera's lag behind the
 cube when the clip was recorded (`offsetMs` of `clock.cameras`, §6), null before a sync check.
+`camera` is the label of the camera that recorded the clip, that of its entry in the session's
+`cameras` and in `clock.cameras` (§6): an attempt during which the camera changed has its scramble
+from one camera and its solve from the other.
 
 `local` is false once the clip's MP4 is no longer on the device that recorded it: the upload queue
 deleted it after the bucket confirmed it, by policy (`docs/PLAN.md` T3.3: "Keep local copies" off,

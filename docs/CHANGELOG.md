@@ -95,6 +95,17 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
   last changed, and an address kept before gets the time this version first reads it. Settings →
   Account says that the account keeps the cubes' MAC addresses too.
 
+### Fixed
+
+- Two cameras of one laptop used in one session (its built-in camera and a USB webcam, issue #40)
+  were both `laptop` in it: the second replaced the first one's entry in `session.json` and its sync
+  check, and the first one's clips then named the wrong camera. Each device of a session now has a
+  label of its own, which names its entry, its sync check and its clips (`laptop.solve.mp4`,
+  `laptop-2.solve.mp4`): the first camera used is `laptop`, another `laptop-2`, then `laptop-3`, …
+  (on a phone, a second rear lens is `phone-rear-2`), and a camera used again in the session gets
+  its label back, with its sync check, while a camera switched to that has no check in the session
+  is due one (T2.14). A new session starts again from `laptop`.
+
 ## 0.2.0 — 2026-09-27
 
 Phase 2 of `docs/PLAN.md`: the device's own camera records every attempt, in sync with the cube.
