@@ -50,6 +50,11 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
+      # The cloud project: the app's own Firebase SDK against the Auth, Firestore and Functions
+      # emulators, its uploads into a sink on the runner (BUCKET_PROVIDER=local). The Firestore
+      # emulator's jar comes from the cache above; the other two are part of the CLI. Its report, on a
+      # failure, is the one the next step uploads.
+      - run: npm run e2e:cloud
 
       - name: Upload the Playwright report
         if: failure()
