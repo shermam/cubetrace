@@ -1714,8 +1714,9 @@ unloads at once (a reload, a closed tab), so the last seconds of events before o
 and the kind `download` had no dot, so `cloudEvent` refused it in silence until the type of
 `record`'s kind asked for one (it is `files.downloaded`). The QA view reads the events beside the
 index (one more read). The initial bundle is 264.57 kB raw
-against `main`'s 264.63 (72.65 kB transferred against 72.57): the same code but for the minifier's
-names; the writer rides in the chunk of `SettingsService` and the services, which every page loads
+against `main`'s 264.63 (its transfer estimate within a few tens of bytes of 72.6 kB, as before):
+the same code but for the minifier's names; the writer rides in the chunk of `SettingsService` and
+the services, which every page loads
 right after the first render, 68.8 kB raw against 57.7 (21.3 kB transferred against 18.2), and the
 QA page grows by its section, 16.2 kB raw against 9.5.
 

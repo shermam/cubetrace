@@ -1660,9 +1660,10 @@ attempts writes about 900 events of the attempts and about a hundred of the rest
 pages, the cube, the camera, the settings), within the cap of 2,000 a device and far under the free
 tier's 20,000 writes a day; the index's writes (a session's, about three per attempt) come on top.
 
-**Sizes** (`ng build`, 2026-10-02, against `main` at eccedc1): the initial bundle is 264.57 kB raw,
-72.65 kB transferred (264.63 and 72.57 before): `main` is the same code but for the minifier's names
-(62 bytes fewer), since the header's controls only inject the writer, which the bundler puts in the
+**Sizes** (`ng build`, 2026-10-02, against `main` at eccedc1): the initial bundle is 264.57 kB raw
+(264.63 before; the CLI's estimate of its transfer, 72.5 to 72.7 kB, moves by a few tens of bytes
+with the commit stamp and the hashes): `main` is the same code but for the minifier's names (62
+bytes fewer), since the header's controls only inject the writer, which the bundler puts in the
 chunk of `SettingsService` and the services, loaded by every page right after the first render:
 68.78 kB raw, 21.26 kB transferred (57.67 and 18.19 before), with the writer, its ring and cap, and
 the services' calls. The QA page's chunk is 16.2 kB raw against 9.5 (its section and the summary),
