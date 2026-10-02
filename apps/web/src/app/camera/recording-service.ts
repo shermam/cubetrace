@@ -22,12 +22,13 @@ import {
   type MotionSample,
   type VideoQuality,
 } from '@cubetrace/capture';
-import type {
-  CameraInfo,
-  MicrophoneInfo,
-  MicrophoneProcessing,
-  VideoClip,
-  VideoSegment,
+import {
+  sameCamera,
+  type CameraInfo,
+  type MicrophoneInfo,
+  type MicrophoneProcessing,
+  type VideoClip,
+  type VideoSegment,
 } from '@cubetrace/core';
 
 import { CubeService } from '../cube/cube-service';
@@ -139,6 +140,15 @@ interface Target {
   readonly quality: VideoQuality;
 }
 
+/**
+ * The camera of the clips: its entry in the session, under the label the session gives the device
+ * (T2.14), and its device id, which the records never keep.
+ */
+interface RecordedCamera {
+  readonly entry: CameraInfo;
+  readonly deviceId: string | null;
+}
+
 /** The microphone open for a run of the pipeline, and what the browser applied to it. */
 interface OpenMicrophone {
   readonly stream: MediaStream;
@@ -167,7 +177,9 @@ interface OpenMicrophone {
  * is saved, said (`clipNotice`) and noted in the session's `notes`, as is a clip without sound while
  * audio is recorded, with why. The session's `cameras` holds the camera's entry while it records,
  * with its microphone and what the browser applied to it (`microphone`, T2.12; a notice says when
- * the browser kept its voice processing on although Raw was asked for). A clip that fails is said
+ * the browser kept its voice processing on although Raw was asked for), under the label the session
+ * gives the device (T2.14: `laptop`, then `laptop-2` for another camera of the laptop), which names
+ * the camera's clips and their files and finds its sync check for them. A clip that fails is said
  * once (`failure`, the console) and noted in the session's `notes`; the attempt is untouched. A
  * clip of an attempt that went meanwhile (a reset, Delete last) is removed again. Stopping saves
  * the clips still waiting for their time at once, with what the buffer has.
@@ -244,7 +256,7 @@ export class RecordingService {
   private target: Target | null = null;
   private microphoneStream: MediaStream | null = null;
   /** The camera's entry while it records: the label and framing of its clips. */
-  private cameraEntry: CameraInfo | null = null;
+  private cameraEntry: RecordedCamera | null = null;
   /** Incremented by every start and stop: a slower, older start then knows it lost. */
   private generation = 0;
   /** The clips waiting for their time, by attempt and segment. */
@@ -281,24 +293,20 @@ export class RecordingService {
         this.reconcile(stream, active, full, { audio, processing, quality });
       });
     });
-    // The session's `cameras` holds the camera's entry while it records, with its microphone.
+    // The session's `cameras` holds the camera's entry while it records, with its microphone, under
+    // the label the session gives the device (T2.14).
     effect(() => {
       const status = this.statusSignal();
       const session = this.session.session();
       this.camera.settings();
       this.camera.framing();
       const audio = this.settings.recordAudio();
-      const microphone = this.microphoneSignal();
+      this.microphoneSignal();
       if (session === null || (status !== 'starting' && status !== 'recording')) {
         return;
       }
       untracked(() => {
-        const info = this.camera.cameraInfo();
-        if (info !== null) {
-          const entry: CameraInfo = { ...info, microphone };
-          this.cameraEntry = entry;
-          this.session.putCamera(entry, audio);
-        }
+        this.putEntry(audio);
       });
     });
   }
@@ -435,6 +443,8 @@ export class RecordingService {
       return;
     }
     this.handle = handle;
+    // The clips of this run take the entry of its camera from now on, not the last camera's.
+    this.putEntry(audio);
     handle.onStats((stats) => {
       if (this.handle !== handle) {
         return;
@@ -506,6 +516,25 @@ export class RecordingService {
       this.addNotice(notice);
     }
     return { stream, info };
+  }
+
+  /**
+   * Puts the entry of the camera recording, with the microphone of the recording, in the session
+   * under way (`SessionService.putCamera`, which gives the device its label in the session, T2.14),
+   * with `audio` as the session's `audio`, and keeps it for the clips; without a session, keeps it
+   * under the camera's own label, a new session's. Nothing while the camera is not on.
+   */
+  private putEntry(audio: boolean): void {
+    const info = this.camera.cameraInfo();
+    if (info === null) {
+      return;
+    }
+    const entry: CameraInfo = { ...info, microphone: this.microphoneSignal() };
+    const deviceId = this.camera.deviceId();
+    this.cameraEntry = {
+      entry: this.session.putCamera(entry, audio, deviceId) ?? entry,
+      deviceId,
+    };
   }
 
   /**
@@ -591,13 +620,13 @@ export class RecordingService {
   /** Saves the clip of `segment` once its end is in the buffer, if the pipeline runs now. */
   private plan(attempt: AttemptRef, segment: VideoSegment, startMs: number, endMs: number): void {
     const handle = this.handle;
-    const entry = this.cameraEntry ?? this.camera.cameraInfo();
-    if (handle === null || entry === null) {
+    const recorded = this.cameraEntry;
+    if (handle === null || recorded === null) {
       return;
     }
     const key = `${attempt.session}/${String(attempt.index)}/${String(attempt.scrambleShown)}/${segment}`;
     const save = (): Promise<void> => {
-      const saving = this.save(handle, entry, attempt, segment, startMs, endMs);
+      const saving = this.save(handle, recorded, attempt, segment, startMs, endMs);
       this.saving.add(saving);
       this.savingSignal.set(this.saving.size);
       void saving.finally(() => {
@@ -628,7 +657,7 @@ export class RecordingService {
    */
   private async save(
     handle: CaptureHandle,
-    entry: CameraInfo,
+    recorded: RecordedCamera,
     attempt: AttemptRef,
     segment: VideoSegment,
     startHostMs: number,
@@ -637,7 +666,7 @@ export class RecordingService {
     if (!this.session.hasAttempt(attempt)) {
       return;
     }
-    const fpsNominal = frameRateOf(entry);
+    const fpsNominal = frameRateOf(recorded.entry);
     let clip: VideoClip;
     let report: ClipReport;
     try {
@@ -648,11 +677,11 @@ export class RecordingService {
         endHostMs,
         sessionId: attempt.session,
         index: attempt.index,
-        camera: entry.label,
+        camera: recorded.entry.label,
         segment,
         fpsNominal,
       });
-      clip = { ...saved.clip, crop: this.cropNow(entry) };
+      clip = { ...saved.clip, crop: this.cropNow(recorded) };
       report = saved.report;
     } catch (error: unknown) {
       this.failed(attempt, segment, errorMessage(error));
@@ -751,10 +780,16 @@ export class RecordingService {
       .catch(() => false);
   }
 
-  /** The framing rectangle now, as the clip's `crop`, or the one the camera recorded with. */
-  private cropNow(entry: CameraInfo): VideoClip['crop'] {
+  /**
+   * The framing rectangle now, as the clip's `crop`, while the camera open is the one that recorded
+   * the clip (the same device, T2.14); else the one the camera recorded with.
+   */
+  private cropNow(recorded: RecordedCamera): VideoClip['crop'] {
     const now = this.camera.cameraInfo();
-    return now !== null && now.label === entry.label ? now.crop : entry.crop;
+    const open = this.camera.identity();
+    const same =
+      open !== null && sameCamera({ ...recorded.entry, deviceId: recorded.deviceId }, open);
+    return now !== null && same ? now.crop : recorded.entry.crop;
   }
 
   /** Says once that a clip failed, and notes it in its session, unless its attempt is gone. */

@@ -15,11 +15,13 @@ import {
   formatMove,
   generateScramble,
   isSolved,
+  labelFor,
   summarize,
   type AttemptEvents,
   type AttemptRecord,
   type AttemptState,
   type CameraClock,
+  type CameraIdentity,
   type CameraInfo,
   type CubeInfo,
   type Facelets,
@@ -189,6 +191,12 @@ export type AttemptMilestone =
 /** What `attachClip` did with a clip: kept for a record to come, saved in one, or nothing. */
 export type ClipAttachment = 'kept' | 'saved' | 'gone';
 
+/** The device ids of a session's cameras by their labels, as known on this page (T2.14). */
+interface CameraIds {
+  readonly session: string;
+  readonly ids: ReadonlyMap<string, string>;
+}
+
 /** An attempt under way or just ended, with what its machine does not expose. */
 interface Current {
   readonly machine: AttemptMachine;
@@ -290,13 +298,15 @@ function sameCube(cube: CubeInfo, hardware: CubeInfo): boolean {
  * - For the recording (T2.4, `RecordingService`): `milestones$` says when an attempt's scramble is
  *   done, when it ended and when it went without a record; `attachClip` adds a clip to the
  *   attempt's record (saved again, nothing else changed), `putCamera` the camera to the session's
- *   `cameras`, and `addNote` a line to its `notes`. For the sync check (T2.5, `SyncService`),
- *   `putCameraClock` keeps a camera's lag behind the cube in `clock.cameras`, which the camera's
- *   later clips carry as their `syncResidualMs`; `suspendForSyncCheck`, `holdAfterSyncCheck` and
- *   `resumeAfterSyncCheck` keep the check's turns out of the attempts: while it runs no attempt is
- *   tracked, nor after it until the cube has been still for {@link SYNC_SETTLE_MS} or its result is
- *   dismissed, and then for {@link SYNC_GRACE_MS} of stillness more (T2.8); an attempt that had not
- *   started its solve begins again afterwards, with its scramble and number, once the cube is solved.
+ *   `cameras`, under a label of its own in the session (T2.14: `cameraLabel`, one per device, which
+ *   names its clips and its `clock.cameras` entry), and `addNote` a line to its `notes`. For the
+ *   sync check (T2.5, `SyncService`), `putCameraClock` keeps a camera's lag behind the cube in
+ *   `clock.cameras`, which the camera's later clips carry as their `syncResidualMs`;
+ *   `suspendForSyncCheck`, `holdAfterSyncCheck` and `resumeAfterSyncCheck` keep the check's turns
+ *   out of the attempts: while it runs no attempt is tracked, nor after it until the cube has been
+ *   still for {@link SYNC_SETTLE_MS} or its result is dismissed, and then for
+ *   {@link SYNC_GRACE_MS} of stillness more (T2.8); an attempt that had not started its solve
+ *   begins again afterwards, with its scramble and number, once the cube is solved.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
@@ -343,6 +353,11 @@ export class SessionService {
   private readonly settlingSignal = signal(false);
   /** The suspension is over; no attempt begins until the cube is still (T2.8). */
   private readonly graceSignal = signal(false);
+  /**
+   * The device ids of the current session's cameras (T2.14), which tell two cameras of one name
+   * apart: never recorded, so known only for the cameras put since the page loaded.
+   */
+  private readonly cameraIdsSignal = signal<CameraIds | null>(null);
 
   /** `opfs`: sessions are kept in the browser; `memory`: they last until the page closes. */
   readonly storageKind = this.sessionStorage.kind;
@@ -818,31 +833,53 @@ export class SessionService {
   }
 
   /**
-   * Puts `camera` in the current session's `cameras` (T2.4), replacing the entry with its label,
-   * its `microphone` included (T2.12: what the browser applied to the microphone of its clips), and
-   * `audio` in its `audio`, and saves session.json; nothing without a session, or when both are
-   * already so.
+   * The label that the current session gives `camera` (T2.14, @cubetrace/core's `labelFor`): one
+   * per device within the session, which names its entry in `cameras`, its clips and its sync check
+   * in `clock.cameras`. That of its entry when the session has one of the same device (the same
+   * browser name, and the same device id when both are known on this page), else the camera's own
+   * label (`laptop`, `phone-front`) when no entry has it, else the first of `<label>-2`,
+   * `<label>-3`, … that none has; its own label without a session. It follows the session in a
+   * computed or an effect.
    */
-  putCamera(camera: CameraInfo, audio: boolean): void {
+  cameraLabel(camera: CameraIdentity): string {
+    const session = this.sessionSignal();
+    return session === null ? camera.label : labelFor(this.cameraIdentities(session), camera);
+  }
+
+  /**
+   * Puts `camera` in the current session's `cameras` (T2.4) under the label the session gives it
+   * (`cameraLabel`, with `deviceId`, the camera's device id when the browser gives one, T2.14),
+   * replacing the entry of that label, the same device's, its `microphone` included (T2.12: what
+   * the browser applied to the microphone of its clips), and `audio` in its `audio`, and saves
+   * session.json; nothing when both are already so. Returns the entry as the session has it, its
+   * label the one its clips take; null, changing nothing, without a session.
+   */
+  putCamera(camera: CameraInfo, audio: boolean, deviceId: string | null = null): CameraInfo | null {
     const session = this.sessionSignal();
     if (session === null) {
-      return;
+      return null;
     }
-    const at = session.cameras.findIndex((entry) => entry.label === camera.label);
+    const label = labelFor(this.cameraIdentities(session), { ...camera, deviceId });
+    const entry: CameraInfo = { ...camera, label };
+    if (deviceId !== null) {
+      this.rememberCameraId(session.id, label, deviceId);
+    }
+    const at = session.cameras.findIndex((known) => known.label === label);
     if (
       at >= 0 &&
       session.audio === audio &&
-      JSON.stringify(session.cameras[at]) === JSON.stringify(camera)
+      JSON.stringify(session.cameras[at]) === JSON.stringify(entry)
     ) {
-      return;
+      return entry;
     }
     const cameras =
       at < 0
-        ? [...session.cameras, camera]
-        : session.cameras.map((entry, k) => (k === at ? camera : entry));
+        ? [...session.cameras, entry]
+        : session.cameras.map((known, k) => (k === at ? entry : known));
     const saved: SessionRecord = { ...session, cameras, audio };
     this.sessionSignal.set(saved);
     void this.save((store) => store.saveSession(saved));
+    return entry;
   }
 
   /**
@@ -943,6 +980,29 @@ export class SessionService {
       const stored = (await store.exportSession(sessionId)).session;
       await store.saveSession({ ...stored, notes: withNote(stored.notes, line) });
     });
+  }
+
+  /** The cameras of `session` as `labelFor` tells them apart: with their device ids known here. */
+  private cameraIdentities(session: SessionRecord): CameraIdentity[] {
+    const known = this.cameraIdsSignal();
+    const ids = known?.session === session.id ? known.ids : null;
+    return session.cameras.map((camera) => ({
+      label: camera.label,
+      deviceLabel: camera.deviceLabel,
+      deviceId: ids?.get(camera.label) ?? null,
+    }));
+  }
+
+  /** Keeps `deviceId` as the device id of the camera `label` of session `sessionId` (T2.14). */
+  private rememberCameraId(sessionId: string, label: string, deviceId: string): void {
+    const known = this.cameraIdsSignal();
+    const ids = known?.session === sessionId ? known.ids : null;
+    if (ids?.get(label) !== deviceId) {
+      this.cameraIdsSignal.set({
+        session: sessionId,
+        ids: new Map([...(ids ?? []), [label, deviceId]]),
+      });
+    }
   }
 
   /**

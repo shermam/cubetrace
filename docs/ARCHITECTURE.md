@@ -93,7 +93,8 @@ and a clip that fails is noted in `session.json`, as is a clip that begins late 
 while the sound is recorded (with why: the capture worker follows its audio, from the microphone's
 first `AudioData` to the encoder's chunks and their decoder config, and places audio whose
 timestamps count on another clock than the frames' by the arrival times).
-The **sync check** runs once per session and camera: the capture worker measures
+The **sync check** runs once per session and camera (each device of a session has a label of its
+own, `laptop`, `laptop-2`…, which names its clips and its check, T2.14): the capture worker measures
 the motion inside the framing rectangle of each frame (the share of a 320- or 160-pixel luma plane,
 read with `VideoFrame.copyTo`, that changed by more than 12 levels), the clapperboard finds the
 middle of each single cube turn's motion in the frames around it, against the picture just before it,

@@ -232,7 +232,9 @@ top face turned with the fingers, the framing rectangle around the cube and the 
 one face flicked with one finger) are still to come. The Logitech row is the owner's check on the
 office MacBook with the GAN 12 ui (issue #40): a USB webcam, with its own compression on the way to
 the browser, lags about 140 ms more than the FaceTime camera; the lag is the camera's, not the cube's.
-Both cameras appear under the session label `laptop` (`docs/PLAN.md`, follow-up (e)).
+Both cameras are `laptop` by the host; since T2.14, a laptop's built-in camera and a USB webcam such
+as this one used in one session are `laptop` and `laptop-2` there (the first one used is `laptop`),
+each with its own sync check and clips (`docs/PLAN.md` T2.14, `docs/DATA-MODEL.md` §6).
 
 Chrome's fake camera cannot give a lag, since nothing in its test pattern turns with the cube, but
 it gives the cost: in Playwright's Chromium 141 on the containers' four CPUs, while the same worker

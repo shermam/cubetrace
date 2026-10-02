@@ -143,7 +143,8 @@ without re-encoding about a second after their end.
 A clip begins at the keyframe at or before its start, so up to a second earlier. A DNF before the
 solve's first turn has the scramble clip only, and an attempt that goes (Delete last, Mark as
 solved) takes its clips with it. Each clip is an MP4 file named after the camera's label (`laptop`,
-or `phone-front` and `phone-rear` on a phone) and the segment, such as `laptop.solve.mp4`, with the
+or `phone-front` and `phone-rear` on a phone; `laptop-2` for another camera of the laptop in the
+same session) and the segment, such as `laptop.solve.mp4`, with the
 time of each of its frames on the device's clock (`laptop.solve.frames.json`), and is listed in the
 attempt's `attempt.json` (`video`); the attempt's timing never waits for them. A clip that could not
 be saved is said once in Camera settings, in Chrome's console (`cubetrace: clip failed: …`) and in

@@ -539,6 +539,21 @@ what Camera settings said.
   room. In the session's export, `cameras[0].microphone` says `"processing": "raw"` with what the
   browser applied: write it in `docs/DEVICES.md`, "Audio", one row per device.
 
+## T2.14 — two cameras in one session
+
+On https://shermam.github.io/cubetrace/, Timer page, on a laptop with two cameras (the MacBook's
+FaceTime camera and the Logitech C930e webcam of issue #40), the GAN 12 ui connected. Next to the
+item, write the laptop, Chrome's version and the labels and lags the export says.
+
+- [ ] A new session (New session, under the time), the FaceTime camera on (Camera settings →
+  Camera): a sync check, then a solve. The Logitech webcam in Camera settings → Camera: the sync
+  check is due again (this camera has none in the session), then a solve; the FaceTime camera again:
+  no check is due, the line under the picture says its lag, then a solve. Export the session:
+  `cameras` has `laptop` (`deviceLabel` the FaceTime camera) and `laptop-2` (the Logitech),
+  `clock.cameras` a lag for each (about 20 to 40 ms and 177 ms, `docs/DEVICES.md`), and the three
+  attempts' clips are `laptop.*.mp4`, `laptop-2.*.mp4` and `laptop.*.mp4`, each with its camera's
+  lag as `syncResidualMs`. A new session with the Logitech webcam first: it is `laptop` there.
+
 ## T3.0 — account
 
 On https://shermam.github.io/cubetrace/, on the MacBook (Chrome) and on the ThinkPhone (the installed

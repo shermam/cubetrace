@@ -62,6 +62,7 @@ export type {
 export { AttemptMachine } from './attempt';
 export type {
   CameraClock,
+  CameraIdentity,
   CameraInfo,
   ClapperboardSample,
   CubeInfo,
@@ -72,7 +73,7 @@ export type {
   SessionSettings,
   SessionSummary,
 } from './session';
-export { createSession, summarize } from './session';
+export { createSession, labelFor, sameCamera, summarize } from './session';
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './clock';
 export type { PhaseAverage } from './stats';

@@ -137,13 +137,16 @@ export interface CameraPick {
   readonly label: string;
 }
 
-/** The manual controls chosen for a camera, by its label (the torch is not kept). */
+/**
+ * The manual controls chosen for a camera, by the browser's name for it (`MediaStreamTrack.label`:
+ * the device's, not its label in a session, T2.14); the torch is not kept.
+ */
 interface CameraControlsEntry {
   readonly camera: string;
   readonly values: ControlValues;
 }
 
-/** A framing rectangle of a camera (by its label) for frames of one size. */
+/** A framing rectangle of a camera, by the browser's name for it, for frames of one size. */
 interface CameraFramingEntry extends StoredFraming {
   readonly camera: string;
 }

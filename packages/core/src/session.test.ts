@@ -1,15 +1,26 @@
 import { Ajv2020 } from 'ajv/dist/2020';
 import { describe, expect, it } from 'vitest';
 
-import type { AttemptRecord, CubeInfo, HostInfo, SessionRecord, SessionSettings } from './index';
+import type {
+  AttemptRecord,
+  CameraIdentity,
+  CameraInfo,
+  CubeInfo,
+  HostInfo,
+  SessionRecord,
+  SessionSettings,
+} from './index';
 import {
   AttemptMachine,
   CubeClockFit,
   SESSION_SCHEMA,
   createSession,
+  labelFor,
   parseMoves,
+  sameCamera,
   summarize,
 } from './index';
+import { CAMERA_CLOCK } from './test-records';
 
 const HOST: HostInfo = {
   label: 'office-mbp',
@@ -146,5 +157,158 @@ describe('summarize', () => {
     expect(summarize(s, attempts)).toEqual({ attempts: 3, solved: 2, dnf: 1 });
     expect(summarize(s, [])).toEqual({ attempts: 0, solved: 0, dnf: 0 });
     expectValid({ ...s, summary: summarize(s, attempts) });
+  });
+});
+
+/** The owner's two laptop cameras of issue #40, as the browser names them. */
+const FACETIME = 'FaceTime HD Camera (3A71:F4B5)';
+const LOGITECH = 'Logitech Webcam C930e (046d:0843)';
+
+/** A camera of a session, labelled `label`, named `deviceLabel` by the browser. */
+function entry(label: string, deviceLabel: string): CameraInfo {
+  return {
+    label,
+    local: true,
+    facing: 'unknown',
+    deviceLabel,
+    settings: { width: 1920, height: 1080, frameRate: 30 },
+    capabilities: {},
+    constraints: {},
+    crop: null,
+    mode: 'full',
+    microphone: null,
+  };
+}
+
+/** The cameras of a session: each camera given its label by `labelFor` as it comes, once. */
+function labelled(cameras: readonly CameraIdentity[]): CameraIdentity[] {
+  const session: CameraIdentity[] = [];
+  for (const camera of cameras) {
+    const label = labelFor(session, camera);
+    if (!session.some((known) => known.label === label)) {
+      session.push({ ...camera, label });
+    }
+  }
+  return session;
+}
+
+describe('labelFor', () => {
+  it('gives a camera its own label in a session without cameras: a new session starts again there', () => {
+    expect(labelFor([], { label: 'laptop', deviceLabel: FACETIME })).toBe('laptop');
+    expect(labelFor([], { label: 'phone-front', deviceLabel: 'camera 1, facing front' })).toBe(
+      'phone-front',
+    );
+    expect(labelFor([], { label: 'laptop', deviceLabel: LOGITECH, deviceId: 'b2' })).toBe('laptop');
+  });
+
+  it('gives a second device under a label the first free `-2`, `-3`, and the same device its label back', () => {
+    const cameras = [entry('laptop', FACETIME)];
+    // Issue #40: the FaceTime camera, then the Logitech webcam, both `laptop` by the host.
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: LOGITECH })).toBe('laptop-2');
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: FACETIME })).toBe('laptop');
+    cameras.push(entry('laptop-2', LOGITECH));
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: LOGITECH })).toBe('laptop-2');
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: FACETIME })).toBe('laptop');
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: 'Studio Display Camera' })).toBe(
+      'laptop-3',
+    );
+    // Another label is another family: a phone's front and rear cameras keep theirs.
+    expect(labelFor(cameras, { label: 'phone-front', deviceLabel: 'camera 1, facing front' })).toBe(
+      'phone-front',
+    );
+    // A free number before a taken one is taken first.
+    expect(
+      labelFor([entry('laptop', FACETIME), entry('laptop-3', LOGITECH)], {
+        label: 'laptop',
+        deviceLabel: 'Studio Display Camera',
+      }),
+    ).toBe('laptop-2');
+  });
+
+  it('keeps one label per device through any number of switches', () => {
+    const switches: CameraIdentity[] = [FACETIME, LOGITECH, FACETIME, LOGITECH, 'USB Camera'].map(
+      (deviceLabel) => ({ label: 'laptop', deviceLabel }),
+    );
+    const session = labelled(switches);
+    expect(session.map((camera) => [camera.label, camera.deviceLabel])).toEqual([
+      ['laptop', FACETIME],
+      ['laptop-2', LOGITECH],
+      ['laptop-3', 'USB Camera'],
+    ]);
+    for (const camera of switches) {
+      expect(labelFor(session, camera)).toBe(
+        session.find((known) => known.deviceLabel === camera.deviceLabel)?.label,
+      );
+    }
+  });
+
+  it("gives a device the label of its entry, whatever its own label is now (the host's label changed)", () => {
+    const cameras = [entry('laptop', FACETIME)];
+    expect(labelFor(cameras, { label: 'phone', deviceLabel: FACETIME })).toBe('laptop');
+    expect(labelFor(cameras, { label: 'phone', deviceLabel: LOGITECH })).toBe('phone');
+  });
+
+  it('tells two cameras of one name apart by their ids, when the ids of both are known', () => {
+    const name = 'USB Camera (1234:5678)';
+    const cameras: CameraIdentity[] = [{ label: 'laptop', deviceLabel: name, deviceId: 'a1' }];
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: name, deviceId: 'a1' })).toBe(
+      'laptop',
+    );
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: name, deviceId: 'b2' })).toBe(
+      'laptop-2',
+    );
+    // An id unknown on either side: the name decides.
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: name })).toBe('laptop');
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: name, deviceId: null })).toBe(
+      'laptop',
+    );
+    expect(
+      labelFor([entry('laptop', name)], { label: 'laptop', deviceLabel: name, deviceId: 'b2' }),
+    ).toBe('laptop');
+    // The entry with the same id first, before an earlier one of the same name without an id (the
+    // records keep no id, so after a reload only the ids seen since are known).
+    const reloaded: CameraIdentity[] = [
+      { label: 'laptop', deviceLabel: name, deviceId: null },
+      { label: 'laptop-2', deviceLabel: name, deviceId: 'b2' },
+    ];
+    expect(labelFor(reloaded, { label: 'laptop', deviceLabel: name, deviceId: 'b2' })).toBe(
+      'laptop-2',
+    );
+    expect(labelFor(reloaded, { label: 'laptop', deviceLabel: name, deviceId: 'a1' })).toBe(
+      'laptop',
+    );
+    // An id under another name is another camera.
+    expect(labelFor(cameras, { label: 'laptop', deviceLabel: LOGITECH, deviceId: 'a1' })).toBe(
+      'laptop-2',
+    );
+  });
+
+  it('gives labels that the schema takes, as `clock.cameras` keys too', () => {
+    const cameras = [entry('laptop', FACETIME), entry('laptop-2', LOGITECH)];
+    const third = labelFor(cameras, { label: 'laptop', deviceLabel: 'USB Camera' });
+    expect(third).toBe('laptop-3');
+    const s: SessionRecord = {
+      ...create(),
+      cameras: [...cameras, entry(third, 'USB Camera')],
+      clock: {
+        cube: new CubeClockFit().params,
+        cameras: { laptop: CAMERA_CLOCK, 'laptop-2': { ...CAMERA_CLOCK, offsetMs: 177.4 } },
+      },
+    };
+    expectValid(s);
+  });
+});
+
+describe('sameCamera', () => {
+  it('compares the names, and the ids when both are known', () => {
+    const facetime: CameraIdentity = { label: 'laptop', deviceLabel: FACETIME };
+    expect(sameCamera(facetime, { label: 'laptop-2', deviceLabel: FACETIME })).toBe(true);
+    expect(sameCamera(facetime, { label: 'laptop', deviceLabel: LOGITECH })).toBe(false);
+    expect(sameCamera({ ...facetime, deviceId: 'a1' }, { ...facetime, deviceId: 'a1' })).toBe(true);
+    expect(sameCamera({ ...facetime, deviceId: 'a1' }, { ...facetime, deviceId: 'b2' })).toBe(
+      false,
+    );
+    expect(sameCamera({ ...facetime, deviceId: 'a1' }, facetime)).toBe(true);
+    expect(sameCamera(facetime, { ...facetime, deviceId: null })).toBe(true);
   });
 });

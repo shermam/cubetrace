@@ -1,6 +1,19 @@
 import { TestBed } from '@angular/core/testing';
 import { NO_AUDIO_DATA } from '@cubetrace/capture';
-import type { AttemptRecord, MicrophoneInfo } from '@cubetrace/core';
+import {
+  ATTEMPT_SCHEMA,
+  CLOUD_ATTEMPT_SCHEMA,
+  CLOUD_SESSION_SCHEMA,
+  SESSION_SCHEMA,
+  cloudAttempt,
+  cloudSession,
+  pendingUpload,
+  type AttemptRecord,
+  type CameraClock,
+  type JsonSchema,
+  type MicrophoneInfo,
+} from '@cubetrace/core';
+import { Ajv2020 } from 'ajv/dist/2020';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
 import {
@@ -24,7 +37,7 @@ import {
   SOLVE_LEAD_MS,
   STORAGE_FULL,
 } from './recording-service';
-import { FakeCaptureStarter, statsOf } from './recording-testing';
+import { FakeCaptureStarter, statsOf, type FakeCapture } from './recording-testing';
 
 /** How long after a segment's end its clip is saved. */
 const SAVE_AFTER_MS = CLIP_TAIL_MS + ENCODER_SETTLE_MS;
@@ -184,7 +197,7 @@ describe('RecordingService', () => {
     expect(r.recording.stats()).toBeNull();
   });
 
-  it('starts again on another camera, and replaces its entry when its settings change', async () => {
+  it('starts again on another camera, which gets a label of its own (T2.14), and replaces its entry when its settings change', async () => {
     const r = rig();
     const { capture } = await recording(r);
     TestBed.tick();
@@ -193,6 +206,7 @@ describe('RecordingService', () => {
     TestBed.tick();
     expect(r.s.service.session()?.cameras).toHaveLength(1);
     expect(r.s.service.session()?.cameras[0].settings['exposureTime']).toBe(30);
+    const first = r.s.service.session()?.cameras[0];
 
     await r.camera.select('facetime');
     await sync(r);
@@ -202,11 +216,178 @@ describe('RecordingService', () => {
     expect(r.media.audioTracks.map((track) => track.readyState)).toEqual(['ended', 'live']);
     r.starter.last.emitStats(statsOf(1));
     TestBed.tick();
-    // One label, `laptop`: the entry is the camera recording now, with its microphone.
+    // Both are `laptop` by the host: the FaceTime camera is `laptop-2` in the session, with its
+    // microphone, and the first camera keeps its entry.
     expect(r.s.service.session()?.cameras).toEqual([
-      { ...r.camera.cameraInfo(), microphone: RAW_MICROPHONE },
+      first,
+      { ...r.camera.cameraInfo(), label: 'laptop-2', microphone: RAW_MICROPHONE },
     ]);
-    expect(r.s.service.session()?.cameras[0].deviceLabel).toBe('FaceTime HD Camera (3A71:F4B5)');
+
+    // The first camera again: its label back, its entry the camera as it opened again.
+    await r.camera.select('fake-webcam');
+    await sync(r);
+    r.starter.last.emitStats(statsOf(1));
+    TestBed.tick();
+    const cameras = r.s.service.session()?.cameras ?? [];
+    expect(cameras.map((entry) => [entry.label, entry.deviceLabel])).toEqual([
+      ['laptop', 'fake_device_0'],
+      ['laptop-2', 'FaceTime HD Camera (3A71:F4B5)'],
+    ]);
+    expect(cameras[0]).toEqual({ ...r.camera.cameraInfo(), microphone: RAW_MICROPHONE });
+    await r.s.service.whenSaved();
+    expect((await r.s.store.exportSession(sessionId(r))).session.cameras).toEqual(cameras);
+  });
+
+  it("gives each camera of a session its own label: its clips and their files, its lag, the cloud's documents (T2.14)", async () => {
+    const r = rig();
+    const { fake, capture } = await recording(r);
+    const lag = (offsetMs: number): CameraClock => ({
+      offsetMs,
+      rttMs: 0,
+      driftPpm: 0,
+      clapperboardResidualMs: 9,
+      clapperboardSamples: 8,
+    });
+    /** A solve recorded by `pipeline`: the attempt's scramble, its inverse, each clip saved. */
+    const solve = async (pipeline: FakeCapture): Promise<void> => {
+      const scramble = r.s.service.attempt()?.scramble ?? '';
+      turn(r.s, fake, scramble);
+      await wait(r, SAVE_AFTER_MS);
+      pipeline.saveNext();
+      await settle();
+      turn(r.s, fake, inverse(scramble), 500);
+      await wait(r, SAVE_AFTER_MS);
+      pipeline.saveNext();
+      await settle();
+    };
+    /** Switches to the camera `deviceId`, whose pipeline is then recording. */
+    const switchTo = async (deviceId: string): Promise<FakeCapture> => {
+      await r.camera.select(deviceId);
+      await sync(r);
+      r.starter.last.emitStats(statsOf(5));
+      TestBed.tick();
+      return r.starter.last;
+    };
+
+    // The first camera, `laptop`, and its sync check; then the FaceTime camera, also `laptop` by
+    // the host (issue #40): `laptop-2`, which has no check until its own; then the first one again.
+    r.s.service.putCameraClock('laptop', lag(20));
+    await solve(capture);
+    const facetime = await switchTo('facetime');
+    expect(r.s.service.session()?.cameras.map((entry) => entry.label)).toEqual([
+      'laptop',
+      'laptop-2',
+    ]);
+    await solve(facetime);
+    r.s.service.putCameraClock('laptop-2', lag(177));
+    await solve(facetime);
+    await solve(await switchTo('fake-webcam'));
+    await r.s.service.whenSaved();
+
+    const { session, attempts } = await r.s.store.exportSession(sessionId(r));
+    expect(session.cameras.map((entry) => [entry.label, entry.deviceLabel])).toEqual([
+      ['laptop', 'fake_device_0'],
+      ['laptop-2', 'FaceTime HD Camera (3A71:F4B5)'],
+    ]);
+    expect(session.clock.cameras).toEqual({ laptop: lag(20), 'laptop-2': lag(177) });
+    // Each clip names its camera's entry, in its files too, and carries that camera's lag.
+    const clips = (camera: string, syncResidualMs: number | null) =>
+      (['scramble', 'solve'] as const).map((segment) => [
+        camera,
+        `${camera}.${segment}.mp4`,
+        `${camera}.${segment}.frames.json`,
+        syncResidualMs,
+      ]);
+    expect(
+      attempts.map((attempt) =>
+        attempt.video.map((clip) => [clip.camera, clip.file, clip.framesFile, clip.syncResidualMs]),
+      ),
+    ).toEqual([
+      clips('laptop', 20),
+      clips('laptop-2', null),
+      clips('laptop-2', 177),
+      clips('laptop', 20),
+    ]);
+
+    // The records validate, and so do the documents of the session index (T3.1), whose attempts
+    // name the session's two cameras as their device's.
+    const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
+    const validators = new Map(
+      [SESSION_SCHEMA, ATTEMPT_SCHEMA, CLOUD_SESSION_SCHEMA, CLOUD_ATTEMPT_SCHEMA].map((schema) => [
+        schema,
+        ajv.compile(schema),
+      ]),
+    );
+    const valid = (schema: JsonSchema, value: unknown): boolean => {
+      const validate = validators.get(schema);
+      const ok = validate?.(value) ?? false;
+      expect(validate?.errors ?? []).toEqual([]);
+      return ok;
+    };
+    expect(valid(SESSION_SCHEMA, session)).toBe(true);
+    const document = cloudSession(session, 'ada-uid');
+    expect(document.cameras.map((entry) => entry.label)).toEqual(['laptop', 'laptop-2']);
+    expect(valid(CLOUD_SESSION_SCHEMA, document)).toBe(true);
+    for (const attempt of attempts) {
+      expect(valid(ATTEMPT_SCHEMA, attempt)).toBe(true);
+      const files = Object.fromEntries(attempt.video.map((clip) => [clip.file, clip.bytes]));
+      const indexed = cloudAttempt({
+        attempt,
+        session,
+        owner: 'ada-uid',
+        upload: pendingUpload(files),
+      });
+      expect(indexed.device).toEqual({ host: session.host.label, cameras: ['laptop', 'laptop-2'] });
+      expect(Object.keys(indexed.upload.files)).toEqual(
+        attempt.video.map((clip) => `${clip.camera}.${clip.segment}.mp4`),
+      );
+      expect(valid(CLOUD_ATTEMPT_SCHEMA, indexed)).toBe(true);
+    }
+  });
+
+  it('saves the clip asked for when the camera switches under its own label and framing; the next one is the new camera’s (T2.14)', async () => {
+    const r = rig();
+    const { fake, capture } = await recording(r);
+    const framing = { x: 480, y: 270, w: 960, h: 540 };
+    r.camera.setFraming(framing);
+    TestBed.tick();
+
+    // The scramble done; its clip is to be saved in a second, but the camera switches first.
+    turn(r.s, fake, 'R U F');
+    await r.camera.select('facetime');
+    TestBed.tick();
+    await settle();
+    // Asked for at once, from the first camera's buffer, under its label.
+    expect(capture.saves.map((save) => save.params)).toMatchObject([
+      { index: 1, segment: 'scramble', camera: 'laptop' },
+    ]);
+    const scrambleClip = capture.saveNext();
+    await sync(r);
+    expect(capture.stopped).toBe(true);
+    const second = r.starter.last;
+    expect(second).not.toBe(capture);
+    second.emitStats(statsOf(5));
+    TestBed.tick();
+
+    turn(r.s, fake, inverse('R U F'), 500);
+    await wait(r, SAVE_AFTER_MS);
+    expect(second.saves.map((save) => save.params)).toMatchObject([
+      { index: 1, segment: 'solve', camera: 'laptop-2' },
+    ]);
+    const solveClip = second.saveNext();
+    await settle();
+    await r.s.service.whenSaved();
+
+    // The first camera's framing on its clip, none (the whole frame) on the FaceTime camera's.
+    const [stored] = (await r.s.store.exportSession(sessionId(r))).attempts;
+    expect(stored.video).toEqual([
+      { ...scrambleClip, crop: framing },
+      { ...solveClip, crop: null },
+    ]);
+    expect(stored.video.map((clip) => clip.file)).toEqual([
+      'laptop.scramble.mp4',
+      'laptop-2.solve.mp4',
+    ]);
   });
 
   it('records without audio when Settings says so, or when the microphone is refused', async () => {

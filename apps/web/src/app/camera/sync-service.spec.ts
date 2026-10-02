@@ -1,5 +1,6 @@
 import type { FakeCube } from '@cubetrace/gan';
 
+import { FAKE_FACETIME, FAKE_WEBCAM } from '../device/fake-browser';
 import { SYNC_GRACE_MS, SYNC_SETTLE_MS } from '../session/session-service';
 import { inverse, ready, turn } from '../session/session-harness';
 import { statsOf, type FakeCapture } from './recording-testing';
@@ -228,6 +229,73 @@ describe('SyncService', () => {
     expect(r.s.service.session()?.clock.cameras['laptop']?.offsetMs).toBe(61);
     await settleAfter(r, capture, fake);
     expect(r.s.service.phase()).toBe('scrambling');
+  });
+
+  it('keeps a check per camera of the session, by the label the session gives it: a camera switched to is due its own, one switched back to finds its own (T2.14)', async () => {
+    const r = rig([FAKE_WEBCAM, FAKE_FACETIME]);
+    const { fake, capture } = await recording(r);
+    // The first camera's check, due by itself at the session's start.
+    expect(r.sync.label()).toBe('laptop');
+    const first = clapperboard(r.s.perf.hostMs, LAGS);
+    await film(r, capture, fake, 14_000, first.energy, first.turns);
+    expect(r.sync.result()).toMatchObject({ label: 'laptop', outcome: { ok: true, offsetMs: 49 } });
+    r.sync.later();
+    await settleAfter(r, capture, fake);
+    expect(r.s.service.phase()).toBe('scrambling');
+
+    // The FaceTime camera, `laptop` by the host too (issue #40): `laptop-2` in the session, which
+    // has no check of it, so one is due by itself, asking for a rectangle around the cube first
+    // (the framing is the camera's own).
+    await r.camera.select('facetime');
+    await update(r);
+    const facetime = r.starter.last;
+    expect(facetime).not.toBe(capture);
+    facetime.emitStats(statsOf(5));
+    await update(r);
+    expect(r.sync.label()).toBe('laptop-2');
+    expect(r.sync.stored()).toBeNull();
+    expect(r.sync.visible()).toBe(true);
+    expect(r.sync.waiting()).toBe(true);
+    r.camera.setFraming(AROUND_THE_CUBE);
+    r.sync.start();
+    await update(r);
+    expect(r.sync.run()?.state()).toBe('running');
+    expect(facetime.watches).toHaveLength(1);
+    // The Logitech webcam's lag of docs/DEVICES.md, for a camera of its own.
+    const second = clapperboard(
+      r.s.perf.hostMs,
+      [177, 175, 178, 176, 177, 179, 177, 176, 178, 177],
+    );
+    await film(r, facetime, fake, 14_000, second.energy, second.turns);
+    expect(r.sync.result()).toMatchObject({
+      label: 'laptop-2',
+      previousOffsetMs: null,
+      saved: true,
+      outcome: { ok: true, offsetMs: 177 },
+    });
+    expect(r.sync.stored()?.offsetMs).toBe(177);
+    r.sync.later();
+    await settleAfter(r, facetime, fake);
+
+    // The first camera again: its own check is there, so none is due.
+    await r.camera.select('fake-webcam');
+    await update(r);
+    r.starter.last.emitStats(statsOf(5));
+    await update(r);
+    expect(r.sync.label()).toBe('laptop');
+    expect(r.sync.stored()?.offsetMs).toBe(49);
+    expect(r.sync.visible()).toBe(false);
+    expect(r.starter.last.watches).toHaveLength(0);
+    await r.s.service.whenSaved();
+    const { session } = await r.s.store.exportSession(r.s.service.session()?.id ?? '');
+    expect(session.cameras.map((entry) => [entry.label, entry.deviceLabel])).toEqual([
+      ['laptop', 'fake_device_0'],
+      ['laptop-2', 'FaceTime HD Camera (3A71:F4B5)'],
+    ]);
+    expect(session.clock.cameras).toMatchObject({
+      laptop: { offsetMs: 49, clapperboardSamples: 8 },
+      'laptop-2': { offsetMs: 177, clapperboardSamples: 8 },
+    });
   });
 
   it('fails after 20 s without turns, keeping nothing, and Retry starts it again', async () => {

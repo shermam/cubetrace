@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 
-import { SYNC_GRACE_MS } from '../session/session-service';
+import { SYNC_GRACE_MS, SYNC_SETTLE_MS } from '../session/session-service';
 import { SYNC_TICK_MS } from './sync-run';
 import { SyncCheck } from './sync-check';
-import { settle } from '../device/fake-browser';
+import { FAKE_FACETIME, FAKE_WEBCAM, settle } from '../device/fake-browser';
 import { turn } from '../session/session-harness';
+import { statsOf } from './recording-testing';
 import {
   AROUND_THE_CUBE,
   STILL,
@@ -139,6 +140,40 @@ describe('SyncCheck', () => {
     await film(r, capture, fake, 14_000, second.energy, second.turns);
     await refresh();
     expect(text(element, 'sync-result')).toBe('Camera lags the cube by 31 ms (±2); was 49 ms.');
+  });
+
+  it("says the check of the camera that is on: another camera of the session has none, the first one's lag comes back (T2.14)", async () => {
+    const r = rig([FAKE_WEBCAM, FAKE_FACETIME]);
+    const { element, refresh } = render(r);
+    const { fake, capture } = await recording(r);
+    const first = clapperboard(r.s.perf.hostMs, [45, 10, 47, 48, 49, 95, 49, 50, 51, 53]);
+    await film(r, capture, fake, 14_000, first.energy, first.turns);
+    await refresh();
+    button(element, 'sync-later')?.click();
+    await film(r, capture, fake, SYNC_SETTLE_MS + SYNC_GRACE_MS + SYNC_TICK_MS, STILL);
+    await refresh();
+    const lag = 'Sync: camera lags the cube by 49 ms (±8). Sync check';
+    expect(text(element, 'sync-line')).toBe(lag);
+
+    // The FaceTime camera, `laptop-2` in the session: no check of it yet, and one is due.
+    await r.camera.select('facetime');
+    await refresh();
+    r.starter.last.emitStats(statsOf(5));
+    await refresh();
+    expect(state(element)).toBe('framing');
+    button(element, 'sync-later')?.click();
+    await refresh();
+    expect(text(element, 'sync-line')).toBe(
+      'Sync: this camera has no check in this session. Sync check',
+    );
+
+    // The first camera again: its own check.
+    await r.camera.select('fake-webcam');
+    await refresh();
+    r.starter.last.emitStats(statsOf(5));
+    await refresh();
+    expect(element.querySelector('[data-testid="sync-check"]')).toBeNull();
+    expect(text(element, 'sync-line')).toBe(lag);
   });
 
   it('counts no turn made in its first second, while it asks to hold still', async () => {
