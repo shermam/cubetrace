@@ -96,9 +96,9 @@ export async function fakeBucket(page: Page): Promise<FakeBucket> {
     }
     const body = request.postDataBuffer() ?? Buffer.alloc(0);
     const headers = request.headers();
-    const range = headers['x-goog-content-length-range'];
+    const range = headers['x-goog-content-length-range'] as string | undefined;
     if (range !== `${String(body.length)},${String(body.length)}`) {
-      await route.fulfill({ status: 400, body: `Not of the size signed: ${String(range)}` });
+      await route.fulfill({ status: 400, body: `Not of the size signed: ${range ?? 'none'}` });
       return;
     }
     puts.push(key);
@@ -208,12 +208,13 @@ export async function fakeAccount(
       /** The attempt a call is about, checked as the functions check it; its upload to change. */
       const target = (state: State, sessionId: string, index: number): Doc => {
         const uid = state.user?.uid;
-        const attempt = state.index.attempts[sessionId]?.[String(index).padStart(4, '0')] as
-          Doc | undefined;
+        const attempts = state.index.attempts[sessionId] as Record<string, Doc> | undefined;
+        const attempt = attempts?.[String(index).padStart(4, '0')];
+        const session = state.index.sessions[sessionId] as Doc | undefined;
         if (uid === undefined) {
           throw functionsError('unauthenticated', 'Sign in to upload.');
         }
-        if (state.index.sessions[sessionId]?.['owner'] !== uid || attempt?.['owner'] !== uid) {
+        if (session?.['owner'] !== uid || attempt?.['owner'] !== uid) {
           throw functionsError(
             'not-found',
             `The attempt ${String(index)} is not in the cloud index.`,

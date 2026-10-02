@@ -465,6 +465,57 @@ describe('sessions/{id}/attempts/{index}', () => {
   });
 });
 
+// T3.3: once the upload queue deleted a clip's MP4 from the device (by policy, after its upload was
+// confirmed), the attempt's record says so (video[].local false, docs/DATA-MODEL.md §7), and the app
+// writes its document's fields again with it.
+describe('an attempt whose clip left the device (T3.3)', () => {
+  const path = `sessions/${SESSION_ID}/attempts/0001`;
+
+  it("takes its fields written again with the clip's local false, the upload left as the functions left it", async () => {
+    const { session, attempt, fields } = appDocuments('alice');
+    const db = alice().firestore();
+    const batch = db.batch();
+    batch.set(db.doc(`sessions/${SESSION_ID}`), session);
+    batch.set(db.doc(path), attempt);
+    await assertSucceeds(batch.commit());
+    const done = {
+      state: 'done',
+      files: {
+        'attempt.json': { bytes: 6_000, doneMs: 1_790_000_100_000 },
+        'laptop.solve.mp4': { bytes: 4_100_000, doneMs: 1_790_000_100_000 },
+        'laptop.solve.frames.json': { bytes: 2_000, doneMs: 1_790_000_100_000 },
+      },
+    };
+    await env.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(path).update({ upload: done });
+    });
+    const clip = {
+      camera: 'laptop',
+      segment: 'solve',
+      file: 'laptop.solve.mp4',
+      bytes: 4_100_000,
+      codec: 'avc1.640028',
+      audio: 'mp4a.40.2',
+      width: 1920,
+      height: 1080,
+      crop: null,
+      fpsNominal: 30,
+      frames: 300,
+      firstFrameHostMs: 1_790_000_001_500,
+      framesFile: 'laptop.solve.frames.json',
+      syncResidualMs: null,
+      truncatedStart: false,
+      local: false,
+    };
+    await assertSucceeds(db.doc(path).set({ ...fields, video: [clip] }, { merge: true }));
+    const stored = await db.doc(path).get();
+    expect((stored.get('video') as { local?: boolean }[]).map((entry) => entry.local)).toEqual([
+      false,
+    ]);
+    expect(stored.get('upload')).toEqual(done);
+  });
+});
+
 describe('everything else', () => {
   it('is closed: no collection outside users and sessions, for anyone', async () => {
     await seed('public/notice', { text: 'hello' });
