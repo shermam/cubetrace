@@ -35,8 +35,10 @@ The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema
 `attempt.v1.schema.json` for version 1, `gyro.schema.json` for the gyro files (§11), whose version 1
 is its own, `user.schema.json` for the account's record in Firestore (§10), whose version 1 is its
 own, `cloud-session.schema.json` and `cloud-attempt.schema.json` for the documents of the session
-index in Firestore (§10), which have the version of the records they copy (2), and
-`cloud-cube.schema.json` for the account's cubes in Firestore (§10), whose version 1 is its own.
+index in Firestore (§10), which have the version of the records they copy (2),
+`cloud-cube.schema.json` for the account's cubes in Firestore (§10), whose version 1 is its own,
+and `cloud-event.schema.json` for the account's diagnostics events there (§10, T3.9), whose version
+1 is its own too.
 
 **Reading older records.** Files of version 1 are never rewritten to upgrade them. The readers,
 `parseSession` and `parseAttempt` in `packages/core/src/records.ts` (the app's session store
@@ -802,6 +804,51 @@ index for its `upload`, and takes as done a file that the index confirmed with t
 whose `uploads.json` was lost, or written late, sends nothing twice. A session deleted from the device
 leaves the file at the queue's next look.
 
+### The diagnostics events: `users/{uid}/events/{eventId}`, schema version 1
+
+The account's log of the app's own use (`docs/PLAN.md` T3.9, `docs/DIAGNOSTICS.md`): one document
+per event, created by the device that saw it, never changed or deleted by the app, which the
+coordinator's round report reads as the evidence of the manual rounds and the QA view sums.
+`{eventId}` is made on the device: the event's time as 13 digits, a dash and 8 random hex digits
+(`eventId` in `packages/core/src/cloud-event.ts`), so that a device's ids sort by time.
+
+```jsonc
+// users/Xb3…uid/events/1790000012345-a1b2c3d4
+{
+  "schema": 1,
+  "tsMs": 1790000012345.5,                       // when it happened: host ms (§1) on the device's clock
+  "kind": "attempt.done",                         // what: a dotted lowercase name of the catalogue, ≤ 64 characters
+  "app": {"version": "0.4.0", "commit": "abc1234"}, // the build that wrote it, as session.json's app
+  "device": {"label": "office-mbp", "platform": "macOS", "installed": false},
+  "session": "3f1c…",                             // the session it belongs to, when it belongs to one
+  "attempt": 17,                                  // the attempt it belongs to (its index), when it does
+  "data": {"status": "solved", "timeMs": 14990, "clips": 2, "replayOk": true, "gyroRateHz": 49.8}
+}
+```
+
+`device` is the host label the account records (`host.label` of §6), the host's platform
+(`host.platform`) and whether the app ran installed (display mode `standalone`). `data` holds the
+event's facts, by name (`docs/DIAGNOSTICS.md` names each kind's): at most 32, each a text of at most
+500 characters, a number, a boolean or null, or a map of those (one level of nesting at most).
+Never a MAC address, an email, a file's contents, a user agent or another account's uid: the
+builder, `cloudEvent`, holds every event to the shapes above, cuts longer texts and scrubs what
+looks like a MAC address or an email. `packages/core/schema/cloud-event.schema.json`
+(`CLOUD_EVENT_SCHEMA`) is this document in machine-readable form, `parseCloudEvent` its reader.
+
+**Writing.** Signed in, with Settings → Account → Diagnostics on (the default), the app queues the
+events in memory and writes them in one batch (Firestore's `writeBatch`, each document `set`
+whole) 5 s after the first of them, at 20 of them, and when the page is hidden or goes away;
+Firestore's persistent cache carries a batch while the device is offline. Signed out, the events
+wait in memory (the last 500) for a sign-in during the page's life, and are gone with the page;
+nothing of them is kept on the device but the day's count, for the cap of 2,000 events a device
+writes in a local day (`localStorage` `cubetrace.diagnostics`), past which only the `error.*` kinds
+go. A write the server refuses is said once in the console (`cubetrace: diagnostics: …`) and
+dropped: the diagnostics never record themselves.
+
+**Reading.** The QA view reads the account's 500 newest events (`orderBy('tsMs', 'desc')`, a
+single-field index, which Firestore keeps by itself); the round report reads every account's events
+of the last days with the Admin SDK, past the rules (`npm run round-report`, `docs/DIAGNOSTICS.md`).
+
 ### The rules
 
 `firebase/firestore.rules`, tested against the Firestore emulator by `firebase/rules.test.ts`
@@ -828,6 +875,13 @@ leaves the file at the queue's next look.
   document must be whole and valid after every write: `schema` 1, its path's name as `name`, `mac`
   six hex bytes in upper case with colons between them, `updatedMs` a number from 0, `device` a
   non-empty text, and no other field.
+- `users/{uid}/events/{eventId}` (T3.9): only the account `uid` creates and reads (lists) them;
+  nothing updates or deletes one, not even the account. A new document must be whole and valid:
+  `schema` 1, `tsMs` a number, `kind` a dotted lowercase name of at most 64 characters, `app` a map
+  of exactly `version` and `commit` (text), `device` a map of exactly `label` (non-empty text),
+  `platform` (text) and `installed` (a boolean), `session` (if there) a non-empty text, `attempt`
+  (if there) an integer from 1, `data` a map of at most 32 fields, and no other field; its id the
+  event's time as 13 digits and 8 hex digits.
 - Nothing else: no other collection, no other subcollection of a user's record, and nothing for
   anyone signed out.
 

@@ -1,8 +1,8 @@
 rules_version = '2';
 
 // Who may read and write what in cubetrace's Firestore (docs/DATA-MODEL.md §10). A signed-in account
-// reads and writes its own users/{uid} with its cubes, and the sessions it owns with their attempts;
-// nothing is public, and everything not matched here is denied. Tested against the emulator by
+// reads and writes its own users/{uid} with its cubes and its diagnostics events, and the sessions it
+// owns with their attempts; nothing is public, and everything not matched here is denied. Tested against the emulator by
 // firebase/rules.test.ts (`npm run test:rules`); deployed by .github/workflows/firebase.yml.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -186,6 +186,51 @@ service cloud.firestore {
         allow update: if ownsExisting() && keepsOwner() && keepsUpload()
           && validAttempt(request.resource.data, sessionId, index);
       }
+    }
+
+    // users/{uid}/events/{eventId} (T3.9, docs/DATA-MODEL.md §10, docs/DIAGNOSTICS.md): the account's
+    // diagnostics events, one fact each about the app's own use on one of its devices, which only
+    // those devices create (in batches) and only the account reads; nothing changes or deletes one,
+    // since an event is what the device saw (the coordinator's round report reads them with the Admin
+    // SDK, past these rules). The shape: schema 1, a time, a kind of at most 64 characters, the build
+    // and the device as maps of exactly their fields, a session and an attempt only when the event
+    // belongs to one, and at most 32 facts; the id is the event's time as 13 digits and 8 hex digits.
+    function eventFields() {
+      return ['schema', 'tsMs', 'kind', 'app', 'device', 'session', 'attempt', 'data'];
+    }
+
+    function validEventDevice(device) {
+      return device is map
+        && device.keys().hasOnly(['label', 'platform', 'installed'])
+        && device.keys().hasAll(['label', 'platform', 'installed'])
+        && device.label is string
+        && device.label.size() > 0
+        && device.platform is string
+        && device.installed is bool;
+    }
+
+    function validEvent(event) {
+      return event.keys().hasAll(['schema', 'tsMs', 'kind', 'app', 'device', 'data'])
+        && event.keys().hasOnly(eventFields())
+        && event.schema == 1
+        && event.tsMs is number
+        && event.kind is string
+        && event.kind.size() <= 64
+        && event.kind.matches('[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+')
+        && validApp(event.app)
+        && validEventDevice(event.device)
+        && (!('session' in event) || (event.session is string && event.session.size() > 0))
+        && (!('attempt' in event) || (event.attempt is int && event.attempt >= 1))
+        && event.data is map
+        && event.data.keys().size() <= 32;
+    }
+
+    match /users/{uid}/events/{eventId} {
+      allow read: if isOwnUid(uid);
+      allow create: if isOwnUid(uid)
+        && eventId.matches('[0-9]{13}-[0-9a-f]{8}')
+        && validEvent(request.resource.data);
+      allow update, delete: if false;
     }
   }
 }

@@ -120,7 +120,10 @@ describe('TimerPage', () => {
     const previews = (): number =>
       (fixture.nativeElement as HTMLElement).querySelectorAll('app-camera-preview').length;
     const scrambleView = (): HTMLElement | null => query(fixture, 'app-scramble-view');
-    expect(asked).toEqual(['(min-width: 60rem)']);
+    // The diagnostics ask whether the app runs installed (T3.9); the layout asks for the width.
+    expect(asked.filter((media) => media !== '(display-mode: standalone)')).toEqual([
+      '(min-width: 60rem)',
+    ]);
 
     // The camera off: the scramble's card alone in the pinned part, the preview's place under the
     // time (where it shows nothing).

@@ -1,6 +1,7 @@
 // The account's backend on the Firebase SDK (docs/ARCHITECTURE.md, "Account"): Authentication with
-// the Google provider, Firestore for users/{uid}, the session index (T3.1) and the account's cubes
-// (T3.4), and the upload's two callable functions (T3.3), through the modular API. This is the only
+// the Google provider, Firestore for users/{uid}, the session index (T3.1), the account's cubes
+// (T3.4) and its diagnostics events (T3.9), and the upload's two callable functions (T3.3), through
+// the modular API. This is the only
 // file that imports Firebase, and only ACCOUNT_LOADER's dynamic import loads it, so the SDK is a
 // lazy chunk of its own, firebase-sdk-<hash>.js, which the service worker caches only once it has
 // been used (ngsw-config.json): a device that never signs in never downloads it. In development builds
@@ -176,6 +177,24 @@ export function connectFirebase(emulators: FirebaseEmulators | null = null): Acc
     listCubes: async (uid) => listing(await getDocs(collection(firestore, 'users', uid, 'cubes'))),
     saveCube: (uid, cube) => setDoc(doc(firestore, 'users', uid, 'cubes', cube.name), cube),
     deleteCube: (uid, name) => deleteDoc(doc(firestore, 'users', uid, 'cubes', name)),
+    // The diagnostics events (T3.9): each created whole, in batches of at most 500.
+    saveEvents: async (uid, events) => {
+      const commits: Promise<void>[] = [];
+      for (let start = 0; start < events.length; start += BATCH_WRITES) {
+        const batch = writeBatch(firestore);
+        for (const { id, event } of events.slice(start, start + BATCH_WRITES)) {
+          batch.set(doc(firestore, 'users', uid, 'events', id), event);
+        }
+        commits.push(batch.commit());
+      }
+      await Promise.all(commits);
+    },
+    listEvents: async (uid, max) =>
+      listing(
+        await getDocs(
+          query(collection(firestore, 'users', uid, 'events'), orderBy('tsMs', 'desc'), limit(max)),
+        ),
+      ),
   };
 }
 

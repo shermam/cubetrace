@@ -49,6 +49,7 @@ import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
 import { WakeLockService } from '../device/wake-lock-service';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SettingsService, hostPlatform } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { ATTEMPT_FILES } from './attempt-files';
@@ -90,6 +91,12 @@ export const SYNC_GRACE_MS = 1000;
  * the cube (T3.7): the time the recording gives the encoder (`ENCODER_SETTLE_MS`).
  */
 export const GYRO_SETTLE_MS = 250;
+
+/**
+ * An attempt's `attempt.done` event (T3.9, docs/DIAGNOSTICS.md) waits for its clips and its gyro
+ * file (`ClipsInFlight`), so that it counts them, at most this long after the attempt ended, ms.
+ */
+export const DONE_EVENT_WAIT_MS = 15_000;
 
 /** The cube of a session created before the cube said what it is. */
 export const UNKNOWN_CUBE: CubeInfo = {
@@ -265,6 +272,11 @@ function isActive(state: AttemptState): state is ActiveState {
   return state === 'scrambling' || state === 'armed' || state === 'solving';
 }
 
+/** The attempt `ref` as `SessionService.doneWaiting` keys it. */
+function doneKey(ref: AttemptRef): string {
+  return `${ref.session}/${String(ref.index)}/${String(ref.scrambleShown)}`;
+}
+
 /** The attempt `current` as the recording names it. */
 function refOf(current: Current): AttemptRef {
   return {
@@ -354,6 +366,7 @@ export class SessionService {
   private readonly files = inject(ATTEMPT_FILES);
   /** The attempts whose gyro file is still to be written, for the upload queue (T3.7). */
   private readonly inFlight = inject(ClipsInFlight);
+  private readonly diagnostics = inject(DiagnosticsService);
   /**
    * The store, whose writes also go to the session index in the cloud while an account is signed in
    * (T3.1, `SessionIndexService`): never awaited, and a refusal is noted in the session; and then to
@@ -516,6 +529,12 @@ export class SessionService {
   private readonly gyro = new GyroBuffer();
   /** The gyro files waiting for their attempt's window to end, by attempt. */
   private readonly gyroTimers = new Map<string, number>();
+  /**
+   * The `attempt.done` events waiting for their attempt's clips and gyro file (T3.9), by attempt:
+   * each checks whether it may go, and goes once at the latest {@link DONE_EVENT_WAIT_MS} after the
+   * end.
+   */
+  private readonly doneWaiting = new Map<string, { check: () => void; timer: number }>();
   /** The connection's latest battery report, which a session created now begins with (T3.7). */
   private lastBattery: BatteryReading | null = null;
   /** Between a connection's first event and its `disconnected`. */
@@ -558,6 +577,31 @@ export class SessionService {
       untracked(() => {
         this.holdWakeLock(active);
       });
+    });
+    // The diagnostics' events say which session and attempt they belong to (T3.9).
+    effect(() => {
+      const session = this.sessionSignal()?.id ?? null;
+      const view = this.attemptSignal();
+      const attempt = view !== null && isActive(view.state) ? view.index : null;
+      untracked(() => {
+        this.diagnostics.setSession(session);
+        this.diagnostics.setAttempt(attempt);
+      });
+    });
+    // An attempt's clips and gyro file came, or went: its `attempt.done` event may go now.
+    effect(() => {
+      this.inFlight.version();
+      untracked(() => {
+        for (const { check } of [...this.doneWaiting.values()]) {
+          check();
+        }
+      });
+    });
+    inject(DestroyRef).onDestroy(() => {
+      for (const { timer } of this.doneWaiting.values()) {
+        this.clearTimer(timer);
+      }
+      this.doneWaiting.clear();
     });
     void this.whenReady();
   }
@@ -656,6 +700,12 @@ export class SessionService {
     if (this.lastResultSignal()?.index === last.index) {
       this.lastResultSignal.set(null);
     }
+    this.forgetDone(last);
+    this.diagnostics.record(
+      'attempt.deleted',
+      { status: last.result.status, timeMs: last.result.timeMs, clips: last.video.length },
+      { session: session.id, attempt: last.index },
+    );
     const current = this.current;
     if (current?.machine.state === 'scrambling') {
       this.queuedSignal.set(current.scramble);
@@ -740,6 +790,11 @@ export class SessionService {
    */
   async deleteSession(id: string): Promise<void> {
     this.deletedSessions.add(id);
+    this.diagnostics.record(
+      'session.deleted',
+      { current: this.sessionSignal()?.id === id, attempts: this.countOf(id) },
+      { session: id },
+    );
     if (this.sessionSignal()?.id === id) {
       const current = this.current;
       if (current !== null && isActive(current.machine.state)) {
@@ -1270,6 +1325,11 @@ export class SessionService {
     }
     const before = current.machine.state;
     current.machine.resync(facelets, hostMs);
+    this.diagnostics.record(
+      'cube.resync',
+      { state: before, after: current.machine.state },
+      { session: current.session, attempt: current.index },
+    );
     this.afterChange(current, before);
   }
 
@@ -1351,7 +1411,96 @@ export class SessionService {
       this.planGyro(refOf(current), record, endMs);
     }
     this.milestones.next({ type: 'ended', attempt: refOf(current), record, endMs });
+    // Its event waits for the clips and the gyro file planned above, to count them (T3.9).
+    this.planDone(refOf(current), endMs);
     this.ensureAttempt();
+  }
+
+  /**
+   * Records `attempt.done` for the attempt `ref` (T3.9, docs/DIAGNOSTICS.md) once nothing of it is
+   * still to come (`ClipsInFlight`: its clips, its gyro file), or {@link DONE_EVENT_WAIT_MS} after
+   * its end at the latest, with its record as it is then; nothing for an attempt deleted meanwhile.
+   */
+  private planDone(ref: AttemptRef, endMs: number): void {
+    const key = doneKey(ref);
+    const settled = (): boolean => !this.inFlight.has(ref.session, ref.index);
+    const go = (): void => {
+      const waiting = this.doneWaiting.get(key);
+      if (waiting === undefined) {
+        return;
+      }
+      this.doneWaiting.delete(key);
+      this.clearTimer(waiting.timer);
+      const record = this.attemptsSignal().find((attempt) => isAttempt(attempt, ref));
+      if (record !== undefined) {
+        this.recordDone(record, endMs, settled());
+      }
+    };
+    const check = (): void => {
+      if (settled()) {
+        go();
+      }
+    };
+    const timer = this.setTimer(go, DONE_EVENT_WAIT_MS);
+    this.doneWaiting.set(key, { check, timer });
+    check();
+  }
+
+  /** The `attempt.done` of `last` is not to go: it was deleted (`deleteLast`). */
+  private forgetDone(last: AttemptRecord): void {
+    const key = doneKey({
+      session: last.session,
+      index: last.index,
+      scrambleShown: last.events.scrambleShown,
+    });
+    const waiting = this.doneWaiting.get(key);
+    if (waiting !== undefined) {
+      this.doneWaiting.delete(key);
+      this.clearTimer(waiting.timer);
+    }
+  }
+
+  /** `attempt.done`: the attempt's outcome, timing, fits, clips and files, as docs/DIAGNOSTICS.md names them. */
+  private recordDone(record: AttemptRecord, endMs: number, settled: boolean): void {
+    const { result, events, clock, gyro, video } = record;
+    this.diagnostics.record(
+      'attempt.done',
+      {
+        status: result.status,
+        timeMs: result.timeMs,
+        inspectionMs: result.inspectionMs,
+        movesQtm: result.movesQtm,
+        tps: result.tps,
+        replayOk: result.replayOk,
+        scrambleCorrected: result.scrambleCorrected,
+        scrambleExtraMoves: result.scrambleExtraMoves,
+        phases: record.phases.length,
+        pickup: events.pickup !== null,
+        clockResidualP95Ms: clock?.residualP95Ms ?? null,
+        clockSamples: clock?.samples ?? null,
+        clockA: clock?.a ?? null,
+        gyroSamples: gyro?.samples ?? null,
+        gyroRateHz: gyro?.rateHz ?? null,
+        gyroTruncated: gyro?.truncatedStart ?? null,
+        resyncs: record.resyncs.length,
+        clips: video.length,
+        clipsLate: video.filter((clip) => clip.truncatedStart).length,
+        clipBytes: video.reduce((sum, clip) => sum + clip.bytes, 0),
+        syncResidualMs: video.find((clip) => clip.syncResidualMs !== null)?.syncResidualMs ?? null,
+        scrambleMs:
+          events.scrambleDone === null || events.scrambleStart === null
+            ? null
+            : events.scrambleDone - events.scrambleStart,
+        settledMs: Math.round(this.now() - endMs),
+        settled,
+      },
+      { session: record.session, attempt: record.index },
+    );
+  }
+
+  /** How many attempts the session `sessionId` has on this page, if it is the current one. */
+  private countOf(sessionId: string): number | null {
+    return this.sessionSignal()?.id === sessionId ? this.attemptsSignal().length : null;
   }
 
   /**
@@ -1411,6 +1560,7 @@ export class SessionService {
       }
       const line = `gyro failed: attempt ${String(ref.index)}: ${errorMessage(error)}`;
       console.warn(`cubetrace: ${line}`);
+      this.diagnostics.record('error.app', { where: 'gyro', message: line }, ref);
       this.addNote(ref.session, line).catch(() => undefined);
     }
   }
@@ -1563,6 +1713,25 @@ export class SessionService {
     this.lastResultSignal.set(null);
     this.writeCurrentId(session.id);
     void this.save((store) => store.createSession(session));
+    this.diagnostics.record(
+      'session.started',
+      {
+        host: session.host.label,
+        platform: session.host.platform,
+        isPhone: session.host.isPhone,
+        model: session.cube.model,
+        hardware: session.cube.hardware,
+        firmware: session.cube.firmware,
+        gyro: session.cube.gyro,
+        productDate: session.cube.productDate,
+        audio: session.audio,
+        inspection15s: session.settings.inspection15s,
+        autoAdvance: session.settings.autoAdvance,
+        battery: this.lastBattery?.level ?? null,
+        storage: this.storageKind,
+      },
+      { session: session.id },
+    );
     if (!this.persistAsked) {
       this.persistAsked = true;
       void this.storage.persist();
@@ -1609,6 +1778,10 @@ export class SessionService {
       (error: unknown) => {
         this.pendingWritesSignal.update((count) => count - 1);
         this.saveErrorSignal.set(errorMessage(error));
+        this.diagnostics.record('error.app', {
+          where: 'store',
+          message: `a record could not be saved: ${errorMessage(error)}`,
+        });
       },
     );
     return run;

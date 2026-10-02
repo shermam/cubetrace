@@ -32,6 +32,26 @@ versions follow [Semantic Versioning](https://semver.org/).
   turn at 50 Hz while a replay turns, with a velocity), which the end-to-end suite uses;
   `GyroBuffer`, `gyroFile`, `gyroSummary`, `parseGyro` and `gyro.schema.json` in `packages/core`,
   `writeAttemptFile` in `packages/storage`.
+- Diagnostics (T3.9; `docs/DIAGNOSTICS.md`, `docs/DATA-MODEL.md` §10): signed in, the app keeps a
+  log of its own use in the account (`users/{uid}/events`): when it starts and which build (and the
+  build it ran before: the update), the sign-ins, the pages viewed, the settings changed, each cube
+  connected (and how its address came, never which), disconnected (with the facts the console had)
+  or reset, each session and attempt (its outcome, timing, clock fit, gyro file and clips), the
+  camera and the recording, each clip saved or failed, the sync checks, the uploads' states and
+  pauses, the clips deleted by policy, the cubes synced (a count), the downloads and the errors the
+  app logs — never a MAC address, an email, a video or a user agent. The events go in batches, 5 s
+  after the first or at 20, offline through Firestore's cache; signed out, nothing is kept beyond the
+  page; a device writes at most 2,000 a day. Settings → Account → Diagnostics, on by default, turns
+  it off after one last event. Sessions → QA view gains a Diagnostics section: per device its last
+  start and build, the events by kind over the last 7 days, and the failures. The manual rounds are
+  now read from these events by the coordinator's round report (`npm run round-report`, with a
+  service-account key: `functions/scripts/round-report.mts`), which ticks the checklists of
+  `docs/MANUAL-TESTS.md` with the facts; the owner looks only at what no event can show.
+- Development: `cloudEvent`, `sanitizeEventData`, `eventId`, `parseCloudEvent` and
+  `cloud-event.schema.json` in `packages/core`; the rules for `users/{uid}/events` (create-only by
+  the account, never updated or deleted) with their tests; `AccountBackend.saveEvents` and
+  `listEvents` in the SDK and both fakes; `diagnostics.spec.ts` in the end-to-end suite and the
+  events checked in the cloud project.
 
 ## 0.3.0 — 2026-10-02
 

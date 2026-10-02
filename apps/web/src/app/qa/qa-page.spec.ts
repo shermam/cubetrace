@@ -1,6 +1,6 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { MemorySessionStore } from '@cubetrace/core';
+import { MemorySessionStore, cloudEvent, eventId } from '@cubetrace/core';
 
 import { ACCOUNT_LOADER } from '../auth/account-backend';
 import { ACCOUNT_STORAGE_KEY } from '../auth/auth-service';
@@ -148,6 +148,7 @@ describe('QaPage', () => {
       'This device (office-mbp) has not synced with your cloud index yet; nothing of this page waits to be sent.',
     );
     expect(backend.reads).toEqual([
+      `events ${ADA.uid} 500`,
       `sessions ${ADA.uid} 50`,
       `attempts ${SESSION_A} ${ADA.uid}`,
       `attempts ${SESSION_B} ${ADA.uid}`,
@@ -178,6 +179,82 @@ describe('QaPage', () => {
     expect(text(element, 'qa-read')).toBe(
       `Offline: read from this device's copy of your cloud index at ${time.format(clock.hostMs)} (2 sessions); 1 of its attempts holds changes of this device not sent yet.`,
     );
+  });
+
+  it("sums the account's diagnostics events: the devices, the kinds of the last days, the failures", async () => {
+    backend.user = ADA;
+    storage.setItem(ACCOUNT_STORAGE_KEY, 'signed-in');
+    const now = clock.hostMs;
+    const day = 24 * 60 * 60 * 1000;
+    const laptop = { label: 'office-mbp', platform: 'macOS', installed: false };
+    const phone = { label: 'ThinkPhone', platform: 'Android', installed: true };
+    const at = (
+      tsMs: number,
+      kind: string,
+      data: Record<string, unknown>,
+      device = laptop,
+      app = { version: '0.4.0', commit: 'abc1234' },
+    ) => ({
+      id: eventId(tsMs, 'a1b2c3d4'),
+      event: cloudEvent({ tsMs, kind, app, device, data, session: SESSION_A, attempt: 1 }),
+    });
+    await backend.saveEvents(ADA.uid, [
+      at(now - 10 * day, 'app.start', { installed: false }, laptop, {
+        version: '0.3.0',
+        commit: 'old1234',
+      }),
+      at(now - 2 * day, 'app.start', { installed: false, updated: true }),
+      at(now - 2 * day + 1000, 'attempt.done', { status: 'solved' }),
+      at(now - day, 'attempt.done', { status: 'solved' }),
+      at(now - 3600_000, 'clip.failed', { segment: 'solve', reason: 'the encoder closed' }, phone),
+      at(now - 60_000, 'page.viewed', { page: 'qa' }, phone),
+    ]);
+    const element = await render();
+
+    const devices = Array.from(element.querySelectorAll('[data-testid="diag-device"]'));
+    expect(devices.map((row) => row.getAttribute('data-device'))).toEqual([
+      'office-mbp',
+      'ThinkPhone',
+    ]);
+    const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
+    expect(cells(devices[0])).toEqual([
+      'office-mbp',
+      'macOS',
+      time.format(now - 2 * day),
+      '0.4.0 · abc1234',
+      time.format(now - day),
+      '4',
+      '0',
+    ]);
+    expect(cells(devices[1])).toEqual([
+      'ThinkPhone',
+      'Android, installed',
+      '–',
+      '–',
+      time.format(now - 60_000),
+      '2',
+      '1',
+    ]);
+    const kinds = Array.from(element.querySelectorAll('[data-testid="diag-kind"]'), (row) => [
+      row.getAttribute('data-kind'),
+      ...cells(row).slice(1),
+    ]);
+    expect(kinds).toEqual([
+      ['attempt.done', '2'],
+      ['app.start', '1'],
+      ['clip.failed', '1'],
+      ['page.viewed', '1'],
+    ]);
+    const failures = Array.from(element.querySelectorAll('[data-testid="diag-failure"]'), (item) =>
+      item.textContent.replace(/\s+/g, ' ').trim(),
+    );
+    expect(failures).toEqual([
+      `${time.format(now - 3600_000)} · ThinkPhone · clip.failed · attempt 1 : solve: the encoder closed`,
+    ]);
+    expect(text(element, 'diag-read')).toBe(
+      `Read from your account at ${time.format(now)} (6 events, from ${time.format(now - 10 * day)} on).`,
+    );
+    expect(backend.reads).toContain(`events ${ADA.uid} 500`);
   });
 
   it('says so when the index cannot be read', async () => {

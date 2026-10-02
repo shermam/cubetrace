@@ -25,7 +25,8 @@ apps/web (Angular, PWA)
                    ACCOUNT_LOADER (fake in apps/web/src/app/auth/fake-account.ts) · SessionIndexService:
                    the session index in Firestore, the Sessions page's cloud sessions, the QA view ·
                    UploadService: the upload queue, from a lazy chunk of its own, its panel and indicator ·
-                   CubeSyncService: Settings' cube MAC addresses merged with the account's (T3.4)
+                   CubeSyncService: Settings' cube MAC addresses merged with the account's (T3.4) ·
+                   DiagnosticsService: the app's own log of its use, in the account (T3.9)
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider
@@ -251,6 +252,39 @@ changes still to be sent, and what went wrong (a refusal, a document of another 
 cannot be an id), which the console has once. Signed out, nothing is read or written, and the list
 is the device's. The addresses never reach the dataset: no record holds one, so no export, upload or
 document of the session index does.
+
+## Diagnostics (T3.9)
+
+The app records what `docs/MANUAL-TESTS.md` asked the owner to write down, as events in the
+account (`users/{uid}/events`, `docs/DATA-MODEL.md` §10; the catalogue and the checklists' mapping in
+`docs/DIAGNOSTICS.md`), so that the coordinator's round report, not the owner's notes, is the
+evidence of the manual rounds. `DiagnosticsService` (`apps/web/src/app/diagnostics/`), made on
+every page load by the header's controls, is a sink the services write into where they know a fact;
+it never throws and never waits:
+
+```
+the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sanitized (texts cut and scrubbed of
+  CubeService: cube.connected / failed /       MAC addresses and emails, ≤ 32 of them), the session and
+    disconnected / reset                        attempt under way (SessionService keeps them)
+  SessionService: session.started, attempt.done   ├─ signed out: a ring of the last 500, written at a sign-in
+    (once the clips and gyro file are in),        │  during the page's life, gone with the page
+    attempt.deleted, cube.resync, session.deleted ├─ the setting off: one last settings.changed, then nothing
+  CameraService, RecordingService: camera.on /    └─ signed in: the queue ─▶ one batch 5 s after its first
+    switched / off, recording.started / stopped /       event, at 20, when the page hides or goes away
+    notice, clip.saved / failed, audio.missing           ─▶ AccountBackend.saveEvents (writeBatch) ─▶ Firestore's
+  SyncService: sync.check                                cache ─▶ the server (a refusal: said once, dropped)
+  UploadService: upload.state / paused / resumed, storage.deleted     at most 2,000 a local day per device
+  CubeSyncService: cubes.synced (a count)                             (localStorage), then error.* alone
+  AuthService: account.signin / signout; the pages: clips.viewed, download; every console `cubetrace:` warning: error.app
+the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the
+  router), settings.changed (the settings the checklists name), wake.lock, storage.persistence, network.changed
+```
+
+The rules let only the account's own devices create the events, and only the account read them;
+nothing updates or deletes one. The QA view sums the last 500 (per device, by kind over the last
+days, the failures); `npm run round-report`, with a service-account key the coordinator holds, prints
+the checklists of `docs/MANUAL-TESTS.md` with ✅ ⬜ ❗ and the facts, and the owner looks only at what
+no event can show. Signed out, nothing leaves the device, as everything else.
 
 ## Storage (phase 3)
 

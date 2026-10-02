@@ -7,7 +7,8 @@
     "moduleResolution": "nodenext",
     "lib": ["ES2023"],
     "types": ["node"],
-    "paths": {}
+    "paths": {},
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "*.ts"]
+  "include": ["src/**/*.ts", "*.ts", "scripts/**/*.ts", "scripts/**/*.mts"]
 }

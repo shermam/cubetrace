@@ -61,6 +61,7 @@ describe('SettingsService', () => {
     expect(settings.cameraFramings()).toEqual([]);
     expect(settings.uploadSessions()).toBe(true);
     expect(settings.keepLocalCopies()).toBe(true);
+    expect(settings.diagnostics()).toBe(true);
     expect(settings.networkTypeKnown).toBe(false);
     expect(settings.wifiOnly()).toBe(false);
     expect(settings.saveError()).toBeNull();
@@ -131,6 +132,7 @@ describe('SettingsService', () => {
     settings.setUploadSessions(false);
     settings.setWifiOnly(true);
     settings.setKeepLocalCopies(false);
+    settings.setDiagnostics(false);
 
     expect(stored()).toEqual({
       version: 2,
@@ -164,9 +166,11 @@ describe('SettingsService', () => {
       uploadSessions: false,
       wifiOnly: true,
       keepLocalCopies: false,
+      diagnostics: false,
     });
     const reloaded = load();
     expect(reloaded.uploadSessions()).toBe(false);
+    expect(reloaded.diagnostics()).toBe(false);
     expect(reloaded.wifiOnlySetting()).toBe(true);
     // A laptop's browser does not say the network's type: it uploads on any network.
     expect(reloaded.wifiOnly()).toBe(false);

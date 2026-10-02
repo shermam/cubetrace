@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/cloud-event.schema.json",
+  "title": "users/{uid}/events/{eventId}",
+  "description": "A diagnostics event of an account in Firestore, schema version 1 (docs/DATA-MODEL.md §10, docs/PLAN.md T3.9, docs/DIAGNOSTICS.md): one fact about the app's own use on one of the account's devices, written by that device, never changed or deleted by the app. Its id is the event's time as 13 digits, a dash and 8 hex digits. Never a MAC address, an email, a file's contents or a user agent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "tsMs", "kind", "app", "device", "data"],
+  "properties": {
+    "schema": { "const": 1 },
+    "tsMs": {
+      "description": "When it happened: host ms on the device's clock (docs/DATA-MODEL.md §1).",
+      "type": "number"
+    },
+    "kind": {
+      "description": "What happened: a dotted lowercase name of the catalogue (docs/DIAGNOSTICS.md), such as attempt.done.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$",
+      "maxLength": 64
+    },
+    "app": {
+      "description": "The build that wrote it, as session.json's app.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit"],
+      "properties": {
+        "version": { "type": "string" },
+        "commit": {
+          "description": "Short SHA of the build's commit.",
+          "type": "string"
+        }
+      }
+    },
+    "device": {
+      "description": "The device that saw it, as its account knows it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "platform", "installed"],
+      "properties": {
+        "label": {
+          "description": "The host label the account records (Settings → This device; session.json's host.label).",
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "description": "The platform, such as macOS or Android (session.json's host.platform); empty when unknown.",
+          "type": "string"
+        },
+        "installed": {
+          "description": "The app runs installed (display mode standalone), not in a browser tab.",
+          "type": "boolean"
+        }
+      }
+    },
+    "session": {
+      "description": "The session the event belongs to, when it belongs to one: its id.",
+      "type": "string",
+      "minLength": 1
+    },
+    "attempt": {
+      "description": "The attempt the event belongs to, when it belongs to one: its index.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "data": {
+      "description": "The event's facts, by name (docs/DIAGNOSTICS.md names each kind's): at most 32, each a text of at most 500 characters, a number, a boolean or null, or a map of those (one level of nesting at most).",
+      "type": "object",
+      "maxProperties": 32,
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/value" },
+          {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/value" }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "value": {
+      "anyOf": [{ "type": "string", "maxLength": 500 }, { "type": ["number", "boolean", "null"] }]
+    }
+  }
+}

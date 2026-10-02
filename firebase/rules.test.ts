@@ -12,8 +12,10 @@ import {
   cloudAttempt,
   cloudAttemptFields,
   cloudCube,
+  cloudEvent,
   cloudSession,
   createSession,
+  eventId,
   parseMoves,
   pendingUpload,
 } from '@cubetrace/core';
@@ -150,7 +152,7 @@ describe('users/{uid}', () => {
     }
   });
 
-  it('keeps the collections under a record closed but its cubes (T3.4, below)', async () => {
+  it('keeps the collections under a record closed but its cubes (T3.4) and its events (T3.9, below)', async () => {
     await seed('users/alice', user());
     const db = alice().firestore();
     for (const path of ['users/alice/sessions/one', 'users/alice/devices/office-mbp']) {
@@ -255,6 +257,143 @@ describe('users/{uid}/cubes/{name}', () => {
     await seed(CUBE, cube());
     await assertFails(db.doc(CUBE).set(document));
     await assertSucceeds(db.doc(CUBE).set(cube()));
+  });
+});
+
+// The account's diagnostics events (T3.9, docs/DATA-MODEL.md §10, docs/DIAGNOSTICS.md):
+// users/{uid}/events/{eventId}, one fact each about the app's use, created by the account's devices
+// and never changed.
+const EVENT_ID = eventId(1_790_000_012_345, 'a1b2c3d4');
+const EVENT = `users/alice/events/${EVENT_ID}`;
+
+/** An event of the laptop (packages/core cloud-event.ts), an attempt's end. */
+function event(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...cloudEvent({
+      tsMs: 1_790_000_012_345,
+      kind: 'attempt.done',
+      app: { version: '0.4.0', commit: 'abc1234' },
+      device: { label: 'office-mbp', platform: 'macOS', installed: false },
+      session: '3f1c9a2e-5b7d-4c1e-9f3a-2b8d6e4c1a7f',
+      attempt: 17,
+      data: { status: 'solved', timeMs: 14_990, replayOk: true, gyroRateHz: null },
+    }),
+    ...extra,
+  };
+}
+
+describe('users/{uid}/events/{eventId}', () => {
+  it('lets an account create its own events, one by one and in a batch, and read and list them, newest first', async () => {
+    const db = alice().firestore();
+    await assertSucceeds(db.doc(EVENT).set(event()));
+    const batch = db.batch();
+    for (let k = 1; k <= 20; k++) {
+      const tsMs = 1_790_000_012_345 + k;
+      batch.set(
+        db.doc(`users/alice/events/${eventId(tsMs, 'a1b2c3d4')}`),
+        event({ tsMs, kind: k % 2 === 0 ? 'clip.saved' : 'page.viewed' }),
+      );
+    }
+    await assertSucceeds(batch.commit());
+    await assertSucceeds(db.doc(EVENT).get());
+    const listed = await assertSucceeds(
+      db.collection('users/alice/events').orderBy('tsMs', 'desc').limit(500).get(),
+    );
+    expect(listed.size).toBe(21);
+    expect(listed.docs[0].get('tsMs')).toBe(1_790_000_012_365);
+    // An event that belongs to no session or attempt, and one of the installed app on a phone.
+    await assertSucceeds(
+      db.doc(`users/alice/events/${eventId(1_790_000_000_000, '00000000')}`).set(
+        cloudEvent({
+          tsMs: 1_790_000_000_000,
+          kind: 'app.start',
+          app: { version: '0.4.0', commit: 'abc1234' },
+          device: { label: 'Android phone', platform: 'Android', installed: true },
+          data: { installed: true, online: true, persisted: 'persistent', previousCommit: null },
+        }),
+      ),
+    );
+  });
+
+  it('never changes or deletes an event, not even for its owner', async () => {
+    await seed(EVENT, event());
+    const db = alice().firestore();
+    await assertFails(db.doc(EVENT).set(event({ kind: 'attempt.deleted' })));
+    await assertFails(db.doc(EVENT).set({ data: { status: 'dnf' } }, { merge: true }));
+    await assertFails(db.doc(EVENT).update({ 'data.status': 'dnf' }));
+    await assertFails(db.doc(EVENT).delete());
+  });
+
+  it("refuses another account, and anyone signed out, any access to an account's events", async () => {
+    await seed(EVENT, event());
+    for (const db of [bob().firestore(), nobody().firestore()]) {
+      await assertFails(db.doc(EVENT).get());
+      await assertFails(db.collection('users/alice/events').get());
+      await assertFails(db.doc(`users/alice/events/${eventId(1, 'ffffffff')}`).set(event()));
+      await assertFails(db.doc(EVENT).delete());
+    }
+    // Bob's own events are his.
+    await assertSucceeds(bob().firestore().doc(`users/bob/events/${EVENT_ID}`).set(event()));
+    await assertFails(bob().firestore().collection('users/alice/events').limit(1).get());
+  });
+
+  it.each([
+    ['schema version 2', { schema: 2 }],
+    ['no schema', { schema: undefined }],
+    ['no time', { tsMs: undefined }],
+    ['a time that is text', { tsMs: '1790000012345' }],
+    ['no kind', { kind: undefined }],
+    ['a kind of one word', { kind: 'start' }],
+    ['a kind in upper case', { kind: 'App.Start' }],
+    ['a kind with a space', { kind: 'app start.now' }],
+    ['a kind over 64 characters', { kind: `app.${'x'.repeat(61)}` }],
+    ['no build', { app: undefined }],
+    ['a build that is text', { app: '0.4.0' }],
+    ['a build without its commit', { app: { version: '0.4.0' } }],
+    ['a build with a field more', { app: { version: '0.4.0', commit: 'abc1234', branch: 'main' } }],
+    ['no device', { device: undefined }],
+    ['a device without a label', { device: { label: '', platform: 'macOS', installed: false } }],
+    ['a device without installed', { device: { label: 'office-mbp', platform: 'macOS' } }],
+    [
+      'a device with a user agent',
+      { device: { label: 'office-mbp', platform: 'macOS', installed: false, userAgent: 'Chrome' } },
+    ],
+    ['an empty session', { session: '' }],
+    ['a session that is a number', { session: 7 }],
+    ['an attempt of index 0', { attempt: 0 }],
+    ['an attempt that is text', { attempt: '17' }],
+    ['no facts', { data: undefined }],
+    ['facts that are a list', { data: ['solved'] }],
+    ['facts that are text', { data: 'solved' }],
+    [
+      'more than 32 facts',
+      { data: Object.fromEntries(Array.from({ length: 33 }, (_, k) => [`k${String(k)}`, k])) },
+    ],
+    ['an unknown field', { uid: 'alice' }],
+    ['an email', { email: 'alice@example.com' }],
+  ] as [string, Record<string, unknown>][])('refuses an event with %s', async (_, change) => {
+    const document = event();
+    for (const [field, value] of Object.entries(change)) {
+      if (value === undefined) {
+        Reflect.deleteProperty(document, field);
+      } else {
+        document[field] = value;
+      }
+    }
+    await assertFails(alice().firestore().doc(EVENT).set(document));
+  });
+
+  it('refuses an id that is not the time as 13 digits and 8 hex digits', async () => {
+    const db = alice().firestore();
+    for (const id of [
+      'latest',
+      '1790000012345',
+      'a1b2c3d4',
+      '1790000012345-A1B2C3D4',
+      '1-a1b2c3d4',
+    ]) {
+      await assertFails(db.doc(`users/alice/events/${id}`).set(event()));
+    }
   });
 });
 

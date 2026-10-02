@@ -17,6 +17,7 @@ import { attemptFolder } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { ATTEMPT_FILES } from '../session/attempt-files';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { downloadBlob, downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
@@ -310,6 +311,7 @@ export class ClipViewer {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
   private readonly files = inject(ATTEMPT_FILES);
+  private readonly diagnostics = inject(DiagnosticsService);
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly list = viewChild<ElementRef<HTMLElement>>('list');
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
@@ -397,6 +399,27 @@ export class ClipViewer {
         void this.read(clip, session, index);
       });
     });
+    // The attempt whose clips are viewed (T3.9, `clips.viewed`), once per attempt shown.
+    let viewed: string | null = null;
+    effect(() => {
+      const record = this.attempt();
+      untracked(() => {
+        const key = `${record.session}/${String(record.index)}`;
+        if (viewed === key) {
+          return;
+        }
+        viewed = key;
+        this.diagnostics.record(
+          'clips.viewed',
+          {
+            clips: record.video.length,
+            local: record.video.filter((clip) => clip.local !== false).length,
+            gyro: record.gyro !== null,
+          },
+          { session: record.session, attempt: record.index },
+        );
+      });
+    });
     // The move shown stays in sight in the list.
     effect(() => {
       const current = this.current();
@@ -482,6 +505,11 @@ export class ClipViewer {
         downloadBlob(this.globals, this.document, attemptFileName(record, names[at]), blob);
       }
       downloadJson(this.globals, this.document, attemptFileName(record, 'attempt.json'), record);
+      this.diagnostics.record(
+        'files.downloaded',
+        { what: 'clips', files: names.length + 1, names: [...names, 'attempt.json'] },
+        { session: record.session, attempt: record.index },
+      );
     } catch (error: unknown) {
       this.downloadError.set(`The files could not be downloaded: ${errorMessage(error)}`);
     } finally {

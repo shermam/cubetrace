@@ -52,6 +52,7 @@ which Cloud Build installs without the lockfile ("Functions", below).
 | `npm run e2e` | `playwright test -c apps/web/e2e/playwright.config.ts` (Chromium; report in `apps/web/e2e/playwright-report`); starts `ng serve` on port 4200 and a production build under `/cubetrace/` on port 4300 |
 | `npm run e2e:cloud` | `npm run build -w @cubetrace/functions`, then `firebase emulators:exec --only auth,firestore,functions --project demo-cubetrace "playwright test -c apps/web/e2e/playwright.config.ts --project cloud"`: the Playwright project `cloud` against the Auth (9099), Firestore (8080) and Functions (5001) emulators, with `ng serve` on port 4200 and the bucket sink on port 4600 ("Cloud end-to-end", below) |
 | `npm run icons -w @cubetrace/web` | `scripts/generate-icons.mts`: redraws `apps/web/public/icons/` (the SVG and the PNGs the manifest lists) |
+| `npm run round-report -- --days 7` | `functions/scripts/round-report.mts`: the coordinator's round report from the diagnostics events of every account (T3.9, `docs/DIAGNOSTICS.md`), with `GOOGLE_APPLICATION_CREDENTIALS` naming a service-account key file; Markdown on stdout |
 | `npm run format` / `format:check` | `prettier --write .` / `prettier --check .` |
 
 The app was generated with
@@ -1621,3 +1622,51 @@ production build never calls; the chunk of `ACCOUNT_LOADER` 6.8 kB (6.4), with t
 Auth emulator offers each new account to the Functions emulator for the project's auth triggers, of
 which there are none, and warns when nobody takes it. In the agents' containers, the CLI also warns
 that each port is free on 127.0.0.1 but not on `::1`, which has no IPv6 there.
+
+## Diagnostics (T3.9)
+
+Added by T3.9 on 2026-10-02: the diagnostics events in the account, their writer, the QA view's
+section and the round report (`docs/DIAGNOSTICS.md`, `docs/ARCHITECTURE.md` "Diagnostics",
+`docs/DATA-MODEL.md` §10).
+
+**No new dependency.** The events go through the SDK's `writeBatch` in `firebase-sdk.ts`, and the QA
+view reads them with a `getDocs` ordered by `tsMs` (a single-field index, which Firestore keeps by
+itself: nothing to deploy). The report script runs on Node 22 as it is, by type stripping, so it
+is written in the erasable syntax (no enum, no parameter property, relative imports with their
+`.mts` extension, which `functions/tsconfig.json` allows with `allowImportingTsExtensions`, set back
+to false in `tsconfig.build.json`, which emits); it imports `firebase-admin`, the functions'
+dependency, which is why it lives under `functions/scripts/` rather than a root `scripts/`, and
+`firebase.json` keeps the folder out of the deployed source. Its test runs with the packages' tests
+(`vitest.config.ts` includes `functions/scripts/**/*.test.ts`), without an emulator.
+
+**A sink without a cycle.** Every service that records an event injects `DiagnosticsService`, so it
+injects none of them: `AuthService` gives it the account through `attach`, `SessionService` the
+session and attempt under way through `setSession` and `setAttempt`, and the `Router` is injected
+optionally (the services' unit tests provide none); `installedApp` moved to
+`apps/web/src/app/device/display-mode.ts` (re-exported by `auth-service.ts`) and `localDay` to
+`apps/web/src/app/shared/local-day.ts` (re-exported by `qa-summary.ts`) for the same reason. The
+unit tests of the writer (`diagnostics-service.spec.ts`, 16 tests) run on the fake clock and timers
+of `fake-browser.ts`, with `FakeAccountBackend.saveEvents` keeping the batches; every service's spec
+that already ran now also runs the writer, with the events in the ring (no account) or in the fake.
+
+**What an attempt costs.** The end-to-end flows annotate their reports with the events of one
+attempt (`events per attempt`): 3 without uploads (`attempt.done`, two `clip.saved`) and 6 with
+them (`upload.state` pending, uploading, done). The demo flow measures a second, steady-state
+attempt and shows 7: the 3, plus the demo cube's reconnection at each replay (`cube.disconnected`,
+`cube.connected`, and `wake.lock` twice, the lock going and coming with the cube), which a real
+cube's session does not have; the cloud flow's first attempt carries its session's setup too (the
+camera's and the recording's start, the cubes synced, the attempt deleted). So a day of 150
+attempts writes about 900 events of the attempts and about a hundred of the rest (the starts, the
+pages, the cube, the camera, the settings), within the cap of 2,000 a device and far under the free
+tier's 20,000 writes a day; the index's writes (a session's, about three per attempt) come on top.
+
+**Sizes** (`ng build`, 2026-10-02, against `main` at eccedc1): the initial bundle is 264.57 kB raw
+(264.63 before; the CLI's estimate of its transfer, 72.5 to 72.7 kB, moves by a few tens of bytes
+with the commit stamp and the hashes): `main` is the same code but for the minifier's names (62
+bytes fewer), since the header's controls only inject the writer, which the bundler puts in the
+chunk of `SettingsService` and the services, loaded by every page right after the first render:
+68.74 kB raw, 21.27 kB transferred (57.67 and 18.19 before), with the writer, its ring and cap, and
+the services' calls. The QA page's chunk is 16.2 kB raw against 9.5 (its section and the summary),
+the Settings page's 23.0 against 22.1, the Firebase chunk 650.47 kB raw against 650.19 (`saveEvents`,
+`listEvents`), and the chunks of the recording services grow by their calls, one to three kB each;
+all the scripts together, 3531.1 kB raw against 3502.5 (1029.2 kB gzipped against 1020.8).
