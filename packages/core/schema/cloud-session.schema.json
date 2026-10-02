@@ -182,9 +182,7 @@
     "battery": {
       "description": "The cube's battery reports over the session's connections, in order, consecutive equal levels coalesced (T3.7); empty when the cube reported none. Absent from the files written before, which read as empty.",
       "type": "array",
-      "items": {
-        "$ref": "#/$defs/batteryReading"
-      }
+      "items": { "$ref": "#/$defs/batteryReading" }
     },
     "owner": {
       "description": "The Firebase Authentication uid of the account that wrote the document, which the rules require (firebase/firestore.rules).",
@@ -391,12 +389,7 @@
           "description": "When the cube reported it, on the host clock.",
           "type": "number"
         },
-        "level": {
-          "description": "In percent.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 100
-        }
+        "level": { "description": "In percent.", "type": "integer", "minimum": 0, "maximum": 100 }
       }
     }
   }

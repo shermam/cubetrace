@@ -7,9 +7,7 @@
   "additionalProperties": false,
   "required": ["schema", "session", "index", "app", "t0HostMs", "dtMs", "q", "v", "truncatedStart"],
   "properties": {
-    "schema": {
-      "const": 1
-    },
+    "schema": { "const": 1 },
     "session": {
       "description": "The id of the session: a lowercase UUID v4.",
       "type": "string",
@@ -20,42 +18,25 @@
       "type": "integer",
       "minimum": 1
     },
-    "app": {
-      "description": "The build that wrote the file.",
-      "$ref": "#/$defs/app"
-    },
-    "t0HostMs": {
-      "description": "The host time of the first sample.",
-      "type": "number"
-    },
+    "app": { "description": "The build that wrote the file.", "$ref": "#/$defs/app" },
+    "t0HostMs": { "description": "The host time of the first sample.", "type": "number" },
     "dtMs": {
       "description": "Per sample, the time since the previous one, in steps of 0.1 ms (the differences of the sample times rounded to 0.1 ms, as the frames files keep them); 0 for the first.",
       "type": "array",
       "minItems": 1,
-      "items": {
-        "type": "number",
-        "minimum": 0
-      }
+      "items": { "type": "number", "minimum": 0 }
     },
     "q": {
       "description": "Unit quaternions, flat, four per sample (x, y, z, w), as the cube reports them, to 5 decimals.",
       "type": "array",
       "minItems": 4,
-      "items": {
-        "type": "number",
-        "minimum": -1,
-        "maximum": 1
-      }
+      "items": { "type": "number", "minimum": -1, "maximum": 1 }
     },
     "v": {
       "description": "The angular velocity's raw integers, flat, three per sample (a Gen2 cube's are 4-bit signed values, −7 to 7); null when the cube gives none.",
       "type": ["array", "null"],
       "minItems": 3,
-      "items": {
-        "type": "integer",
-        "minimum": -8,
-        "maximum": 7
-      }
+      "items": { "type": "integer", "minimum": -8, "maximum": 7 }
     },
     "truncatedStart": {
       "description": "The buffer did not reach back to the window's start: the file begins at its oldest sample.",
@@ -69,13 +50,8 @@
       "additionalProperties": false,
       "required": ["version", "commit"],
       "properties": {
-        "version": {
-          "type": "string"
-        },
-        "commit": {
-          "description": "Short SHA of the build's commit.",
-          "type": "string"
-        }
+        "version": { "type": "string" },
+        "commit": { "description": "Short SHA of the build's commit.", "type": "string" }
       }
     }
   }

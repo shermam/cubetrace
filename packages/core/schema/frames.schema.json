@@ -7,15 +7,9 @@
   "additionalProperties": false,
   "required": ["schema", "camera", "segment", "t0HostMs", "dtMs", "keyframes", "arrival"],
   "properties": {
-    "schema": {
-      "const": 2
-    },
-    "camera": {
-      "$ref": "#/$defs/cameraLabel"
-    },
-    "segment": {
-      "enum": ["scramble", "solve"]
-    },
+    "schema": { "const": 2 },
+    "camera": { "$ref": "#/$defs/cameraLabel" },
+    "segment": { "enum": ["scramble", "solve"] },
     "app": {
       "description": "The build that wrote the file (T3.7). Absent from the files written before.",
       "$ref": "#/$defs/app"
@@ -28,20 +22,14 @@
       "description": "Per frame, the time since the previous frame from the frames' own timestamps, in steps of 0.1 ms; 0 for the first.",
       "type": "array",
       "minItems": 1,
-      "items": {
-        "type": "number",
-        "minimum": 0
-      }
+      "items": { "type": "number", "minimum": 0 }
     },
     "keyframes": {
       "description": "The indices of the keyframes, in increasing order, starting with 0.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {
-        "type": "integer",
-        "minimum": 0
-      }
+      "items": { "type": "integer", "minimum": 0 }
     },
     "arrival": {
       "description": "The fit of the frames' arrival host times on their own timestamps that gives t0HostMs.",
@@ -73,13 +61,8 @@
       "additionalProperties": false,
       "required": ["version", "commit"],
       "properties": {
-        "version": {
-          "type": "string"
-        },
-        "commit": {
-          "description": "Short SHA of the build's commit.",
-          "type": "string"
-        }
+        "version": { "type": "string" },
+        "commit": { "description": "Short SHA of the build's commit.", "type": "string" }
       }
     }
   }

@@ -184,23 +184,10 @@
       "additionalProperties": false,
       "required": ["file", "samples", "fromHostMs", "toHostMs", "rateHz", "truncatedStart"],
       "properties": {
-        "file": {
-          "description": "The file's name in the attempt's folder.",
-          "const": "gyro.json"
-        },
-        "samples": {
-          "description": "The samples in the file.",
-          "type": "integer",
-          "minimum": 1
-        },
-        "fromHostMs": {
-          "description": "The host time of the first sample.",
-          "type": "number"
-        },
-        "toHostMs": {
-          "description": "The host time of the last sample.",
-          "type": "number"
-        },
+        "file": { "description": "The file's name in the attempt's folder.", "const": "gyro.json" },
+        "samples": { "description": "The samples in the file.", "type": "integer", "minimum": 1 },
+        "fromHostMs": { "description": "The host time of the first sample.", "type": "number" },
+        "toHostMs": { "description": "The host time of the last sample.", "type": "number" },
         "rateHz": {
           "description": "The samples per second over the file, to one decimal; 0 with fewer than two samples.",
           "type": "number",
@@ -215,9 +202,7 @@
     "resyncs": {
       "description": "The states the app adopted from the cube's reports after moves went unseen (T3.7), in order; empty when none. Absent from the files written before it existed, which read as empty.",
       "type": "array",
-      "items": {
-        "$ref": "#/$defs/resync"
-      }
+      "items": { "$ref": "#/$defs/resync" }
     },
     "owner": {
       "description": "The Firebase Authentication uid of the account that wrote the document, as its session's: the rules require it on both (firebase/firestore.rules).",
@@ -282,10 +267,7 @@
           "description": "When the cube reported it, on the host clock.",
           "type": "number"
         },
-        "facelets": {
-          "description": "The state adopted.",
-          "$ref": "#/$defs/facelets"
-        },
+        "facelets": { "description": "The state adopted.", "$ref": "#/$defs/facelets" },
         "state": {
           "description": "The attempt's state when the report came, during which moves went unseen.",
           "enum": ["scrambling", "armed", "solving"]
@@ -469,13 +451,8 @@
       "additionalProperties": false,
       "required": ["version", "commit"],
       "properties": {
-        "version": {
-          "type": "string"
-        },
-        "commit": {
-          "description": "Short SHA of the build's commit.",
-          "type": "string"
-        }
+        "version": { "type": "string" },
+        "commit": { "description": "Short SHA of the build's commit.", "type": "string" }
       }
     },
     "uploadFile": {
