@@ -4,6 +4,9 @@
 import type { CloudAttempt } from '@cubetrace/core';
 
 import type { CloudEntry } from '../cloud/session-index';
+import { localDay } from '../shared/local-day';
+
+export { localDay };
 
 /** The counts of a row, or of the total. */
 export interface QaCounts {
@@ -72,13 +75,6 @@ function median(values: readonly number[]): number | null {
 function countsOf(tally: Tally): QaCounts {
   const { gyroRates, ...counts } = tally;
   return { ...counts, gyroRateHz: median(gyroRates) };
-}
-
-/** The day of host time `ms` (about the wall clock, docs/DATA-MODEL.md §1) in this time zone. */
-export function localDay(ms: number): string {
-  const date = new Date(ms);
-  const pad = (value: number): string => String(value).padStart(2, '0');
-  return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /**

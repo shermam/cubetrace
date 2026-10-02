@@ -25,9 +25,10 @@ import {
 import { BehaviorSubject, EMPTY, switchMap, type Observable, type Subscription } from 'rxjs';
 
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SettingsService, macAddressProblem } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
-import { describeConnectError } from './connect-error';
+import { connectFailureKind, describeConnectError } from './connect-error';
 import {
   DISCONNECTED_ON_REQUEST,
   describeDisconnect,
@@ -74,10 +75,28 @@ export const MARK_AS_SOLVED_HINT =
 /** How many of the latest moves `CubeService.moves` keeps. */
 export const MOVE_HISTORY = 200;
 
+/**
+ * How a GAN cube's MAC address came, for the diagnostics (`cube.connected`, docs/DIAGNOSTICS.md):
+ * `stored`, from Settings' list (typed here before, or synced from the account); `driver`, read by
+ * Chrome from the advertisement (the flag); `typed`, in the connect dialog; `none`, the demo cube.
+ */
+export type MacSource = 'stored' | 'driver' | 'typed' | 'none';
+
 /** The driver could not read the cube's MAC address and asks the user for it. */
 export interface MacPrompt {
   /** The cube's Bluetooth name, when it has one; a remembered address is stored under it. */
   readonly deviceName: string | null;
+}
+
+/** The raw facts of a disconnection (`CubeService.facts`). */
+interface DisconnectFacts {
+  readonly reason: string;
+  readonly idleMs: number;
+  readonly visibilityState: DocumentVisibilityState | null;
+  readonly hiddenMs: number | null;
+  readonly connectedMs: number;
+  readonly battery: number | null;
+  readonly model: string | null;
 }
 
 /** What `reconnect()` repeats: the last connection that was established. */
@@ -115,6 +134,7 @@ export class CubeService {
   private readonly connectGan = inject(GAN_CONNECTOR);
   private readonly loadDriver = inject(GAN_DRIVER_LOADER);
   private readonly globals = inject(BROWSER_GLOBALS);
+  private readonly diagnostics = inject(DiagnosticsService);
 
   /** What this browser can do for a GAN cube, for the connect dialog. */
   readonly support: BluetoothSupport = checkBluetoothSupport(this.globals.navigator);
@@ -181,6 +201,12 @@ export class CubeService {
   /** The MAC address given to the driver during the current attempt, for error messages. */
   private macGiven: string | null = null;
   private macCancelled = false;
+  /** How the current attempt's MAC address came, for `cube.connected`. */
+  private macSource: MacSource = 'none';
+  /** Host ms when the current attempt to connect began, for `cube.connected`. */
+  private beganAt = 0;
+  /** The connection whose `cube.connected` was recorded (its hardware event came). */
+  private announced: CubeConnection | null = null;
   /** A typed address to store once the cube it was typed for has connected. */
   private macToRemember: { name: string; mac: string } | null = null;
   /** The demo cube while it replays its solve; "Mark as solved" stops the replay. */
@@ -256,9 +282,14 @@ export class CubeService {
       });
     } catch (error: unknown) {
       if (generation === this.generation) {
-        this.fail(
-          describeConnectError(error, { mac: this.macGiven, cancelled: this.macCancelled }),
-        );
+        const context = { mac: this.macGiven, cancelled: this.macCancelled };
+        // Why it failed, as a kind (never the message: it may name the address).
+        this.diagnostics.record('cube.failed', {
+          reason: connectFailureKind(error, context),
+          mac: this.macSource,
+          ms: Math.round(this.now() - this.beganAt),
+        });
+        this.fail(describeConnectError(error, context));
       }
       return;
     }
@@ -309,6 +340,7 @@ export class CubeService {
       solves = await this.demoSolves.load();
     } catch (error: unknown) {
       if (generation === this.generation) {
+        this.diagnostics.record('cube.failed', { reason: 'demo', mac: 'none', ms: 0 });
         this.fail(`The demo solves could not be loaded: ${errorMessage(error)}`);
       }
       return;
@@ -381,10 +413,15 @@ export class CubeService {
       replaying.stop();
     }
     this.armIdleTimer();
+    this.diagnostics.record('cube.reset', { kind: connection.kind });
     try {
       await connection.resetToSolved();
     } catch (error: unknown) {
       console.warn(`The cube's state could not be reset: ${errorMessage(error)}`);
+      this.diagnostics.record('error.app', {
+        where: 'cube',
+        message: `The cube's state could not be reset: ${errorMessage(error)}`,
+      });
     }
   }
 
@@ -403,6 +440,7 @@ export class CubeService {
       return macAddressProblem(text);
     }
     this.macGiven = mac;
+    this.macSource = 'typed';
     this.macToRemember =
       remember && prompt.deviceName !== null ? { name: prompt.deviceName, mac } : null;
     this.answerMacPrompt = null;
@@ -435,6 +473,7 @@ export class CubeService {
     const deviceName = name === '' ? null : name;
     if (!isFallback) {
       this.macGiven = this.settings.macFor(deviceName);
+      this.macSource = this.macGiven === null ? 'driver' : 'stored';
       return Promise.resolve(this.macGiven);
     }
     this.dismissMacPrompt();
@@ -459,6 +498,8 @@ export class CubeService {
     this.generation++;
     this.macGiven = null;
     this.macCancelled = false;
+    this.macSource = 'none';
+    this.beganAt = this.now();
     this.macToRemember = null;
     this.demoSignal.set(null);
     this.demoSpeedSignal.set(null);
@@ -546,13 +587,34 @@ export class CubeService {
         break;
       case 'hardware':
         this.hardwareSignal.set(event);
+        if (this.announced !== connection) {
+          this.announced = connection;
+          this.diagnostics.record('cube.connected', {
+            kind: connection.kind,
+            model: event.model,
+            hardware: event.hardware,
+            firmware: event.firmware,
+            gyro: event.gyro,
+            productDate: event.productDate ?? null,
+            mac: this.macSource,
+            ms: Math.round(this.now() - this.beganAt),
+            battery: this.batterySignal(),
+          });
+        }
         break;
       case 'gyro':
         break;
       case 'disconnected': {
         const requested = this.closing?.connection === connection ? this.closing.reason : null;
         this.closing = null;
-        const reason = requested ?? this.diagnose(event.reason ?? 'The cube disconnected.');
+        const facts = this.facts(requested ?? event.reason ?? 'The cube disconnected.');
+        const reason = requested ?? this.diagnose(facts);
+        this.diagnostics.record('cube.disconnected', {
+          ...facts,
+          kind: connection.kind,
+          requested: requested !== null,
+          moves: this.moveCountSignal(),
+        });
         this.detach();
         this.statusSignal.set('disconnected');
         this.kindSignal.set(null);
@@ -567,27 +629,36 @@ export class CubeService {
   }
 
   /**
-   * The reason shown for a disconnection that the app did not ask for (`describeDisconnect`), and
-   * one line in the console with the raw facts, for the owner to paste into an issue: the
-   * connection's own reason, the ms since the last turn (or since connecting), the page's
-   * visibility and, if hidden, for how long, the connection's duration, the last battery level and
-   * the model.
+   * The raw facts of a disconnection, for the console and the diagnostics (`cube.disconnected`):
+   * `reason`, the connection's own reason (or the app's, when it asked for it), the ms since the
+   * last turn (or since connecting), the page's visibility and, if hidden, for how long, the
+   * connection's duration, the last battery level and the model.
    */
-  private diagnose(reason: string): string {
+  private facts(reason: string): DisconnectFacts {
     const now = this.now();
     const visibilityState = this.globals.document?.visibilityState ?? null;
-    const idleMs = Math.round(now - (this.lastTurnAt ?? this.connectedAt));
-    const facts = {
+    return {
       reason,
-      idleMs,
+      idleMs: Math.round(now - (this.lastTurnAt ?? this.connectedAt)),
       visibilityState,
       hiddenMs: this.hiddenSince === null ? null : Math.round(now - this.hiddenSince),
       connectedMs: Math.round(now - this.connectedAt),
       battery: this.batterySignal(),
       model: this.hardwareSignal()?.model ?? null,
     };
+  }
+
+  /**
+   * The reason shown for a disconnection that the app did not ask for (`describeDisconnect`), and
+   * one line in the console with the raw facts, for the owner to paste into an issue.
+   */
+  private diagnose(facts: DisconnectFacts): string {
     console.info(`cubetrace: the cube disconnected ${JSON.stringify(facts)}`);
-    return describeDisconnect({ reason, idleMs, hidden: visibilityState === 'hidden' });
+    return describeDisconnect({
+      reason: facts.reason,
+      idleMs: facts.idleMs,
+      hidden: facts.visibilityState === 'hidden',
+    });
   }
 
   /**

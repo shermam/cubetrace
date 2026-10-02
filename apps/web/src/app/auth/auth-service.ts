@@ -1,7 +1,9 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { userRecord } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, hostNow, type BrowserGlobals } from '../device/browser-globals';
+import { installedApp } from '../device/display-mode';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import {
@@ -35,15 +37,7 @@ export interface CloudAccount {
   readonly backend: AccountBackend;
 }
 
-/**
- * Whether the app runs installed (display mode `standalone`: Chrome's WebAPK on Android, a window of
- * its own on a laptop) rather than in a browser tab. Signing in is the same popup either way, which
- * Chrome on Android opens over the installed app as a Custom Tab (docs/ARCHITECTURE.md, "Account");
- * only what a popup that did not finish says differs (`AuthErrorContext`).
- */
-export function installedApp(globals: BrowserGlobals): boolean {
-  return globals.matchMedia?.('(display-mode: standalone)').matches === true;
-}
+export { installedApp };
 
 /**
  * The account (docs/PLAN.md, T3.0): Google sign-in through Firebase Authentication, and
@@ -51,13 +45,16 @@ export function installedApp(globals: BrowserGlobals): boolean {
  * host label. Firebase is loaded only when the account is used (`ACCOUNT_LOADER`): on Sign in, and
  * as the app starts if a sign-in is remembered (`ACCOUNT_STORAGE_KEY`), so that a device that never
  * signs in never downloads it, and the app works signed out exactly as without an account. Errors
- * are kept in `status` and `error` for the controls to show; no method throws.
+ * are kept in `status` and `error` for the controls to show; no method throws. The diagnostics
+ * (T3.9) get the account to write their events to, and the sign-ins, sign-outs and failures as
+ * events (`account.signin`, `account.signout`).
  */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly loadBackend = inject(ACCOUNT_LOADER);
   private readonly settings = inject(SettingsService);
+  private readonly diagnostics = inject(DiagnosticsService);
   private readonly storage = storageOf(this.globals);
 
   private readonly userSignal = signal<AccountUser | null>(null);
@@ -106,6 +103,13 @@ export class AuthService {
   );
 
   constructor() {
+    // The diagnostics write their events to the account signed in, and keep them while none is.
+    effect(() => {
+      const account = this.cloud();
+      untracked(() => {
+        this.diagnostics.attach(account);
+      });
+    });
     if (this.remembered()) {
       this.statusSignal.set('loading');
       void this.resume();
@@ -132,7 +136,16 @@ export class AuthService {
       }
       await backend.signInWithPopup();
       this.expectUser();
+      this.diagnostics.record('account.signin', {
+        outcome: 'ok',
+        installed: installedApp(this.globals),
+      });
     } catch (error: unknown) {
+      this.diagnostics.record('account.signin', {
+        outcome: 'failed',
+        code: errorCode(error),
+        installed: installedApp(this.globals),
+      });
       this.fail(this.message(error));
     } finally {
       this.endPending();
@@ -150,6 +163,9 @@ export class AuthService {
       return;
     }
     try {
+      // The event goes before the account does: a write after the sign-out would be refused.
+      this.diagnostics.record('account.signout', { installed: installedApp(this.globals) });
+      this.diagnostics.flush();
       await (await loading).signOut();
       // The backend reports it too; the page need not wait for that.
       this.userSignal.set(null);
@@ -168,7 +184,19 @@ export class AuthService {
     this.pending++;
     try {
       await this.connect();
+      if ((await this.firstReport) !== null) {
+        this.diagnostics.record('account.signin', {
+          outcome: 'resumed',
+          installed: installedApp(this.globals),
+        });
+      }
     } catch (error: unknown) {
+      this.diagnostics.record('account.signin', {
+        outcome: 'failed',
+        resumed: true,
+        code: errorCode(error),
+        installed: installedApp(this.globals),
+      });
       // Not loaded (offline): the account is still remembered, for the next start or Sign in.
       this.fail(this.message(error), !(error instanceof AccountLoadError));
     } finally {
@@ -302,6 +330,7 @@ export class AuthService {
     const message = `The account's record (users/{uid}) could not be saved: ${reason.replace(/\.$/, '')}.`;
     this.recordErrorSignal.set(message);
     console.warn(`cubetrace: ${message}`);
+    this.diagnostics.record('error.app', { where: 'account', message });
   }
 
   /** The sentence for a failure: from the error, and from where the sign-in ran. */
@@ -342,6 +371,24 @@ export class AuthService {
       // Storage blocked: there is nothing remembered either.
     }
   }
+}
+
+/**
+ * What went wrong, as a code for the diagnostics: Firebase's (`auth/popup-closed-by-user`), else the
+ * error's name (`AccountLoadError`), else `unknown`.
+ */
+function errorCode(error: unknown): string {
+  if (typeof error === 'object' && error !== null) {
+    const code: unknown = Reflect.get(error, 'code');
+    if (typeof code === 'string' && code !== '') {
+      return code;
+    }
+    const name: unknown = Reflect.get(error, 'name');
+    if (typeof name === 'string' && name !== '' && name !== 'Error') {
+      return name;
+    }
+  }
+  return 'unknown';
 }
 
 /** `localStorage`, or null where the browser has none or refuses it to this page. */

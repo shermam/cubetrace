@@ -7,6 +7,7 @@ import { AuthService } from '../auth/auth-service';
 import { SessionIndexService, type CloudRead } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SessionService, type SessionList, type SessionListItem } from '../session/session-service';
 import { clipsSummary } from '../shared/clips-text';
 import { downloadJson } from '../shared/download';
@@ -353,6 +354,7 @@ export class SessionsPage {
   private readonly index = inject(SessionIndexService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
+  private readonly diagnostics = inject(DiagnosticsService);
 
   /** Null while the store is read. */
   protected readonly list = signal<SessionList | null>(null);
@@ -513,6 +515,11 @@ export class SessionsPage {
       const exported = await this.session.exportSession(item.session.id);
       const fileName = exportFileName(item.session.id);
       downloadJson(this.globals, this.document, fileName, exported);
+      this.diagnostics.record(
+        'download',
+        { what: 'export', files: 1, names: fileName, attempts: exported.attempts.length },
+        { session: item.session.id },
+      );
       this.notice.set(`Exported ${fileName}.`);
     } catch (error: unknown) {
       this.failure.set({

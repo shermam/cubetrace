@@ -9,7 +9,8 @@ import type { Page } from '@playwright/test';
 // bucket (`fakeBucket`): they sign URLs into it, on the app's own origin, and confirm what it holds;
 // elsewhere they refuse as unavailable, and the upload queue waits. The account's cubes (T3.4) are in
 // localStorage too, unless the test gives a cloud (`fakeCloud`) that browser contexts share: two
-// devices of one account.
+// devices of one account; and so are the diagnostics events the app writes (T3.9), in the order of
+// their batches.
 
 /** A signed-in account as the backend reports it (src/app/auth/account-backend.ts, BackendUser). */
 export interface FakeAccountUser {
@@ -50,6 +51,14 @@ export interface FakeAccountState {
   readonly cubes: Readonly<Record<string, Readonly<Record<string, Record<string, unknown>>>>>;
   /** The cubes' writes in order: `users/<uid>/cubes/<name>`, `delete …`. */
   readonly cubeWrites: readonly string[];
+  /** The diagnostics events written (T3.9), in the order of their batches, with the account. */
+  readonly events: readonly {
+    readonly uid: string;
+    readonly id: string;
+    readonly event: Record<string, unknown>;
+  }[];
+  /** How many batches the events came in. */
+  readonly eventBatches: number;
 }
 
 /** An object the fake bucket holds: what its PUT sent. */
@@ -194,9 +203,12 @@ export async function fakeAccount(
         uploadCalls: string[];
         cubes: Record<string, Record<string, Doc>>;
         cubeWrites: string[];
+        events: { uid: string; id: string; event: Doc }[];
+        eventBatches: number;
       }
-      const read = (): State =>
-        (JSON.parse(localStorage.getItem(key) ?? 'null') as State | null) ?? {
+      const read = (): State => {
+        const stored = JSON.parse(localStorage.getItem(key) ?? 'null') as Partial<State> | null;
+        return {
           user: null,
           loads: 0,
           calls: [],
@@ -206,7 +218,11 @@ export async function fakeAccount(
           uploadCalls: [],
           cubes: {},
           cubeWrites: [],
+          events: [],
+          eventBatches: 0,
+          ...(stored ?? {}),
         };
+      };
       const change = (edit: (state: State) => void): State => {
         const state = read();
         edit(state);
@@ -482,6 +498,24 @@ export async function fakeAccount(
             Reflect.deleteProperty(cubes, name);
           });
         },
+        // The diagnostics events (T3.9): each batch kept in order.
+        saveEvents(uid: string, events: { id: string; event: Doc }[]): Promise<void> {
+          change((state) => {
+            state.eventBatches++;
+            for (const { id, event } of events) {
+              state.events.push({ uid, id, event: structuredClone(event) });
+            }
+          });
+          return Promise.resolve();
+        },
+        listEvents(uid: string, limit: number) {
+          const documents = read()
+            .events.filter((entry) => entry.uid === uid)
+            .sort((p, q) => Number(q.event['tsMs']) - Number(p.event['tsMs']))
+            .slice(0, limit)
+            .map((entry) => ({ id: entry.id, data: entry.event, pending: false }));
+          return Promise.resolve({ documents, fromCache: false });
+        },
       };
       Reflect.set(window, 'cubetraceE2eAccountLoader', () => {
         change((state) => {
@@ -536,6 +570,8 @@ export async function fakeAccountState(page: Page): Promise<FakeAccountState> {
         uploadCalls: [],
         cubes: {},
         cubeWrites: [],
+        events: [],
+        eventBatches: 0,
       },
     STATE_KEY,
   );

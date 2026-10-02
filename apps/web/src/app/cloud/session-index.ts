@@ -22,6 +22,7 @@ import { recordJson, type ProblemReporter } from '@cubetrace/storage';
 import type { AccountBackend, CloudDocument, CloudListing } from '../auth/account-backend';
 import { AuthService, type CloudAccount } from '../auth/auth-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { ATTEMPT_FILES } from '../session/attempt-files';
 import { SESSION_STORAGE } from '../session/session-storage';
 import { errorMessage } from '../shared/error-message';
@@ -101,6 +102,7 @@ export class SessionIndexService {
   private readonly files = inject(ATTEMPT_FILES);
   /** The store itself, for the catch-up's reads: they need no tracking. */
   private readonly store = inject(SESSION_STORAGE).store;
+  private readonly diagnostics = inject(DiagnosticsService);
 
   private readonly failuresSignal = signal<ReadonlyMap<string, string>>(new Map());
   /** The writes of this page load that the server has not confirmed, by session. */
@@ -393,8 +395,12 @@ export class SessionIndexService {
             ),
           );
         } catch (error: unknown) {
-          console.warn(
-            `cubetrace: cloud: the attempts of session ${session.id} in the index could not be read; it waits for the next catch-up: ${errorMessage(error)}`,
+          const message = `the attempts of session ${session.id} in the index could not be read; it waits for the next catch-up: ${errorMessage(error)}`;
+          console.warn(`cubetrace: cloud: ${message}`);
+          this.diagnostics.record(
+            'error.app',
+            { where: 'index', message },
+            { session: session.id },
           );
           continue;
         }
@@ -421,9 +427,9 @@ export class SessionIndexService {
         written += 1 + attempts.length;
       }
     } catch (error: unknown) {
-      console.warn(
-        `cubetrace: cloud: the sessions of this device could not be listed for the index: ${errorMessage(error)}`,
-      );
+      const message = `the sessions of this device could not be listed for the index: ${errorMessage(error)}`;
+      console.warn(`cubetrace: cloud: ${message}`);
+      this.diagnostics.record('error.app', { where: 'index', message });
     } finally {
       this.catchingUpSignal.set(false);
     }
@@ -555,6 +561,7 @@ export class SessionIndexService {
     this.reported.add(sessionId);
     this.failuresSignal.update((failures) => new Map(failures).set(sessionId, message));
     console.warn(`cubetrace: cloud: ${message}`);
+    this.diagnostics.record('error.app', { where: 'index', message }, { session: sessionId });
     const line = `cloud: ${message}`;
     if (this.sessions.get(sessionId)?.notes.split('\n').includes(line) !== true) {
       void this.note(sessionId, line).catch(() => undefined);
@@ -596,6 +603,7 @@ export class SessionIndexService {
   private enqueue(operation: () => void | Promise<void>): void {
     this.queue = this.queue.then(operation).catch((error: unknown) => {
       console.warn(`cubetrace: cloud: ${errorMessage(error)}`);
+      this.diagnostics.record('error.app', { where: 'index', message: errorMessage(error) });
     });
   }
 

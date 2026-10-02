@@ -35,6 +35,7 @@ import { APP_BUILD } from '../../environments/version';
 import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { STORAGE_STOP_PERCENT, StorageService } from '../device/storage-service';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { ClipsInFlight } from '../session/clips-in-flight';
 import { SessionService, type AttemptMilestone, type AttemptRef } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
@@ -196,6 +197,7 @@ export class RecordingService {
   private readonly starter = inject(CAPTURE_STARTER);
   /** The attempts whose clips are still to come, for the upload queue (T3.3). */
   private readonly inFlight = inject(ClipsInFlight);
+  private readonly diagnostics = inject(DiagnosticsService);
 
   private readonly statusSignal = signal<RecordingStatus>('off');
   private readonly statsSignal = signal<CaptureStats | null>(null);
@@ -269,6 +271,8 @@ export class RecordingService {
   private refreshTimer: number | null = null;
   /** The lines noted once per start of the pipeline (notices, a clip's missing audio). */
   private readonly notedThisRun = new Set<string>();
+  /** The run of the pipeline whose `recording.started` was recorded (its first stats). */
+  private announced: CaptureHandle | null = null;
 
   constructor() {
     this.support = this.starter.support();
@@ -370,6 +374,20 @@ export class RecordingService {
       }
       this.target = null;
       const generation = ++this.generation;
+      const stats = this.statsSignal();
+      this.diagnostics.record('recording.stopped', {
+        why:
+          stream === null
+            ? 'camera-off'
+            : !active
+              ? 'no-session'
+              : full
+                ? 'storage-full'
+                : 'unsupported',
+        dropped: stats?.dropped ?? null,
+        bufferSeconds: stats?.bufferSeconds ?? null,
+        encodedFps: stats?.encodedFps ?? null,
+      });
       void this.serially(async () => {
         await this.stopPipeline();
         if (generation === this.generation) {
@@ -454,6 +472,10 @@ export class RecordingService {
       if (this.statusSignal() === 'starting' && stats.bufferSeconds > 0) {
         this.statusSignal.set('recording');
       }
+      if (this.announced !== handle && stats.codec !== null) {
+        this.announced = handle;
+        this.started(stats, target, microphone?.info ?? null);
+      }
       if (stats.audioState === 'encoding' && this.noticesSignal().includes(NO_AUDIO_DATA)) {
         // The microphone was late, not silent: its sound is recorded now (the note stays).
         this.noticesSignal.update((notices) => notices.filter((n) => n !== NO_AUDIO_DATA));
@@ -467,6 +489,10 @@ export class RecordingService {
         // The buffer stays: the clips waiting for their time are still cut from it.
         this.statusSignal.set('error');
         this.errorSignal.set(`Recording stopped: ${error.message}`);
+        this.diagnostics.record('error.app', {
+          where: 'recording',
+          message: `Recording stopped: ${error.message}`,
+        });
       } else {
         this.addNotice(error.message);
       }
@@ -539,12 +565,44 @@ export class RecordingService {
   }
 
   /**
+   * `recording.started` (T3.9, docs/DIAGNOSTICS.md): what this run of the pipeline records, once its
+   * encoder is chosen: the codecs and the bitrate, the quality asked for, the camera's frame size and
+   * rate, and the microphone, as asked for and as the browser applied it.
+   */
+  private started(stats: CaptureStats, target: Target, microphone: MicrophoneInfo | null): void {
+    const entry = this.cameraEntry?.entry;
+    const settings = entry?.settings ?? {};
+    this.diagnostics.record('recording.started', {
+      camera: entry?.label ?? null,
+      codec: stats.codec,
+      audioCodec: stats.audioCodec,
+      bitrate: stats.bitrate,
+      quality: target.quality,
+      audio: target.audio,
+      processing: microphone?.processing ?? null,
+      applied:
+        microphone === null
+          ? null
+          : {
+              echoCancellation: microphone.echoCancellation,
+              noiseSuppression: microphone.noiseSuppression,
+              autoGainControl: microphone.autoGainControl,
+              voiceIsolation: microphone.voiceIsolation,
+            },
+      width: numberOf(settings['width']),
+      height: numberOf(settings['height']),
+      fps: numberOf(settings['frameRate']),
+    });
+  }
+
+  /**
    * Shows a notice with the others of this run of the pipeline, and notes it once in the session
    * under way, if any: a notice is not to be missed because another came after it (issue #33).
    */
   private addNotice(message: string): void {
     if (!this.noticesSignal().includes(message)) {
       this.noticesSignal.update((notices) => [...notices, message]);
+      this.diagnostics.record('recording.notice', { message });
     }
     const session = this.session.session();
     if (session !== null) {
@@ -579,6 +637,7 @@ export class RecordingService {
     }
     this.statusSignal.set('error');
     this.errorSignal.set(message);
+    this.diagnostics.record('error.app', { where: 'recording', message });
   }
 
   private onMilestone(milestone: AttemptMilestone): void {
@@ -703,6 +762,25 @@ export class RecordingService {
       return;
     }
     this.lastClipSignal.set({ index: attempt.index, clip });
+    this.diagnostics.record(
+      'clip.saved',
+      {
+        segment,
+        camera: clip.camera,
+        bytes: clip.bytes,
+        frames: clip.frames,
+        codec: clip.codec,
+        audioCodec: clip.audio,
+        audio: clip.audio !== null,
+        truncatedStart: clip.truncatedStart,
+        lateMs: report.lateMs,
+        bufferSeconds: report.bufferSeconds,
+        syncResidualMs: clip.syncResidualMs,
+        audioRebasedMs: report.audioRebasedMs,
+        kept: attached === 'kept',
+      },
+      { session: attempt.session, attempt: attempt.index },
+    );
     this.remark(attempt, clip, report);
     void this.storageService.refresh();
   }
@@ -730,6 +808,11 @@ export class RecordingService {
     }
     if (report.audioMissing !== null) {
       said.push(`${name} has no sound: ${report.audioMissing}.`);
+      this.diagnostics.record(
+        'audio.missing',
+        { segment: clip.segment, cause: report.audioMissing },
+        { session: attempt.session, attempt: attempt.index },
+      );
       this.noteOnce(
         attempt.session,
         `clip without audio: ${what}: ${report.audioMissing}`,
@@ -802,6 +885,11 @@ export class RecordingService {
     }
     const line = `clip failed: ${segment} of attempt ${String(attempt.index)}: ${reason}`;
     this.failureSignal.set(line);
+    this.diagnostics.record(
+      'clip.failed',
+      { segment, reason },
+      { session: attempt.session, attempt: attempt.index },
+    );
     this.note(attempt.session, line);
   }
 
@@ -844,6 +932,11 @@ export class RecordingService {
       });
     clear(handle);
   }
+}
+
+/** `value` when it is a finite number (a camera's settings as JSON); null otherwise. */
+function numberOf(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /** The frame rate the camera's track reports, for the clips' `fpsNominal`; 30 if it says none. */

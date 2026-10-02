@@ -3,6 +3,7 @@ import type {
   CloudAttempt,
   CloudAttemptFields,
   CloudCube,
+  CloudEventWrite,
   CloudSession,
   UserRecord,
 } from '@cubetrace/core';
@@ -28,18 +29,18 @@ export interface BackendUser extends AccountUser {
 }
 
 /**
- * A document as Firestore gives it back (docs/DATA-MODEL.md §10): of the session index (T3.1), or a
- * cube of the account's list (T3.4).
+ * A document as Firestore gives it back (docs/DATA-MODEL.md §10): of the session index (T3.1), a
+ * cube of the account's list (T3.4), or a diagnostics event (T3.9).
  */
 export interface CloudDocument {
   /**
-   * The document's id: a session's id, an attempt's index zero-padded to 4 digits (`0001`), or a
-   * cube's name.
+   * The document's id: a session's id, an attempt's index zero-padded to 4 digits (`0001`), a
+   * cube's name, or an event's id.
    */
   readonly id: string;
   /**
-   * Its fields as Firestore holds them, unchecked: core's parseCloudSession, parseCloudAttempt and
-   * parseCloudCube read them.
+   * Its fields as Firestore holds them, unchecked: core's parseCloudSession, parseCloudAttempt,
+   * parseCloudCube and parseCloudEvent read them.
    */
   readonly data: unknown;
   /**
@@ -58,8 +59,8 @@ export interface CloudListing {
 
 /**
  * The few calls the app makes into Firebase: Authentication with the Google provider, Firestore for
- * users/{uid}, the session index and the account's cubes (docs/ARCHITECTURE.md, "Account"), and the
- * upload's two callable functions (T3.2, T3.3). `firebase-sdk.ts` implements it with the SDK, in a
+ * users/{uid}, the session index, the account's cubes and its diagnostics events
+ * (docs/ARCHITECTURE.md, "Account"), and the upload's two callable functions (T3.2, T3.3). `firebase-sdk.ts` implements it with the SDK, in a
  * lazy chunk of its own; the unit tests and the end-to-end suite give fakes, so that neither loads
  * Firebase.
  */
@@ -137,6 +138,20 @@ export interface AccountBackend {
   saveCube(uid: string, cube: CloudCube): Promise<void>;
   /** Deletes users/{uid}/cubes/{name}; settles as `saveCube`. */
   deleteCube(uid: string, name: string): Promise<void>;
+
+  // ---- The diagnostics events (T3.9): users/{uid}/events/{eventId} ----
+
+  /**
+   * Creates users/{uid}/events/{id} for each of `events`, in one batch (docs/DIAGNOSTICS.md). As
+   * `saveUser`, Firestore applies the writes to its cache at once and sends them when it can; the
+   * promise settles when the server has them, and rejects when it refuses them (the rules).
+   */
+  saveEvents(uid: string, events: readonly CloudEventWrite[]): Promise<void>;
+  /**
+   * The newest `limit` events of the account `uid` (users/{uid}/events), newest first by `tsMs`:
+   * from the server, or from the cache when the server is out of reach.
+   */
+  listEvents(uid: string, limit: number): Promise<CloudListing>;
 }
 
 /** Loads the account's backend: the Firebase SDK, from its lazy chunk. */

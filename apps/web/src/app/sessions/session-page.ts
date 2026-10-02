@@ -15,6 +15,7 @@ import { AuthService } from '../auth/auth-service';
 import { SessionIndexService, type CloudProblem } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SessionService } from '../session/session-service';
 import { sessionStats } from '../session/session-stats';
 import { clipsText as describeClips } from '../shared/clips-text';
@@ -330,6 +331,7 @@ export class SessionPage {
   private readonly router = inject(Router);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
+  private readonly diagnostics = inject(DiagnosticsService);
   private readonly viewing = inject(ClipViewing);
   private readonly uploads = inject(UploadService);
 
@@ -447,6 +449,11 @@ export class SessionPage {
       const exported = await this.sessions.exportSession(id);
       const fileName = exportFileName(id);
       downloadJson(this.globals, this.document, fileName, exported);
+      this.diagnostics.record(
+        'download',
+        { what: 'export', files: 1, names: fileName, attempts: exported.attempts.length },
+        { session: id },
+      );
       this.notice.set(`Exported ${fileName}.`);
     } catch (error: unknown) {
       this.failure.set(`The session could not be exported: ${errorMessage(error)}`);

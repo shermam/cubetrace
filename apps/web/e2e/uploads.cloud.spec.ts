@@ -1,5 +1,6 @@
 import {
   CLOUD_ATTEMPT_SCHEMA,
+  CLOUD_EVENT_SCHEMA,
   CLOUD_SESSION_SCHEMA,
   USER_SCHEMA,
   type CloudUpload,
@@ -36,6 +37,7 @@ const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
 const isSessionDocument = ajv.compile(CLOUD_SESSION_SCHEMA);
 const isAttemptDocument = ajv.compile(CLOUD_ATTEMPT_SCHEMA);
 const isUserRecord = ajv.compile(USER_SCHEMA);
+const isEventDocument = ajv.compile(CLOUD_EVENT_SCHEMA);
 
 /** The files of the session's folder (`session.json`) or of attempt `folder`'s, with their sizes. */
 async function folderFiles(
@@ -257,4 +259,67 @@ test('a real session recorded with the camera on reaches the Firestore emulator 
   await expect(qaRow.getByTestId('qa-clips')).toHaveText('2');
   await expect(qaRow.getByTestId('qa-pending')).toHaveText('0 B');
   await expect(qaRow.getByTestId('qa-uploaded')).not.toHaveText('0 B');
+
+  // The diagnostics events (T3.9), under the account through the rules: the start, the sign-in,
+  // the session, the cube, the camera, the attempt, its clips and its upload's states, each valid
+  // against the schema, in batches the page wrote within 5 s or as it went away.
+  type EventDocument = {
+    kind: string;
+    session?: string;
+    attempt?: number;
+    data: Record<string, unknown>;
+  };
+  const eventsOf = async (): Promise<Record<string, EventDocument>> =>
+    (await firestoreCollection(`users/${uid}/events`)) as Record<string, EventDocument>;
+  await expect
+    .poll(
+      async () =>
+        Object.values(await eventsOf()).some(
+          (event) =>
+            event.kind === 'upload.state' &&
+            event.session === sessionId &&
+            event.data['state'] === 'done',
+        ),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+  const events = await eventsOf();
+  for (const [id, event] of Object.entries(events)) {
+    expect(id).toMatch(/^\d{13}-[0-9a-f]{8}$/);
+    expect(isEventDocument(event), `${event.kind}: ${JSON.stringify(isEventDocument.errors)}`).toBe(
+      true,
+    );
+  }
+  const kinds = Object.values(events).map((event) => event.kind);
+  expect(kinds).toEqual(
+    expect.arrayContaining([
+      'app.start',
+      'account.signin',
+      'session.started',
+      'cube.connected',
+      'camera.on',
+      'recording.started',
+      'attempt.done',
+      'clip.saved',
+      'upload.state',
+      'page.viewed',
+    ]),
+  );
+  const ofAttempt = Object.values(events).filter(
+    (event) => event.session === sessionId && event.attempt === 1,
+  );
+  expect(ofAttempt.find((event) => event.kind === 'attempt.done')).toMatchObject({
+    data: { status: 'solved', clips: 2, settled: true },
+  });
+  expect(ofAttempt.filter((event) => event.kind === 'clip.saved')).toHaveLength(2);
+  const states = ofAttempt
+    .filter((event) => event.kind === 'upload.state')
+    .map((event) => event.data['state']);
+  expect(states).toContain('done');
+  expect(states).not.toContain('failed');
+  expect(JSON.stringify(events)).not.toContain(GRACE.email);
+  test.info().annotations.push({
+    type: 'events per attempt',
+    description: `${String(ofAttempt.length)}: ${ofAttempt.map((event) => event.kind).join(', ')}`,
+  });
 });

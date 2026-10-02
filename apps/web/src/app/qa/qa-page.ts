@@ -1,10 +1,15 @@
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import type { CloudAttempt } from '@cubetrace/core';
+import { parseCloudEvent, type CloudAttempt, type CloudEvent } from '@cubetrace/core';
 
 import { AuthService } from '../auth/auth-service';
 import { SessionIndexService, type CloudEntry, type CloudProblem } from '../cloud/session-index';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
+import {
+  SUMMARY_DAYS,
+  diagnosticsSummary,
+  type DiagnosticsSummary,
+} from '../diagnostics/diagnostics-summary';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
@@ -13,11 +18,23 @@ import { qaSummary, type QaCounts, type QaSummary } from './qa-summary';
 /** The newest sessions of the index whose attempts the QA view counts. */
 export const QA_SESSIONS = 50;
 
+/** The newest diagnostics events of the account the QA view aggregates (T3.9). */
+export const QA_EVENTS = 500;
+
 /** How many sessions' attempts are read at once. */
 const PARALLEL_READS = 6;
 
 const TIME = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
 const DAY = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+
+/** What one reading of the account's diagnostics events gave (T3.9). */
+interface EventsRead {
+  readonly summary: DiagnosticsSummary;
+  /** The documents that could not be read (another version's). */
+  readonly unreadable: number;
+  readonly fromCache: boolean;
+  readonly readMs: number;
+}
 
 /** What one reading of the index gave. */
 interface QaRead {
@@ -36,7 +53,9 @@ interface QaRead {
  * cloud index (its {@link QA_SESSIONS} newest sessions), every device's, by day and device, with their
  * clips, the bytes the clips take, and the bytes of their files uploaded and pending; when this device
  * last synced (the last write of the index the server confirmed) and what still waits to be sent.
- * Plain tables, read once, and again with Refresh.
+ * Then the diagnostics (T3.9, docs/DIAGNOSTICS.md): the account's last {@link QA_EVENTS} events,
+ * aggregated here: per device its last start and build, the counts by kind over the last days, and
+ * the failures. Plain tables, read once, and again with Refresh.
  */
 @Component({
   selector: 'app-qa-page',
@@ -133,6 +152,103 @@ interface QaRead {
           </p>
         }
       }
+      <h2>Diagnostics</h2>
+      <p class="muted note">
+        The last {{ eventsCounted }} events your devices recorded about the app's own use (Settings
+        → Account → Diagnostics): per device its last start and build, the counts by kind over the
+        last {{ summaryDays }} days, and the failures among them. The owner's round report reads the
+        same events.
+      </p>
+      <p class="muted" data-testid="diag-read">{{ eventsText() }}</p>
+      @if (eventsError(); as error) {
+        <p class="error" role="alert" data-testid="diag-error">{{ error }}</p>
+      }
+      @if (events(); as events) {
+        @if (events.summary.total === 0) {
+          <p class="muted" data-testid="diag-empty">No event in your account yet.</p>
+        } @else {
+          <div class="table">
+            <table data-testid="diag-devices">
+              <caption>
+                Devices
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Device</th>
+                  <th scope="col">Platform</th>
+                  <th scope="col">Last start</th>
+                  <th scope="col">Build</th>
+                  <th scope="col">Last event</th>
+                  <th scope="col">Events</th>
+                  <th scope="col">Failures</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (device of events.summary.devices; track device.label) {
+                  <tr data-testid="diag-device" [attr.data-device]="device.label">
+                    <td>{{ device.label }}</td>
+                    <td>{{ device.platform }}{{ device.installed ? ', installed' : '' }}</td>
+                    <td>{{ device.lastStartMs === null ? '–' : time(device.lastStartMs) }}</td>
+                    <td data-testid="diag-build">{{ buildText(device.build) }}</td>
+                    <td>{{ time(device.lastMs) }}</td>
+                    <td class="number" data-testid="diag-events">{{ device.events }}</td>
+                    <td class="number" data-testid="diag-failures">{{ device.failures }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <div class="table">
+            <table data-testid="diag-kinds">
+              <caption>
+                Events by kind, last
+                {{
+                  summaryDays
+                }}
+                days
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (entry of events.summary.kinds; track entry.kind) {
+                  <tr data-testid="diag-kind" [attr.data-kind]="entry.kind">
+                    <td>
+                      <code>{{ entry.kind }}</code>
+                    </td>
+                    <td class="number">{{ entry.count }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (events.summary.failures.length === 0) {
+            <p class="muted" data-testid="diag-no-failures">No failure among them.</p>
+          } @else {
+            <ul class="failures" data-testid="diag-failure-list">
+              @for (failure of events.summary.failures; track failure.tsMs + failure.kind) {
+                <li data-testid="diag-failure">
+                  {{ time(failure.tsMs) }} · {{ failure.device }} · <code>{{ failure.kind }}</code>
+                  @if (failure.attempt !== null) {
+                    · attempt {{ failure.attempt }}
+                  }
+                  @if (failure.message !== '') {
+                    : {{ failure.message }}
+                  }
+                </li>
+              }
+            </ul>
+          }
+          @if (events.unreadable > 0) {
+            <p class="warning" data-testid="diag-unreadable">
+              Left out, {{ events.unreadable }} events that could not be read (another version's).
+            </p>
+          }
+        }
+      }
     }
   `,
   styles: `
@@ -214,6 +330,21 @@ interface QaRead {
     tfoot {
       font-weight: 600;
     }
+
+    h2 {
+      margin: var(--space-5) 0 var(--space-2);
+      font-size: 1.125rem;
+    }
+
+    .failures {
+      margin: var(--space-2) 0 0;
+      padding-left: var(--space-4);
+      font-size: 0.875rem;
+
+      li + li {
+        margin-top: var(--space-1);
+      }
+    }
   `,
 })
 export class QaPage {
@@ -223,10 +354,15 @@ export class QaPage {
   private readonly globals = inject(BROWSER_GLOBALS);
 
   protected readonly sessionsCounted = QA_SESSIONS;
+  protected readonly eventsCounted = QA_EVENTS;
+  protected readonly summaryDays = SUMMARY_DAYS;
   protected readonly signedIn = computed(() => this.auth.cloud() !== null);
   protected readonly read = signal<QaRead | null>(null);
   protected readonly reading = signal(false);
   protected readonly error = signal<string | null>(null);
+  /** The diagnostics events read, aggregated (T3.9). */
+  protected readonly events = signal<EventsRead | null>(null);
+  protected readonly eventsError = signal<string | null>(null);
 
   /** When this device last synced, and what still waits to be sent. */
   protected readonly syncText = computed(() => {
@@ -262,6 +398,20 @@ export class QaPage {
     return `${where} (${String(read.sessions)} sessions)${held}.`;
   });
 
+  /** When the events were read, from where, and how many. */
+  protected readonly eventsText = computed(() => {
+    const events = this.events();
+    if (events === null) {
+      return this.reading() ? 'Reading your events…' : '';
+    }
+    const where = events.fromCache
+      ? `Offline: read from this device's copy of your account at ${TIME.format(events.readMs)}`
+      : `Read from your account at ${TIME.format(events.readMs)}`;
+    const span =
+      events.summary.oldestMs === null ? '' : `, from ${TIME.format(events.summary.oldestMs)} on`;
+    return `${where} (${String(events.summary.total)} events${span}).`;
+  });
+
   /** Incremented by every reading: a slower, older one then knows it lost. */
   private reads = 0;
 
@@ -276,6 +426,8 @@ export class QaPage {
           this.reads++;
           this.read.set(null);
           this.error.set(null);
+          this.events.set(null);
+          this.eventsError.set(null);
         }
       });
     });
@@ -283,6 +435,15 @@ export class QaPage {
 
   protected refresh(): void {
     void this.load();
+  }
+
+  protected time(ms: number): string {
+    return TIME.format(ms);
+  }
+
+  /** `0.4.0 · abc1234`, or `–` without a start among the events read. */
+  protected buildText(build: { version: string; commit: string } | null): string {
+    return build === null ? '–' : `${build.version} · ${build.commit}`;
   }
 
   protected bytes(count: number): string {
@@ -306,6 +467,7 @@ export class QaPage {
     const reading = ++this.reads;
     this.reading.set(true);
     this.error.set(null);
+    void this.loadEvents(reading);
     try {
       const sessions = await this.index.cloudSessions(QA_SESSIONS);
       if (sessions === null) {
@@ -341,6 +503,40 @@ export class QaPage {
     } finally {
       if (reading === this.reads) {
         this.reading.set(false);
+      }
+    }
+  }
+
+  /** The account's last {@link QA_EVENTS} events, aggregated; a document of another version is counted. */
+  private async loadEvents(reading: number): Promise<void> {
+    const account = this.auth.cloud();
+    if (account === null) {
+      return;
+    }
+    this.eventsError.set(null);
+    try {
+      const listing = await account.backend.listEvents(account.uid, QA_EVENTS);
+      const events: CloudEvent[] = [];
+      let unreadable = 0;
+      for (const { data } of listing.documents) {
+        try {
+          events.push(parseCloudEvent(data));
+        } catch {
+          unreadable++;
+        }
+      }
+      if (reading === this.reads) {
+        const readMs = hostNow(this.globals);
+        this.events.set({
+          summary: diagnosticsSummary(events, readMs),
+          unreadable,
+          fromCache: listing.fromCache,
+          readMs,
+        });
+      }
+    } catch (error: unknown) {
+      if (reading === this.reads) {
+        this.eventsError.set(`Your events could not be read: ${errorMessage(error)}`);
       }
     }
   }

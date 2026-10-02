@@ -6,6 +6,7 @@ import {
   type CloudAttempt,
   type CloudAttemptFields,
   type CloudCube,
+  type CloudEventWrite,
   type CloudSession,
   type CloudUpload,
   type UserRecord,
@@ -376,6 +377,61 @@ export class FakeAccountBackend implements AccountBackend {
     return this.cubeWrite(`delete users/${uid}/cubes/${name}`, () => {
       this.cubes.get(uid)?.delete(name);
     });
+  }
+
+  // ---- The diagnostics events (T3.9): users/{uid}/events/{eventId} ----
+
+  /** Every event written, in the order of the batches, with the account it went to. */
+  readonly events: { uid: string; write: CloudEventWrite }[] = [];
+  /** How many batches the events came in. */
+  eventBatches = 0;
+  /** Set: the events' writes are refused with it, as the rules refuse a document, applying nothing. */
+  eventError: Error | null = null;
+
+  saveEvents(uid: string, events: readonly CloudEventWrite[]): Promise<void> {
+    this.eventBatches++;
+    const refused = this.eventError;
+    if (refused === null) {
+      for (const write of events) {
+        this.events.push({ uid, write: structuredClone(write) });
+      }
+    }
+    return new Promise<void>((resolve, reject) => {
+      const send = (): void => {
+        if (refused === null) {
+          resolve();
+        } else {
+          reject(refused);
+        }
+      };
+      if (this.online) {
+        queueMicrotask(send);
+      } else {
+        this.waiting.push(send);
+      }
+    });
+  }
+
+  listEvents(uid: string, limit: number): Promise<CloudListing> {
+    this.reads.push(`events ${uid} ${String(limit)}`);
+    return this.read(() =>
+      this.events
+        .filter((entry) => entry.uid === uid)
+        .sort(
+          (p, q) => q.write.event.tsMs - p.write.event.tsMs || q.write.id.localeCompare(p.write.id),
+        )
+        .slice(0, limit)
+        .map(({ write }) =>
+          this.document(write.id, `users/${uid}/events/${write.id}`, write.event),
+        ),
+    );
+  }
+
+  /** The kinds of the events written to `uid` (every account's without one), in order. */
+  eventKinds(uid?: string): string[] {
+    return this.events
+      .filter((entry) => uid === undefined || entry.uid === uid)
+      .map((entry) => entry.write.event.kind);
   }
 
   /** A write of the cubes, as `write` makes one of the index, refused with `cubeError` alone. */

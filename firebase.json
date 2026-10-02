@@ -15,6 +15,7 @@
         "firebase-debug.*.log",
         "*.local",
         ".env.demo-cubetrace",
+        "scripts",
         "src",
         "tsconfig*.json",
         "vitest.config.ts",

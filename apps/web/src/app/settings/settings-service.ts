@@ -191,6 +191,8 @@ interface StoredSettings {
   readonly wifiOnly: boolean | null;
   /** T3.3: uploaded clips stay on this device; null: this device's default (on for a laptop). */
   readonly keepLocalCopies: boolean | null;
+  /** T3.9: signed in, the app records diagnostics events in the account. */
+  readonly diagnostics: boolean;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -215,6 +217,7 @@ const DEFAULTS: StoredSettings = {
   uploadSessions: true,
   wifiOnly: null,
   keepLocalCopies: null,
+  diagnostics: true,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -236,7 +239,9 @@ export function macAddressProblem(text: string): string {
  * (T2.12, Raw by default), its video quality (T2.10, Standard by default), and whether the Timer
  * page's Camera settings are open (T2.7); and the uploads' (T3.3): whether the sessions are uploaded
  * while an account is signed in, on Wi-Fi only (a phone's default, where the browser tells Wi-Fi from
- * mobile data), and whether the uploaded clips stay on the device (a laptop's default). Signals, kept
+ * mobile data), and whether the uploaded clips stay on the device (a laptop's default); and the
+ * diagnostics (T3.9): whether, signed in, the app records events about its own use in the account.
+ * Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
  * Signed in, the cube list is kept in sync with the account's by CubeSyncService (T3.4), which is
@@ -323,6 +328,12 @@ export class SettingsService {
    * uploaded; its attempt.json and frames files stay.
    */
   readonly keepLocalCopies = computed(() => this.stored().keepLocalCopies ?? !this.isPhone);
+  /**
+   * "Diagnostics" (T3.9, Settings → Account): signed in, the app records events about its own use in
+   * the account (docs/DIAGNOSTICS.md), the evidence of the manual rounds; on by default. Nothing goes
+   * signed out either way.
+   */
+  readonly diagnostics = computed(() => this.stored().diagnostics);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -481,6 +492,12 @@ export class SettingsService {
     }
   }
 
+  setDiagnostics(on: boolean): void {
+    if (on !== this.stored().diagnostics) {
+      this.update({ diagnostics: on });
+    }
+  }
+
   /** Sets the sharpness threshold; returns false, changing nothing, unless it is above 0. */
   setSharpnessThreshold(threshold: number): boolean {
     if (!isSharpnessThreshold(threshold)) {
@@ -593,6 +610,7 @@ function readSettings(
   const uploadSessions = member(parsed, 'uploadSessions');
   const wifiOnly = member(parsed, 'wifiOnly');
   const keepLocalCopies = member(parsed, 'keepLocalCopies');
+  const diagnostics = member(parsed, 'diagnostics');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
   const settings: StoredSettings = {
     hostLabel:
@@ -641,6 +659,8 @@ function readSettings(
     wifiOnly: typeof wifiOnly === 'boolean' ? wifiOnly : DEFAULTS.wifiOnly,
     keepLocalCopies:
       typeof keepLocalCopies === 'boolean' ? keepLocalCopies : DEFAULTS.keepLocalCopies,
+    // Settings stored before T3.9 have none: on, as for a new device.
+    diagnostics: typeof diagnostics === 'boolean' ? diagnostics : DEFAULTS.diagnostics,
   };
   return { settings, migrated: cubeMacs.migrated };
 }

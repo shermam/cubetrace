@@ -51,6 +51,50 @@ export function describeConnectError(error: unknown, macContext: MacContext): st
   return message === '' ? 'The cube could not be connected.' : message;
 }
 
+/**
+ * Why connecting failed, as a kind, for the diagnostics (`cube.failed`, docs/DIAGNOSTICS.md): the
+ * cases of {@link describeConnectError}, without their messages, which may name the address typed.
+ */
+export type ConnectFailureKind =
+  | 'cancelled'
+  | 'no-bluetooth'
+  | 'blocked'
+  | 'no-mac'
+  | 'mac-unreadable'
+  | 'no-state'
+  | 'disconnected'
+  | 'not-gan'
+  | 'unreachable'
+  | 'other';
+
+/** The kind of a failure to connect (see {@link describeConnectError} for the cases). */
+export function connectFailureKind(error: unknown, macContext: MacContext): ConnectFailureKind {
+  const name = stringMember(error, 'name') ?? '';
+  const message = stringMember(error, 'message') ?? String(error);
+  if (name === 'NotFoundError' && /cancel/i.test(message)) {
+    return 'cancelled';
+  }
+  if (name === 'NotFoundError' && /adapter/i.test(message)) {
+    return 'no-bluetooth';
+  }
+  if (name === 'SecurityError' || name === 'NotAllowedError') {
+    return 'blocked';
+  }
+  if (/Unable to determine cube MAC address/i.test(message)) {
+    return macContext.cancelled ? 'no-mac' : 'mac-unreadable';
+  }
+  if (/did not report its state/i.test(message)) {
+    return 'no-state';
+  }
+  if (/disconnected before reporting its state/i.test(message)) {
+    return 'disconnected';
+  }
+  if (/Can't find target BLE services/i.test(message)) {
+    return 'not-gan';
+  }
+  return name === 'NetworkError' ? 'unreachable' : 'other';
+}
+
 /** `value[key]` when it is a string (errors and DOMExceptions alike). */
 function stringMember(value: unknown, key: 'name' | 'message'): string | null {
   if (typeof value !== 'object' || value === null || !(key in value)) {

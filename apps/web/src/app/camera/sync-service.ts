@@ -14,6 +14,7 @@ import type { CameraClock } from '@cubetrace/core';
 import { APP_BUILD } from '../../environments/version';
 import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SessionService, type TimerPhase } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
 import { downloadJson } from '../shared/download';
@@ -92,6 +93,7 @@ export class SyncService {
   private readonly settings = inject(SettingsService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
+  private readonly diagnostics = inject(DiagnosticsService);
 
   private readonly runSignal = signal<SyncRun | null>(null);
   private readonly resultSignal = signal<SyncCheckResult | null>(null);
@@ -319,7 +321,9 @@ export class SyncService {
       return;
     }
     try {
-      downloadJson(this.globals, this.document, syncReportFileName(report.createdMs), report);
+      const fileName = syncReportFileName(report.createdMs);
+      downloadJson(this.globals, this.document, fileName, report);
+      this.diagnostics.record('download', { what: 'sync-check', files: 1, names: fileName });
     } catch (error: unknown) {
       this.noticeSignal.set(`The check's data could not be saved: ${errorMessage(error)}`);
     }
@@ -347,6 +351,26 @@ export class SyncService {
     const report = this.report(run);
     if (report !== null) {
       console.info(syncSummaryLine(report));
+      const { result } = report;
+      this.diagnostics.record('sync.check', {
+        outcome: result.ok ? 'ok' : 'failed',
+        reason: result.reason,
+        message: result.message,
+        camera: label,
+        offsetMs: result.offsetMs,
+        spreadMs: result.spreadMs,
+        previousOffsetMs,
+        matched: result.matched,
+        of: result.matched + result.unmatched,
+        kept: result.kept,
+        moves: result.moves,
+        frames: result.frames,
+        durationMs: Math.round(result.durationMs),
+        frameIntervalMs: result.frameIntervalMs,
+        wide: report.framing.wide,
+        costMs: result.cost?.medianMs ?? null,
+        saved,
+      });
     }
   }
 

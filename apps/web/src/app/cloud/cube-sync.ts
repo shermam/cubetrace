@@ -4,6 +4,7 @@ import { cloudCube, parseCloudCube } from '@cubetrace/core';
 import type { AccountBackend, CloudListing } from '../auth/account-backend';
 import { AuthService, type CloudAccount } from '../auth/auth-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SettingsService, type CubeMac } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { cubeChanges, cubeKey, mergeCubes, type CloudCubeEntry } from './cube-merge';
@@ -41,6 +42,7 @@ export class CubeSyncService {
   private readonly auth = inject(AuthService);
   private readonly settings = inject(SettingsService);
   private readonly globals = inject(BROWSER_GLOBALS);
+  private readonly diagnostics = inject(DiagnosticsService);
 
   private readonly mergingSignal = signal(false);
   private readonly offlineSignal = signal(false);
@@ -201,6 +203,13 @@ export class CubeSyncService {
       if (JSON.stringify(merge.local) !== JSON.stringify(this.settings.cubeMacs())) {
         this.settings.setCubeMacs(merge.local);
       }
+      // Counts only: never a name's address (docs/DIAGNOSTICS.md).
+      this.diagnostics.record('cubes.synced', {
+        count: merge.local.length,
+        cloud: cloud.length,
+        unreadable: unreadable.length,
+        fromServer: !listing.fromCache,
+      });
       this.reconcile(account);
     } finally {
       if (this.mergingUid === account.uid) {
@@ -347,6 +356,7 @@ export class CubeSyncService {
     if (!this.said.has(key)) {
       this.said.add(key);
       console.warn(`cubetrace: cloud: ${message}.`);
+      this.diagnostics.record('error.app', { where: 'cubes', message: `${message}.` });
     }
   }
 

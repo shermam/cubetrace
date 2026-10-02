@@ -23,6 +23,7 @@ import { AuthService, type CloudAccount } from '../auth/auth-service';
 import { SessionIndexService } from '../cloud/session-index';
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import { StorageService } from '../device/storage-service';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { ClipsInFlight } from '../session/clips-in-flight';
 import { SessionChanges, type SessionChange } from '../session/session-changes';
 import { SessionService } from '../session/session-service';
@@ -115,6 +116,7 @@ export class UploadService {
   private readonly sessionStorage = inject(SESSION_STORAGE);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly loadRuntime = inject(UPLOAD_RUNTIME);
+  private readonly diagnostics = inject(DiagnosticsService);
 
   private readonly viewSignal = signal<QueueView | null>(null);
   private readonly errorSignal = signal<string | null>(null);
@@ -163,8 +165,15 @@ export class UploadService {
   private wanted: CloudAccount | null = null;
   /** The starts and stops, one after the other. */
   private chain: Promise<void> = Promise.resolve();
-  /** The clips deleted from the device so far, as the view last said. */
+  /** The clips deleted from the device so far, as the view last said, and their bytes. */
   private freed = 0;
+  private freedBytes = 0;
+  /** Each attempt's upload state as the view last said it (`<session>/<index>`), for `upload.state`. */
+  private readonly states = new Map<string, AttemptView['state']>();
+  /** What held the queue as the view last said it, for `upload.paused`. */
+  private pause: string | null = null;
+  /** The queue's last error said, for `error.app`. */
+  private queueError: string | null = null;
 
   constructor() {
     const subscription = inject(SessionChanges).changes$.subscribe((change) => {
@@ -247,6 +256,10 @@ export class UploadService {
       })
       .catch((error: unknown) => {
         this.errorSignal.set(`The uploads could not start: ${errorMessage(error)}`);
+        this.diagnostics.record('error.app', {
+          where: 'uploads',
+          message: `The uploads could not start: ${errorMessage(error)}`,
+        });
       });
   }
 
@@ -261,6 +274,10 @@ export class UploadService {
       this.errorSignal.set(
         `The uploads could not be loaded (${errorMessage(error)}): they start again with the next page load online.`,
       );
+      this.diagnostics.record('error.app', {
+        where: 'uploads',
+        message: `The uploads could not be loaded: ${errorMessage(error)}`,
+      });
       return;
     }
     if (this.wanted !== account) {
@@ -296,10 +313,80 @@ export class UploadService {
     }
     const view = queue.view();
     this.viewSignal.set(view);
+    this.followView(view);
     if (view.freed.clips !== this.freed) {
       // Uploaded clips were deleted: the storage meter goes down with them.
+      const files = view.freed.clips - this.freed;
+      const bytes = view.freed.bytes - this.freedBytes;
+      const before = this.storage.usage()?.usage ?? null;
       this.freed = view.freed.clips;
-      void this.storage.refresh();
+      this.freedBytes = view.freed.bytes;
+      void this.storage.refresh().then(() => {
+        this.diagnostics.record('storage.deleted', {
+          files,
+          bytes,
+          usageBefore: before,
+          usageAfter: this.storage.usage()?.usage ?? null,
+          percent: this.storage.percent(),
+        });
+      });
+    }
+  }
+
+  /**
+   * The events of the queue's progress (T3.9, docs/DIAGNOSTICS.md): `upload.state` at each change
+   * of an attempt's state (pending, uploading, done, failed; not waiting for its clips),
+   * `upload.paused` and `upload.resumed` as what holds the queue changes, and `error.app` for an
+   * error of the queue itself, each once.
+   */
+  private followView(view: QueueView): void {
+    for (const attempt of [...view.active, ...view.recent]) {
+      const key = `${attempt.sessionId}/${String(attempt.index)}`;
+      if (this.states.get(key) === attempt.state) {
+        continue;
+      }
+      this.states.set(key, attempt.state);
+      if (attempt.state === 'waiting') {
+        continue;
+      }
+      const failed = attempt.files.find((file) => file.state === 'failed') ?? null;
+      this.diagnostics.record(
+        'upload.state',
+        {
+          state: attempt.state,
+          files: attempt.files.length,
+          bytes: attempt.bytes,
+          sent: attempt.sent,
+          tries: attempt.files.reduce((sum, file) => sum + file.tries, 0),
+          error: attempt.error,
+          failedFile: failed?.path ?? null,
+        },
+        { session: attempt.sessionId, attempt: attempt.index },
+      );
+    }
+    // The attempts gone from the view (a session deleted) leave the map at the next look.
+    if (this.states.size > 1000) {
+      this.states.clear();
+    }
+    const pause =
+      view.pause === null ? null : view.pause.reason === 'not-wifi' ? 'wifi' : view.pause.reason;
+    if (pause !== this.pause) {
+      this.pause = pause;
+      if (pause === null) {
+        this.diagnostics.record('upload.resumed', {});
+      } else {
+        this.diagnostics.record('upload.paused', {
+          reason: pause,
+          untilMs: view.pause?.reason === 'quota' ? view.pause.untilMs : null,
+          left: view.counts.pending + view.counts.uploading + view.counts.waiting,
+        });
+      }
+    }
+    if (view.error !== this.queueError) {
+      this.queueError = view.error;
+      if (view.error !== null) {
+        this.diagnostics.record('error.app', { where: 'uploads', message: view.error });
+      }
     }
   }
 

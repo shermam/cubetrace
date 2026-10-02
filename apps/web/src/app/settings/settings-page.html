@@ -348,6 +348,24 @@
     cubes' MAC addresses (Cube MAC addresses, above), so that one typed on a device is known on the
     others.
   </p>
+  <label class="switch">
+    <input
+      #diagnosticsBox
+      type="checkbox"
+      data-testid="diagnostics"
+      [checked]="settings.diagnostics()"
+      (change)="settings.setDiagnostics(diagnosticsBox.checked)"
+    />
+    Diagnostics
+  </label>
+  <p class="hint" data-testid="diagnostics-hint">
+    While you are signed in, the app also keeps a log of its own use in your account: when it starts
+    and which build, when a cube connects or disconnects and why, each attempt's outcome and timing,
+    each clip saved or failed, the sync checks, the uploads' progress, the settings changed and the
+    errors it meets, each with this device's label — never a MAC address, an email, a video or a
+    user agent. It stands in for the manual test checklists (docs/DIAGNOSTICS.md). Nothing is kept
+    while you are signed out, and nothing while this is off.
+  </p>
 </section>
 
 <section id="uploads" aria-labelledby="uploads-heading">

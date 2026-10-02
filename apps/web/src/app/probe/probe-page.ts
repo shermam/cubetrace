@@ -11,6 +11,7 @@ import {
 import { ActivatedRoute } from '@angular/router';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { describeError, member } from './probe-guards';
 import {
   listCameras,
@@ -106,6 +107,7 @@ const SECTIONS: readonly Pick<SectionView, 'key' | 'title' | 'about'>[] = [
 export class ProbePage {
   private readonly document = inject(DOCUMENT);
   private readonly scope: ProbeScope = inject(BROWSER_GLOBALS);
+  private readonly diagnostics = inject(DiagnosticsService);
   private readonly stop = new AbortController();
   private readonly preview = viewChild.required<ElementRef<HTMLVideoElement>>('preview');
   private readonly sections = signal<PartialReport>({});
@@ -186,6 +188,7 @@ export class ProbePage {
     setTimeout(() => {
       objectUrls.revokeObjectURL(href);
     }, 60_000);
+    this.diagnostics.record('download', { what: 'probe', files: 1, names: link.download });
     this.notice.set(`Saved ${link.download}.`);
   }
 

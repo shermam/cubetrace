@@ -40,6 +40,7 @@ import {
 import type { CameraIdentity, CameraInfo } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import {
   CAMERA_RESOLUTION_SIZE,
   SettingsService,
@@ -149,6 +150,7 @@ export function cameraDevices(list: readonly MediaDeviceInfo[]): CameraDevice[] 
 export class CameraService {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly prefs = inject(SettingsService);
+  private readonly diagnostics = inject(DiagnosticsService);
   private readonly sampler = inject(LUMA_SAMPLER);
   private readonly media = mediaDevicesOf(this.globals);
 
@@ -170,6 +172,9 @@ export class CameraService {
   private readonly frameProblemSignal = signal<string | null>(null);
   private readonly busySignal = signal(false);
   private readonly framingEditingSignal = signal(false);
+
+  /** The browser's name of the camera on, for `camera.on`, `camera.switched` and `camera.off`; null while off. */
+  private onLabel: string | null = null;
 
   /** This device's cameras (see `cameraDevices`). */
   readonly devices = this.devicesSignal.asReadonly();
@@ -346,6 +351,10 @@ export class CameraService {
   stop(): void {
     this.prefs.setCameraOn(false);
     this.generation++;
+    if (this.onLabel !== null) {
+      this.diagnostics.record('camera.off', { label: this.onLabel });
+      this.onLabel = null;
+    }
     this.close();
     this.statusSignal.set('off');
     this.errorSignal.set(null);
@@ -649,7 +658,36 @@ export class CameraService {
     this.streamSignal.set(stream);
     this.statusSignal.set('on');
     this.noticeSignal.set(messages.length > 0 ? messages.join(' ') : null);
+    this.announce(track, choice, messages.length);
     void this.refreshDevices();
+  }
+
+  /**
+   * `camera.on` when the camera comes on, `camera.switched` when another camera takes its place
+   * while it is on (T3.9, docs/DIAGNOSTICS.md); nothing for the same camera opened again (a
+   * resolution changed, its controls reset), which the settings' events say.
+   */
+  private announce(track: MediaStreamTrack, choice: CameraChoice, notes: number): void {
+    const before = this.onLabel;
+    this.onLabel = track.label;
+    if (before === track.label) {
+      return;
+    }
+    const settings = track.getSettings();
+    const facts = {
+      label: track.label,
+      facing: this.facing(),
+      width: settings.width ?? null,
+      height: settings.height ?? null,
+      fps: settings.frameRate ?? null,
+      asked: `${String(choice.width ?? 1920)}×${String(choice.height ?? 1080)} at ${String(choice.fps ?? 60)}${choice.exactFps === true ? ' exactly' : ''}`,
+      notes,
+    };
+    if (before === null) {
+      this.diagnostics.record('camera.on', facts);
+    } else {
+      this.diagnostics.record('camera.switched', { ...facts, from: before });
+    }
   }
 
   private takeSnapshot(track: MediaStreamTrack): void {
@@ -687,6 +725,8 @@ export class CameraService {
     this.close();
     this.statusSignal.set('error');
     this.errorSignal.set(message);
+    this.diagnostics.record('error.app', { where: 'camera', message, label: this.onLabel });
+    this.onLabel = null;
   }
 
   /** Runs `task` after the ones before it. */
