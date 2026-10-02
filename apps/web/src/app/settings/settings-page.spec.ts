@@ -181,6 +181,41 @@ describe('SettingsPage', () => {
     expect(macList(fixture)).toEqual([['None stored.']]);
   });
 
+  it('says, signed in, that the cube list is synced with the account and when it last merged; nothing signed out', async () => {
+    const backend = new FakeAccountBackend();
+    TestBed.overrideProvider(ACCOUNT_LOADER, { useValue: backend.loader });
+    const fixture = await render();
+    expect(text(fixture, 'cube-macs-sync')).toBeUndefined();
+
+    buttonNamed(fixture, 'Sign in with Google').click();
+    await update(fixture);
+    await update(fixture);
+    expect(text(fixture, 'cube-macs-sync')).toMatch(
+      /^Synced with your account\. Last merged .+\.$/,
+    );
+
+    type(input(fixture, '#mac-name'), 'GAN12ui_AB12');
+    type(input(fixture, '#mac-address'), 'ab-12-cd-34-ef-56');
+    buttonNamed(fixture, 'Add').click();
+    await update(fixture);
+    expect(backend.cubeWrites).toEqual(['users/ada-uid/cubes/GAN12ui_AB12']);
+    expect(backend.cubes.get('ada-uid')?.get('GAN12ui_AB12')?.mac).toBe('AB:12:CD:34:EF:56');
+
+    // Offline, the change waits to be sent, and the line says so.
+    backend.online = false;
+    buttonNamed(fixture, 'Remove GAN12ui_AB12').click();
+    await update(fixture);
+    expect(text(fixture, 'cube-macs-sync')).toMatch(/ 1 change waits to be sent\.$/);
+    backend.goOnline();
+    await update(fixture);
+    expect(text(fixture, 'cube-macs-sync')).not.toContain('wait');
+    expect(text(fixture, 'cube-macs-sync-error')).toBeUndefined();
+
+    buttonNamed(fixture, 'Sign out').click();
+    await update(fixture);
+    expect(text(fixture, 'cube-macs-sync')).toBeUndefined();
+  });
+
   it('keeps the idle disconnection, from 0 to 60 whole minutes', async () => {
     const fixture = await render();
     const idle = input(fixture, '#idle-minutes');
@@ -395,7 +430,8 @@ describe('SettingsPage', () => {
         '“Linux laptop”, in your cubetrace account, and keeps an index of your sessions there: ' +
         'their records without the moves, so that the Sessions page of each of your devices lists ' +
         'them all (demo sessions stay on the device). Their files are uploaded as Uploads, below, ' +
-        'says.',
+        "says. The account also keeps the cubes' MAC addresses (Cube MAC addresses, above), so " +
+        'that one typed on a device is known on the others.',
     );
     expect(backend.loads).toBe(0);
 

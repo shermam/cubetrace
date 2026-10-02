@@ -29,7 +29,9 @@ at once. The GAN driver also needs the cube's MAC address:
 - Without the flag, a dialog asks for the address once the cube is chosen: six hex bytes such as
   `AB:12:CD:34:EF:56` (`chrome://bluetooth-internals` lists nearby devices with their addresses).
   The flag's steps are folded under it, with a Copy button. With "Remember it for this cube" on,
-  Settings keeps it, and the next connection does not ask.
+  Settings keeps it, and the next connection does not ask. Signed in (below), the account keeps
+  Settings' list too, so that an address typed on one of your devices is known on the others from
+  their next start.
 
 Once the cube is connected, no dialog is left open: the pill shows the cube's model and battery
 (click it for the cube's details and Disconnect). If connecting fails, the reason appears under the
@@ -67,7 +69,11 @@ one dataset.
 **An account, if you want one.** Sign in, in the header or in Settings → Account, signs in with Google
 (in a popup; the app installed on Android goes to Google's page and comes back). The account records
 your name, your email and each device's label, keeps the index of your sessions and receives their
-uploads (below). Signed out, the app works as before and never downloads Firebase.
+uploads (below). It also keeps the cubes' MAC addresses of Settings → Cube MAC addresses: each device
+merges its list with the account's as it signs in and as it starts, the latest change of each cube
+winning, and sends each change as it is made, so that a cube removed on one device goes on the others
+too; Settings says when the list last merged. The addresses are yours, not the dataset's: no export or
+upload holds one. Signed out, the app works as before and never downloads Firebase.
 
 **The session index.** Signed in, every session of a real cube goes, as it is recorded, to your index
 in the cloud (Firestore): the session's record and each attempt's, without the moves, with the device

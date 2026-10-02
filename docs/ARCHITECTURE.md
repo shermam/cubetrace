@@ -24,7 +24,8 @@ apps/web (Angular, PWA)
   account (phase 3): AuthService · Firebase (Authentication, Firestore, Functions) in a lazy chunk behind
                    ACCOUNT_LOADER (fake in apps/web/src/app/auth/fake-account.ts) · SessionIndexService:
                    the session index in Firestore, the Sessions page's cloud sessions, the QA view ·
-                   UploadService: the upload queue, from a lazy chunk of its own, its panel and indicator
+                   UploadService: the upload queue, from a lazy chunk of its own, its panel and indicator ·
+                   CubeSyncService: Settings' cube MAC addresses merged with the account's (T3.4)
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider
@@ -130,8 +131,8 @@ tests give `AuthService` a fake of the backend; the end-to-end suite gives the d
 through the window (development builds only), so that no test reaches Google.
 
 The rules (`firebase/firestore.rules`, `docs/DATA-MODEL.md` §10): an account reads and writes only
-its own `users/{uid}` and the sessions, and their attempts, whose `owner` is its uid; nothing is
-public. They are tested against the Firestore emulator in CI and deployed on merge by
+its own `users/{uid}` with its cubes (T3.4), and the sessions, and their attempts, whose `owner` is
+its uid; nothing is public. They are tested against the Firestore emulator in CI and deployed on merge by
 `.github/workflows/firebase.yml`. The service worker has no data group, so it caches nothing of
 Google's or Firebase's: it passes their requests through (one that fails reaches the SDK as a 504,
 which it reads as a network error), and Google's sign-in page and its helper frame are on
@@ -180,6 +181,41 @@ account's 100 newest from the index, by id ("this device", "cloud", "both"), a s
 alone opening a read-only page (its clips and moves are on the device that recorded it); `/qa` counts
 the attempts of the 50 newest sessions by day and device. Signed out, none of it reads or writes
 anything, and the pages are as before.
+
+## The account's cubes (T3.4)
+
+The cubes' MAC addresses that Settings keeps (Settings → Cube MAC addresses, and the connect
+dialog's "Remember it for this cube", for Chrome without the flag that reads them) are the account's
+too: `users/{uid}/cubes/{name}`, one document per cube by its Bluetooth name (`docs/DATA-MODEL.md`
+§10), so that an address typed on the phone is known on the laptop. `CubeSyncService`
+(`apps/web/src/app/cloud/cube-sync.ts`) does it, made by the header's controls on every page, in the
+lazy chunk of the account's code (the initial bundle is unchanged); `cube-merge.ts` beside it is the
+merge, as pure functions:
+
+```
+sign-in, or a start signed in ─▶ listCubes(uid): the server's documents, or the cache's offline
+  ─▶ mergeCubes(Settings' list, the documents, what this device knows the server holds)
+       the union by name, ignoring case; of two copies the later updatedMs (equal: the account's);
+       missing on one side in a version the server held: deleted there, so deleted on the other
+  ─▶ SettingsService.setCubeMacs(the merged list) ─▶ cubeChanges ─▶ saveCube, deleteCube
+a change of the list (Settings, the connect dialog) ─▶ cubeChanges ─▶ saveCube, deleteCube
+  (never awaited) ─▶ Firestore's cache ─▶ the server, when online ─▶ its confirmation ─▶ what this
+  device knows the server holds (localStorage cubetrace.cubeSync, per account)
+```
+
+Each entry of Settings' list has `updatedMs`, when it last changed (the stored settings are version
+2; an entry stored before gets the time it is first read), and an edit is dated later than the entry
+it replaces, even one dated by a clock running ahead, so that an edit wins over the copy it changed.
+The device remembers, per account, each document's `updatedMs` as the server last held it to its
+knowledge: an entry missing on one side in a version the server held was deleted there, while one in
+a version it never held is new. A listing from the cache (offline) adds what it holds and deletes
+nothing. Writes go through Firestore's persistent cache, as the session index's do: nothing waits
+for them, and offline they wait there, across reloads. Settings → Cube MAC addresses says "Synced
+with your account" with the time of the last merge with the server, a merge under way, or the
+changes still to be sent, and what went wrong (a refusal, a document of another version, a name that
+cannot be an id), which the console has once. Signed out, nothing is read or written, and the list
+is the device's. The addresses never reach the dataset: no record holds one, so no export, upload or
+document of the session index does.
 
 ## Storage (phase 3)
 

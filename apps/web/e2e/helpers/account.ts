@@ -7,7 +7,9 @@ import type { Page } from '@playwright/test';
 // IndexedDB, and so is its session index (T3.1): the documents as written, merged as Firestore's
 // `set` with `merge` merges them. Its upload functions (T3.2, T3.3) answer only in a test that runs a
 // bucket (`fakeBucket`): they sign URLs into it, on the app's own origin, and confirm what it holds;
-// elsewhere they refuse as unavailable, and the upload queue waits.
+// elsewhere they refuse as unavailable, and the upload queue waits. The account's cubes (T3.4) are in
+// localStorage too, unless the test gives a cloud (`fakeCloud`) that browser contexts share: two
+// devices of one account.
 
 /** A signed-in account as the backend reports it (src/app/auth/account-backend.ts, BackendUser). */
 export interface FakeAccountUser {
@@ -44,6 +46,10 @@ export interface FakeAccountState {
    * `confirm …` (the functions write `upload` past the rules, so these are not in `indexWrites`).
    */
   readonly uploadCalls: readonly string[];
+  /** users/{uid}/cubes (T3.4), by uid, then by name, when no cloud is shared. */
+  readonly cubes: Readonly<Record<string, Readonly<Record<string, Record<string, unknown>>>>>;
+  /** The cubes' writes in order: `users/<uid>/cubes/<name>`, `delete …`. */
+  readonly cubeWrites: readonly string[];
 }
 
 /** An object the fake bucket holds: what its PUT sent. */
@@ -127,6 +133,25 @@ export async function fakeBucket(page: Page): Promise<FakeBucket> {
   };
 }
 
+/**
+ * The account's cubes (T3.4) on a server that the pages given it share, in the test's process: two
+ * browser contexts signed in to one account through it are two devices of that account.
+ */
+export interface FakeCloud {
+  /** users/{uid}/cubes, by uid, then by document name: the documents as written. */
+  readonly cubes: Record<string, Record<string, Record<string, unknown>>>;
+  /** The cubes' writes in order, from every page: `users/<uid>/cubes/<name>`, `delete …`. */
+  readonly cubeWrites: string[];
+}
+
+/** An empty cloud, for `fakeAccount`'s `cloud`. */
+export function fakeCloud(): FakeCloud {
+  return { cubes: {}, cubeWrites: [] };
+}
+
+/** The window function through which the pages given a cloud reach it (`page.exposeFunction`). */
+const CLOUD_FUNCTION = 'cubetraceE2eCloud';
+
 /** The account Google's page would sign in. */
 export const ADA: FakeAccountUser = {
   uid: 'e2e-ada',
@@ -141,14 +166,23 @@ const STATE_KEY = 'e2e.fakeAccount';
 /**
  * Installs the fake before the app's scripts run, on every page load of `page` (call it before
  * `page.goto`). With `popupError`, signing in fails as Firebase does, with that error code. `index`
- * is what the session index holds before the first page load (another device's sessions).
+ * is what the session index holds before the first page load (another device's sessions). With
+ * `cloud`, the account's cubes are there, shared with the other pages given it.
  */
 export async function fakeAccount(
   page: Page,
-  options: { account?: FakeAccountUser; popupError?: string; index?: FakeIndex } = {},
+  options: {
+    account?: FakeAccountUser;
+    popupError?: string;
+    index?: FakeIndex;
+    cloud?: FakeCloud;
+  } = {},
 ): Promise<void> {
+  if (options.cloud !== undefined) {
+    await shareCloud(page, options.cloud);
+  }
   await page.addInitScript(
-    ({ key, account, popupError, seed }) => {
+    ({ key, account, popupError, seed, cloudFunction }) => {
       type Doc = Record<string, unknown>;
       interface State {
         user: FakeAccountUser | null;
@@ -158,6 +192,8 @@ export async function fakeAccount(
         index: { sessions: Record<string, Doc>; attempts: Record<string, Record<string, Doc>> };
         indexWrites: string[];
         uploadCalls: string[];
+        cubes: Record<string, Record<string, Doc>>;
+        cubeWrites: string[];
       }
       const read = (): State =>
         (JSON.parse(localStorage.getItem(key) ?? 'null') as State | null) ?? {
@@ -168,6 +204,8 @@ export async function fakeAccount(
           index: structuredClone(seed),
           indexWrites: [],
           uploadCalls: [],
+          cubes: {},
+          cubeWrites: [],
         };
       const change = (edit: (state: State) => void): State => {
         const state = read();
@@ -228,6 +266,18 @@ export async function fakeAccount(
         const attempts = (state.index.attempts[sessionId] ??= {});
         attempts[id] = merged(attempts[id], attempt);
         state.indexWrites.push(`sessions/${sessionId}/attempts/${id}`);
+      };
+      // The cubes (T3.4): in the shared cloud when the test gave one, else in this context's state.
+      type CloudCall = (op: string, uid: string, arg?: unknown) => Promise<unknown>;
+      const cloudCall = (): CloudCall | null => {
+        const call: unknown = Reflect.get(window, cloudFunction);
+        return typeof call === 'function' ? (call as CloudCall) : null;
+      };
+      const putCube = (uid: string, write: string, edit: (cubes: Record<string, Doc>) => void) => {
+        change((state) => {
+          edit((state.cubes[uid] ??= {}));
+          state.cubeWrites.push(write);
+        });
       };
       const watchers = new Set<(user: FakeAccountUser | null) => void>();
       const setUser = (user: FakeAccountUser | null): void => {
@@ -406,6 +456,40 @@ export async function fakeAccount(
           });
           return result;
         },
+        async listCubes(uid: string) {
+          const shared = cloudCall();
+          const cubes =
+            shared === null
+              ? (read().cubes[uid] ?? {})
+              : ((await shared('list', uid)) as Record<string, Doc>);
+          const documents = Object.entries(cubes).map(([id, data]) => ({
+            id,
+            data,
+            pending: false,
+          }));
+          return { documents, fromCache: false };
+        },
+        async saveCube(uid: string, cube: Doc): Promise<void> {
+          const shared = cloudCall();
+          if (shared !== null) {
+            await shared('save', uid, cube);
+            return;
+          }
+          const name = String(cube['name']);
+          putCube(uid, `users/${uid}/cubes/${name}`, (cubes) => {
+            cubes[name] = structuredClone(cube);
+          });
+        },
+        async deleteCube(uid: string, name: string): Promise<void> {
+          const shared = cloudCall();
+          if (shared !== null) {
+            await shared('delete', uid, name);
+            return;
+          }
+          putCube(uid, `delete users/${uid}/cubes/${name}`, (cubes) => {
+            Reflect.deleteProperty(cubes, name);
+          });
+        },
       };
       Reflect.set(window, 'cubetraceE2eAccountLoader', () => {
         change((state) => {
@@ -419,8 +503,31 @@ export async function fakeAccount(
       account: options.account ?? ADA,
       popupError: options.popupError,
       seed: options.index ?? { sessions: {}, attempts: {} },
+      cloudFunction: CLOUD_FUNCTION,
     },
   );
+}
+
+/** Lets `page` reach `cloud`, in the test's process, through a window function. */
+async function shareCloud(page: Page, cloud: FakeCloud): Promise<void> {
+  await page.exposeFunction(CLOUD_FUNCTION, (op: string, uid: string, arg?: unknown): unknown => {
+    const cubes = (cloud.cubes[uid] ??= {});
+    if (op === 'list') {
+      return structuredClone(cubes);
+    }
+    if (op === 'save' && typeof arg === 'object' && arg !== null) {
+      const name = String(Reflect.get(arg, 'name'));
+      cubes[name] = structuredClone(arg as Record<string, unknown>);
+      cloud.cubeWrites.push(`users/${uid}/cubes/${name}`);
+      return null;
+    }
+    if (op === 'delete' && typeof arg === 'string') {
+      Reflect.deleteProperty(cubes, arg);
+      cloud.cubeWrites.push(`delete users/${uid}/cubes/${arg}`);
+      return null;
+    }
+    throw new Error(`The fake cloud cannot ${op}.`);
+  });
 }
 
 /** What the fake has done so far in this browser context. */
@@ -435,6 +542,8 @@ export async function fakeAccountState(page: Page): Promise<FakeAccountState> {
         index: { sessions: {}, attempts: {} },
         indexWrites: [],
         uploadCalls: [],
+        cubes: {},
+        cubeWrites: [],
       },
     STATE_KEY,
   );

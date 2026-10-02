@@ -2,6 +2,7 @@ import { Component, type ElementRef, computed, inject, signal, viewChild } from 
 
 import { AccountControl } from '../auth/account-control';
 import { videoQualityOptions } from '../camera/video-quality';
+import { CubeSyncService } from '../cloud/cube-sync';
 import { type StoragePersistence, StorageService } from '../device/storage-service';
 import { WAKE_LOCK_TEXT, WakeLockService } from '../device/wake-lock-service';
 import { formatBytes } from '../shared/format-bytes';
@@ -19,6 +20,9 @@ import {
   VIDEO_QUALITIES,
 } from './settings-service';
 
+/** When the cube list was last merged with the account's (T3.4): a date and a time. */
+const MERGED = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
 const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
   unsupported: 'This browser has no Storage API, so it cannot be asked to keep the data.',
   unknown: 'Checking whether the browser keeps the data…',
@@ -33,7 +37,8 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
  * resolution, frame rate and sharpness threshold (T2.1), Record audio (T2.4), the microphone, raw or
  * voice (T2.12), the video quality (T2.10) and the demo speed, all kept by `SettingsService`; then
  * the account (T3.0), kept by `AuthService`, and the uploads (T3.3): Upload sessions, Wi-Fi only
- * (where the browser tells Wi-Fi from mobile data) and Keep local copies.
+ * (where the browser tells Wi-Fi from mobile data) and Keep local copies. Signed in, the cube list
+ * says it is synced with the account (T3.4, `CubeSyncService`).
  */
 @Component({
   selector: 'app-settings-page',
@@ -45,6 +50,7 @@ export class SettingsPage {
   protected readonly wakeLock = inject(WakeLockService);
   protected readonly storage = inject(StorageService);
   protected readonly settings = inject(SettingsService);
+  protected readonly cubeSync = inject(CubeSyncService);
   protected readonly wakeLockText = computed(() => WAKE_LOCK_TEXT[this.wakeLock.status()]);
   protected readonly persistenceText = PERSISTENCE_TEXT;
   protected readonly canPersist = computed(() => {
@@ -79,6 +85,35 @@ export class SettingsPage {
     label: MICROPHONE_PROCESSING_TEXT[value],
   }));
   protected readonly microphoneHint = MICROPHONE_HINT;
+  /**
+   * Signed in, how the cube list stands with the account's (T3.4): synced, when it was last merged,
+   * and what waits to be sent; null signed out, when the list is this device's alone.
+   */
+  protected readonly cubeSyncText = computed(() => {
+    if (!this.cubeSync.active()) {
+      return null;
+    }
+    const last = this.cubeSync.lastMerge();
+    const waiting = this.cubeSync.unconfirmed();
+    const parts = ['Synced with your account.'];
+    if (this.cubeSync.merging()) {
+      parts.push('Merging…');
+    } else if (last !== null) {
+      parts.push(`Last merged ${MERGED.format(last)}.`);
+    } else {
+      parts.push(
+        this.cubeSync.offline()
+          ? 'Not merged yet: your account is out of reach.'
+          : 'Not merged yet.',
+      );
+    }
+    if (waiting > 0) {
+      parts.push(
+        `${String(waiting)} ${waiting === 1 ? 'change waits' : 'changes wait'} to be sent.`,
+      );
+    }
+    return parts.join(' ');
+  });
 
   constructor() {
     void this.storage.refresh();

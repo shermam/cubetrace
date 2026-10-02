@@ -1494,3 +1494,31 @@ gone, read `uploads.json` before the old page's last write had landed. The queue
 `pagehide` (`UploadQueue.flush`), and asks the index about every attempt `uploads.json` does not show as
 all done, so that what the index confirmed is not sent again; the test waits until `uploads.json` says
 the attempt is done before its next page load.
+
+## The account's cubes (T3.4)
+
+Added by T3.4 on 2026-10-02: Settings' cube MAC addresses synced with the account
+(`docs/ARCHITECTURE.md`, "The account's cubes"; `docs/DATA-MODEL.md` §10).
+
+**No new dependency.** `AccountBackend` gains `listCubes(uid)` (`getDocs` of `users/{uid}/cubes`: the
+server's documents, or the cache's when the server is out of reach, each with `hasPendingWrites`, and
+the query's `fromCache`), `saveCube` (`setDoc` without `merge`: a document is written whole) and
+`deleteCube`; `firebase-sdk.ts` is still the only file that imports Firebase. The merge is plain
+functions (`cloud/cube-merge.ts`), tested without Angular; `CubeSyncService` is tested with two
+devices of one account, two fakes of the backend (`fake-account.ts`) sharing one map of cubes, each
+device with its own `localStorage` and clock, and one page load at a time.
+
+**Two devices in the end-to-end suite.** The fake of Firebase (`e2e/helpers/account.ts`) keeps an
+account's cubes in the test's process when the test gives it a cloud (`fakeCloud()`, then
+`fakeAccount(page, {cloud})` for each page): the pages reach it through `page.exposeFunction`, so that
+two browser contexts signed in to the fake account are two devices of it. Without a cloud, the cubes
+stay in the context's `localStorage`, as the index does. `cube-macs.spec.ts` types an address in one
+context and finds it in the other after a reload, removes it there and finds it gone from the first,
+and checks that an export holds no address.
+
+**Sizes** (`ng build`, 2026-10-02, against `main` at fef1c8c): the initial bundle is unchanged,
+264.63 kB raw; `main` is byte for byte `main`'s built with the same commit stamp, but for the lazy
+chunks' hashes (with another stamp, the minifier also names the object that holds it otherwise). The
+cube sync and the merge are in the lazy chunk that the header's controls and the Settings page
+share, beside `AccountControl` (13.1 kB raw, 6.9 before); the Settings page is 22.1 kB (21.0),
+Firebase's chunk 647.0 kB (646.8).

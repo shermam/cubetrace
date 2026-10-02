@@ -11,7 +11,7 @@ import type { MicrophoneProcessing } from '@cubetrace/core';
 import { normalizeMac } from '@cubetrace/gan';
 
 import { DEMO_SPEED_DEFAULT, isDemoSpeed } from '../cube/demo';
-import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
+import { BROWSER_GLOBALS, hostNow, type BrowserGlobals } from '../device/browser-globals';
 import { networkConnection } from '../device/network-connection';
 import { errorMessage } from '../shared/error-message';
 
@@ -24,6 +24,12 @@ export interface CubeMac {
   readonly name: string;
   /** Normalized: `AB:12:CD:34:EF:56`. */
   readonly mac: string;
+  /**
+   * When the entry last changed, in ms on the host clock of the device that changed it, so that a
+   * merge with the account's list keeps the newest copy of each entry (T3.4). The entries stored
+   * before T3.4 got the time they were first read.
+   */
+  readonly updatedMs: number;
 }
 
 /** The outcome of storing a cube's MAC address: the stored entry, or why it was refused. */
@@ -147,6 +153,12 @@ const MAX_FRAMINGS = 24;
 /** At most this many cameras keep their manual controls, and hosts their chosen camera. */
 const MAX_CAMERA_ENTRIES = 12;
 
+/**
+ * The version of what `localStorage` holds: 2 since T3.4, whose cube entries have `updatedMs` (1
+ * had none). Written, not read: every field is checked on its own.
+ */
+const SETTINGS_VERSION = 2;
+
 /** What `localStorage` holds; every field is checked on reading and falls back on its own. */
 interface StoredSettings {
   /** Null: the default label of this device. */
@@ -224,12 +236,16 @@ export function macAddressProblem(text: string): string {
  * mobile data), and whether the uploaded clips stay on the device (a laptop's default). Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
+ * Signed in, the cube list is kept in sync with the account's by CubeSyncService (T3.4), which is
+ * why each entry has the time it last changed.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly storage = storageOf(this.globals);
-  private readonly stored = signal<StoredSettings>(readSettings(this.storage));
+  /** What `localStorage` held as the page loaded; cube entries stored before T3.4 dated now. */
+  private readonly loaded = readSettings(this.storage, hostNow(this.globals));
+  private readonly stored = signal<StoredSettings>(this.loaded.settings);
   private readonly saveErrorSignal = signal<string | null>(null);
 
   /** This device is a phone, as its browser says: the uploads' defaults follow it (T3.3). */
@@ -307,6 +323,14 @@ export class SettingsService {
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
+  constructor() {
+    if (this.loaded.migrated) {
+      // The cube entries stored before T3.4 keep the time they got now: read again later, they must
+      // not look newer than the copies on the account's other devices.
+      this.saveErrorSignal.set(writeSettings(this.storage, this.stored()));
+    }
+  }
+
   /** Sets the host label; an empty one restores the default. */
   setHostLabel(label: string): void {
     const trimmed = label.trim();
@@ -324,8 +348,9 @@ export class SettingsService {
 
   /**
    * Stores `mac` for the cube called `name` (replacing an entry of that name, ignoring case, and
-   * the entry called `replacing`, when one is being edited). Refuses an empty name or a text that
-   * is not a MAC address.
+   * the entry called `replacing`, when one is being edited), changed now: later than the entry it
+   * replaces, even when that one came from a device whose clock is ahead. Refuses an empty name or
+   * a text that is not a MAC address.
    */
   saveCubeMac(name: string, mac: string, replacing?: string): CubeMacResult {
     const trimmed = name.trim();
@@ -339,11 +364,22 @@ export class SettingsService {
     if (normalized === null) {
       return { ok: false, error: macAddressProblem(mac) };
     }
-    const entry: CubeMac = { name: trimmed, mac: normalized };
     const gone = new Set([trimmed.toLowerCase(), replacing?.trim().toLowerCase()]);
+    const replaced = this.stored().cubeMacs.filter((e) => gone.has(e.name.toLowerCase()));
+    const updatedMs = Math.max(hostNow(this.globals), ...replaced.map((e) => e.updatedMs + 1));
+    const entry: CubeMac = { name: trimmed, mac: normalized, updatedMs };
     const others = this.stored().cubeMacs.filter((e) => !gone.has(e.name.toLowerCase()));
     this.update({ cubeMacs: sortByName([...others, entry]) });
     return { ok: true, entry };
+  }
+
+  /**
+   * Sets the cube list as a merge with the account's left it (T3.4, CubeSyncService): every entry
+   * with its own `updatedMs`, the account's copies among them. The user's changes go through
+   * saveCubeMac and removeCubeMac.
+   */
+  setCubeMacs(entries: readonly CubeMac[]): void {
+    this.update({ cubeMacs: readCubeMacs(entries, 0).entries });
   }
 
   /** Forgets the MAC address of the cube called `name`. */
@@ -519,16 +555,23 @@ function storageOf(globals: BrowserGlobals): Storage | null {
   }
 }
 
-function readSettings(storage: Storage | null): StoredSettings {
+/**
+ * The settings stored, each field read on its own; `migrated` when cube entries stored before T3.4,
+ * without `updatedMs`, got `nowMs`, which must then be written back.
+ */
+function readSettings(
+  storage: Storage | null,
+  nowMs: number,
+): { settings: StoredSettings; migrated: boolean } {
   let parsed: unknown;
   try {
     const text = storage?.getItem(SETTINGS_STORAGE_KEY) ?? null;
     if (text === null) {
-      return DEFAULTS;
+      return { settings: DEFAULTS, migrated: false };
     }
     parsed = JSON.parse(text);
   } catch {
-    return DEFAULTS;
+    return { settings: DEFAULTS, migrated: false };
   }
   const hostLabel = member(parsed, 'hostLabel');
   const demoSpeed = member(parsed, 'demoSpeed');
@@ -547,12 +590,13 @@ function readSettings(storage: Storage | null): StoredSettings {
   const uploadSessions = member(parsed, 'uploadSessions');
   const wifiOnly = member(parsed, 'wifiOnly');
   const keepLocalCopies = member(parsed, 'keepLocalCopies');
-  return {
+  const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
+  const settings: StoredSettings = {
     hostLabel:
       typeof hostLabel === 'string' && hostLabel.trim() !== ''
         ? hostLabel.trim()
         : DEFAULTS.hostLabel,
-    cubeMacs: readCubeMacs(member(parsed, 'cubeMacs')),
+    cubeMacs: cubeMacs.entries,
     demoSpeed:
       typeof demoSpeed === 'number' && isDemoSpeed(demoSpeed) ? demoSpeed : DEFAULTS.demoSpeed,
     inspection: typeof inspection === 'boolean' ? inspection : DEFAULTS.inspection,
@@ -595,6 +639,7 @@ function readSettings(storage: Storage | null): StoredSettings {
     keepLocalCopies:
       typeof keepLocalCopies === 'boolean' ? keepLocalCopies : DEFAULTS.keepLocalCopies,
   };
+  return { settings, migrated: cubeMacs.migrated };
 }
 
 /** The entries of a stored list that `read` accepts; anything else is dropped. */
@@ -678,21 +723,33 @@ function readCameraFraming(item: unknown): CameraFramingEntry | null {
   return { camera, width, height, rect: { x, y, w, h } };
 }
 
-/** The valid entries of a stored list, normalized; anything else is dropped. */
-function readCubeMacs(value: unknown): CubeMac[] {
+/**
+ * The valid entries of a stored list, normalized, one per name ignoring case, sorted by name;
+ * anything else is dropped. An entry without a valid `updatedMs` (stored before T3.4) gets `nowMs`,
+ * and `migrated` says that one did.
+ */
+function readCubeMacs(value: unknown, nowMs: number): { entries: CubeMac[]; migrated: boolean } {
   if (!Array.isArray(value)) {
-    return [];
+    return { entries: [], migrated: false };
   }
   const byName = new Map<string, CubeMac>();
+  let migrated = false;
   for (const item of value as unknown[]) {
     const name = member(item, 'name');
     const mac = member(item, 'mac');
     const normalized = typeof mac === 'string' ? normalizeMac(mac) : null;
     if (typeof name === 'string' && name.trim() !== '' && normalized !== null) {
-      byName.set(name.trim().toLowerCase(), { name: name.trim(), mac: normalized });
+      const stored = member(item, 'updatedMs');
+      const known = typeof stored === 'number' && Number.isFinite(stored) && stored >= 0;
+      migrated ||= !known;
+      byName.set(name.trim().toLowerCase(), {
+        name: name.trim(),
+        mac: normalized,
+        updatedMs: known ? stored : nowMs,
+      });
     }
   }
-  return sortByName(Array.from(byName.values()));
+  return { entries: sortByName(Array.from(byName.values())), migrated };
 }
 
 /** Writes the settings; returns why that failed, or null. */
@@ -701,7 +758,10 @@ function writeSettings(storage: Storage | null, settings: StoredSettings): strin
     return 'This browser does not let cubetrace store its settings: they last until the page closes.';
   }
   try {
-    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ version: 1, ...settings }));
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ version: SETTINGS_VERSION, ...settings }),
+    );
     return null;
   } catch (error: unknown) {
     return `The settings could not be saved (${errorMessage(error)}): they last until the page closes.`;

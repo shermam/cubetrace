@@ -5,6 +5,7 @@ import {
   attemptDocumentId,
   type CloudAttempt,
   type CloudAttemptFields,
+  type CloudCube,
   type CloudSession,
   type CloudUpload,
   type UserRecord,
@@ -360,6 +361,68 @@ export class FakeAccountBackend implements AccountBackend {
     for (const send of waiting) {
       send();
     }
+  }
+
+  // ---- The cubes (T3.4): users/{uid}/cubes/{name} ----
+
+  /**
+   * users/{uid}/cubes, by uid, then by document name: the documents as written (and as a test seeded
+   * them). Two backends given the same map stand for two devices of one account.
+   */
+  cubes = new Map<string, Map<string, CloudCube>>();
+  /** The cubes' writes, in order: `users/<uid>/cubes/<name>`, `delete users/<uid>/cubes/<name>`. */
+  readonly cubeWrites: string[] = [];
+  /** Set: the cubes' writes are refused with it, as the rules refuse a document, applying nothing. */
+  cubeError: Error | null = null;
+
+  listCubes(uid: string): Promise<CloudListing> {
+    this.reads.push(`cubes ${uid}`);
+    return this.read(() =>
+      [...(this.cubes.get(uid) ?? new Map<string, CloudCube>())].map(([name, cube]) =>
+        this.document(name, `users/${uid}/cubes/${name}`, cube),
+      ),
+    );
+  }
+
+  saveCube(uid: string, cube: CloudCube): Promise<void> {
+    return this.cubeWrite(`users/${uid}/cubes/${cube.name}`, () => {
+      let cubes = this.cubes.get(uid);
+      if (cubes === undefined) {
+        cubes = new Map();
+        this.cubes.set(uid, cubes);
+      }
+      cubes.set(cube.name, structuredClone(cube));
+    });
+  }
+
+  deleteCube(uid: string, name: string): Promise<void> {
+    return this.cubeWrite(`delete users/${uid}/cubes/${name}`, () => {
+      this.cubes.get(uid)?.delete(name);
+    });
+  }
+
+  /** A write of the cubes, as `write` makes one of the index, refused with `cubeError` alone. */
+  private cubeWrite(what: string, apply: () => void): Promise<void> {
+    const refused = this.cubeError;
+    if (refused === null) {
+      this.cubeWrites.push(what);
+      this.markUnsent(what.replace(/^delete /, ''));
+      apply();
+    }
+    return new Promise<void>((resolve, reject) => {
+      const send = (): void => {
+        if (refused === null) {
+          resolve();
+        } else {
+          reject(refused);
+        }
+      };
+      if (this.online) {
+        queueMicrotask(send);
+      } else {
+        this.waiting.push(send);
+      }
+    });
   }
 
   /** The session's document in the index, or undefined. */
