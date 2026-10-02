@@ -1340,6 +1340,7 @@ second key. Phase 3 starts after T2.4, because it changes the same `SessionServi
 | T3.6 | `web`: the app installed on Android signs in with the popup; the redirect flow removed (issue #50) | T3.0 | ✅ #51 (2026-10-02; confirmed by the owner on the ThinkPhone the same day: the installed app signs in, issue #50 closed) |
 | T3.7 | `gan`, `core`, `storage`, `upload`, `functions`, `web`: the cube's whole record — the gyroscope stream in a `gyro.json` per attempt, each move's counter and packet flag, a resync log, the battery readings and the production date, and the app's version and commit in every file it writes (found by the owner in the first downloads) | T3.5 | ⬜ |
 | T3.8 | `web`: a 3D cube in the clip viewer that follows the video: its orientation from `gyro.json`, its turns from the moves, the camera's lag applied; no live 3D cube on the timer page (the owner's decision: the solver watches the real cube, and WebGL would compete with the capture) | T3.7 | ⬜ |
+| T3.9 | `web`, `core`, `firebase`, `scripts`: diagnostics events in the account (`users/{uid}/events`, create-only by the owner, nothing while signed out): evidence for the manual rounds' items without the owner writing them up, a Settings switch, and a report script the coordinator runs with the service-account key to tick the rounds' checklists | T3.1 | ⬜ (next after T3.7, before T3.8: the owner's time) |
 
 Waves: T3.0 → {T3.1, T3.2, T3.4} → T3.3 → T3.5.
 

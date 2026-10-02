@@ -149,7 +149,7 @@ adds items; the owner ticks them when done (date and any detail that others need
   Fill in its table, attach to one issue the exports, the bucket's listing, the console lines and
   the screenshots it lists, write its numbers into `docs/DEVICES.md` ("Manual round 3"), and open an
   issue for every failure.
-- [ ] **The `v0.3.0` release**, after round 3, from the GitHub UI (the coordinator's session cannot
+- [x] 2026-10-02 — **The `v0.3.0` release** created by the owner (round 3's sign-in question settled by T3.6, issue #50). (Was:) after round 3, from the GitHub UI (the coordinator's session cannot
   push tags): Releases → Draft a new release → Choose a tag: type `v0.3.0` and choose "Create new
   tag on publish", target `main` (after T3.6 merges: the installed app's sign-in, issue #50), title
   `0.3.0`, the notes from the 0.3.0 section of `docs/CHANGELOG.md` → Publish release. The `v0.2.0`
