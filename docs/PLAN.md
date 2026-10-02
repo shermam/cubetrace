@@ -1271,8 +1271,8 @@ second key. Phase 3 starts after T2.4, because it changes the same `SessionServi
 | T3.0 | `web`: Firebase in the app: config, Google sign-in, `users/{uid}`, Firestore rules with emulator tests, deploy workflow | T2.4 | ✅ #42 (rules deployed by the coordinator on 2026-10-01; the workflow waits for the `FIREBASE_SERVICE_ACCOUNT` secret) |
 | T3.1 | `web`: Firestore session index; the Sessions page merges local and cloud sessions; QA view | T3.0 | ✅ #45 |
 | T3.2 | `functions`: `signUpload` and `confirmUpload` with presigned URLs for R2 (S3 SigV4) or GCS by configuration, quotas, secrets, bucket CORS | T3.0 | ✅ #44 (deployed 2026-10-01: rules, functions, bucket `cubetrace-data`) |
-| T3.3 | `upload`: the upload queue: per attempt JSON and clips, resumable, retried, throttled, persistent; local clips deleted after confirmation by policy | T3.1, T3.2 | ⬜ |
-| T3.4 | `web`: cube MAC addresses synced per user (issue #21) | T3.0 | ⬜ |
+| T3.3 | `upload`: the upload queue: per attempt JSON and clips, resumable, retried, throttled, persistent; local clips deleted after confirmation by policy | T3.1, T3.2 | ✅ #46 |
+| T3.4 | `web`: cube MAC addresses synced per user (issue #21) | T3.0 | ✅ #47 |
 | T3.5 | e2e against the emulators, docs, `v0.3.0`, manual round 3 (two devices, one dataset, `rclone ls` on the training machine) | T3.3, T3.4 | ⬜ |
 
 Waves: T3.0 → {T3.1, T3.2, T3.4} → T3.3 → T3.5.
