@@ -7,8 +7,11 @@ import { HttpsError } from 'firebase-functions/https';
 export const JSON_TYPE = 'application/json';
 export const MP4_TYPE = 'video/mp4';
 
-/** At most this many files in one call: an attempt has 1 + 4 per camera, plus `session.json`. */
-export const MAX_FILES_PER_CALL = 32;
+/**
+ * At most this many files in one call: an attempt has 2 (`attempt.json` and `gyro.json`, T3.7) plus
+ * 4 per camera, plus `session.json`.
+ */
+export const MAX_FILES_PER_CALL = 33;
 
 /** At most this many characters in a file's name (a camera's label is a word or two). */
 export const MAX_PATH_LENGTH = 128;
@@ -23,6 +26,9 @@ const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 
 /** `session.json` is the session's, uploaded with one of its attempts; every other file is the attempt's. */
 export const SESSION_FILE = 'session.json';
+
+/** The attempt's gyroscope file (docs/DATA-MODEL.md §11, T3.7), JSON like its record. */
+export const GYRO_FILE = 'gyro.json';
 
 /** A file to upload, as `signUpload` receives it. */
 export interface FileToSign {
@@ -51,14 +57,14 @@ export interface ConfirmRequest extends AttemptRef {
 
 /**
  * The content type of the file named `path`, or null when the dataset has no such file:
- * `attempt.json`, `session.json` and `<camera>.<segment>.frames.json` are JSON,
+ * `attempt.json`, `session.json`, `gyro.json` and `<camera>.<segment>.frames.json` are JSON,
  * `<camera>.<segment>.mp4` is MP4.
  */
 export function contentTypeOf(path: string): string | null {
   if (path.length > MAX_PATH_LENGTH) {
     return null;
   }
-  if (path === 'attempt.json' || path === SESSION_FILE || FRAMES.test(path)) {
+  if (path === 'attempt.json' || path === SESSION_FILE || path === GYRO_FILE || FRAMES.test(path)) {
     return JSON_TYPE;
   }
   return CLIP.test(path) ? MP4_TYPE : null;
@@ -149,7 +155,7 @@ function parsePath(value: unknown, i: number): { path: string; contentType: stri
   if (typeof value !== 'string' || contentType === null) {
     refuse(
       `files[${String(i)}].path is not a file of the dataset (attempt.json, session.json, ` +
-        '<camera>.<segment>.mp4 or <camera>.<segment>.frames.json).',
+        'gyro.json, <camera>.<segment>.mp4 or <camera>.<segment>.frames.json).',
     );
   }
   return { path: value, contentType };

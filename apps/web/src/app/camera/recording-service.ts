@@ -31,6 +31,7 @@ import {
   type VideoSegment,
 } from '@cubetrace/core';
 
+import { APP_BUILD } from '../../environments/version';
 import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { STORAGE_STOP_PERCENT, StorageService } from '../device/storage-service';
@@ -680,6 +681,8 @@ export class RecordingService {
         camera: recorded.entry.label,
         segment,
         fpsNominal,
+        // The frames file names the build that wrote it (T3.7).
+        app: APP_BUILD,
       });
       clip = { ...saved.clip, crop: this.cropNow(recorded) };
       report = saved.report;

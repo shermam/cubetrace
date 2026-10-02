@@ -47,6 +47,15 @@ const ATTEMPTS = EXPORTS.flatMap(({ file, cube, attempts }) =>
   attempts.map((attempt) => ({ at: `${file} #${String(attempt.index)}`, cube, attempt })),
 );
 
+/** `record` without the fields `keys` (the ones T3.7 added, which the files written before lack). */
+function without<T extends object>(record: T, ...keys: (keyof T)[]): Partial<T> {
+  const copy: Partial<T> = { ...record };
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
+  return copy;
+}
+
 /** The fit of `moves`, every one of them a sample. */
 function clockOf(moves: AttemptRecord['moves']): CubeClockFit {
   const fit = new CubeClockFit();
@@ -214,8 +223,17 @@ describe('the cube clock of the real-hardware exports (fixtures/hardware)', () =
       expect(record.result.timeMs, at).toBe(attempt.result.timeMs);
       expect(record.result.movesQtm, at).toBe(attempt.result.movesQtm);
       // Everything else as recorded on the day, too: events, phases, the whole result. The clips
-      // of a schema-2 export are the camera's, not the machine's.
-      expect({ ...record, clock: null, video: [] }, at).toEqual({
+      // of a schema-2 export are the camera's, not the machine's; the moves' counters and packet
+      // flags (T3.7) were not kept on the day, so the replay's are left out.
+      expect(
+        {
+          ...record,
+          moves: record.moves.map((move) => without(move, 'serial', 'packetLast')),
+          clock: null,
+          video: [],
+        },
+        at,
+      ).toEqual({
         ...attempt,
         clock: null,
         video: [],

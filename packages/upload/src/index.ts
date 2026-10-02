@@ -8,6 +8,7 @@ export type { AttemptFile, UploadFileKind } from './files';
 export {
   ATTEMPT_JSON,
   CONTENT_TYPES,
+  GYRO_JSON,
   SESSION_JSON,
   attemptText,
   attemptUploadFiles,

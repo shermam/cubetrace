@@ -1609,6 +1609,58 @@ Google Identity Services giving an ID token to `signInWithCredential`, without F
 all, which needs the app's origin among the OAuth client's authorized JavaScript origins in the
 Google Cloud console.
 
+### T3.7 — the cube's whole record: `gyro.json` per attempt, move counters, resyncs, battery, the app's build in every file
+
+The owner downloaded an attempt's files and found no gyroscope data, and no app version or commit
+in them: the driver decoded the cube's gyro packets and the app used them for the pickup event
+only, and `attempt.json` and the frames files named no build, although a session can outlive an
+update. Contract: everything the cube provides is kept now, to be trimmed later if useless, and
+every file says which build wrote it, so that the data of a buggy or an older version can be
+excluded or repaired later. (1) `gyro.json`, one per attempt, next to `attempt.json` (schema 1:
+`t0HostMs`, `dtMs` in the frames files' convention, `q` flat to 5 decimals, `v` the Gen2 velocity's
+raw integers or null, `truncatedStart`), the window from 2 s before `scrambleStart` to 1 s after the
+end, from a ring buffer of the connection's gyro events in typed arrays sized by time (the last 10
+minutes), written once per attempt when the record is written after its end margin, with or without
+a camera; no file for a cube without a gyro or an attempt without samples; the pickup detection as it
+was; `CubeGyroEvent` gains `v`. (2) `attempt.json` (schema 2, the new fields optional): `app`,
+`gyro` (the file's summary or null), `resyncs` (the states adopted after moves went unseen), each
+move's `serial` and `packetLast`; the frames files gain `app`. (3) `session.json`:
+`cube.productDate`, `battery` (every report, consecutive equal levels coalesced). (4) The cloud: the
+index copies the new fields; the rules, the cloud schemas and `cloud.ts` follow. (5) The upload:
+`gyro.json` the attempt's sixth file, in the functions' allow-list, counted by the quota, kept on the
+device when the clips go; the clip viewer's Download includes it; the QA view counts the attempts
+with one and says their median rate. (6) The fake cube gains a gyroscope option for the e2e suite
+and the demo. (7) The docs. (8) Nothing on the per-event path allocates or stringifies. (9) No
+version bump, no workflow change, no new dependency.
+
+**Outcome (2026-10-02, PR #52).** As contracted, with these choices. The ring buffer
+(`GyroBuffer`, `packages/core/src/gyro.ts`) is the page's rather than a connection's: the host
+clock runs on across the cube's reconnections, so an attempt that spans one keeps its samples from
+before it (a gap in `dtMs`), and nothing of another cube can reach a window, since a different cube
+starts a new session seconds later; its capacity is 10 minutes at 100 Hz (60,000 samples, 1.6 MB of
+typed arrays), evicted by time as well, so a slower cube keeps 10 minutes too. The file is written
+by `SessionService` 1 s + 250 ms after the end (`GYRO_TAIL_MS` + `GYRO_SETTLE_MS`, the latter the
+time the recording gives the encoder), through a `write` on `ATTEMPT_FILES` over the storage
+package's new `writeAttemptFile` (one step, as the records), then `attachGyro` saves the record
+with `gyro`; `ClipsInFlight` holds the attempt for the upload meanwhile, so the record goes once;
+a failure is noted (`gyro failed: attempt <i>: …`) and the record keeps `gyro` null. A window older
+than the buffer begins at its oldest sample with `truncatedStart` (the first attempt of a page whose
+cube connected a moment before its scramble). `v` is null when no sample of the window has a
+velocity (a Gen3 cube has no gyro at all; the Gen2 and Gen4 cubes always send one). `resyncs[].state`
+is the attempt's state when the report came, during which the moves went unseen. The battery event
+gained its host time; a session begins with the connection's latest report, and the report that
+arrives right after the hardware event that began a session saves it once more. The frames file's
+`app` travels with the clip's request (`SaveClipParams.app`) through the capture worker to the clip
+worker, so the muxer and its tests are unchanged. The rules check the new fields' shape where a
+document has them (the catch-up writes older records without them). The e2e: `?gyro=1` gives the
+demo cube a gyroscope (a 30°/s turn about its white axis while a replay turns, at 50 Hz, velocity
+`[0, 0, 2]`); one new recording test checks the file's span, the record, the download of six files and
+the export, with the camera off and on; the cloud e2e now records with the gyro on and sees the sixth
+file reach the sink (seven signatures with `session.json`). Size: about 46 bytes a sample, 92 KiB for
+a 20 s solve at 50 Hz (2,049 samples over a 41 s window) and 183 KiB at 100 Hz. `main` is unchanged
+in size (264.63 kB raw initial). Left for the owner: the gyro rate of each cube from the first capture
+(`docs/DEVICES.md`), and the item of `docs/MANUAL-TESTS.md` "After T3.7".
+
 ## Phases 4 and 5
 
 Outlines only, written into boards when phase 3 ends: **4. Remote cameras** — WebRTC pairing by

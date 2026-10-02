@@ -2,10 +2,13 @@
 // them, with the fields of phase 2 filled as the capture tasks will fill them, and the same records
 // as schema version 1 wrote them. Not exported by the package.
 import type {
+  AppBuild,
   AttemptRecord,
   CameraClock,
   CameraInfo,
   FramesJson,
+  GyroJson,
+  GyroSummary,
   MicrophoneInfo,
   SessionRecord,
   VideoClip,
@@ -15,16 +18,28 @@ import { AttemptMachine, createSession, parseMoves } from './index';
 
 export const SESSION = '3f1c9a2e-5b7d-4c1e-9f3a-2b8d6e4c1a7f';
 
-/** An attempt on `R U F` whose moves are `moves`, 100 ms apart on the cube clock. */
+/** The build that writes the test records (T3.7). */
+export const APP: AppBuild = { version: '0.2.0', commit: 'abc1234' };
+
+/**
+ * An attempt on `R U F` whose moves are `moves`, 100 ms apart on the cube clock, each with the
+ * cube's counter from 1, that names the build.
+ */
 function attemptOf(moves: string, dnf: boolean): AttemptRecord {
   const machine = new AttemptMachine({
     session: SESSION,
     index: 7,
     scramble: 'R U F',
     scrambleShownMs: 1_790_000_000_000,
+    app: APP,
   });
   for (const [k, m] of parseMoves(moves).entries()) {
-    machine.onMove({ m, cubeMs: 5000 + 100 * k, hostMs: 1_790_000_001_000.25 + 100.7 * k });
+    machine.onMove({
+      m,
+      cubeMs: 5000 + 100 * k,
+      hostMs: 1_790_000_001_000.25 + 100.7 * k,
+      serial: k + 1,
+    });
   }
   if (dnf) {
     machine.markDnf(1_790_000_009_000);
@@ -68,16 +83,32 @@ export function clip(camera: string, segment: VideoSegment): VideoClip {
   };
 }
 
+/** The gyro file of an attempt as the session service writes it (T3.7), summed up. */
+export const GYRO: GyroSummary = {
+  file: 'gyro.json',
+  samples: 1234,
+  fromHostMs: 1_789_999_999_012.5,
+  toHostMs: 1_790_000_024_340.7,
+  rateHz: 48.7,
+  truncatedStart: false,
+};
+
 /**
  * The solved attempt with its two clips from the laptop's camera, the scramble's begun later than
- * asked (its start was older than the capture's buffer, T2.9).
+ * asked (its start was older than the capture's buffer, T2.9), its gyro file, and a resync during
+ * the solve (T3.7).
  */
 export function attemptWithVideo(): AttemptRecord {
+  const attempt = solvedAttempt();
   return {
-    ...solvedAttempt(),
+    ...attempt,
     video: [
       { ...clip('laptop', 'scramble'), truncatedStart: true },
       { ...clip('laptop', 'solve'), audio: null, crop: null },
+    ],
+    gyro: { ...GYRO },
+    resyncs: [
+      { hostMs: 1_790_000_001_450.5, facelets: attempt.scrambledFacelets, state: 'scrambling' },
     ],
   };
 }
@@ -87,8 +118,8 @@ export function sessionRecord(): SessionRecord {
     host: { label: 'laptop', userAgent: 'Mozilla/5.0', platform: 'Windows', isPhone: false },
     cube: { model: 'GAN 12 ui FreePlay', hardware: '1.2', firmware: '2.3.1', gyro: true },
     settings: { inspection15s: false, autoAdvance: true },
-    appVersion: '0.2.0',
-    commit: 'abc1234',
+    appVersion: APP.version,
+    commit: APP.commit,
     nowMs: 1_730_640_000_000,
     id: SESSION,
   });
@@ -135,17 +166,22 @@ export const CAMERA_CLOCK: CameraClock = {
 
 /**
  * The session with the laptop's camera and its clock, and a phone's rear camera that recorded
- * without a microphone.
+ * without a microphone; its cube says its production date and reported its battery twice (T3.7).
  */
 export function sessionWithCamera(): SessionRecord {
   const s = sessionRecord();
   return {
     ...s,
+    cube: { ...s.cube, productDate: '2025-03-14' },
     cameras: [
       CAMERA,
       { ...CAMERA, label: 'phone-rear', facing: 'environment', crop: null, microphone: null },
     ],
     clock: { ...s.clock, cameras: { laptop: CAMERA_CLOCK, 'phone-rear': { ...CAMERA_CLOCK } } },
+    battery: [
+      { hostMs: 1_730_640_000_100.5, level: 83 },
+      { hostMs: 1_730_640_600_100.5, level: 82 },
+    ],
   };
 }
 
@@ -162,19 +198,47 @@ export function framesJson(): FramesJson {
   };
 }
 
-/** `record` without the field `key`. */
-function without(record: object, key: string): Record<string, unknown> {
+/** The gyro file of a short attempt: four samples at 50 Hz, with velocities (T3.7). */
+export function gyroJson(): GyroJson {
+  return {
+    schema: 1,
+    session: SESSION,
+    index: 7,
+    app: { ...APP },
+    t0HostMs: 1_789_999_999_012.5,
+    dtMs: [0, 20.1, 19.9, 20],
+    q: [0, 0, 0, 1, 0, 0, 0.08716, 0.99619, 0, 0, 0.17365, 0.98481, 0, 0, 0.25882, 0.96593],
+    v: [0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 2],
+    truncatedStart: false,
+  };
+}
+
+/** `record` without the fields `keys`. */
+function without(record: object, ...keys: string[]): Record<string, unknown> {
   const copy: Record<string, unknown> = { ...record };
-  Reflect.deleteProperty(copy, key);
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
   return copy;
 }
 
-/** An attempt as schema version 1 wrote it: no `clock`, no clips. */
+/** An attempt as schema version 1 wrote it: no `clock`, no clips, none of T3.7's fields. */
 export function asVersion1Attempt(a: AttemptRecord): Record<string, unknown> {
-  return { ...without(a, 'clock'), schema: 1, video: [] };
+  return {
+    ...without(a, 'app', 'clock', 'gyro', 'resyncs'),
+    schema: 1,
+    moves: a.moves.map((move) => without(move, 'serial', 'packetLast')),
+    video: [],
+  };
 }
 
-/** A session as schema version 1 wrote it: no cameras. */
+/** A session as schema version 1 wrote it: no cameras, no battery, no production date. */
 export function asVersion1Session(s: SessionRecord): Record<string, unknown> {
-  return { ...s, schema: 1, cameras: [], clock: { cube: s.clock.cube, cameras: {} } };
+  return {
+    ...without(s, 'battery'),
+    schema: 1,
+    cube: without(s.cube, 'productDate'),
+    cameras: [],
+    clock: { cube: s.clock.cube, cameras: {} },
+  };
 }

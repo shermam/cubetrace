@@ -5,13 +5,16 @@ import { type Locator, type Page, expect } from '@playwright/test';
 
 /**
  * The Timer page with the demo cube replaying demo solve `index` at `speed`
- * (`?demo=<index>&speed=<speed>`), and with a wrong turn after scramble move `misscramble` when it
- * is given (`&misscramble=<k>`).
+ * (`?demo=<index>&speed=<speed>`), with a wrong turn after scramble move `misscramble` when it is
+ * given (`&misscramble=<k>`), and with a gyroscope when `gyro` is set (`&gyro=1`, T3.7).
  */
-export function demoPath(index: number, speed: number, misscramble?: number): string {
+export function demoPath(index: number, speed: number, misscramble?: number, gyro = false): string {
   const query = new URLSearchParams({ demo: String(index), speed: String(speed) });
   if (misscramble !== undefined) {
     query.set('misscramble', String(misscramble));
+  }
+  if (gyro) {
+    query.set('gyro', '1');
   }
   return `/?${query.toString()}`;
 }

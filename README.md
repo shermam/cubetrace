@@ -166,13 +166,15 @@ deleted. Each clip badge, each row of the Sessions page and each session's page 
 clips take.
 
 **Where the files are.** In the site's origin private file system, next to the records:
-`sessions/<session id>/attempts/0001/` holds `attempt.json` and the attempt's four clip files. The
+`sessions/<session id>/attempts/0001/` holds `attempt.json`, the attempt's four clip files and, for a
+cube with a gyroscope, `gyro.json`, the gyroscope's samples over the attempt (T3.7). The
 Timer page lists the session's last 12 solves; "See all" under them, or a session's date on the
 Sessions page, opens the session's page, with all its attempts, its statistics (ao100 too) and the
 storage its clips take. Each list shows a badge on each attempt with clips ("2 clips, 1.6 MB"),
 which opens the clip viewer: the clip plays next to the attempt's moves by time, the one on screen
-highlighted (a click on a move goes to it), and Download saves the five files: both MP4s, both
-frames files and `attempt.json` (Chrome may ask once to allow multiple downloads).
+highlighted (a click on a move goes to it), and Download saves the attempt's files: both MP4s, both
+frames files, `gyro.json` when there is one, and `attempt.json` (Chrome may ask once to allow
+multiple downloads).
 
 ## Cloud
 
@@ -224,9 +226,9 @@ copies, on by default on a laptop and off on a phone, keeps the clips on the dev
 uploaded: off, an attempt's clips are deleted from it once all its files are uploaded (its
 `attempt.json` and frame times stay, and the clip says "in the cloud"). In any case, once the
 browser's storage is 70% full, the oldest uploaded clips are deleted until it is under 60%. Each
-account may have 6 GB and 1,200 files signed per UTC day, every signature counted: at most 240 attempts
-with their clips (five files each); past it, the uploads wait for the next UTC day, and the panel
-says until when.
+account may have 6 GB and 1,200 files signed per UTC day, every signature counted: at most 200 attempts
+with their clips and gyro files (six files each: `attempt.json`, two MP4s, two frames files and
+`gyro.json`); past it, the uploads wait for the next UTC day, and the panel says until when.
 
 **Whose cloud.** The account, the index and the bucket are the owner's: the Firebase project
 `cubetrace-cacd9` (Authentication with Google, Firestore in `nam5`, the Cloud Functions in

@@ -112,10 +112,45 @@ service cloud.firestore {
     // check the fields that the queries, the other rules and the readers rely on: the schema version,
     // the document's place (a session's id, an attempt's session and index, as its path has them:
     // `0001` is index 1), that an attempt's moves stay on the device, and the owner, which ownsNew and
-    // keepsOwner hold to the writer's uid.
+    // keepsOwner hold to the writer's uid; and the shape of the fields of T3.7 where a document has
+    // them (the records written before have none): a session's battery reports and its cube's
+    // production date, an attempt's build, its gyro file's summary and its resyncs.
+    function validApp(app) {
+      return app is map
+        && app.keys().hasOnly(['version', 'commit'])
+        && app.keys().hasAll(['version', 'commit'])
+        && app.version is string
+        && app.commit is string;
+    }
+
+    function gyroFields() {
+      return ['file', 'samples', 'fromHostMs', 'toHostMs', 'rateHz', 'truncatedStart'];
+    }
+
+    function validGyro(gyro) {
+      return gyro is map
+        && gyro.keys().hasOnly(gyroFields())
+        && gyro.keys().hasAll(gyroFields())
+        && gyro.file == 'gyro.json'
+        && gyro.samples is int
+        && gyro.samples >= 1
+        && gyro.fromHostMs is number
+        && gyro.toHostMs is number
+        && gyro.rateHz is number
+        && gyro.rateHz >= 0
+        && gyro.truncatedStart is bool;
+    }
+
+    function validCubeInfo(cube) {
+      return cube is map
+        && (!('productDate' in cube) || cube.productDate == null || cube.productDate is string);
+    }
+
     function validSession(data, sessionId) {
       return data.schema is int
-        && data.id == sessionId;
+        && data.id == sessionId
+        && (!('cube' in data) || validCubeInfo(data.cube))
+        && (!('battery' in data) || data.battery is list);
     }
 
     function validAttempt(data, sessionId, index) {
@@ -124,7 +159,10 @@ service cloud.firestore {
         && int(index) == data.index
         && !('moves' in data)
         && data.device is map
-        && data.upload is map;
+        && data.upload is map
+        && (!('app' in data) || validApp(data.app))
+        && (!('gyro' in data) || data.gyro == null || validGyro(data.gyro))
+        && (!('resyncs' in data) || data.resyncs is list);
     }
 
     // An attempt's `upload` is written by the app with the document, all pending; from then on only the

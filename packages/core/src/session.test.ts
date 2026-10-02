@@ -2,6 +2,7 @@ import { Ajv2020 } from 'ajv/dist/2020';
 import { describe, expect, it } from 'vitest';
 
 import type {
+  BatteryReading,
   AttemptRecord,
   CameraIdentity,
   CameraInfo,
@@ -19,6 +20,7 @@ import {
   parseMoves,
   sameCamera,
   summarize,
+  withBattery,
 } from './index';
 import { CAMERA_CLOCK } from './test-records';
 
@@ -33,6 +35,7 @@ const CUBE: CubeInfo = {
   hardware: '1.2',
   firmware: '2.3.1',
   gyro: true,
+  productDate: null,
 };
 const SETTINGS: SessionSettings = { inspection15s: false, autoAdvance: true };
 const ID = '3f1c9a2e-5b7d-4c1e-9f3a-2b8d6e4c1a7f';
@@ -87,10 +90,40 @@ describe('createSession', () => {
       settings: SETTINGS,
       notes: '',
       summary: { attempts: 0, solved: 0, dnf: 0 },
+      battery: [],
     });
     expectValid(s);
     // The empty clock fit is the one CubeClockFit reports without samples.
     expect(s.clock.cube).toEqual(new CubeClockFit().params);
+  });
+
+  it("keeps the cube's production date when it says one, and the battery reports so far (T3.7)", () => {
+    const { productDate, ...gen2 } = CUBE;
+    expect(productDate).toBeNull();
+    // A Gen2 cube's hardware event: no production date.
+    expect(create({ cube: gen2 }).cube).toEqual(CUBE);
+    const gen4 = create({
+      cube: { ...gen2, productDate: '2025-03-14' },
+      battery: [{ hostMs: 1_730_639_990_000, level: 83, extra: true } as BatteryReading],
+    });
+    expect(gen4.cube.productDate).toBe('2025-03-14');
+    expect(gen4.battery).toEqual([{ hostMs: 1_730_639_990_000, level: 83 }]);
+    expectValid(gen4);
+  });
+
+  it('coalesces consecutive equal battery levels (withBattery)', () => {
+    const first = withBattery([], { hostMs: 1000, level: 83 });
+    expect(first).toEqual([{ hostMs: 1000, level: 83 }]);
+    const same = withBattery(first, { hostMs: 2000, level: 83 });
+    expect(same).toEqual(first);
+    expect(same).not.toBe(first);
+    const lower = withBattery(same, { hostMs: 3000, level: 82 });
+    expect(lower).toEqual([
+      { hostMs: 1000, level: 83 },
+      { hostMs: 3000, level: 82 },
+    ]);
+    // Back up after a charge: a new entry, since the last one differs.
+    expect(withBattery(lower, { hostMs: 4000, level: 83 })).toHaveLength(3);
   });
 
   it('draws a new lowercase UUID v4 with crypto.randomUUID by default', () => {

@@ -9,20 +9,22 @@ import { parseQueueState } from './state';
 import { FakeUploadHttp } from './testing';
 import {
   A,
-  B,
-  DEMO,
-  FRAMES_BYTES,
-  KEEP,
-  UID,
   attempt,
+  B,
   clip,
+  DEMO,
   device,
   fileText,
   flush,
+  FRAMES_BYTES,
+  GYRO,
+  GYRO_BYTES,
+  KEEP,
   queueOf,
   record,
   session,
   type Device,
+  UID,
 } from './test-device';
 
 /** The bucket's key of `path` of attempt `index` of session `s`. */
@@ -891,6 +893,42 @@ describe('UploadQueue', () => {
     queue.setPolicy(KEEP);
     await flush();
     expect(queue.view().counts.done).toBe(1);
+    await queue.stop();
+  });
+
+  it("uploads an attempt's gyro file as its sixth file, after the clips, and keeps it on the device with the frames files when the clips go (T3.7)", async () => {
+    const d = device();
+    const a1 = { ...attempt(A, 1, [clip('scramble', 1000), clip('solve', 2000)]), gyro: GYRO };
+    await record(d, session(A, 1_790_000_000_000), [a1]);
+    const queue = queueOf(d, { wifiOnly: false, keepLocalCopies: false });
+    await queue.start();
+    await flush();
+    expect(d.cloud.calls.filter((call) => call.startsWith('sign'))).toEqual([
+      `sign ${A}/1 attempt.json,laptop.scramble.mp4,laptop.scramble.frames.json,laptop.solve.mp4,laptop.solve.frames.json,gyro.json,session.json`,
+    ]);
+    expect(d.bucket.objects.get(key(A, 'gyro.json'))).toMatchObject({
+      bytes: GYRO_BYTES,
+      contentType: 'application/json',
+    });
+    expect(d.cloud.uploads.get(`${A}/1`)?.state).toBe('done');
+    expect(Object.keys(d.cloud.uploads.get(`${A}/1`)?.files ?? {}).sort()).toEqual([
+      'attempt.json',
+      'gyro.json',
+      'laptop.scramble.frames.json',
+      'laptop.scramble.mp4',
+      'laptop.solve.frames.json',
+      'laptop.solve.mp4',
+      'session.json',
+    ]);
+    // The uploaded attempt.json names the gyro file, as the device's does.
+    expect(d.bucket.objects.get(key(A, 'attempt.json'))?.text).toBe(recordJson(datasetAttempt(a1)));
+    // The clips leave the device by policy; the gyro file stays, as the frames files do.
+    const folder = `sessions/${A}/attempts/0001`;
+    expect(d.removed).toEqual([`${A}/1 laptop.scramble.mp4,laptop.solve.mp4`]);
+    expect(fileText(d, `${folder}/laptop.solve.mp4`)).toBeNull();
+    expect(fileText(d, `${folder}/gyro.json`)).toBe('g'.repeat(GYRO_BYTES));
+    expect(fileText(d, `${folder}/laptop.solve.frames.json`)).toBe('f'.repeat(FRAMES_BYTES));
+    expect(queue.view().freed).toEqual({ clips: 2, bytes: 3000 });
     await queue.stop();
   });
 

@@ -272,19 +272,25 @@ describe('GanEventMapper', () => {
     expect(warn).toHaveBeenCalledTimes(4);
   });
 
-  it('maps gyro, battery, hardware and disconnect', () => {
+  it('maps gyro, battery, hardware and disconnect, with everything the driver decodes (T3.7)', () => {
     const mapper = new GanEventMapper(toHostMs, 'GAN12ui_1a2b');
+    // A Gen2 cube's gyro packet carries its angular velocity, 4-bit signed integers per axis.
     expect(
       mapper.map({
         type: 'GYRO',
         timestamp: 10,
         quaternion: { x: 0.1, y: 0.2, z: 0.3, w: 0.9 },
-        velocity: { x: 0, y: 0, z: 1 },
+        velocity: { x: 0, y: -7, z: 1 },
       }),
-    ).toEqual({ type: 'gyro', q: [0.1, 0.2, 0.3, 0.9], hostMs: ORIGIN + 10 });
+    ).toEqual({ type: 'gyro', q: [0.1, 0.2, 0.3, 0.9], v: [0, -7, 1], hostMs: ORIGIN + 10 });
+    // A cube that gives none: no velocity field.
+    expect(
+      mapper.map({ type: 'GYRO', timestamp: 11, quaternion: { x: 0, y: 0, z: 0, w: 1 } }),
+    ).toEqual({ type: 'gyro', q: [0, 0, 0, 1], hostMs: ORIGIN + 11 });
     expect(mapper.map({ type: 'BATTERY', timestamp: 10, batteryLevel: 87 })).toEqual({
       type: 'battery',
       level: 87,
+      hostMs: ORIGIN + 10,
     });
     expect(
       mapper.map({
@@ -309,6 +315,11 @@ describe('GanEventMapper', () => {
       firmware: '',
       gyro: true,
     });
+    // A Gen4 cube's hardware message says its production date; blank, it is as if unsaid.
+    const dated = mapper.map({ type: 'HARDWARE', timestamp: 10, productDate: '2025-03-14' });
+    expect(dated).toMatchObject({ type: 'hardware', productDate: '2025-03-14' });
+    const blank = mapper.map({ type: 'HARDWARE', timestamp: 10, productDate: ' \u0000' });
+    expect(blank !== null && 'productDate' in blank).toBe(false);
     expect(mapper.map({ type: 'DISCONNECT', timestamp: 10 })).toEqual({
       type: 'disconnected',
       reason: 'The cube closed the connection.',
@@ -456,7 +467,7 @@ describe('openGanConnection', () => {
     const { events } = record(conn);
     expect(events).toEqual([
       { type: 'hardware', model: 'GAN12uiF', hardware: '1.0', firmware: '2.1', gyro: false },
-      { type: 'battery', level: 64 },
+      { type: 'battery', level: 64, hostMs: ORIGIN + 2 },
     ]);
   });
 

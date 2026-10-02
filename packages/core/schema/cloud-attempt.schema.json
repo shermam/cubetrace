@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/cloud-attempt.schema.json",
   "title": "sessions/{id}/attempts/{index}",
-  "description": "An attempt's document in the session index in Firestore, schema version 2 (docs/DATA-MODEL.md §10): its attempt.json (attempt.schema.json, version 2) without moves, which stay on the device that recorded it and in the uploaded attempt.json, with owner, device and upload. {index} is the attempt's index zero-padded to 4 digits, as its folder.",
+  "description": "An attempt's document in the session index in Firestore, schema version 2 (docs/DATA-MODEL.md §10): its attempt.json (attempt.schema.json, version 2) without moves, which stay on the device that recorded it and in the uploaded attempt.json, with owner, device and upload; since T3.7 with the record's app, gyro and resyncs where the record has them. {index} is the attempt's index zero-padded to 4 digits, as its folder.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -34,6 +34,10 @@
       "description": "The attempt's 1-based position in its session.",
       "type": "integer",
       "minimum": 1
+    },
+    "app": {
+      "description": "The build that wrote the record (T3.7). Absent from the files written before.",
+      "$ref": "#/$defs/app"
     },
     "scramble": {
       "description": "Face turns separated by single spaces (docs/DATA-MODEL.md §2).",
@@ -174,6 +178,32 @@
         "$ref": "#/$defs/clip"
       }
     },
+    "gyro": {
+      "description": "The attempt's gyroscope file, gyro.json in its folder (docs/DATA-MODEL.md §11, T3.7): its name, its samples, the host times of its first and last samples, their rate, and whether it begins later than the window asked for; null without one (a cube without a gyroscope, no sample in the window). Absent from the files written before it existed, which read as null.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["file", "samples", "fromHostMs", "toHostMs", "rateHz", "truncatedStart"],
+      "properties": {
+        "file": { "description": "The file's name in the attempt's folder.", "const": "gyro.json" },
+        "samples": { "description": "The samples in the file.", "type": "integer", "minimum": 1 },
+        "fromHostMs": { "description": "The host time of the first sample.", "type": "number" },
+        "toHostMs": { "description": "The host time of the last sample.", "type": "number" },
+        "rateHz": {
+          "description": "The samples per second over the file, to one decimal; 0 with fewer than two samples.",
+          "type": "number",
+          "minimum": 0
+        },
+        "truncatedStart": {
+          "description": "The buffer did not reach back to the window's start (2 s before the first scramble turn): the file begins at its oldest sample.",
+          "type": "boolean"
+        }
+      }
+    },
+    "resyncs": {
+      "description": "The states the app adopted from the cube's reports after moves went unseen (T3.7), in order; empty when none. Absent from the files written before it existed, which read as empty.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/resync" }
+    },
     "owner": {
       "description": "The Firebase Authentication uid of the account that wrote the document, as its session's: the rules require it on both (firebase/firestore.rules).",
       "type": "string",
@@ -209,10 +239,10 @@
           "enum": ["pending", "uploading", "done", "failed"]
         },
         "files": {
-          "description": "The files of the attempt's folder (docs/DATA-MODEL.md §5), by name: attempt.json, and each clip's <camera>.<segment>.mp4 and <camera>.<segment>.frames.json; and session.json, the session's file, on the attempt it was uploaded with (T3.2).",
+          "description": "The files of the attempt's folder (docs/DATA-MODEL.md §5), by name: attempt.json, each clip's <camera>.<segment>.mp4 and <camera>.<segment>.frames.json, and gyro.json (T3.7); and session.json, the session's file, on the attempt it was uploaded with (T3.2).",
           "type": "object",
           "propertyNames": {
-            "pattern": "^(attempt\\.json|session\\.json|[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.(mp4|frames\\.json))$"
+            "pattern": "^(attempt\\.json|session\\.json|gyro\\.json|[a-z0-9]+(-[a-z0-9]+)*\\.(scramble|solve)\\.(mp4|frames\\.json))$"
           },
           "additionalProperties": {
             "$ref": "#/$defs/uploadFile"
@@ -226,6 +256,23 @@
       "description": "A cube state: 54 stickers in Kociemba order (docs/DATA-MODEL.md §2).",
       "type": "string",
       "pattern": "^[URFDLB]{54}$"
+    },
+    "resync": {
+      "description": "A state the cube reported that differed from the one the app knew, and which the app adopted (docs/DATA-MODEL.md §7, T3.7).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostMs", "facelets", "state"],
+      "properties": {
+        "hostMs": {
+          "description": "When the cube reported it, on the host clock.",
+          "type": "number"
+        },
+        "facelets": { "description": "The state adopted.", "$ref": "#/$defs/facelets" },
+        "state": {
+          "description": "The attempt's state when the report came, during which moves went unseen.",
+          "enum": ["scrambling", "armed", "solving"]
+        }
+      }
     },
     "phase": {
       "type": "object",
@@ -396,6 +443,16 @@
           "description": "False once the MP4 is no longer on the device that recorded it: deleted after its upload was confirmed, it is in the dataset's bucket (docs/DATA-MODEL.md §7, T3.3); its frames file stays. Absent while the file is there, which true means too, and in the uploaded attempt.json.",
           "type": "boolean"
         }
+      }
+    },
+    "app": {
+      "description": "The build of the app that wrote the file: the version of the root package.json and the short SHA of its commit (session.json has had it since version 1; the other files since T3.7, so those written before have none).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit"],
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "description": "Short SHA of the build's commit.", "type": "string" }
       }
     },
     "uploadFile": {

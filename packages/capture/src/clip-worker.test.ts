@@ -167,6 +167,18 @@ describe('ClipWorker', () => {
     ).toMatchObject({ camera: 'laptop', segment: 'solve', dtMs: sample.frames.dtMs });
   });
 
+  it("writes the build of the request into the clip's frames file (T3.7)", async () => {
+    const { worker, posted, root } = await clipWorker();
+    const app = { version: '0.4.0', commit: 'abc1234' };
+    await worker.handle(job(1, { app }));
+    expect(posted.at(-1)?.type).toBe('mux-and-write-done');
+    const frames = JSON.parse(
+      root.files().get(`${FOLDER}/laptop.solve.frames.json`)?.text ?? '',
+    ) as Record<string, unknown>;
+    expect(frames['app']).toEqual(app);
+    expect(Object.keys(frames).slice(0, 4)).toEqual(['schema', 'camera', 'segment', 'app']);
+  });
+
   it('saves a clip whose start was older than the buffer, from its first keyframe, and reports how late it begins', async () => {
     const { worker, posted, root } = await clipWorker();
     const sample = readMediaSample();

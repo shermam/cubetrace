@@ -9,7 +9,7 @@
 // access handles (`createSyncAccessHandle`, dedicated workers only); where there are none, a
 // writable stream does it. Plain TypeScript over the structural OPFS types of @cubetrace/storage
 // (types only: see clip-files.ts), so it runs in Node's tests on the in-memory fake.
-import type { FramesJson, VideoClip, VideoSegment } from '@cubetrace/core';
+import type { AppBuild, FramesJson, VideoClip, VideoSegment } from '@cubetrace/core';
 import type { OpfsDirectoryHandle, OpfsFileHandle } from '@cubetrace/storage';
 
 import { attemptPath, clipFiles, isTemporaryOf, temporaryName } from './clip-files';
@@ -27,13 +27,16 @@ export interface ClipDetails {
   readonly fpsNominal: number;
   /** The clip begins later than asked (its start was older than the buffer): the muxer's `info`. */
   readonly truncatedStart: boolean;
+  /** The build of the app, which the frames file names as `app` (T3.7); absent, it names none. */
+  readonly app?: AppBuild;
 }
 
 /**
  * Writes the clip of `camera` for `segment` into the folder of attempt `index` of session
  * `sessionId` (the folder is made if needed; the session's must exist) and returns its `video[]`
  * entry (docs/DATA-MODEL.md §7), with `crop` and `syncResidualMs` null for the caller to fill.
- * `frames.json` is written as compact JSON. A clip saved again replaces the files as a whole.
+ * `frames.json` is written as compact JSON, with the build that wrote it (`details.app`, T3.7) after
+ * the clip's names. A clip saved again replaces the files as a whole.
  *
  * Both files are first written under temporary names (`<name>.<random>.tmp`), then moved into
  * place, the frames file first, so that an MP4 is never without its frames file and neither is ever
@@ -73,7 +76,7 @@ export async function writeClip(
       `The nominal frame rate must be positive, got ${String(details.fpsNominal)}.`,
     );
   }
-  const json = new TextEncoder().encode(`${JSON.stringify(frames)}\n`);
+  const json = new TextEncoder().encode(`${JSON.stringify(withBuild(frames, details.app))}\n`);
   const dir = await attemptDir(root, path, true);
   if (dir === null) {
     throw new Error(`No session ${sessionId}: its folder is missing.`);
@@ -178,6 +181,18 @@ export async function deleteClipIf(
   }
   await deleteClip(root, sessionId, index, camera, segment);
   return true;
+}
+
+/**
+ * `frames` as the file holds it: with `app`, the build that wrote it, after `segment`, in the order
+ * of docs/DATA-MODEL.md §9 (T3.7); as it is without one.
+ */
+function withBuild(frames: FramesJson, app: AppBuild | undefined): FramesJson {
+  if (app === undefined) {
+    return frames;
+  }
+  const { schema, camera, segment, ...rest } = frames;
+  return { schema, camera, segment, app: { version: app.version, commit: app.commit }, ...rest };
 }
 
 /** Whether `error` is the `NotFoundError` DOMException the File System API rejects with. */

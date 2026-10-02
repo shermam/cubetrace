@@ -23,6 +23,7 @@ export {
   isTemporaryOf,
   recordJson,
   temporaryName,
+  writeAttemptFile,
   writeTextFile,
 } from './opfs-session-store';
 export type { FakeOpfsOptions } from './fake-opfs';

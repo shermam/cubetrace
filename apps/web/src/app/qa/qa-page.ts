@@ -8,7 +8,7 @@ import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
-import { qaSummary, type QaSummary } from './qa-summary';
+import { qaSummary, type QaCounts, type QaSummary } from './qa-summary';
 
 /** The newest sessions of the index whose attempts the QA view counts. */
 export const QA_SESSIONS = 50;
@@ -52,7 +52,8 @@ interface QaRead {
       <p class="muted note">
         The attempts in your cloud index, every device's, by day and device, from its
         {{ sessionsCounted }} newest sessions. Recorded: what the clips take. Uploaded and pending:
-        the files of the attempts (their records, clips and frame times), uploaded or not yet.
+        the files of the attempts (their records, clips, frame times and gyroscope files), uploaded
+        or not yet. Gyro: the attempts with a gyroscope file, and the median rate of those files.
       </p>
       <p data-testid="qa-sync">{{ syncText() }}</p>
       <div class="read">
@@ -82,6 +83,7 @@ interface QaRead {
                   <th scope="col">Recorded</th>
                   <th scope="col">Uploaded</th>
                   <th scope="col">Pending</th>
+                  <th scope="col">Gyro</th>
                 </tr>
               </thead>
               <tbody>
@@ -98,6 +100,7 @@ interface QaRead {
                     <td class="number" data-testid="qa-recorded">{{ bytes(row.recordedBytes) }}</td>
                     <td class="number" data-testid="qa-uploaded">{{ bytes(row.uploadedBytes) }}</td>
                     <td class="number" data-testid="qa-pending">{{ bytes(row.pendingBytes) }}</td>
+                    <td class="number" data-testid="qa-gyro">{{ gyro(row) }}</td>
                   </tr>
                 }
               </tbody>
@@ -117,6 +120,7 @@ interface QaRead {
                   <td class="number" data-testid="qa-pending">
                     {{ bytes(read.summary.total.pendingBytes) }}
                   </td>
+                  <td class="number" data-testid="qa-gyro">{{ gyro(read.summary.total) }}</td>
                 </tr>
               </tfoot>
             </table>
@@ -283,6 +287,13 @@ export class QaPage {
 
   protected bytes(count: number): string {
     return formatBytes(count);
+  }
+
+  /** The attempts with a gyro file, and the median rate of those files: "3 · 49.8 Hz", or "0". */
+  protected gyro(counts: QaCounts): string {
+    return counts.gyroRateHz === null
+      ? String(counts.gyro)
+      : `${String(counts.gyro)} · ${String(counts.gyroRateHz)} Hz`;
   }
 
   /** `2026-10-01` as the viewer writes a date. */

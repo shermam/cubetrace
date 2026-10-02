@@ -375,6 +375,41 @@ describe('CubeService', () => {
       expect(cubeMs.slice(3).map((ms) => ms - cubeMs[3])).toEqual([0, 90, 95]);
     });
 
+    it('gives the demo cube a gyroscope when asked (?gyro=1, T3.7), and not otherwise', async () => {
+      vi.useFakeTimers();
+      const { cube } = setup();
+      const [, solve] = parseDemoSolves(DEMO_FILE);
+      const gyros: number[] = [];
+      cube.events$.subscribe((e) => {
+        if (e.type === 'gyro') {
+          gyros.push(e.hostMs);
+        }
+      });
+      cube.connectDemo(solve, 10);
+      expect(cube.hardware()?.gyro).toBe(false);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(gyros).toEqual([]);
+
+      cube.connectDemo(solve, 10, null, true);
+      expect(cube.hardware()?.gyro).toBe(true);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(gyros.length).toBeGreaterThanOrEqual(20);
+      // Reconnect keeps it; the demo's address turns it on.
+      const before = gyros.length;
+      await cube.disconnect();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(gyros.length).toBe(before);
+      await cube.reconnect();
+      expect(cube.hardware()?.gyro).toBe(true);
+      await cube.disconnect();
+      await cube.startDemo({ demo: '2', speed: '20', gyro: '1' });
+      expect(cube.hardware()?.gyro).toBe(true);
+      await cube.disconnect();
+      await cube.startDemo({ demo: '2', speed: '20', gyro: '0' });
+      expect(cube.hardware()?.gyro).toBe(false);
+      await cube.disconnect();
+    });
+
     it('downloads the demo solves and plays the one the address asks for', async () => {
       const { cube } = setup();
 

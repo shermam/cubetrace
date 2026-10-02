@@ -134,7 +134,8 @@ function messageOf(err: unknown): string {
  * Maps the driver's events to {@link CubeEvent}, or to `null` for an event that must be dropped
  * (with a console warning when it is malformed). Stateful: a move that the driver recovered
  * without a cube timestamp (Gen3/Gen4 cubes only) keeps the cube clock where the previous move
- * left it, so `cubeMs` never goes back.
+ * left it, so `cubeMs` never goes back. Everything the driver decodes is passed on (T3.7): a gyro
+ * packet's angular velocity (`v`), a battery report's time, the hardware message's production date.
  */
 export class GanEventMapper {
   private lastCubeMs = 0;
@@ -161,18 +162,25 @@ export class GanEventMapper {
         return { type: 'facelets', facelets: e.facelets, hostMs: this.toHostMs(e.timestamp) };
       case 'GYRO': {
         const { x, y, z, w } = e.quaternion;
-        return { type: 'gyro', q: [x, y, z, w], hostMs: this.toHostMs(e.timestamp) };
+        const hostMs = this.toHostMs(e.timestamp);
+        const velocity = e.velocity;
+        return velocity === undefined
+          ? { type: 'gyro', q: [x, y, z, w], hostMs }
+          : { type: 'gyro', q: [x, y, z, w], v: [velocity.x, velocity.y, velocity.z], hostMs };
       }
       case 'BATTERY':
-        return { type: 'battery', level: e.batteryLevel };
-      case 'HARDWARE':
+        return { type: 'battery', level: e.batteryLevel, hostMs: this.toHostMs(e.timestamp) };
+      case 'HARDWARE': {
+        const productDate = printable(e.productDate);
         return {
           type: 'hardware',
           model: printable(e.hardwareName) || this.deviceName,
           hardware: printable(e.hardwareVersion),
           firmware: printable(e.softwareVersion),
           gyro: e.gyroSupported === true,
+          ...(productDate === '' ? {} : { productDate }),
         };
+      }
       case 'DISCONNECT':
         return { type: 'disconnected', reason: 'The cube closed the connection.' };
       default:

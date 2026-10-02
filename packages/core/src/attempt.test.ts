@@ -170,14 +170,53 @@ describe('AttemptMachine', () => {
     });
     // The clock fit of the six moves, each the newest of its packet (the default).
     expect(record.clock).toMatchObject({ samples: 6 });
+    // Each move with its counter (none here: the source gave none) and its packet flag (T3.7).
     expect(record.moves).toEqual([
-      { m: 'R', hostMs: 1100, cubeMs: 50, phase: 'scramble' },
-      { m: 'U', hostMs: 1200, cubeMs: 150, phase: 'scramble' },
-      { m: 'F', hostMs: 1300, cubeMs: 250, phase: 'scramble' },
-      { m: "F'", hostMs: 2000, cubeMs: 1050, phase: 'solve' },
-      { m: "U'", hostMs: 2100, cubeMs: 1150, phase: 'solve' },
-      { m: "R'", hostMs: 2250, cubeMs: 1300, phase: 'solve' },
+      { m: 'R', hostMs: 1100, cubeMs: 50, phase: 'scramble', serial: null, packetLast: true },
+      { m: 'U', hostMs: 1200, cubeMs: 150, phase: 'scramble', serial: null, packetLast: true },
+      { m: 'F', hostMs: 1300, cubeMs: 250, phase: 'scramble', serial: null, packetLast: true },
+      { m: "F'", hostMs: 2000, cubeMs: 1050, phase: 'solve', serial: null, packetLast: true },
+      { m: "U'", hostMs: 2100, cubeMs: 1150, phase: 'solve', serial: null, packetLast: true },
+      { m: "R'", hostMs: 2250, cubeMs: 1300, phase: 'solve', serial: null, packetLast: true },
     ]);
+    // No gyro file, no resync, and no build unless the caller names one (T3.7).
+    expect(record.gyro).toBeNull();
+    expect(record.resyncs).toEqual([]);
+    expect('app' in record).toBe(false);
+  });
+
+  it("keeps each move's counter and packet flag as the cube reported them, and names the build (T3.7)", () => {
+    const m = new AttemptMachine({
+      session: SESSION,
+      index: 2,
+      scramble: SCRAMBLE,
+      scrambleShownMs: 1000,
+      app: { version: '0.4.0', commit: 'abc1234' },
+    });
+    // Two moves in one Bluetooth packet (R recovered with U's arrival), then the rest on their own.
+    m.onMove({ m: parseMove('R'), cubeMs: 50, hostMs: 1200, serial: 254, packetLast: false });
+    m.onMove({ m: parseMove('U'), cubeMs: 150, hostMs: 1200, serial: 255, packetLast: true });
+    m.onMove({ m: parseMove('F'), cubeMs: 250, hostMs: 1300, serial: 0 });
+    feed(m, SOLUTION, 2000);
+    const record = validRecord(m);
+    expect(record.moves.map(({ m, serial, packetLast }) => [m, serial, packetLast])).toEqual([
+      ['R', 254, false],
+      ['U', 255, true],
+      ['F', 0, true],
+      ["F'", null, true],
+      ["U'", null, true],
+      ["R'", null, true],
+    ]);
+    expect(record.app).toEqual({ version: '0.4.0', commit: 'abc1234' });
+    // In the order of the schema: the build right after the index.
+    expect(Object.keys(record).slice(0, 5)).toEqual([
+      'schema',
+      'session',
+      'index',
+      'app',
+      'scramble',
+    ]);
+    expect(Object.keys(record).slice(-3)).toEqual(['video', 'gyro', 'resyncs']);
   });
 
   it('takes the phases from detectPhases on the solve moves in host time, from the first solve move', () => {
@@ -429,11 +468,29 @@ describe('AttemptMachine: desync and resync', () => {
     expect(m.facelets).toBe(scrambleTarget(SCRAMBLE));
     expect(m.events.scrambleDone).toBe(1450);
     feed(m, SOLUTION, 3000);
-    // The lost move was a scramble move: the solve's moves still replay.
+    // The lost move was a scramble move: the solve's moves still replay; the record keeps the
+    // state adopted, with the time of the report and the attempt's state then (T3.7).
     expect(validRecord(m)).toMatchObject({
       events: { scrambleDone: 1450, solveStart: 3000, solveEnd: 3200 },
       result: { status: 'solved', replayOk: true, scrambleCorrected: false, timeMs: 200 },
+      resyncs: [{ hostMs: 1450, facelets: scrambleTarget(SCRAMBLE), state: 'scrambling' }],
     });
+  });
+
+  it("logs every state adopted, in order, with the attempt's state then; none for a report that matches (T3.7)", () => {
+    const m = armed();
+    m.resync(m.facelets, 2050); // The same state: nothing adopted.
+    const started = applyMoves(scrambleTarget(SCRAMBLE), parseMoves("F'"));
+    m.resync(started, 2100); // Armed: the solve started unseen.
+    feed(m, "U'", 2200);
+    m.resync(SOLVED, 2400); // Solving: solved unseen.
+    expect(validRecord(m).resyncs).toEqual([
+      { hostMs: 2100, facelets: started, state: 'armed' },
+      { hostMs: 2400, facelets: SOLVED, state: 'solving' },
+    ]);
+    // Over: a report changes nothing and logs nothing.
+    m.resync(scrambleTarget(SCRAMBLE), 3000);
+    expect(validRecord(m).resyncs).toHaveLength(2);
   });
 
   it('while scrambling: an off-path state is a divergence with no undo; without a time, the last move', () => {

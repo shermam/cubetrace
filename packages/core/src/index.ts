@@ -51,6 +51,7 @@ export type {
   AttemptPhase,
   AttemptRecord,
   AttemptResult,
+  AttemptResync,
   AttemptState,
   CropRect,
   CubeMoveInput,
@@ -61,6 +62,8 @@ export type {
 } from './attempt';
 export { AttemptMachine } from './attempt';
 export type {
+  AppBuild,
+  BatteryReading,
   CameraClock,
   CameraIdentity,
   CameraInfo,
@@ -73,7 +76,7 @@ export type {
   SessionSettings,
   SessionSummary,
 } from './session';
-export { createSession, labelFor, sameCamera, summarize } from './session';
+export { createSession, labelFor, sameCamera, summarize, withBattery } from './session';
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './clock';
 export type { PhaseAverage } from './stats';
@@ -88,6 +91,7 @@ export {
   CLOUD_CUBE_SCHEMA,
   CLOUD_SESSION_SCHEMA,
   FRAMES_SCHEMA,
+  GYRO_SCHEMA,
   SESSION_SCHEMA,
   SESSION_SCHEMA_V1,
   USER_SCHEMA,
@@ -100,8 +104,22 @@ export {
   parseCloudAttempt,
   parseCloudCube,
   parseCloudSession,
+  parseGyro,
   parseSession,
 } from './records';
+// T3.7 — the cube's gyroscope stream: the ring buffer and the gyro file of an attempt
+export type { GyroJson, GyroSummary, GyroWindow } from './gyro';
+export {
+  GYRO_BUFFER_MS,
+  GYRO_BUFFER_RATE_HZ,
+  GYRO_FILE,
+  GYRO_LEAD_MS,
+  GYRO_TAIL_MS,
+  GyroBuffer,
+  gyroFile,
+  gyroIntervals,
+  gyroSummary,
+} from './gyro';
 // T3.0 — the account's record in Firestore
 export type { UserRecord, UserRecordInput } from './user';
 export { userRecord } from './user';

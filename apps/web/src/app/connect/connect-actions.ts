@@ -34,8 +34,9 @@ export class ConnectActions {
   }
 
   /**
-   * The demo cube: the solve, speed and mis-scramble of the address's `?demo=`, `?speed=` and
-   * `?misscramble=`, if any; else a random solve at the speed set in Settings.
+   * The demo cube: the solve, speed, mis-scramble and gyroscope of the address's `?demo=`,
+   * `?speed=`, `?misscramble=` and `?gyro=`, if any; else a random solve at the speed set in
+   * Settings, without a gyroscope.
    */
   demo(): void {
     const query = this.router.routerState.snapshot.root.queryParamMap;
@@ -43,6 +44,7 @@ export class ConnectActions {
       demo: query.get('demo'),
       speed: query.get('speed'),
       misscramble: query.get('misscramble'),
+      gyro: query.get('gyro'),
     });
   }
 

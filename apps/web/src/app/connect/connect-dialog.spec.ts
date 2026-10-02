@@ -385,7 +385,12 @@ describe('ConnectDialog', () => {
     button('Demo cube').click();
     await stable();
 
-    expect(startDemo).toHaveBeenCalledWith({ demo: '0', speed: '20', misscramble: '1' });
+    expect(startDemo).toHaveBeenCalledWith({
+      demo: '0',
+      speed: '20',
+      misscramble: '1',
+      gyro: null,
+    });
     await cube.disconnect();
   });
 });

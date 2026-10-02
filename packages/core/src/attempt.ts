@@ -10,8 +10,10 @@ import type { Face, Move } from './notation';
 import { formatMove, formatMoves, parseMoves, quarterTurns } from './notation';
 import type { PhaseRecord, TimedMove } from './phases';
 import { detectPhases } from './phases';
+import type { GyroSummary } from './gyro';
 import type { ScrambleProgress } from './scramble';
 import { ScrambleTracker, scrambleTarget } from './scramble';
+import type { AppBuild } from './session';
 import { UUID_V4 } from './session';
 
 /**
@@ -32,6 +34,8 @@ export interface CubeMoveInput {
    * measures (default true): only such moves are samples of the attempt's clock fit.
    */
   packetLast?: boolean;
+  /** The cube's move counter (0–255, wrapping), when the source has one (T3.7). */
+  serial?: number | null;
 }
 
 export interface AttemptOptions {
@@ -50,6 +54,8 @@ export interface AttemptOptions {
    * scramble is applied to a solved cube.
    */
   start?: Facelets;
+  /** The build of the app, which the record names as `app` (T3.7); absent, the record names none. */
+  app?: AppBuild;
 }
 
 /** The part of the attempt a move belongs to (docs/DATA-MODEL.md §3). */
@@ -62,6 +68,29 @@ export interface AttemptMove {
   hostMs: number;
   cubeMs: number;
   phase: MovePhase;
+  /**
+   * The cube's move counter, 0–255, wrapping (T3.7); null for a source without one. Absent from the
+   * files written before it existed.
+   */
+  serial?: number | null;
+  /**
+   * The move was the newest of its Bluetooth packet, the one whose arrival its `hostMs` measures
+   * (T3.7): the older moves of a packet share its time. Absent from the files written before.
+   */
+  packetLast?: boolean;
+}
+
+/**
+ * One entry of `resyncs` in attempt.json (T3.7): a state the cube reported that differed from the
+ * one the machine knew, and which the machine adopted ({@link AttemptMachine.resync}).
+ */
+export interface AttemptResync {
+  /** When the cube reported it, on the host clock. */
+  hostMs: number;
+  /** The state adopted. */
+  facelets: Facelets;
+  /** The attempt's state when the report came, during which moves went unseen. */
+  state: Extract<AttemptState, 'scrambling' | 'armed' | 'solving'>;
 }
 
 /** The events of docs/DATA-MODEL.md §3, in host ms; null when they did not happen. */
@@ -161,6 +190,8 @@ export interface FramesJson {
   schema: 2;
   camera: string;
   segment: VideoSegment;
+  /** The build of the app that wrote the file (T3.7); absent from the files written before. */
+  app?: AppBuild;
   /** The host time of the first frame, from the arrival fit. */
   t0HostMs: number;
   /**
@@ -185,6 +216,8 @@ export interface AttemptRecord {
   schema: 2;
   session: string;
   index: number;
+  /** The build of the app that wrote the record (T3.7); absent from the files written before. */
+  app?: AppBuild;
   scramble: string;
   /** The scramble's target, from solved: the state at `scrambleDone`, where the solve starts. */
   scrambledFacelets: Facelets;
@@ -203,6 +236,17 @@ export interface AttemptRecord {
   phases: AttemptPhase[];
   /** The video clips, one per camera and segment; empty without a camera. */
   video: VideoClip[];
+  /**
+   * The attempt's gyroscope file, `gyro.json` (T3.7, docs/DATA-MODEL.md §11); null without one (a
+   * cube without a gyroscope, no sample in the attempt's window). Absent from the files written
+   * before it existed, which read as null.
+   */
+  gyro: GyroSummary | null;
+  /**
+   * The states the machine adopted from the cube's reports after moves went unseen (T3.7), in
+   * order; empty when none. Absent from the files written before it existed, which read as empty.
+   */
+  resyncs: AttemptResync[];
 }
 
 /**
@@ -218,6 +262,7 @@ export class AttemptMachine {
   readonly #session: string;
   readonly #index: number;
   readonly #scramble: string;
+  readonly #app: AppBuild | undefined;
   readonly #crossFace: Face | undefined;
   readonly #tracker: ScrambleTracker;
   /** The scramble's target, where the solve starts. */
@@ -226,6 +271,8 @@ export class AttemptMachine {
   #facelets: Facelets = SOLVED;
   readonly #events: AttemptEvents;
   readonly #moves: AttemptMove[] = [];
+  /** The states adopted from the cube's reports after moves went unseen (T3.7). */
+  readonly #resyncs: AttemptResync[] = [];
   /** The solve's moves, in host time. */
   readonly #solveMoves: TimedMove[] = [];
   #scrambleCorrected = false;
@@ -254,6 +301,7 @@ export class AttemptMachine {
     this.#session = opts.session;
     this.#index = opts.index;
     this.#scramble = formatMoves(parseMoves(opts.scramble));
+    this.#app = opts.app === undefined ? undefined : { ...opts.app };
     this.#crossFace = opts.crossFace;
     this.#tracker = new ScrambleTracker(this.#scramble);
     this.#scrambled = scrambleTarget(this.#scramble);
@@ -353,7 +401,8 @@ export class AttemptMachine {
    * continues from it (`ScrambleTracker.setState`), and the attempt is armed if it is the target.
    * While armed, a state other than the target means the solve started unseen: the attempt is then
    * solving. While solving, the attempt is solved if the state is. The unseen moves are not
-   * recorded, so a solve that went through a resync does not replay (`replayOk` false).
+   * recorded, so a solve that went through a resync does not replay (`replayOk` false); the state
+   * adopted is, in the record's `resyncs` (T3.7), with the time and the attempt's state then.
    *
    * @param hostMs when the cube reported the state, used as the time of an event the adopted state
    *   completes (`scrambleDone`, `solveStart`, `solveEnd`); by default the last move's time.
@@ -364,6 +413,10 @@ export class AttemptMachine {
       return;
     }
     const at = hostMs ?? this.#moves.at(-1)?.hostMs ?? this.#events.scrambleShown;
+    const state = this.#state;
+    if (state === 'scrambling' || state === 'armed' || state === 'solving') {
+      this.#resyncs.push({ hostMs: at, facelets: reported, state });
+    }
     switch (this.#state) {
       case 'scrambling': {
         const progress = this.#tracker.setState(reported);
@@ -395,8 +448,8 @@ export class AttemptMachine {
 
   /**
    * attempt.json (docs/DATA-MODEL.md §7) of the attempt, which must be over (solved or DNF: call
-   * {@link markDnf} to end it otherwise); throws before that. `video` is empty: the caller adds the
-   * clips (phase 2).
+   * {@link markDnf} to end it otherwise); throws before that. `video` is empty and `gyro` null: the
+   * caller adds the clips (phase 2) and the gyro file (T3.7).
    */
   toRecord(): AttemptRecord {
     if (this.#state !== 'solved' && this.#state !== 'dnf') {
@@ -418,6 +471,7 @@ export class AttemptMachine {
       schema: 2,
       session: this.#session,
       index: this.#index,
+      ...(this.#app === undefined ? {} : { app: { ...this.#app } }),
       scramble: this.#scramble,
       scrambledFacelets: this.#scrambled,
       crossFace: report.crossFace,
@@ -437,12 +491,22 @@ export class AttemptMachine {
       },
       phases: report.phases.map(toAttemptPhase),
       video: [],
+      gyro: null,
+      resyncs: this.#resyncs.map((r) => ({ ...r })),
     };
   }
 
   #record(input: CubeMoveInput, phase: MovePhase): void {
-    this.#moves.push({ m: formatMove(input.m), hostMs: input.hostMs, cubeMs: input.cubeMs, phase });
-    this.#clock.addSample(input.cubeMs, input.hostMs, input.packetLast ?? true);
+    const packetLast = input.packetLast ?? true;
+    this.#moves.push({
+      m: formatMove(input.m),
+      hostMs: input.hostMs,
+      cubeMs: input.cubeMs,
+      phase,
+      serial: input.serial ?? null,
+      packetLast,
+    });
+    this.#clock.addSample(input.cubeMs, input.hostMs, packetLast);
   }
 
   /** After the tracker took a move or a state: a divergence is a correction; the target arms. */

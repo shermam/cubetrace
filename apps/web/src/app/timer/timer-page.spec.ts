@@ -208,7 +208,12 @@ describe('TimerPage', () => {
 
     await TestBed.inject(SessionService).whenReady();
     await settle();
-    expect(autoStartDemo).toHaveBeenCalledWith({ demo: '4', speed: '20', misscramble: '5' });
+    expect(autoStartDemo).toHaveBeenCalledWith({
+      demo: '4',
+      speed: '20',
+      misscramble: '5',
+      gyro: null,
+    });
   });
 
   it('answers Esc, Delete and N, but not while typing, with a modifier or with the dialog open', async () => {

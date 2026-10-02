@@ -457,6 +457,14 @@ describe('CaptureHandle', () => {
     await expect(first).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
     await expect(second).rejects.toThrow('Error: No session gone: its folder is missing.');
     await expect(third).rejects.toThrow('RangeError: Nothing is buffered yet.');
+
+    // The build goes with the request when the caller names one (T3.7), and not otherwise.
+    expect(worker.messages().at(-1)).not.toHaveProperty('app');
+    const app = { version: '0.4.0', commit: 'abc1234' };
+    const fourth = capture.saveClip({ ...PARAMS, app });
+    expect(worker.messages().at(-1)).toEqual({ type: 'mux-and-write', id: 4, ...PARAMS, app });
+    clipWorker.reply({ type: 'mux-and-write-done', id: 4, clip: A_CLIP, report: A_REPORT });
+    await expect(fourth).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
   });
 
   it('asks the clip worker to remove a clip and resolves with whether it did', async () => {

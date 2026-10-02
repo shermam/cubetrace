@@ -24,14 +24,19 @@ after its upload; a missing one means the file is there), and a camera in `sessi
 `microphone` (§6, T2.12; the readers take a missing one as null). Since T2.14 a camera's `label` is
 one per device within its session (§6), which the schema always allowed (`laptop-2`); in the files
 written before, two devices of one session could share a label, its entry then the last one's.
+T3.7 added, optional in the same way, the cube's whole record: in `attempt.json`, `app` (the build
+that wrote it), `gyro` (its gyroscope file, §11; read as null when missing), `resyncs` (the states
+adopted after moves went unseen; read as none) and each move's `serial` and `packetLast`; in
+`session.json`, `cube.productDate` (read as null) and `battery` (read as none); in the frames files,
+`app`; and a new file per attempt, `gyro.json` (§11), with a version of its own, 1.
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
-`attempt.v1.schema.json` for version 1, `user.schema.json` for the account's record in Firestore
-(§10), whose version 1 is its own, `cloud-session.schema.json` and `cloud-attempt.schema.json` for
-the documents of the session index in Firestore (§10), which have the version of the records they
-copy (2), and `cloud-cube.schema.json` for the account's cubes in Firestore (§10), whose version 1
-is its own.
+`attempt.v1.schema.json` for version 1, `gyro.schema.json` for the gyro files (§11), whose version 1
+is its own, `user.schema.json` for the account's record in Firestore (§10), whose version 1 is its
+own, `cloud-session.schema.json` and `cloud-attempt.schema.json` for the documents of the session
+index in Firestore (§10), which have the version of the records they copy (2), and
+`cloud-cube.schema.json` for the account's cubes in Firestore (§10), whose version 1 is its own.
 
 **Reading older records.** Files of version 1 are never rewritten to upgrade them. The readers,
 `parseSession` and `parseAttempt` in `packages/core/src/records.ts` (the app's session store
@@ -157,16 +162,21 @@ sessions/<sessionId>/
     ├── <camera>.scramble.mp4          phase 2
     ├── <camera>.scramble.frames.json
     ├── <camera>.solve.mp4
-    └── <camera>.solve.frames.json
+    ├── <camera>.solve.frames.json
+    └── gyro.json                      T3.7: the gyroscope samples of the attempt (§11)
 uploads.json                           phase 3: the upload queue's state (§10)
 ```
 
 `sessionId` is a UUID v4; `<camera>` is the camera's `label` (§6), one per device of the session:
 lowercase letters and digits in words joined by hyphens (`laptop`, `phone-front`, `laptop-2`), so
-that the file names split at their dots; `<segment>` is `scramble` or `solve`. A JSON file is
-written whole under a temporary name next to it, `<name>.<random>.tmp`, then moved over `<name>`
-in one step, so a file holds its previous content or the new one even when the page goes away
-mid-write; readers ignore such leftover `*.tmp` files and remove them.
+that the file names split at their dots; `<segment>` is `scramble` or `solve`. `gyro.json` is there
+for a cube with a gyroscope, when the attempt's window had a sample (§11), written a second after the
+attempt ends, as the solve clip is. A JSON file is written whole under a temporary name next to it,
+`<name>.<random>.tmp`, then moved over `<name>` in one step, so a file holds its previous content or
+the new one even when the page goes away mid-write; readers ignore such leftover `*.tmp` files and
+remove them. Every JSON file names the build that wrote it, `app` (the version and the commit of the
+app, §6): `session.json` since version 1, the others since T3.7, so that the files of a buggy or an
+older build can be told apart later, also within one session, which can outlive an update.
 
 ## 6. `session.json`
 
@@ -177,7 +187,8 @@ mid-write; readers ignore such leftover `*.tmp` files and remove them.
   "createdMs": 1730640000000.0,          // host clock at creation
   "app": {"version": "0.2.0", "commit": "abc1234"},
   "host": {"label": "office-mbp", "userAgent": "…", "platform": "macOS", "isPhone": false},
-  "cube": {"model": "GAN 12 ui FreePlay", "hardware": "…", "firmware": "…", "gyro": true},
+  "cube": {"model": "GAN 12 ui FreePlay", "hardware": "…", "firmware": "…", "gyro": true,
+           "productDate": null},        // T3.7: the production date, when the cube says it
   "cameras": [                            // empty without a camera
     {"label": "laptop", "local": true, "facing": "user", "deviceLabel": "FaceTime HD Camera",
      "settings": {"width": 1920, "height": 1080, "frameRate": 30, "…": "…"},
@@ -196,11 +207,20 @@ mid-write; readers ignore such leftover `*.tmp` files and remove them.
   "audio": true,
   "settings": {"inspection15s": false, "autoAdvance": true},
   "notes": "",
-  "summary": {"attempts": 0, "solved": 0, "dnf": 0}
+  "summary": {"attempts": 0, "solved": 0, "dnf": 0},
+  "battery": [{"hostMs": 1730640000100.5, "level": 83}]   // T3.7: the cube's battery reports
 }
 ```
 
-`id` is lowercase, as `crypto.randomUUID()` writes it. `clock.cube` is the least-squares fit of the
+`id` is lowercase, as `crypto.randomUUID()` writes it. `cube` is what the cube said in its hardware
+message: `productDate` (T3.7) is its production date as the message has it, which a Gen4 cube says
+and a Gen2 cube (the GAN 12 ui, the GAN 356 i3) does not, null then; absent from the files written
+before T3.7, which read as null. `battery` (T3.7) is every battery report of the cube over the
+session's connections, in order, each with the host time of the report and the level in percent,
+consecutive equal levels coalesced (a GAN cube reports its battery once per connection, when asked,
+and whenever the level changes); a session begins with the report of the connection it begins on,
+and the file is saved again with each new entry. Empty when the cube reported none; absent from the
+files written before T3.7, which read as empty. `clock.cube` is the least-squares fit of the
 host time on the cube time over the moves that were the newest of their Bluetooth packet (the older
 moves of a packet carry the packet's arrival time, so they are not samples): `residualP95Ms` is the
 95th percentile (nearest rank) of the absolute residuals of the last 2000 of them, `samples` their
@@ -300,6 +320,7 @@ camera's clock sync (phase 4); a local camera shares the host's clock and has 0 
   "schema": 2,
   "session": "3f1c…",
   "index": 17,
+  "app": {"version": "0.4.0", "commit": "abc1234"},   // T3.7: the build that wrote the record
   "scramble": "F2 U2 R B2 D' L B' L' B U2 L2 F2 U F2 U R2 D2 B2 U' L2 D'",
   "scrambledFacelets": "…54 chars…",
   "crossFace": "D",                      // null if DNF before cross
@@ -307,7 +328,8 @@ camera's clock sync (phase 4); a local camera shares the host's clock and has 0 
     "scrambleShown": 0, "scrambleStart": 0, "scrambleDone": 0, "pickup": null, "solveStart": 0, "solveEnd": 0
   },
   "moves": [
-    {"m": "U'", "hostMs": 1730640000123.4, "cubeMs": 9527, "phase": "scramble"}
+    {"m": "U'", "hostMs": 1730640000123.4, "cubeMs": 9527, "phase": "scramble",
+     "serial": 213, "packetLast": true}  // T3.7: the cube's move counter and the packet flag
   ],
   "clock": {"a": 1.00701, "b": 1730639990529.6, "residualP95Ms": 14.3, "samples": 112},
   "result": {
@@ -327,19 +349,31 @@ camera's clock sync (phase 4); a local camera shares the host's clock and has 0 
      "firstFrameHostMs": 1730640017211.9, "framesFile": "laptop.solve.frames.json",
      "syncResidualMs": 41.5, "truncatedStart": false}
                                          // "local": false once the MP4 left the device (T3.3)
+  ],
+  "gyro": {                              // T3.7: the attempt's gyroscope file (§11); null without one
+    "file": "gyro.json", "samples": 1234, "fromHostMs": 1730639998012.5,
+    "toHostMs": 1730640023340.7, "rateHz": 48.7, "truncatedStart": false
+  },
+  "resyncs": [                           // T3.7: the states adopted after moves went unseen; [] when none
+    {"hostMs": 1730640001450.5, "facelets": "…54 chars…", "state": "scrambling"}
   ]
 }
 ```
 
-`index` is 1-based. `scrambledFacelets` is the scramble applied to a solved cube, the state at
-`scrambleDone`, where the solve starts. `movesQtm` counts the quarter turns of the solve's moves
-(a `2` counts two); it equals Cubeast's `quarter_turns` on all 300 fixtures.
+`index` is 1-based. `app` (T3.7) is the build that wrote the record, as `session.json` has it (§6);
+absent from the files written before T3.7. `scrambledFacelets` is the scramble applied to a solved
+cube, the state at `scrambleDone`, where the solve starts. `movesQtm` counts the quarter turns of
+the solve's moves (a `2` counts two); it equals Cubeast's `quarter_turns` on all 300 fixtures.
 `tps = movesQtm / (timeMs / 1000)`, rounded to two decimals. Cubeast's `tps` is not comparable:
 it divides its `slice_turns` (two turns of one face merged into one double, turns of opposite
 faces into one slice) by the time, so it is lower (3.39 against our 3.87 on average over the
 fixtures). The `moves` array is the raw stream in the order the cube reported it, one entry per
-face turn, including the corrections of a mis-scramble. `slot` appears on the four f2l phases
-only.
+face turn, including the corrections of a mis-scramble. Since T3.7 each move keeps `serial`, the
+cube's move counter as its packet carried it (0 to 255, wrapping; null for a source without one),
+and `packetLast`, whether the move was the newest of its Bluetooth packet, the one whose arrival
+its `hostMs` measures (the older moves of a packet, recovered from its counter, share its time;
+only `packetLast` moves are samples of `clock`, below); both absent from the files written before.
+`slot` appears on the four f2l phases only.
 
 A **DNF** (`status: "dnf"`, which the solver can mark at any moment before solved) has `timeMs`,
 `tps` and `events.solveEnd` null and `replayOk` false; `phases` are the phases completed before
@@ -351,7 +385,22 @@ moves made so far.
 When moves went unseen (the cube's reported state differs from the simulated one), the app adopts
 the reported state (a resync); an event that state completes (`scrambleDone`, `solveStart`,
 `solveEnd`) takes the time of the report, and the unseen moves are missing from `moves`, so
-`replayOk` is false if they were solve moves.
+`replayOk` is false if they were solve moves. Since T3.7 `resyncs` logs each such adoption, in
+order: `hostMs`, when the cube reported the state (the app asks for it when the tab comes back into
+view and when the cube reconnects, and the cube sends it on its own now and then); `facelets`, the
+state adopted; `state`, the attempt's state when the report came, during which the moves went
+unseen (`scrambling`, `armed` or `solving`). Empty when none; absent from the files written before
+T3.7, which read as empty.
+
+`gyro` (T3.7) says what the attempt's gyroscope file holds (`gyro.json` in its folder, §11): `file`,
+its name; `samples`; `fromHostMs` and `toHostMs`, the host times of its first and last samples;
+`rateHz`, the samples per second over that span, to one decimal (0 with fewer than two samples);
+and `truncatedStart`, whether the samples did not reach back to the window's start, 2 s before the
+first scramble turn. Null without a file: a cube without a gyroscope (`cube.gyro` false in
+`session.json`), or no sample in the attempt's window; absent from the files written before T3.7,
+which read as null. The record is saved with `gyro` null when the attempt ends and again with the
+summary a second later, when the file is written; the upload queue sends the attempt once it is
+(§10).
 
 `clock` is the cube clock fit of the attempt: the least-squares line `hostMs ≈ a·cubeMs + b` over
 the attempt's moves that were the newest of their Bluetooth packet (as in §6: the older moves of a
@@ -436,6 +485,7 @@ clip (phase 2):
   "schema": 2,
   "camera": "laptop",
   "segment": "solve",
+  "app": {"version": "0.4.0", "commit": "abc1234"},   // T3.7: the build that wrote the file
   "t0HostMs": 1730640017211.9,           // the first frame, on the host clock
   "dtMs": [0, 33.4, 33.3, 33.3, 66.7, 33.3, …],   // per frame, the time since the previous one
   "keyframes": [0, 30, 60, …],           // the frames a decoder can start at
@@ -443,8 +493,9 @@ clip (phase 2):
 }
 ```
 
-Frame k is at host time `t0HostMs + dtMs[0] + dtMs[1] + … + dtMs[k]`, so `dtMs` has one entry
-per frame and `dtMs[0]` is 0. The intervals come from the frames' own timestamps
+`app` (T3.7) is the build that wrote the file, as `session.json` has it (§6); absent from the files
+written before. Frame k is at host time `t0HostMs + dtMs[0] + dtMs[1] + … + dtMs[k]`, so `dtMs` has
+one entry per frame and `dtMs[0]` is 0. The intervals come from the frames' own timestamps
 (`VideoFrame.timestamp`: steady and exact for intervals, so that a dropped frame shows as a double
 interval), never from when the frames reached the page, which jitters by ±10 ms and more
 (`docs/DEVICES.md`). They are kept in steps of 0.1 ms without drifting: with `tₖ` the timestamp
@@ -564,8 +615,11 @@ The index of an account's sessions (`docs/PLAN.md` T3.1): through it the Session
 account's devices lists the sessions of the others, and the QA view counts what was recorded and what
 is uploaded. A session's document is its `session.json` (§6) with `owner`; an attempt's is its
 `attempt.json` (§7) without `moves`, which stay on the device that recorded it (and go to the bucket
-in the uploaded `attempt.json`, T3.3), with `owner`, `device` and `upload`. The documents keep the
-schema version of the records they copy, 2; no other was ever written. `{id}` is the session's id,
+in the uploaded `attempt.json`, T3.3), with `owner`, `device` and `upload`. So the fields of T3.7
+reach Firestore with the records: `app`, `gyro` and `resyncs` on an attempt's document, `battery` and
+`cube.productDate` on a session's (the QA view counts the attempts with a gyro file and the median of
+their rates from `gyro`). The documents keep the schema version of the records they copy, 2; no
+other was ever written. `{id}` is the session's id,
 `{index}` the attempt's index zero-padded to 4 digits, as its folder (§5), so that a session's
 attempts sort by index.
 
@@ -575,13 +629,15 @@ attempts sort by index.
   "schema": 2, "id": "3f1c…", "createdMs": 1730640000000.0, "app": {…}, "host": {…},
   "cube": {…}, "cameras": […], "clock": {…}, "audio": true, "settings": {…}, "notes": "",
   "summary": {"attempts": 17, "solved": 16, "dnf": 1},   // session.json, field for field (§6)
+  "battery": [{"hostMs": 1730640000100.5, "level": 83}],
   "owner": "Xb3…uid"                                     // the account that wrote it
 }
 // sessions/3f1c…/attempts/0017
 {
-  "schema": 2, "session": "3f1c…", "index": 17, "scramble": "…", "scrambledFacelets": "…",
+  "schema": 2, "session": "3f1c…", "index": 17, "app": {…}, "scramble": "…", "scrambledFacelets": "…",
   "crossFace": "D", "events": {…}, "clock": {…}, "result": {…}, "phases": […],
   "video": [{"camera": "laptop", "segment": "solve", "file": "laptop.solve.mp4", "bytes": 23734012, …}],
+  "gyro": {"file": "gyro.json", "samples": 1234, …}, "resyncs": [],
                                                          // attempt.json without "moves" (§7)
   "owner": "Xb3…uid",
   "device": {"host": "office-mbp", "cameras": ["laptop"]},
@@ -598,15 +654,16 @@ attempts: `host`, its session's host label (`host.label`, Settings → This devi
 labels of its session's cameras, in their order. `upload` is the state of the attempt's upload
 (below, "Uploads"): `state` is `pending` before anything is sent, `uploading`, `done` once every file
 is confirmed, or `failed`; `files` has an entry per file, by name (`attempt.json`, each clip's
-`<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`, and `session.json` on the attempt
-the session's file went with): `bytes`, its size, and `doneMs`, when its upload was confirmed, in ms,
-null until then. **The app writes `upload` once, when it creates the attempt's document**: `pending`,
-with the files of the attempt's folder that the device has then and their sizes there (an
-`attempt.json` as the store writes it, an MP4 as its clip's `bytes`, a frames file as the file system
-has it; one that cannot be read there is left out), each `doneMs` null. An attempt's document is
-created when the attempt ends, before its clips are cut, so its `files` names `attempt.json` alone,
-and the clips' files are added by the uploads as they are signed; from then on only the functions
-write `upload` (T3.2), and the rules refuse the app's changes to it.
+`<camera>.<segment>.mp4` and `<camera>.<segment>.frames.json`, `gyro.json` (T3.7), and
+`session.json` on the attempt the session's file went with): `bytes`, its size, and `doneMs`, when
+its upload was confirmed, in ms, null until then. **The app writes `upload` once, when it creates the
+attempt's document**: `pending`, with the files of the attempt's folder that the device has then and
+their sizes there (an `attempt.json` as the store writes it, an MP4 as its clip's `bytes`, a frames
+file or the gyro file as the file system has it; one that cannot be read there is left out), each
+`doneMs` null. An attempt's document is created when the attempt ends, before its clips are cut and
+its gyro file is written, so its `files` names `attempt.json` alone, and the other files are added by
+the uploads as they are signed; from then on only the functions write `upload` (T3.2), and the rules
+refuse the app's changes to it.
 
 **Writing.** With an account signed in, every save of a session (its creation, its summary after each
 attempt, a note, a camera, a sync check) writes its document, and every save of an attempt (when it
@@ -677,8 +734,12 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
   1970, once its object is in the bucket with that size, and `state` to `done` once every file of
   `files` has one. The functions never write `pending` or `failed`, and keep any other field of
   `upload` as it is. `path` is the file's name in the attempt's folder (`attempt.json`,
-  `<camera>.<segment>.mp4`, `<camera>.<segment>.frames.json`), or `session.json`, the session's file,
-  recorded on the attempt it was uploaded with.
+  `<camera>.<segment>.mp4`, `<camera>.<segment>.frames.json`, `gyro.json`), or `session.json`, the
+  session's file, recorded on the attempt it was uploaded with; at most 33 files in one call. An
+  attempt with one camera and a gyroscope is six files (T3.7: `gyro.json` after the clips), plus
+  `session.json` now and then, each signature a file of the day's quota: with the default 1,200
+  files a day, at most 200 attempts with their clips and gyro files upload in a day (240 before
+  T3.7, at five files), fewer with `session.json`.
 - The objects are `users/{uid}/sessions/{id}/attempts/{index}/<path>`, and
   `users/{uid}/sessions/{id}/session.json` for the session's file, in the bucket of the configuration
   (`bucket/README.md`).
@@ -758,10 +819,69 @@ leaves the file at the queue's next look.
   an integer `schema` and its path's `id`; an attempt's an integer `schema`, its path's session as
   `session` and its path's index as `index` (`0017` is 17), `device` and `upload` maps, and no
   `moves`; and the account never changes an attempt's `upload` once the document exists (the
-  functions do, past the rules).
+  functions do, past the rules). The fields of T3.7, where a document has them: a session's `cube`
+  is a map whose `productDate`, if there, is text or null, and its `battery` a list; an attempt's
+  `app` is a map of exactly `version` and `commit`, both text, its `gyro` null or a map of exactly
+  `file` (`gyro.json`), `samples` (an integer from 1), `fromHostMs`, `toHostMs` and `rateHz`
+  (numbers, the rate from 0) and `truncatedStart` (a boolean), and its `resyncs` a list.
 - `users/{uid}/cubes/{name}` (T3.4): only the account `uid` reads, lists, writes and deletes them; a
   document must be whole and valid after every write: `schema` 1, its path's name as `name`, `mac`
   six hex bytes in upper case with colons between them, `updatedMs` a number from 0, `device` a
   non-empty text, and no other field.
 - Nothing else: no other collection, no other subcollection of a user's record, and nothing for
   anyone signed out.
+
+## 11. `gyro.json`
+
+`gyro.json`, next to `attempt.json` in the attempt's folder (§5), holds the cube's gyroscope reports
+over the attempt's window (T3.7): from 2 s before the first scramble turn (the scramble clip's
+margin; from 2 s before the scramble was shown, for an attempt without a turn) to 1 s after
+`solveEnd` or the DNF (the clips' margin), one continuous stretch, the inspection and the pickup in
+it. Its schema version, 1, is its own (`packages/core/schema/gyro.schema.json`; the reader is
+`parseGyro`).
+
+```jsonc
+{
+  "schema": 1,
+  "session": "3f1c…",
+  "index": 17,
+  "app": {"version": "0.4.0", "commit": "abc1234"},   // the build that wrote the file
+  "t0HostMs": 1730639998012.5,           // the first sample, on the host clock
+  "dtMs": [0, 20.1, 19.9, …],            // per sample, the time since the previous one (§9's convention)
+  "q": [x, y, z, w, x, y, z, w, …],      // unit quaternions, flat, four per sample, to 5 decimals
+  "v": [x, y, z, x, y, z, …],            // the angular velocity's raw integers, flat, three per sample; null when the cube gives none
+  "truncatedStart": false                // true when the buffer did not reach back to the window's start
+}
+```
+
+Sample k is at host time `t0HostMs + dtMs[0] + … + dtMs[k]`; its quaternion is `q[4k..4k+3]` and
+its velocity `v[3k..3k+2]`. `dtMs` is kept as the frames files keep their intervals (§9): the
+differences of the sample times rounded to 0.1 ms, so that the sums do not drift, `dtMs[0]` 0. The
+host time of a sample is when its Bluetooth packet reached the page, as a move's `hostMs` is (whole
+milliseconds from the driver, so the intervals are whole too); the cube's own clock is not in the
+gyro packets. `q` is the orientation as the cube reports it, to 5 decimals (the packets carry 15-bit
+fractions), `x, y, z, w` with the scalar last. **The cube's frame**, as the driver states it:
+right-handed, +X through the red face, +Y through the blue face, +Z through the white face. The
+yaw (the turn about the vertical) has an arbitrary reference and drifts, since the cube has no
+magnetometer: the viewer (T3.8) zeroes it on the clip's first sample; the pitch and roll are
+gravity's. `v` is the angular velocity per axis as the cube reports it, raw: the Gen2 cubes (the
+GAN 12 ui FreePlay, the GAN 356 i3) send 4-bit signed values, −7 to 7, per packet, in the cube's
+units; null when the cube's gyro packets carry none (a sample without one among others is 0).
+
+The samples come from a ring buffer of the page's gyro events (`GyroBuffer` in
+`packages/core/src/gyro.ts`): typed arrays holding the last 10 minutes, sized for 100 Hz (a GAN cube
+reports at 50 to 100 Hz; a faster cube keeps less time), filled without allocating per event. The
+buffer is the page's, not a connection's: the host clock runs on across the cube's reconnections, so
+an attempt that spans one keeps its samples from before it, with the gap between them in `dtMs`. A
+window older than the buffer begins at its oldest sample and says `truncatedStart` (the first
+attempt of a page whose demo cube connected a moment before its scramble, say). The file is written
+once per attempt, a second after its end (`GYRO_TAIL_MS` plus `GYRO_SETTLE_MS`, 250 ms, for the last
+reports to arrive), with or without a camera, as compact JSON with a final newline, under a
+temporary name moved into place (§5); `attempt.json` is then saved again with its summary, `gyro`
+(§7), and the upload queue sends both (§10). No file for a cube without a gyroscope (`cube.gyro`
+false), or an attempt without a sample in its window; a file that could not be written is noted in
+the session's `notes`, `gyro failed: attempt <index>: <reason>` (§6), and the record keeps `gyro`
+null. The pickup (§3) is detected as before, from the live events; the file is the record of them.
+Size: about 46 bytes a sample, so about 92 KiB for a 20 s solve at 50 Hz (a 15 s scramble, 3 s of
+inspection and the margins, 2,049 samples) and 183 KiB at 100 Hz. The rate of the owner's cubes is
+measured by the first capture after T3.7 (`docs/DEVICES.md`).

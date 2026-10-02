@@ -10,6 +10,10 @@
     "schema": { "const": 2 },
     "camera": { "$ref": "#/$defs/cameraLabel" },
     "segment": { "enum": ["scramble", "solve"] },
+    "app": {
+      "description": "The build that wrote the file (T3.7). Absent from the files written before.",
+      "$ref": "#/$defs/app"
+    },
     "t0HostMs": {
       "description": "The host time of the clip's first frame, from the arrival fit.",
       "type": "number"
@@ -50,6 +54,16 @@
       "description": "A camera's label, unique within its session: lowercase letters and digits in words joined by hyphens (docs/DATA-MODEL.md §5).",
       "type": "string",
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "app": {
+      "description": "The build of the app that wrote the file: the version of the root package.json and the short SHA of its commit (session.json has had it since version 1; the other files since T3.7, so those written before have none).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit"],
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "description": "Short SHA of the build's commit.", "type": "string" }
+      }
     }
   }
 }

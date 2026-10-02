@@ -13,6 +13,14 @@ export interface FakeCubeOptions {
   speed?: number;
   /** The host clock, in ms; `performance.timeOrigin + performance.now()` by default. */
   now?: () => number;
+  /**
+   * The cube reports a gyroscope (`hardware.gyro` true) and emits `gyro` events at
+   * {@link FAKE_GYRO_HZ} while connected: a steady rotation of {@link FAKE_GYRO_DEG_PER_S} about
+   * its white axis while a `play()` turns it, with the velocity {@link FAKE_GYRO_VELOCITY}; still,
+   * with a velocity of zero, otherwise. Off by default (T3.7: the whole record of the cube, which
+   * the end-to-end suite and the demo exercise with it on).
+   */
+  gyro?: boolean;
 }
 
 /** A move and when it happens, in ms on any clock (the fixtures use the cube's). */
@@ -33,6 +41,15 @@ export const FAKE_CUBE_HARDWARE: Readonly<CubeHardwareEvent> = {
 /** The fake cube's battery level, in percent. */
 export const FAKE_CUBE_BATTERY = 100;
 
+/** How often the fake cube's gyroscope reports, when it has one (`FakeCubeOptions.gyro`). */
+export const FAKE_GYRO_HZ = 50;
+
+/** How fast the fake cube turns about its white axis while a replay turns it, degrees per second. */
+export const FAKE_GYRO_DEG_PER_S = 30;
+
+/** The angular velocity the fake cube reports while it turns (raw integers, as a Gen2 cube's). */
+export const FAKE_GYRO_VELOCITY: readonly [number, number, number] = [0, 0, 2];
+
 function disconnectedError(): Error {
   return new Error('The fake cube is disconnected.');
 }
@@ -44,7 +61,9 @@ function disconnectedError(): Error {
  * from the schedule. `cubeMs` never goes back. Every move is its own Bluetooth packet
  * (`packetLast: true`) and carries a move counter like a GAN cube's (`serial`: 1 for the first
  * move, wrapping after 255 to 0). On creation it reports its hardware and a full battery, which
- * `events$` replays to every new subscriber.
+ * `events$` replays to every new subscriber. With `gyro` on, it has a gyroscope (see
+ * `FakeCubeOptions.gyro`): a timer at {@link FAKE_GYRO_HZ} emits its orientation, which turns
+ * while a replay turns the cube and holds otherwise, until it is disconnected.
  */
 export class FakeCube implements CubeConnection {
   readonly kind = 'fake';
@@ -62,6 +81,14 @@ export class FakeCube implements CubeConnection {
   private stopPlay: (() => void) | undefined;
   /** How many times `stop()` was called: a play queued before a stop does not start. */
   private stops = 0;
+  /** The gyroscope's timer, while the cube has one and is connected. */
+  private gyroTimer: ReturnType<typeof setInterval> | undefined;
+  /** The gyroscope's orientation: the angle turned about the white axis so far, in radians. */
+  private gyroAngle = 0;
+  /** The host time of the gyroscope's last report. */
+  private gyroAtMs = 0;
+  /** Plays under way: the cube turns, as far as its gyroscope says, while there is one. */
+  private playing = 0;
 
   constructor(opts: FakeCubeOptions = {}) {
     const start = opts.start ?? SOLVED;
@@ -76,8 +103,14 @@ export class FakeCube implements CubeConnection {
     this.speed = speed;
     this.now = opts.now ?? (() => performance.timeOrigin + performance.now());
     this.createdMs = this.now();
-    this.hub.emit({ ...FAKE_CUBE_HARDWARE });
-    this.hub.emit({ type: 'battery', level: FAKE_CUBE_BATTERY });
+    this.hub.emit({ ...FAKE_CUBE_HARDWARE, gyro: opts.gyro === true });
+    this.hub.emit({ type: 'battery', level: FAKE_CUBE_BATTERY, hostMs: this.createdMs });
+    if (opts.gyro === true) {
+      this.gyroAtMs = this.createdMs;
+      this.gyroTimer = setInterval(() => {
+        this.tickGyro();
+      }, 1000 / FAKE_GYRO_HZ);
+    }
   }
 
   /** The simulated state, updated before each move event is emitted. */
@@ -166,16 +199,20 @@ export class FakeCube implements CubeConnection {
     if (this.hub.closed) {
       return Promise.reject(disconnectedError());
     }
-    this.hub.emit({ type: 'battery', level: FAKE_CUBE_BATTERY });
+    this.hub.emit({ type: 'battery', level: FAKE_CUBE_BATTERY, hostMs: this.now() });
     return Promise.resolve();
   }
 
   /**
-   * Stops any play, emits `disconnected` with `reason` and completes `events$`. The reason can
-   * simulate a cube that goes away (turned off, out of range). Idempotent.
+   * Stops any play and the gyroscope, emits `disconnected` with `reason` and completes `events$`.
+   * The reason can simulate a cube that goes away (turned off, out of range). Idempotent.
    */
   disconnect(reason = 'Disconnected on request.'): Promise<void> {
     this.stopPlay?.();
+    if (this.gyroTimer !== undefined) {
+      clearInterval(this.gyroTimer);
+      this.gyroTimer = undefined;
+    }
     this.hub.emit({ type: 'disconnected', reason });
     return Promise.resolve();
   }
@@ -187,7 +224,13 @@ export class FakeCube implements CubeConnection {
     return new Promise<void>((resolve) => {
       const first = moves[0].ms;
       let base: number | undefined;
+      this.playing++;
+      let finished = false;
       const finish = (): void => {
+        if (!finished) {
+          finished = true;
+          this.playing--;
+        }
         this.stopPlay = undefined;
         resolve();
       };
@@ -215,6 +258,30 @@ export class FakeCube implements CubeConnection {
   /** The fake cube's clock now. */
   private clock(): number {
     return Math.round((this.now() - this.createdMs) * this.speed);
+  }
+
+  /**
+   * One report of the gyroscope: the orientation turned on by the host time since the last report
+   * while a play turns the cube, as a unit quaternion about the white (+Z) axis, with the velocity
+   * of a turning cube or a still one.
+   */
+  private tickGyro(): void {
+    if (this.hub.closed) {
+      return;
+    }
+    const nowMs = this.now();
+    const turning = this.playing > 0;
+    if (turning) {
+      this.gyroAngle += ((nowMs - this.gyroAtMs) / 1000) * ((FAKE_GYRO_DEG_PER_S * Math.PI) / 180);
+    }
+    this.gyroAtMs = nowMs;
+    const half = this.gyroAngle / 2;
+    this.hub.emit({
+      type: 'gyro',
+      q: [0, 0, Math.sin(half), Math.cos(half)],
+      v: turning ? FAKE_GYRO_VELOCITY : [0, 0, 0],
+      hostMs: nowMs,
+    });
   }
 
   private emitMove(m: Move, cubeMs: number): void {

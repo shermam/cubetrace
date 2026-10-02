@@ -1,4 +1,6 @@
 import { TestBed } from '@angular/core/testing';
+
+import { APP_BUILD } from '../../environments/version';
 import { NO_AUDIO_DATA } from '@cubetrace/capture';
 import {
   ATTEMPT_SCHEMA,
@@ -589,6 +591,7 @@ describe('RecordingService', () => {
         camera: 'laptop',
         segment: 'scramble',
         fpsNominal: 20,
+        app: APP_BUILD,
       },
     ]);
     // Saved while the attempt is under way: kept for its record.
@@ -620,6 +623,7 @@ describe('RecordingService', () => {
         camera: 'laptop',
         segment: 'solve',
         fpsNominal: 20,
+        app: APP_BUILD,
       },
     ]);
     const solveClip = capture.saveNext();

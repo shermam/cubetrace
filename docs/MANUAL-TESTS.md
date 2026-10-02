@@ -197,9 +197,9 @@ cubetrace:cubetrace-data/users/` totals them, and `rclone copy cubetrace:cubetra
 - An attempt uploads once its clips are saved, a second or two after it ends; `session.json` goes
   again about two minutes after the session's last change, not with every attempt.
 - The day's quota, per account and UTC day: 6 GB and 1,200 files signed, every signature counted. An
-  attempt with its clips is five files, so at most 80 attempts a day upload (fewer with
-  `session.json`); past it, the uploads wait until 00:00 UTC (21:00 in Brasília), and the panel says
-  until when.
+  attempt with its clips and its gyro file is six files (T3.7), so at most 200 attempts a day upload
+  (fewer with `session.json`); past it, the uploads wait until 00:00 UTC (21:00 in Brasília), and the
+  panel says until when.
 - Only one tab uploads at a time (a Web Lock); another tab's attempts go at the queue's next look at
   the device's sessions, within 10 minutes, or at the next start.
 - The QA view's "last synced" is this device's; another device's is not stored.
@@ -437,7 +437,7 @@ clips of the timer.
   ends about 1 s after its last turn; the solve clip begins about 3 s (at most 4 s) before the first
   turn of the solve and ends about 1 s after the cube is solved. Check it in the viewer: the first
   move's time in the list is the lead (2.xx s for the scramble, 3.xx s for the solve).
-- [ ] Download in the viewer gives five files: both MP4s, both frames files and attempt.json (Chrome
+- [ ] Download in the viewer gives five files, six with `gyro.json` since T3.7: both MP4s, both frames files and attempt.json (Chrome
   may ask once to allow multiple downloads: Allow). The MP4s play in the system's player (QuickTime,
   VLC or the phone's gallery).
 - [ ] A DNF (Esc) during a solve: its row gets both clips, the solve clip ending about 1 s after the
@@ -513,7 +513,7 @@ the device, Chrome's version and the window's size (`innerWidth` × `innerHeight
   session · See all"; See all opens the session's page with all of them and the same ao12 as the
   Timer page (ao100 says "–" until the session has 100 attempts).
 - [ ] The session's page: its date, device, cube, camera and clips with their size; a clip badge opens
-  the viewer, which plays the clip and downloads the five files. The same for an older session,
+  the viewer, which plays the clip and downloads the five files (six with `gyro.json`, T3.7). The same for an older session,
   opened from the Sessions page (its date is a link). Reload the page: the same. Export saves the
   session's JSON; Delete… then Delete removes it and goes back to the Sessions page.
 - [ ] Camera settings: closed the first time, until the camera is on; then open by themselves. Closed
@@ -811,3 +811,20 @@ the documents under `users/<uid>/cubes`.
 - [ ] A session's export (Sessions → Export) from each device, and the `attempt.json` and
   `session.json` of an uploaded attempt in the bucket (T3.3): search them for the address, with and
   without its colons: it is in none.
+
+## After T3.7 — the cube's whole record
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T3.7, on the MacBook
+with the GAN 12 ui FreePlay (and once with the GAN 356 i3), signed in. Next to the item, write the
+device, the cube and what happened.
+
+- [ ] One attempt with the camera on. A second after the solve, its folder has `gyro.json` beside
+  the record: the clip viewer's Download gives six files (both MP4s, both frames files, `gyro.json`
+  and `attempt.json`), and `attempt.json` says `gyro` with `samples`, a `rateHz` and
+  `truncatedStart` false, `app` with this build's version and commit, each move with its `serial`
+  and `packetLast`, and `resyncs` (`[]` unless the cube reported a state the app did not know). The
+  frames files name the build too. Sessions → QA view: today's row's Gyro column counts the attempt
+  and says its rate; write the rate into `docs/DEVICES.md` (round 1's paragraph). In the bucket,
+  the attempt's folder has the six files; the session's document in the Firebase console has
+  `battery` (one entry per level the cube reported) and `cube.productDate` null (a Gen2 cube says
+  none).

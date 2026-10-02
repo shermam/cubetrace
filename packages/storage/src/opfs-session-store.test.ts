@@ -6,7 +6,13 @@ import { describe, expect, it } from 'vitest';
 
 import { FakeDirectoryHandle, FakeFileHandle } from './fake-opfs';
 import { opfsAvailable } from './opfs';
-import { OpfsSessionStore, attemptFolder, describeProblem, recordJson } from './opfs-session-store';
+import {
+  OpfsSessionStore,
+  attemptFolder,
+  describeProblem,
+  recordJson,
+  writeAttemptFile,
+} from './opfs-session-store';
 import { A, B, C, attempt, session } from './test-records';
 
 function setup(): { root: FakeDirectoryHandle; store: OpfsSessionStore } {
@@ -33,6 +39,15 @@ function flush(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
+}
+
+/** `record` without the fields `keys` (the ones T3.7 added, which the files written before lack). */
+function without<T extends object>(record: T, ...keys: (keyof T)[]): Partial<T> {
+  const copy: Partial<T> = { ...record };
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
+  return copy;
 }
 
 describe('attemptFolder', () => {
@@ -341,13 +356,28 @@ describe('OpfsSessionStore', () => {
 
   it('reads the records of schema version 1 as version 2, and leaves their files as they are', async () => {
     const { root, store } = setup();
-    // As cubetrace 0.1 wrote them: schema 1, and an attempt without its clock fit.
-    const oldSession = JSON.stringify({ ...session(A, 1000), schema: 1 }, null, 2);
-    const oldAttempt = { ...attempt(A, 1), schema: 1, clock: undefined };
+    // As cubetrace 0.1 wrote them: schema 1, an attempt without its clock fit, and none of the
+    // fields of T3.7 (the cube's production date, the battery, the gyro file, the resyncs, the
+    // moves' counters and packet flags).
+    const first = session(A, 1000);
+    const oldSession = JSON.stringify(
+      { ...without(first, 'battery'), cube: without(first.cube, 'productDate'), schema: 1 },
+      null,
+      2,
+    );
+    const recorded = attempt(A, 1);
+    const oldMoves = recorded.moves.map((move) => without(move, 'serial', 'packetLast'));
+    const oldAttempt = {
+      ...without(recorded, 'gyro', 'resyncs'),
+      moves: oldMoves,
+      schema: 1,
+      clock: undefined,
+    };
     await root.plant(`sessions/${A}/session.json`, oldSession);
     await root.plant(`sessions/${A}/attempts/0001/attempt.json`, JSON.stringify(oldAttempt));
 
-    const upgraded = { ...attempt(A, 1), clock: null };
+    // Read as version 2: the fields of T3.7 with their defaults, the moves as they were.
+    const upgraded = { ...attempt(A, 1), moves: oldMoves, clock: null };
     expect(await store.listSessions()).toEqual([session(A, 1000)]);
     expect(await store.exportSession(A)).toEqual({
       session: session(A, 1000),
@@ -428,6 +458,36 @@ describe('OpfsSessionStore', () => {
     );
     await expect(refused.listSessions()).rejects.toThrow('Storage is blocked.');
     await expect(refused.createSession(session(A, 1000))).rejects.toThrow('Storage is blocked.');
+  });
+});
+
+describe('writeAttemptFile (T3.7)', () => {
+  it("writes a file into an attempt's folder in one step, making the folders under the session's", async () => {
+    const root = new FakeDirectoryHandle();
+    const store = new OpfsSessionStore(root);
+    await store.createSession(session(A, 1000));
+    await writeAttemptFile(root, A, 7, 'gyro.json', '{"schema":1}\n');
+    expect(root.files().get(`sessions/${A}/attempts/0007/gyro.json`)?.text).toBe('{"schema":1}\n');
+    expect([...root.files().keys()].filter((path) => path.endsWith('.tmp'))).toEqual([]);
+    // Written again: replaced whole; the record beside it is untouched.
+    await store.saveAttempt(attempt(A, 7));
+    await writeAttemptFile(root, A, 7, 'gyro.json', '{"schema":1,"index":7}\n');
+    expect(root.files().get(`sessions/${A}/attempts/0007/gyro.json`)?.text).toBe(
+      '{"schema":1,"index":7}\n',
+    );
+    expect((await store.loadAttempts(A)).map((a) => a.index)).toEqual([7]);
+  });
+
+  it('refuses a session that is not there, an index that is not one, and an id that cannot name a folder', async () => {
+    const root = new FakeDirectoryHandle();
+    await expect(writeAttemptFile(root, A, 1, 'gyro.json', '{}')).rejects.toThrow(
+      `No session ${A}: its folder is missing.`,
+    );
+    await new OpfsSessionStore(root).createSession(session(A, 1000));
+    await expect(writeAttemptFile(root, A, 0, 'gyro.json', '{}')).rejects.toThrow(RangeError);
+    await expect(writeAttemptFile(root, '../x', 1, 'gyro.json', '{}')).rejects.toThrow(RangeError);
+    await expect(writeAttemptFile(root, B, 1, 'gyro.json', '{}')).rejects.toThrow(/No session/);
+    expect([...root.files().keys()].filter((path) => path.includes('gyro'))).toEqual([]);
   });
 });
 

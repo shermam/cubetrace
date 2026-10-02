@@ -118,6 +118,7 @@ describe('QaPage', () => {
       '10.6 MB',
       '5.3 MB',
       '5.3 MB',
+      '0',
     ]);
     expect(cells(rows[1])).toEqual([
       day.format(new Date(2026, 8, 30)),
@@ -127,6 +128,7 @@ describe('QaPage', () => {
       '0 B',
       '0 B',
       '5.0 kB',
+      '0',
     ]);
     const total = element.querySelector('[data-testid="qa-total"]');
     expect(total === null ? [] : cells(total)).toEqual([
@@ -136,6 +138,7 @@ describe('QaPage', () => {
       '10.6 MB',
       '5.3 MB',
       '5.3 MB',
+      '0',
     ]);
     const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
     expect(text(element, 'qa-read')).toBe(

@@ -244,6 +244,42 @@ describe('ClipViewer', () => {
     expect(element.querySelector('[data-testid="clip-download-error"]')).toBeNull();
   });
 
+  it('downloads the gyro file with the rest when the attempt has one, and says so (T3.7)', async () => {
+    const withGyro: AttemptRecord = {
+      ...ATTEMPT,
+      gyro: {
+        file: 'gyro.json',
+        samples: 240,
+        fromHostMs: -2000,
+        toHostMs: 2780,
+        rateHz: 50,
+        truncatedStart: false,
+      },
+    };
+    const element = await render([], withGyro);
+    expect(element.textContent).toContain(
+      'both clips, their frame times, the gyroscope and attempt.json',
+    );
+    const names: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      names.push(this.download);
+    });
+    element.querySelector<HTMLButtonElement>('[data-testid="clip-download"]')?.click();
+    await update();
+    const prefix = `cubetrace-session-${SESSION_A}-attempt-0003-`;
+    expect(names).toEqual([
+      `${prefix}laptop.scramble.mp4`,
+      `${prefix}laptop.scramble.frames.json`,
+      `${prefix}laptop.solve.mp4`,
+      `${prefix}laptop.solve.frames.json`,
+      `${prefix}gyro.json`,
+      `${prefix}attempt.json`,
+    ]);
+    expect(reads.at(-1)).toBe(`${SESSION_A}/3/gyro.json`);
+  });
+
   it('says a clip deleted once uploaded is in the cloud, in place of its video, and downloads what is here', async () => {
     const solveGone: AttemptRecord = {
       ...ATTEMPT,

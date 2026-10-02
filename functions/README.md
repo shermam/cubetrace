@@ -24,11 +24,12 @@ signUpload({ sessionId, attemptIndex, files: [{ path, bytes, contentType }] })
   four digits like the attempt's folder (`0001`, `docs/DATA-MODEL.md` §5 and §10), must be in
   Firestore with the caller as `owner`; a document the app has not sent yet (Firestore's offline
   queue: `waitForPendingWrites` first) is `not-found`.
-- `files`: 1 to 32, named as in the attempt's folder: `attempt.json`, `<camera>.<segment>.mp4`,
-  `<camera>.<segment>.frames.json`, or `session.json`, the session's file, which rides with one of its
-  attempts (the first uploaded, and again with a later one when it has changed) and goes to the
-  session's object. `bytes` is the file's exact size, 1 to `MAX_FILE_BYTES`; `contentType` is
-  `video/mp4` for a clip and `application/json` for the rest.
+- `files`: 1 to 33, named as in the attempt's folder: `attempt.json`, `<camera>.<segment>.mp4`,
+  `<camera>.<segment>.frames.json`, `gyro.json` (the attempt's gyroscope file, T3.7), or
+  `session.json`, the session's file, which rides with one of its attempts (the first uploaded, and
+  again with a later one when it has changed) and goes to the session's object. `bytes` is the file's
+  exact size, 1 to `MAX_FILE_BYTES`; `contentType` is `video/mp4` for a clip and `application/json`
+  for the rest.
 - The answer, in the order of `files`: `PUT` the file as a `Blob` to `url` with exactly `headers`
   (`Content-Type`, and on GCS `x-goog-content-length-range: <bytes>,<bytes>`; the browser sets
   `Content-Length`) before `expiresAt` (ms since 1970 on the server's clock, 15 minutes on). The URL

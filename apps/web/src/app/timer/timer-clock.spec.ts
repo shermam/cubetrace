@@ -230,7 +230,12 @@ describe('TimerClock', () => {
       await stable();
       await stable();
 
-      expect(startDemo).toHaveBeenCalledWith({ demo: '1', speed: '20', misscramble: '1' });
+      expect(startDemo).toHaveBeenCalledWith({
+        demo: '1',
+        speed: '20',
+        misscramble: '1',
+        gyro: null,
+      });
       expect(s.cube.status()).toBe('connected');
       expect(s.cube.demo()?.index).toBe(1);
       expect(dialogOpen()).toBe(false);

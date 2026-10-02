@@ -9,10 +9,12 @@ import { describe, expect, it } from 'vitest';
 import {
   ATTEMPT_SCHEMA,
   ATTEMPT_SCHEMA_V1,
+  GYRO_SCHEMA,
   RecordError,
   SESSION_SCHEMA,
   SESSION_SCHEMA_V1,
   parseAttempt,
+  parseGyro,
   parseSession,
   type AttemptRecord,
   type SessionRecord,
@@ -22,6 +24,7 @@ import {
   asVersion1Session,
   attemptWithVideo,
   dnfAttempt,
+  gyroJson,
   sessionRecord,
   sessionWithCamera,
   solvedAttempt,
@@ -29,11 +32,15 @@ import {
 } from './test-records';
 
 const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
+// A gyro file has one version, 1: its schema stands for both entries, so that a file that says 2 is
+// refused by it as by the reader.
+const isGyro = ajv.compile(GYRO_SCHEMA);
 const VALIDATE = {
   attempt: { 1: ajv.compile(ATTEMPT_SCHEMA_V1), 2: ajv.compile(ATTEMPT_SCHEMA) },
   session: { 1: ajv.compile(SESSION_SCHEMA_V1), 2: ajv.compile(SESSION_SCHEMA) },
+  gyro: { 1: isGyro, 2: isGyro },
 };
-const PARSE = { attempt: parseAttempt, session: parseSession };
+const PARSE = { attempt: parseAttempt, session: parseSession, gyro: parseGyro };
 type Kind = keyof typeof PARSE;
 
 /**
@@ -65,6 +72,15 @@ function hardware(name: string): (typeof HARDWARE)[number] {
     throw new Error(`No export of ${name} in fixtures/hardware/.`);
   }
   return found;
+}
+
+/** `record` without the fields `keys` (the ones T3.7 added, which the files written before lack). */
+function without<T extends object>(record: T, ...keys: (keyof T)[]): Partial<T> {
+  const copy: Partial<T> = { ...record };
+  for (const key of keys) {
+    Reflect.deleteProperty(copy, key);
+  }
+  return copy;
 }
 
 /** What ajv says of `value`: valid against the schema of the version it claims, or not, and where. */
@@ -172,6 +188,12 @@ const CORPUS: [Kind, string, unknown][] = [
   ['session', 'a session of version 1', asVersion1Session(sessionRecord())],
   ['session', 'the session on the phone', hardware('thinkphone').session],
   ['session', 'the session of the i3, with its camera', hardware('gan356i3').session],
+  ['gyro', 'a gyro file', gyroJson()],
+  [
+    'gyro',
+    'a gyro file of a cube without velocities, truncated',
+    { ...gyroJson(), v: null, truncatedStart: true },
+  ],
 ];
 
 describe('parseAttempt and parseSession', () => {
@@ -231,6 +253,52 @@ describe('parseAttempt and parseSession', () => {
     );
   });
 
+  it('read the records written before T3.7 as ones without a build, a gyro file, resyncs, battery reports and a production date', () => {
+    const attempt = attemptWithVideo();
+    const before = {
+      ...attempt,
+      moves: attempt.moves.map(({ m, hostMs, cubeMs, phase }) => ({ m, hostMs, cubeMs, phase })),
+    };
+    Reflect.deleteProperty(before, 'app');
+    Reflect.deleteProperty(before, 'gyro');
+    Reflect.deleteProperty(before, 'resyncs');
+    const read = parseAttempt(before);
+    expect('app' in read).toBe(false);
+    expect(read.gyro).toBeNull();
+    expect(read.resyncs).toEqual([]);
+    expect('serial' in read.moves[0]).toBe(false);
+    expect('packetLast' in read.moves[0]).toBe(false);
+    expect(Object.keys(read).slice(-3)).toEqual(['video', 'gyro', 'resyncs']);
+    // Written since: every field kept as it is, in the order of the schema.
+    const now = parseAttempt(attempt);
+    expect(now).toEqual(attempt);
+    expect(Object.keys(now)).toEqual(Object.keys(attempt));
+    expect(now.moves[0]).toEqual(attempt.moves[0]);
+
+    const session = sessionWithCamera();
+    const earlier: Record<string, unknown> = { ...session, cube: { ...session.cube } };
+    Reflect.deleteProperty(earlier, 'battery');
+    Reflect.deleteProperty(earlier['cube'] as object, 'productDate');
+    const readSession = parseSession(earlier);
+    expect(readSession.battery).toEqual([]);
+    expect(readSession.cube.productDate).toBeNull();
+    expect(Object.keys(readSession).at(-1)).toBe('battery');
+    expect(parseSession(session)).toEqual(session);
+  });
+
+  it('read a gyro file, and refuse one whose arrays do not fit its samples (beyond the schema)', () => {
+    const file = gyroJson();
+    expect(parseGyro(file)).toEqual(file);
+    expect(parseGyro(file)).not.toBe(file);
+    expect(() => parseGyro({ ...file, q: [...file.q, 0] })).toThrow(
+      'gyro.json (schema 1): q must have four numbers per sample (16), got 17.',
+    );
+    expect(() => parseGyro({ ...file, v: file.v?.slice(1) })).toThrow(
+      'gyro.json (schema 1): v must have three integers per sample (12), got 11.',
+    );
+    expect(() => parseGyro({ ...file, schema: 2 })).toThrow('gyro.json: schema must be 1, got 2.');
+  });
+
   it('read a camera written before its microphone was kept as one without, in the order of the schema', () => {
     const session = sessionWithCamera();
     expect(session.cameras.map((entry) => entry.microphone?.processing ?? null)).toEqual([
@@ -253,20 +321,31 @@ describe('parseAttempt and parseSession', () => {
     expect(parseSession(input).cameras[0].microphone).not.toBe(input.cameras[0].microphone);
   });
 
-  it('upgrade a record of version 1 in memory: no clock, no clip, no camera', () => {
+  it('upgrade a record of version 1 in memory: no clock, no clip, no camera, none of T3.7', () => {
     for (const record of [solvedAttempt(), dnfAttempt(), untouchedAttempt()]) {
       const v1 = asVersion1Attempt(record);
       const before = JSON.stringify(v1);
       const parsed = parseAttempt(v1);
-      expect(parsed).toEqual({ ...record, clock: null });
+      // Version 1 kept no build and no move counters; the gyro file and the resyncs read as none.
+      expect(parsed).toEqual({
+        ...without(record, 'app'),
+        moves: record.moves.map((move) => without(move, 'serial', 'packetLast')),
+        clock: null,
+        gyro: null,
+        resyncs: [],
+      });
       expect(JSON.stringify(v1)).toBe(before);
       // In the order of the schema, as the next save writes it.
-      expect(Object.keys(parsed)).toEqual(ATTEMPT_SCHEMA['required']);
+      expect(Object.keys(parsed)).toEqual([
+        ...(ATTEMPT_SCHEMA['required'] as string[]),
+        'gyro',
+        'resyncs',
+      ]);
       expect(VALIDATE.attempt[2](parsed)).toBe(true);
     }
     const parsed = parseSession(asVersion1Session(sessionRecord()));
     expect(parsed).toEqual(sessionRecord());
-    expect(Object.keys(parsed)).toEqual(SESSION_SCHEMA['required']);
+    expect(Object.keys(parsed)).toEqual([...(SESSION_SCHEMA['required'] as string[]), 'battery']);
   });
 
   it('read the real-hardware exports of version 1, which upgrade to valid records of version 2', () => {
@@ -285,8 +364,18 @@ describe('parseAttempt and parseSession', () => {
         expect(VALIDATE.attempt[1](attempt), at).toBe(true);
         const a = parseAttempt(attempt);
         expect(VALIDATE.attempt[2](a), JSON.stringify(VALIDATE.attempt[2].errors)).toBe(true);
-        expect(a, at).toMatchObject({ schema: 2, session: s.id, clock: null, video: [] });
-        expect({ ...a, schema: 1, clock: undefined }, at).toEqual(attempt);
+        expect(a, at).toMatchObject({
+          schema: 2,
+          session: s.id,
+          clock: null,
+          video: [],
+          gyro: null,
+          resyncs: [],
+        });
+        expect(
+          { ...a, schema: 1, clock: undefined, gyro: undefined, resyncs: undefined },
+          at,
+        ).toEqual(attempt);
       }
     }
   });
@@ -299,11 +388,14 @@ describe('parseAttempt and parseSession', () => {
     for (const { file, session, attempts } of i3) {
       expect(VALIDATE.session[2](session), JSON.stringify(VALIDATE.session[2].errors)).toBe(true);
       const s = parseSession(session);
-      // Written before the microphone was kept (T2.12), its camera reads as having none.
+      // Written before the microphone was kept (T2.12), its camera reads as having none; before
+      // T3.7, its cube's production date reads as null and its battery reports as none.
       const written = session as SessionRecord;
       expect(s, file).toEqual({
         ...written,
+        cube: { ...written.cube, productDate: null },
         cameras: written.cameras.map((entry) => ({ ...entry, microphone: null })),
+        battery: [],
       });
       expect(s.cameras.map(({ label }) => label)).toEqual(['laptop']);
       // Attempt 6's scramble clip was refused on the day (its start was older than the buffer, issue
@@ -313,11 +405,14 @@ describe('parseAttempt and parseSession', () => {
         const at = `${file} attempts[${String(k)}]`;
         expect(VALIDATE.attempt[2](attempt), JSON.stringify(VALIDATE.attempt[2].errors)).toBe(true);
         const a = parseAttempt(attempt);
-        // Written before truncatedStart existed (T2.9), its clips read as begun where asked.
+        // Written before truncatedStart existed (T2.9), its clips read as begun where asked;
+        // before T3.7, its gyro file reads as none and its resyncs as none.
         const raw = attempt as AttemptRecord;
         expect(a, at).toEqual({
           ...raw,
           video: raw.video.map((clip) => ({ ...clip, truncatedStart: false })),
+          gyro: null,
+          resyncs: [],
         });
         expect(a.session, at).toBe(s.id);
         expect(a.clock, at).not.toBeNull();

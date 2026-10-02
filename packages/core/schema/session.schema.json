@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/session.schema.json",
   "title": "session.json",
-  "description": "One cubetrace session, schema version 2 (docs/DATA-MODEL.md §6; version 1 is session.v1.schema.json). Times are host milliseconds: performance.timeOrigin + performance.now() on the host device.",
+  "description": "One cubetrace session, schema version 2 (docs/DATA-MODEL.md §6; version 1 is session.v1.schema.json). Times are host milliseconds: performance.timeOrigin + performance.now() on the host device. The fields of T3.7 (cube.productDate, battery) are optional: the files written before have none.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -57,7 +57,11 @@
         "model": { "type": "string" },
         "hardware": { "type": "string" },
         "firmware": { "type": "string" },
-        "gyro": { "type": "boolean" }
+        "gyro": { "type": "boolean" },
+        "productDate": {
+          "description": "The production date, as the cube's hardware message has it (a Gen4 cube says it; a Gen2 cube does not); null when the cube does not say (T3.7). Absent from the files written before, which read as null.",
+          "type": ["string", "null"]
+        }
       }
     },
     "cameras": {
@@ -122,6 +126,11 @@
         "solved": { "type": "integer", "minimum": 0 },
         "dnf": { "type": "integer", "minimum": 0 }
       }
+    },
+    "battery": {
+      "description": "The cube's battery reports over the session's connections, in order, consecutive equal levels coalesced (T3.7); empty when the cube reported none. Absent from the files written before, which read as empty.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/batteryReading" }
     }
   },
   "$defs": {
@@ -272,6 +281,19 @@
           "description": "The middle of the turn's motion in the camera's frames, on the host clock (its first rise before T2.11).",
           "type": "number"
         }
+      }
+    },
+    "batteryReading": {
+      "description": "One battery report of the cube.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostMs", "level"],
+      "properties": {
+        "hostMs": {
+          "description": "When the cube reported it, on the host clock.",
+          "type": "number"
+        },
+        "level": { "description": "In percent.", "type": "integer", "minimum": 0, "maximum": 100 }
       }
     }
   }
