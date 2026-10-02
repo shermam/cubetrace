@@ -7,7 +7,15 @@ import type {
   StoredFraming,
   VideoQuality,
 } from '@cubetrace/capture';
-import type { MicrophoneProcessing } from '@cubetrace/core';
+import {
+  MAX_VIEWER_CHOICES,
+  type MicrophoneProcessing,
+  type ViewerChoice,
+  type ViewerChoices,
+  parseViewerChoices,
+  sameViewerChoice,
+  viewerChoice,
+} from '@cubetrace/core';
 import { normalizeMac } from '@cubetrace/gan';
 
 import { DEMO_SPEED_DEFAULT, isDemoSpeed } from '../cube/demo';
@@ -193,6 +201,11 @@ interface StoredSettings {
   readonly keepLocalCopies: boolean | null;
   /** T3.9: signed in, the app records diagnostics events in the account. */
   readonly diagnostics: boolean;
+  /**
+   * T3.10: the clip viewer's choice per camera label (the view of the 3D cube and the mirror), the
+   * oldest first; synced with the account's `viewer` by ViewerSyncService.
+   */
+  readonly viewer: ViewerChoices;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -218,6 +231,7 @@ const DEFAULTS: StoredSettings = {
   wifiOnly: null,
   keepLocalCopies: null,
   diagnostics: true,
+  viewer: {},
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -240,7 +254,9 @@ export function macAddressProblem(text: string): string {
  * page's Camera settings are open (T2.7); and the uploads' (T3.3): whether the sessions are uploaded
  * while an account is signed in, on Wi-Fi only (a phone's default, where the browser tells Wi-Fi from
  * mobile data), and whether the uploaded clips stay on the device (a laptop's default); and the
- * diagnostics (T3.9): whether, signed in, the app records events about its own use in the account.
+ * diagnostics (T3.9): whether, signed in, the app records events about its own use in the account;
+ * and the clip viewer's choice per camera (T3.10): where its 3D cube is seen from and the mirror
+ * applied to its orientation, by the camera's label, synced with the account's by ViewerSyncService.
  * Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
@@ -334,6 +350,12 @@ export class SettingsService {
    * signed out either way.
    */
   readonly diagnostics = computed(() => this.stored().diagnostics);
+  /**
+   * The clip viewer's choices by camera label (T3.10): the view of the 3D cube (the player's camera
+   * latitude and longitude) and the mirror, for the cameras that have one; a camera without one gets
+   * the defaults, the cube seen straight on from the front. At most 8, the oldest first.
+   */
+  readonly viewerChoices = computed(() => this.stored().viewer);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -498,6 +520,42 @@ export class SettingsService {
     }
   }
 
+  /** The clip viewer's choice for the camera labelled `camera`, or null when it has none. */
+  viewerChoiceFor(camera: string): ViewerChoice | null {
+    return (this.stored().viewer[camera] as ViewerChoice | undefined) ?? null;
+  }
+
+  /**
+   * Keeps `choice` for the camera labelled `camera` (normalized: the angles to a tenth of a degree,
+   * the longitude in (−180, 180]); nothing when it is the choice kept. The camera's entry becomes the
+   * newest, and the oldest goes when there are more than 8.
+   */
+  setViewerChoice(camera: string, choice: ViewerChoice): void {
+    if (camera === '') {
+      return;
+    }
+    const next = viewerChoice(choice.latitude, choice.longitude, choice.mirror);
+    const current = this.viewerChoiceFor(camera);
+    if (current !== null && sameViewerChoice(current, next)) {
+      return;
+    }
+    const others = Object.entries(this.stored().viewer).filter(([label]) => label !== camera);
+    this.update({
+      viewer: Object.fromEntries([...others, [camera, next]].slice(-MAX_VIEWER_CHOICES)),
+    });
+  }
+
+  /**
+   * Sets the choices as a merge with the account's left them (T3.10, ViewerSyncService): every
+   * camera's, the account's among them. The viewer's own changes go through setViewerChoice.
+   */
+  setViewerChoices(choices: ViewerChoices): void {
+    const next = parseViewerChoices(choices);
+    if (JSON.stringify(next) !== JSON.stringify(this.stored().viewer)) {
+      this.update({ viewer: next });
+    }
+  }
+
   /** Sets the sharpness threshold; returns false, changing nothing, unless it is above 0. */
   setSharpnessThreshold(threshold: number): boolean {
     if (!isSharpnessThreshold(threshold)) {
@@ -611,6 +669,7 @@ function readSettings(
   const wifiOnly = member(parsed, 'wifiOnly');
   const keepLocalCopies = member(parsed, 'keepLocalCopies');
   const diagnostics = member(parsed, 'diagnostics');
+  const viewer = member(parsed, 'viewer');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
   const settings: StoredSettings = {
     hostLabel:
@@ -661,6 +720,9 @@ function readSettings(
       typeof keepLocalCopies === 'boolean' ? keepLocalCopies : DEFAULTS.keepLocalCopies,
     // Settings stored before T3.9 have none: on, as for a new device.
     diagnostics: typeof diagnostics === 'boolean' ? diagnostics : DEFAULTS.diagnostics,
+    // Settings stored before T3.10 have none: the defaults for every camera. An entry that is not
+    // well formed is dropped; the cap takes the first ones, which are the oldest.
+    viewer: parseViewerChoices(viewer),
   };
   return { settings, migrated: cubeMacs.migrated };
 }

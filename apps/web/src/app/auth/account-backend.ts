@@ -6,6 +6,7 @@ import type {
   CloudEventWrite,
   CloudSession,
   UserRecord,
+  ViewerChoices,
 } from '@cubetrace/core';
 import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 
@@ -30,17 +31,17 @@ export interface BackendUser extends AccountUser {
 
 /**
  * A document as Firestore gives it back (docs/DATA-MODEL.md §10): of the session index (T3.1), a
- * cube of the account's list (T3.4), or a diagnostics event (T3.9).
+ * cube of the account's list (T3.4), a diagnostics event (T3.9), or the account's record (T3.10).
  */
 export interface CloudDocument {
   /**
    * The document's id: a session's id, an attempt's index zero-padded to 4 digits (`0001`), a
-   * cube's name, or an event's id.
+   * cube's name, an event's id, or the account's uid.
    */
   readonly id: string;
   /**
    * Its fields as Firestore holds them, unchecked: core's parseCloudSession, parseCloudAttempt,
-   * parseCloudCube and parseCloudEvent read them.
+   * parseCloudCube, parseCloudEvent and parseViewerChoices read them.
    */
   readonly data: unknown;
   /**
@@ -82,6 +83,19 @@ export interface AccountBackend {
    * has it.
    */
   saveUser(uid: string, record: UserRecord): Promise<void>;
+  /**
+   * users/{uid}, the account's record as Firestore holds it (the fields of `saveUser`'s record, the
+   * functions' `quota`, the clip viewer's `viewer`): from the server, or from the cache when the
+   * server is out of reach; null when there is none yet (T3.10).
+   */
+  getUser(uid: string): Promise<CloudDocument | null>;
+  /**
+   * Merges `viewer`, the clip viewer's choice for the cameras it names, into users/{uid}.viewer
+   * (T3.10, docs/DATA-MODEL.md §10): the other cameras' choices stay. As `saveUser`, Firestore
+   * applies it to its cache at once and sends it when it can; the promise settles when the server
+   * has it, and rejects when it refuses it (the rules).
+   */
+  saveViewer(uid: string, viewer: ViewerChoices): Promise<void>;
   /**
    * Merges `session` into sessions/{id}, and in the same batch each of `attempts` into its
    * sessions/{id}/attempts/{index} (docs/PLAN.md T3.1): an attempt with its `upload` creates its

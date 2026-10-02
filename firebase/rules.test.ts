@@ -9,6 +9,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   AttemptMachine,
+  MAX_VIEWER_CHOICES,
   cloudAttempt,
   cloudAttemptFields,
   cloudCube,
@@ -143,13 +144,14 @@ describe('users/{uid}', () => {
     await assertFails(alice().firestore().doc('users/alice').set(user(change)));
   });
 
-  it('refuses a new record without one of its fields', async () => {
+  it('refuses a new record without one of its fields (the viewer of T3.10 is optional)', async () => {
     const db = alice().firestore();
     for (const field of ['schema', 'createdMs', 'displayName', 'email', 'devices']) {
       const record = user();
       Reflect.deleteProperty(record, field);
       await assertFails(db.doc('users/alice').set(record));
     }
+    await assertSucceeds(db.doc('users/alice').set(user()));
   });
 
   it('keeps the collections under a record closed but its cubes (T3.4) and its events (T3.9, below)', async () => {
@@ -160,6 +162,122 @@ describe('users/{uid}', () => {
       await assertFails(db.doc(path).get());
     }
     await assertFails(db.collection('users/alice/macs').get());
+  });
+});
+
+// The clip viewer's choice per camera in the account's record (T3.10, docs/DATA-MODEL.md §10):
+// users/{uid}.viewer, which the app merges into the record apart from the sign-in's write, one
+// camera's choice at a time.
+const FRONT = { latitude: 0, longitude: 0, mirror: 'none' };
+const BEHIND_ABOVE = { latitude: 90, longitude: 180, mirror: 'left-right' };
+
+/** A viewer map of `count` cameras, each seen from the front. */
+function cameras(count: number): Record<string, unknown> {
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, k) => [`camera-${String(k)}`, FRONT]),
+  );
+}
+
+describe('users/{uid}.viewer (T3.10)', () => {
+  it("lets the account merge a camera's choice into its record, keep the others, replace one and read them back", async () => {
+    await seed('users/alice', user());
+    const db = alice().firestore();
+    await assertSucceeds(
+      db.doc('users/alice').set({ viewer: { laptop: BEHIND_ABOVE } }, { merge: true }),
+    );
+    await assertSucceeds(
+      db.doc('users/alice').set({ viewer: { 'phone-rear': FRONT } }, { merge: true }),
+    );
+    const replaced = { latitude: -12.3, longitude: -179.9, mirror: 'all' };
+    await assertSucceeds(
+      db.doc('users/alice').set({ viewer: { laptop: replaced } }, { merge: true }),
+    );
+    let snapshot = await assertSucceeds(db.doc('users/alice').get());
+    expect(snapshot.data()?.['viewer']).toEqual({ laptop: replaced, 'phone-rear': FRONT });
+    // The sign-in's write of the record leaves the choices as they are.
+    await assertSucceeds(
+      db.doc('users/alice').set(user({ devices: { phone: 1_790_000_300_000 } }), { merge: true }),
+    );
+    snapshot = await assertSucceeds(db.doc('users/alice').get());
+    expect(snapshot.data()?.['viewer']).toEqual({ laptop: replaced, 'phone-rear': FRONT });
+    expect(snapshot.data()?.['devices']).toEqual({
+      'office-mbp': 1_790_000_123_456.7,
+      phone: 1_790_000_300_000,
+    });
+    // The map written whole: a camera's choice gone.
+    await assertSucceeds(db.doc('users/alice').update({ viewer: { laptop: FRONT } }));
+    snapshot = await assertSucceeds(db.doc('users/alice').get());
+    expect(snapshot.data()?.['viewer']).toEqual({ laptop: FRONT });
+    // A record created with choices in it, and the most cameras the rules take: merged beside the
+    // one there (the cap is on the whole map: one more camera merged in is refused), and written whole.
+    await assertSucceeds(
+      bob()
+        .firestore()
+        .doc('users/bob')
+        .set(user({ viewer: { laptop: FRONT } })),
+    );
+    await assertSucceeds(
+      db.doc('users/alice').set({ viewer: cameras(MAX_VIEWER_CHOICES - 1) }, { merge: true }),
+    );
+    await assertFails(
+      db.doc('users/alice').set({ viewer: { 'one-more': FRONT } }, { merge: true }),
+    );
+    await assertSucceeds(db.doc('users/alice').set(user({ viewer: cameras(MAX_VIEWER_CHOICES) })));
+    await assertSucceeds(db.doc('users/alice').set(user({ viewer: {} })));
+  });
+
+  it("merges a choice into a record that holds the functions' quota, which stays", async () => {
+    const quota = { day: '2026-10-02', bytes: 43_000, files: 3 };
+    await seed('users/alice', user({ quota }));
+    const db = alice().firestore();
+    await assertSucceeds(db.doc('users/alice').set({ viewer: { laptop: FRONT } }, { merge: true }));
+    const snapshot = await assertSucceeds(db.doc('users/alice').get());
+    expect(snapshot.data()?.['quota']).toEqual(quota);
+    expect(snapshot.data()?.['viewer']).toEqual({ laptop: FRONT });
+  });
+
+  it.each([
+    ['a list of choices', [FRONT]],
+    ['a choice that is a number', { laptop: 1 }],
+    ['a latitude of 91', { laptop: { ...FRONT, latitude: 91 } }],
+    ['a latitude of −91', { laptop: { ...FRONT, latitude: -91 } }],
+    ['a longitude of 181', { laptop: { ...FRONT, longitude: 181 } }],
+    ['a longitude of −181', { laptop: { ...FRONT, longitude: -181 } }],
+    ['a latitude that is text', { laptop: { ...FRONT, latitude: '0' } }],
+    ['a longitude that is null', { laptop: { ...FRONT, longitude: null } }],
+    ['an unknown mirror', { laptop: { ...FRONT, mirror: 'sideways' } }],
+    ['a mirror that is a number', { laptop: { ...FRONT, mirror: 1 } }],
+    ['no mirror', { laptop: { latitude: 0, longitude: 0 } }],
+    ['no latitude', { laptop: { longitude: 0, mirror: 'none' } }],
+    ['a field more', { laptop: { ...FRONT, distance: 5 } }],
+    ['a bad choice after good ones', { ...cameras(3), bad: { ...FRONT, mirror: 'sideways' } }],
+    [
+      'a bad choice as the last one the rules take',
+      { ...cameras(MAX_VIEWER_CHOICES - 1), bad: { ...FRONT, latitude: 100 } },
+    ],
+    ['one camera too many', cameras(MAX_VIEWER_CHOICES + 1)],
+  ] as [string, unknown][])(
+    'refuses the viewer with %s, merged or written whole',
+    async (_, viewer) => {
+      await seed('users/alice', user());
+      const db = alice().firestore();
+      await assertFails(db.doc('users/alice').set({ viewer }, { merge: true }));
+      await assertFails(db.doc('users/alice').set(user({ viewer })));
+      await assertFails(db.doc('users/alice').update({ viewer }));
+      await assertSucceeds(
+        db.doc('users/alice').set({ viewer: { laptop: FRONT } }, { merge: true }),
+      );
+    },
+  );
+
+  it("refuses another account, and anyone signed out, the choices of someone's record", async () => {
+    await seed('users/alice', user({ viewer: { laptop: FRONT } }));
+    for (const db of [bob().firestore(), nobody().firestore()]) {
+      await assertFails(
+        db.doc('users/alice').set({ viewer: { laptop: BEHIND_ABOVE } }, { merge: true }),
+      );
+      await assertFails(db.doc('users/alice').update({ 'viewer.laptop': BEHIND_ABOVE }));
+    }
   });
 });
 
