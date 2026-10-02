@@ -1792,7 +1792,7 @@ highlighted move with what core computes from the file at those moments. Sizes
 viewer's lazy chunk (`clip-viewer-<hash>.js`, the pages' `@defer`) is 18.5 kB raw, 6.4 kB gzipped,
 against 11.4 and 4.2 (the cube's driving, the controls and the styles); the chunk of core and the
 services, which every page loads after its first render, is 71.1 kB raw against 68.7 (the CLI's
-transfer estimate 22.05kB against 21.2 kB: the orientation maths, the clip's time mapping and
+transfer estimate 22.1 kB against 21.2: the orientation maths, the clip's time mapping and
 `parseGyro`'s reader); the scramble view's chunk (`cubing/twisty`, 116.5 kB raw, 32.8 kB gzipped) is
 unchanged and shared, `TWISTY_LOADER` now in a module of its own (`twisty-loader.ts`, a 163-byte
 chunk; the Timer page's chunk is 31.2 kB as before), so that the viewer does not pull the scramble

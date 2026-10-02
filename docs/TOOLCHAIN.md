@@ -1683,13 +1683,16 @@ cubing.js then loads its 3D code, the `twisty-dynamic-3d` chunk that the build a
 the service worker already prefetched with the other cubing.js chunks (509 kB raw, 109 kB transferred:
 three.js's renderer, the cube's meshes), which the 2D scramble picture never asked for. The viewer
 itself is a lazy chunk of its own (`clip-viewer-<hash>.js`, through the pages' `@defer`), where the
-new code lives. **Sizes** (`ng build`, 2026-10-02, against `main` at 4be2a6d): the viewer's chunk is
-20.2 kB raw, 7.1 kB gzipped (11.4 and 4.2 before: the cube's driving, the orientation maths, the
-controls and the styles); the initial bundle is unchanged (264.57 kB raw), the Timer page's chunk
-31.2 kB as before, `TWISTY_LOADER` having moved to `twisty-loader.ts` (a 163-byte chunk shared by
-the scramble view and the viewer) so that the viewer does not pull the scramble view in; the
-services' chunk grows by `parseGyro`'s reader (387 bytes); all the scripts together 3,540.3 kB raw
-against 3,531.1 (1,009.6 kB gzipped against 1,007.1).
+new code lives; the orientation maths and the clip's time mapping live in `packages/core`
+(`orientation.ts`, `clip.ts`), so that the end-to-end suite computes what the viewer must show.
+**Sizes** (`ng build`, 2026-10-02, against `main` at 4be2a6d): the viewer's chunk is 18.5 kB raw,
+6.4 kB gzipped (11.4 and 4.2 before: the cube's driving, the controls and the styles); the chunk of
+core and the services, loaded by every page after its first render, is 71.1 kB raw against 68.7
+(the CLI's transfer estimate 22.1 kB against 21.2: the maths, the time mapping and `parseGyro`'s
+reader); the initial bundle is unchanged (264.57 kB raw), the Timer page's chunk 31.2 kB as before,
+`TWISTY_LOADER` having moved to `twisty-loader.ts` (a 163-byte chunk shared by the scramble view
+and the viewer) so that the viewer does not pull the scramble view in; all the scripts together
+3,540.7 kB raw against 3,531.1 (1,010.5 kB gzipped against 1,007.1).
 
 **The player's API** (`node_modules/cubing/dist/lib/cubing/index-*.d.ts`, cubing 0.63.7): the
 properties `alg`, `experimentalSetupAlg` and `timestamp` (setters whose getters throw;
