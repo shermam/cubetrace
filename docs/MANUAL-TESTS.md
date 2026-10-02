@@ -109,8 +109,10 @@ to create the `v0.2.0` release from GitHub after it.
 - A clip begins at the keyframe at or before its margin: 2 to 3 s before the scramble's first turn,
   3 to 4 s before the solve's.
 - The sharpness threshold, 20, was set on Chrome's test camera only; this round sets it per camera.
-- The clip viewer places each move at the time its Bluetooth packet arrived, without the camera's
-  lag: the highlighted move can lead the picture by the sync check's X ms.
+- ~~The clip viewer places each move at the time its Bluetooth packet arrived, without the camera's
+  lag: the highlighted move can lead the picture by the sync check's X ms.~~ Since T3.8 the viewer
+  applies the clip's `syncResidualMs` to the moves and to its 3D cube: a move is highlighted when the
+  picture shows it.
 - From 95% of the storage quota the camera stops recording while the timer goes on. Exporting frees
   nothing (the export is the JSON records only): delete sessions, after downloading the clips to
   keep.
@@ -837,3 +839,25 @@ device, the cube and what happened.
   the attempt's folder has the six files; the session's document in the Firebase console has
   `battery` (one entry per level the cube reported) and `cube.productDate` null (a Gen2 cube says
   none).
+
+## After T3.8 — the 3D cube in the clip viewer
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T3.8, on the MacBook
+with the GAN 12 ui FreePlay, the camera on and a sync check made. The frame mapping of the gyroscope
+(the cube's +X through red, +Y through blue, +Z through white, as the driver documents it) has not
+been seen on a real recording: this item is how it gets corrected, from one file, if it is wrong.
+Next to the item, write the device, the cube and what happened.
+
+- [ ] One attempt in which, during the inspection, you tilt the cube to the right (its white face
+  leaning towards your right hand) for a second, bring it back, then tilt it forward (the white face
+  away from you), bring it back, and turn it a quarter about the vertical. Open its clip from the
+  solve list: the 3D cube beside the video starts upright (white up, green in front, whatever way the
+  real cube faces the camera) and, as the video plays, tilts to the right when the real one does,
+  forward when it does, and turns about the vertical with it; the turns of the solve follow the
+  picture, and the highlighted move changes when the picture shows the turn, not before. Write which
+  of the three motions the 3D cube made the same way, and which it mirrored or made about another
+  axis: the correction is `CUBE_TO_PLAYER` in `packages/core/src/orientation.ts` (one
+  constant), or a conjugation of `q` in `toPlayerFrame` beside it if every motion goes the opposite
+  way. "Raw" off and on; "Re-zero" at a moment the cube is tilted: it stands upright from there.
+- [ ] A clip of an attempt before T3.7 (no `gyro.json`): the cube turns with the moves, upright, and
+  the line under it says the orientation is not recorded.

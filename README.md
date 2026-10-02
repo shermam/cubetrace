@@ -172,9 +172,13 @@ Timer page lists the session's last 12 solves; "See all" under them, or a sessio
 Sessions page, opens the session's page, with all its attempts, its statistics (ao100 too) and the
 storage its clips take. Each list shows a badge on each attempt with clips ("2 clips, 1.6 MB"),
 which opens the clip viewer: the clip plays next to the attempt's moves by time, the one on screen
-highlighted (a click on a move goes to it), and Download saves the attempt's files: both MP4s, both
-frames files, `gyro.json` when there is one, and `attempt.json` (Chrome may ask once to allow
-multiple downloads).
+highlighted (a click on a move goes to it), and a 3D cube that follows the video (T3.8): it turns
+with the moves as the picture shows them (the camera's lag from the sync check applied) and, when
+the attempt has a `gyro.json`, tilts and turns as the real cube did, upright at the clip's first
+frame ("Re-zero" makes the current moment upright; "Raw" shows the gyroscope's own frame, whose yaw
+is arbitrary); without one, a line says the orientation is not recorded. Download saves the
+attempt's files: both MP4s, both frames files, `gyro.json` when there is one, and `attempt.json`
+(Chrome may ask once to allow multiple downloads).
 
 ## Cloud
 

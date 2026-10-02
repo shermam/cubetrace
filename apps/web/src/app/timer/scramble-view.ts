@@ -1,26 +1,11 @@
-import {
-  CUSTOM_ELEMENTS_SCHEMA,
-  Component,
-  InjectionToken,
-  computed,
-  inject,
-  input,
-  signal,
-} from '@angular/core';
+import { CUSTOM_ELEMENTS_SCHEMA, Component, computed, inject, input, signal } from '@angular/core';
 import type { ScrambleMoveState } from '@cubetrace/core';
 
 import { SessionService, type AttemptView } from '../session/session-service';
 import { errorMessage } from '../shared/error-message';
+import { TWISTY_LOADER } from './twisty-loader';
 
-/**
- * Loads cubing.js's `<twisty-player>` element (`cubing/twisty` defines it when imported). A dynamic
- * import, so that it is a lazy chunk of its own and nothing of it is in the initial bundle; the unit
- * tests give a loader that does nothing.
- */
-export const TWISTY_LOADER = new InjectionToken<() => Promise<unknown>>('TWISTY_LOADER', {
-  providedIn: 'root',
-  factory: () => () => import('cubing/twisty'),
-});
+export { TWISTY_LOADER } from './twisty-loader';
 
 /**
  * How a move of the scramble on screen looks: how far the cube has made it (`done`; `partial`, a

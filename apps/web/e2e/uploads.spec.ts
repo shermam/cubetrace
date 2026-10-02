@@ -300,6 +300,7 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
   const viewer = page.getByTestId('clip-viewer');
   await expect(viewer.getByTestId('clip-cloud')).toContainText('In the cloud');
   await expect(viewer.getByTestId('clip-video')).toHaveCount(0);
+  await expect(viewer.getByTestId('clip-cube')).toHaveCount(0);
   await viewer.getByRole('button', { name: 'Close' }).click();
   await page.goto('/sessions');
   await expect(

@@ -1720,6 +1720,92 @@ the services, which every page loads
 right after the first render, 68.7 kB raw against 57.7 (21.3 kB transferred against 18.2), and the
 QA page grows by its section, 16.2 kB raw against 9.5.
 
+### T3.8 — `web`: a 3D cube in the clip viewer that follows the video: its orientation from `gyro.json`, its turns from the moves, the camera's lag applied
+
+Since T3.7 each attempt of a cube with a gyroscope has a `gyro.json` beside its clips. The owner
+wants to see, in the clip viewer, a 3D cube beside the video that tilts and rotates as the real one
+did and turns with the moves, in time with the picture; no live 3D cube on the Timer page (the
+solver watches the real cube, and WebGL would compete with the capture pipeline). Contract: (1)
+cubing.js's `<twisty-player>` in the viewer's body beside the video, 3D, no control panel, no drag
+input, transparent background, hint facelets off, from the scramble view's lazy chunk
+(`TWISTY_LOADER`), as tall as the video on a laptop and under it on a phone; shown whenever a local
+clip plays, and when the attempt has no gyro file the cube still turns with the moves and a line
+says the orientation is not recorded. (2) Time: the video's `t` shows the world at host time
+`firstFrameHostMs + t·1000 − lag`, `lag` the clip's `syncResidualMs` (0 when null); the cube's state
+then is the record's moves at or before it on the segment's starting state (the scramble as the
+setup alg for the solve clip, solved for the scramble clip, a mis-scramble's corrections included);
+its orientation the gyro sample then (slerp between neighbours; the first or last sample beyond the
+span; nothing before a truncated file's first sample); the moves list applies the same lag. (3)
+Following: every frame while it plays (`requestVideoFrameCallback`, else `requestAnimationFrame`) and
+on `seeked`, `timeupdate` and pause; the next move added with `experimentalAddMove` so that it
+animates, at a tempo that completes a turn in about 100 ms; after a seek, or when more than one move
+passed since the last frame, the state rebuilt without animation; the orientation set on the
+puzzle's `Object3D` through `experimentalCurrentThreeJSPuzzleObject()` and rendered through the
+vantages, only when it changed; nothing while the dialog is closed, everything released when it
+closes. (4) Frames: the cube's +X red, +Y blue, +Z white; cubing.js's +X R, +Y U, +Z F; `(x, y, z) →
+(x, z, −y)`, a rotation of −90° about X, `q → r·q·r⁻¹`, in a pure module with the slerp (shorter
+arc), the interpolation (binary search) and the reference; by default relative to the clip's first
+sample (`conj(q_ref)·q`), "Re-zero" takes the current time, "Raw" shows the samples as they are; a
+manual item ("After T3.8") checks the mapping on a real recording, the mapping in one constant. (5)
+`gyro.json` read through `ATTEMPT_FILES` and `parseGyro`, failures shown in one line. (6) Tests: unit
+for the pure module, the time mapping with and without lag, the interpolation, the moves-so-far and
+the rebuild-versus-animate decision; component tests of the viewer with `TWISTY_LOADER` replaced;
+one end-to-end flow with `?gyro=1` and the camera on, watching the puzzle object's quaternion and
+the highlighted move while a clip plays, and the line of a clip without a gyro file. (7) Docs. (8)
+The lazy chunk's size before and after, and the per-frame cost. (9) Nothing else: no version bump, no
+workflow change, no new dependency.
+
+**Outcome (2026-10-02).** As contracted, with these choices. The maths live in `packages/core`
+(`orientation.ts`: a `[x, y, z, w]` tuple type, `multiply`, `conjugate`,
+`slerp` along the shorter arc with a linear fallback for near-equal orientations, `orientationAt`
+over a `GyroTrack` whose sample times are the file's intervals summed in tenths of a millisecond,
+`referenceAt`, `shownOrientation`, `toPlayerFrame` with the constant `CUBE_TO_PLAYER = (−√½, 0, 0,
+√½)`, and `cubeStep`; `clip.ts`: a clip's time on the host clock with the camera's lag, `clipHostMs`
+and `clipSeconds`), so that the end-to-end flow computes from the gyro file the app wrote what the
+viewer must show, and the player's driving in `clip-cube.ts` (`ClipCube` over a `CubePlayer`
+interface of the six members used: `alg`, `experimentalSetupAlg`, `timestamp`,
+`experimentalAddMove`, `experimentalCurrentThreeJSPuzzleObject`, `experimentalCurrentVantages`,
+which the compiler checks against cubing.js's `TwistyPlayer` in the spec), so that the viewer's tests
+run on a fake `<twisty-player>` defined in jsdom and never load cubing.js. The player's alg is the
+moves shown so far and its setup the segment's start: a move on is `experimentalAddMove` (no
+cancellation, so the alg stays the record's moves, one per turn), whose catch-up animation cubing.js
+runs over 500 ms divided by `tempoScale`, set to 5; a rebuild sets `alg` to the moves up to the time
+and `timestamp` to `end`. The orientation compares as `1 − |a·b| < 1e-9` (q and −q alike, a hundredth
+of a degree) before a render. The reference is the sample at the host time of the clip's first frame
+(the lag applied), or the file's first sample when the clip begins before a truncated file; before
+a truncated file's first sample the cube is shown upright and the line says from when the
+orientation is recorded. Sizing is by CSS alone: on a laptop the body's columns are the video, the
+cube and the 9rem moves list, the cube's column the share `height / (width + height)` of the clip's
+frames of what the video and the cube have (`--cube-share`), which makes the square as tall as the
+16:9 picture; on a phone the cube is 12rem under the video. `session-page.spec.ts` now replaces
+`TWISTY_LOADER` too, since the viewer would load cubing.js in jsdom. The known limitation of round 2
+("the highlighted move can lead the picture by the sync check's lag") is closed. Found on the way:
+the demo's gyroscope starts over at each replay (`replayDemo` connects a new fake cube, its angle
+from 0) while the page's gyro buffer keeps the previous cube's samples, so a demo attempt's file
+begins with the previous cube's orientation and jumps to the new one's: the viewer's reference is
+then the previous cube's, and the solve's turn runs from about 37° away back towards it, which an
+early version of the end-to-end check, polling the quaternion while the video played, caught only
+when a poll fell in that second (it failed under the full suite's load); the check now seeks to
+the solve's middle, plays to the end and seeks back, and compares the quaternion, the alg and the
+highlighted move with what core computes from the file at those moments. Sizes
+(`ng build`, against `main` at 4be2a6d): the initial bundle is unchanged (264.57 kB raw); the
+viewer's lazy chunk (`clip-viewer-<hash>.js`, the pages' `@defer`) is 18.5 kB raw, 6.4 kB gzipped,
+against 11.4 and 4.2 (the cube's driving, the controls and the styles); the chunk of core and the
+services, which every page loads after its first render, is 71.1 kB raw against 68.7 (the CLI's
+transfer estimate 22.1 kB against 21.2: the orientation maths, the clip's time mapping and
+`parseGyro`'s reader); the scramble view's chunk (`cubing/twisty`, 116.5 kB raw, 32.8 kB gzipped) is
+unchanged and shared, `TWISTY_LOADER` now in a module of its own (`twisty-loader.ts`, a 163-byte
+chunk; the Timer page's chunk is 31.2 kB as before), so that the viewer does not pull the scramble
+view in; cubing.js's 3D code, `twisty-dynamic-3d` (509.2 kB raw, 131.9 kB gzipped; the CLI's estimate
+108.9 kB), was already emitted and prefetched by the service worker and is now loaded, by cubing.js
+itself, the first time a clip is opened; all the scripts together 3,540.7 kB raw against 3,531.1
+(1,010.5 kB gzipped against 1,007.1). Per frame: one scan
+of the segment's moves (at most a few hundred), one binary search over the samples, one slerp, one
+`quaternion.set` and one `scheduleRender` when the orientation changed, plus cubing.js's own render
+of a move in progress. Left for the owner: the frame mapping on a real recording
+(`docs/MANUAL-TESTS.md`, "After T3.8"), since the driver's documentation of the gyro's axes is all
+it rests on.
+
 ## Phases 4 and 5
 
 Outlines only, written into boards when phase 3 ends: **4. Remote cameras** — WebRTC pairing by

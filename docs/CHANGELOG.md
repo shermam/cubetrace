@@ -52,6 +52,27 @@ versions follow [Semantic Versioning](https://semver.org/).
   the account, never updated or deleted) with their tests; `AccountBackend.saveEvents` and
   `listEvents` in the SDK and both fakes; `diagnostics.spec.ts` in the end-to-end suite and the
   events checked in the cloud project.
+- A 3D cube in the clip viewer that follows the video (T3.8): beside the clip, cubing.js's cube in
+  3D turns with the attempt's moves as the picture shows them (the next move animated in about
+  100 ms; the state rebuilt at once after a seek) and, when the attempt has a `gyro.json` (T3.7),
+  tilts and turns as the real cube did, from the gyroscope's samples around the moment the picture
+  shows, upright at the clip's first frame (the gyroscope's yaw is arbitrary); "Re-zero" takes the
+  current moment as upright, and "Raw" shows the samples as recorded. The moves list and the cube
+  both apply the camera's lag from the sync check (`syncResidualMs`), so the highlighted move changes
+  when the picture shows the turn, which it used to lead by that lag. Without a gyro file (an older
+  attempt, a cube without a gyroscope) the cube still turns, upright, and a line says the orientation
+  is not recorded; a file that cannot be read is said in that line. On a laptop the cube stands
+  beside the video, as tall as it; on a phone, under it. No 3D cube on the Timer page: the solver
+  watches the real cube, and WebGL would compete with the capture. The gyroscope's frame is mapped
+  from the driver's documentation, not yet from a real recording: `docs/MANUAL-TESTS.md`, "After
+  T3.8", says how to check it.
+- Development: `orientation.ts` (quaternion arithmetic, the frame mapping `CUBE_TO_PLAYER`, the
+  interpolation over a gyro file, `cubeStep`) and `clip.ts` (a clip's time on the host clock, the
+  camera's lag applied) in `packages/core`, and `clip-cube.ts` (the player driven through
+  `experimentalAddMove`, `experimentalCurrentThreeJSPuzzleObject` and the vantages) in
+  `apps/web/src/app/timer`, with their tests; the recording flow of the end-to-end suite seeks and
+  plays a clip and checks the puzzle object's quaternion, the player's alg and the highlighted move
+  against what core computes from the gyro file the app wrote.
 
 ## 0.3.0 — 2026-10-02
 
