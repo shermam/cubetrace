@@ -1369,11 +1369,10 @@ Authentication's creation time of the account, the same on every device, so that
 read and the rules can keep it unchanged. The rules also keep the client to the record's fields
 (T3.2's quota will be out of its reach) and create an attempt only under a session of the same
 owner; for T3.1, attempts carry `owner` too, and queries must ask `where('owner', '==', uid)`. The
-Firebase CLI runs through npx, pinned (15.32.1), not as a devDependency. Open for manual round 3:
-whether the redirect completes in the installed app on the ThinkPhone, since Chrome's partitioned
-third-party storage can cut a redirect's outcome off on an app outside `firebaseapp.com`
-(`docs/ARCHITECTURE.md`, "Account"); the popup there, or Firebase's auth helper served from the
-app's own site, would be the fix.
+Firebase CLI runs through npx, pinned (15.32.1), not as a devDependency. The question left for
+manual round 3, whether the redirect completes in the installed app on the ThinkPhone, was answered
+there on 2026-10-02: it does not (issue #50; Chrome's partitioned third-party storage cuts the
+outcome off, as feared), and T3.6 below made the popup the one flow.
 
 ### T3.1 — Firestore session index and the merged Sessions page
 
@@ -1563,6 +1562,48 @@ it); `main` is unchanged but for its stamps, and Firebase's chunk is 3.7 kB larg
 (`docs/MANUAL-TESTS.md`, "Round 3"), then the `v0.3.0` release from the GitHub UI; and the daily
 quota, 400 files, at most 80 attempts with their clips, below the design's cadence (raised to 6 GB and 1,200 files a day by the coordinator on 2026-10-02)
 (`functions/.env`).
+
+### T3.6 — Sign-in in the installed app on Android (issue #50)
+
+The first sign-in from the app installed on the ThinkPhone (Chrome's WebAPK, display mode
+`standalone`) ended with "Signing in did not finish: Google sent the page back without an account":
+T3.0's redirect, whose outcome comes back through Firebase's helper frame on
+`cubetrace-cacd9.firebaseapp.com`, a third party to the app on `shermam.github.io`, which Chrome's
+partitioned third-party storage keeps from the app. Contract: one sign-in flow, the popup, in the
+installed app too (Chrome opens it there as a Custom Tab over the app, which closes itself when
+Google is done); the redirect flow removed from `AuthService`, `AccountBackend`, `firebase-sdk.ts`
+and both fakes; a `redirect` value of `cubetrace.account` left by 0.3.0 read as nothing and removed
+at start, never an error; in the installed app, a popup blocked or closed before Google is done
+says to sign in once in Chrome itself, at the app's address, and to open the installed app again
+(Chrome's installed apps share the site's storage with its tabs); the messages in a tab unchanged;
+no version bump, no change to the workflow, the Firebase configuration or the dependencies.
+
+**Outcome (2026-10-02, PR #T36PR).** `signInWithPopup` everywhere: `SignInFlow`, `signInFlow()`, the
+redirect branches of `signIn()` and `resume()`, `RedirectLostError` and the `redirect` value of
+`cubetrace.account` are gone, with `signInWithRedirect` and `redirectResult` from `AccountBackend`,
+`firebase-sdk.ts` (which keeps `browserPopupRedirectResolver`, passed per call so that a remembered
+start opens no iframe) and both fakes; `installedApp()` (display mode `standalone`) is what is left
+of the choice, and `AuthService` hands it to `authErrorMessage` as an `AuthErrorContext`, so that
+`auth/popup-blocked`, `auth/popup-closed-by-user` and `auth/cancelled-popup-request` say, in the
+installed app alone, "Google's window did not finish signing in from the installed app. Open the
+app's address in Chrome itself and sign in there once: the installed app shares its storage with
+Chrome, so that signs it in too. Then open the installed app again." Why the popup should work where
+the redirect did not: its outcome goes from Google's window to the app's by messages, not through
+the helper frame's storage, and the owner's laptop, the same Chrome with the same partitioning,
+signs in with it already. Why the helper on the app's own domain (Firebase's other options: the
+app's domain as `authDomain`, a reverse proxy of `/__/auth/`, the helper's files served with the
+app) is not the fix here: each needs the app's host to serve or proxy those paths, which GitHub
+Pages cannot. In `auth-service.spec.ts`, six tests in place of the three redirect ones (the
+installed app on Android signs in with the popup; a stale `redirect` forgotten at start, signed out,
+nothing said, Firebase not loaded; the three codes' installed-app message, and a Chrome tab's
+sign-in reaching the installed app's next start; the other messages unchanged there) and two in
+place of five for `installedApp()` (the user agent no longer matters); the e2e fakes lost their
+redirect members and no end-to-end test changed. Left for the owner on the ThinkPhone, after the
+deploy: Sign in from the installed app, the Custom Tab, and whether the app comes back signed in
+(`docs/MANUAL-TESTS.md`, round 3); if the Custom Tab does not come back signed in either, plan B is
+Google Identity Services giving an ID token to `signInWithCredential`, without Firebase's helper at
+all, which needs the app's origin among the OAuth client's authorized JavaScript origins in the
+Google Cloud console.
 
 ## Phases 4 and 5
 

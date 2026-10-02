@@ -20,11 +20,12 @@ the owner's Firebase project `cubetrace-cacd9` and the Google Cloud Storage buck
 ### Added
 
 - A Google account, optional (T3.0): Sign in, in the header and in Settings → Account, signs in with
-  Google, in a popup (in the app installed on Android, the page goes to Google's and comes back), and
-  the header then shows the account's photo and name, with Sign out in its menu. The account records
-  the name, the email and each device's label (`users/{uid}` in Firestore), and is there for the
-  cloud index of the sessions and their uploads (below). Signed out, the app works as before and
-  never downloads Firebase, which loads once the account is used; signed in, it opens offline too.
+  Google, in a popup (over the app installed on Android, a Chrome tab of its own that closes
+  itself), and the header then shows the account's photo and name, with Sign out in its menu. The
+  account records the name, the email and each device's label (`users/{uid}` in Firestore), and is
+  there for the cloud index of the sessions and their uploads (below). Signed out, the app works as
+  before and never downloads Firebase, which loads once the account is used; signed in, it opens
+  offline too.
 - Development: the Firestore rules (`firebase/firestore.rules`: an account reads and writes only its
   own record and its own sessions), tested against the Firestore emulator (`npm run test:rules`, in
   CI with Java 21), and a workflow that deploys them when a merge changes them
@@ -121,6 +122,14 @@ the owner's Firebase project `cubetrace-cacd9` and the Google Cloud Storage buck
   (on a phone, a second rear lens is `phone-rear-2`), and a camera used again in the session gets
   its label back, with its sync check, while a camera switched to that has no check in the session
   is due one (T2.14). A new session starts again from `laptop`.
+- Signing in from the app installed on Android never finished (issue #50, the first sign-in of manual
+  round 3 on the ThinkPhone): the installed app sent the page to Google's and back, and the outcome
+  comes back through Firebase's helper frame on another site than the app's, which Chrome's
+  partitioning of third-party storage keeps from the app, so it said "Signing in did not finish:
+  Google sent the page back without an account". The installed app now signs in with the same popup
+  as a browser tab, which Chrome opens over it as a tab of its own that closes itself when Google is
+  done (T3.6). Should that window not finish, the app says to sign in once in Chrome itself, at the
+  app's address, which signs the installed app in too, and to open it again.
 
 ## 0.2.0 — 2026-09-27
 

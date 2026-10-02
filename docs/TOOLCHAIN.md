@@ -1235,8 +1235,8 @@ Firestore, the Firestore rules and their tests, and the deploy workflow (`docs/A
 **Firebase 12.19.0, modular, behind one file.** The latest 12.x on 2026-10-01 and the version the plan
 names (13.0 exists only as prereleases). `apps/web/src/app/auth/firebase-sdk.ts` is the only file
 that imports it: `initializeApp`, `initializeAuth` (IndexedDB persistence, then `localStorage`; no
-popup and redirect resolver at start, so that a remembered account starts without Google's iframe:
-the calls that open Google's page pass `browserPopupRedirectResolver`), `GoogleAuthProvider` (with
+popup resolver at start, so that a remembered account starts without Google's iframe: the one call
+that opens Google's page passes `browserPopupRedirectResolver`), `GoogleAuthProvider` (with
 `prompt: select_account`) and `initializeFirestore` with `persistentLocalCache` and
 `persistentMultipleTabManager`, so that writes wait in IndexedDB while offline, across reloads, and
 the app's tabs share the cache. It implements `AccountBackend` (`account-backend.ts`), the few calls
@@ -1272,15 +1272,22 @@ chunk of 13.0 kB raw, 3.9 kB transferred, which the header's controls (`header-c
 2.3 kB, the cube's pill with it; the pill alone was 1.9 kB) and the Settings page share, and which
 every start loads right after the first render; the Settings page's own chunk is 17.0 kB (16.4).
 
-**Sign-in flows.** A popup (`signInWithPopup`), except in the app installed on Android (display mode
-`standalone` and the platform Android), where a popup would leave the app for a Chrome tab: there
-`signInWithRedirect`, whose outcome the next start reads (`getRedirectResult`), the `localStorage`
-flag `cubetrace.account` saying `redirect` meanwhile. A redirect that comes back without an account
-says so ("Signing in did not finish…"): the outcome comes back through Firebase's helper frame on
+**The sign-in flow.** A popup (`signInWithPopup`) everywhere, in the app installed on Android too
+(T3.6). Until it, the installed app (display mode `standalone` and the platform Android) signed in
+with `signInWithRedirect`, whose outcome the next start read (`getRedirectResult`), the
+`localStorage` flag `cubetrace.account` saying `redirect` meanwhile, on the thought that a popup
+would leave the app for a Chrome tab; the outcome comes back through Firebase's helper frame on
 `cubetrace-cacd9.firebaseapp.com`, which browsers that partition third-party storage (Chrome 115+)
-can cut off from the app on another site (Firebase's "signInWithRedirect best practices"); manual
-round 3 checks it on the phone. Errors keep Firebase's codes' meaning in plain sentences
-(`auth-error.ts`).
+cut off from the app on another site (Firebase's "signInWithRedirect best practices"), and manual
+round 3 met exactly that on the ThinkPhone (issue #50: "Signing in did not finish…"). The popup
+passes its outcome by messages, not through storage, and Chrome opens it from the installed app as
+a Custom Tab over the app that closes itself; of the two flows' functions, `firebase-sdk.ts` now
+imports `signInWithPopup` and `browserPopupRedirectResolver` alone, a `redirect` flag left by 0.3.0
+is removed at start, and `docs/ARCHITECTURE.md` ("Account") has the reasoning and the plan B. Errors
+keep Firebase's codes' meaning in plain sentences (`auth-error.ts`); in the installed app, which
+`AuthService` tells `authErrorMessage` through an `AuthErrorContext`, a popup blocked or closed
+before Google was done says to sign in once from a Chrome tab at the app's address and to open the
+installed app again, since Chrome's installed apps share the site's storage with its tabs.
 
 **The end-to-end suite's fake.** The dev server's app takes a fake backend from
 `window.cubetraceE2eAccountLoader` (`apps/web/e2e/helpers/account.ts`, installed with

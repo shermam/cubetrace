@@ -127,9 +127,11 @@ coordinator asks the owner to create the `v0.3.0` release from GitHub.
    (the account; on the ThinkPhone, do the first item of **T3.4** before signing in), **T3.4** (the
    cubes' MAC addresses), **T3.1** (the session index), **T3.3** (uploads), then **T2.14** (two
    cameras in one session, on the MacBook). The round as a whole, which those sections detail:
-   - Sign in on the MacBook (a popup) and on the ThinkPhone, in the installed app (a redirect to
-     Google's page): write down whether the app comes back signed in, the open question of T3.0, and
-     if it says "Signing in did not finish", whether a Chrome tab signs in there.
+   - Sign in on the MacBook (a popup) and on the ThinkPhone, in the installed app, where the popup
+     opens as a Custom Tab over the app and closes itself when Google is done (T3.6, after issue
+     #50): write down whether the app comes back signed in. If it says instead that Google's window
+     did not finish, sign in from a Chrome tab at the same address and open the installed app again,
+     which is then signed in too; report the Custom Tab that did not come back.
    - The cube's MAC address typed on the phone in round 1 is in the MacBook's Settings → Cube MAC
      addresses, which says "Synced with your account"; with the flag off on the MacBook, the cube
      connects without asking for it.
@@ -187,9 +189,11 @@ cubetrace:cubetrace-data/users/` totals them, and `rclone copy cubetrace:cubetra
 
 **Known limitations** (from the phase 3 pull requests), not to be reported as surprises:
 
-- The installed app on Android signs in with a redirect, whose outcome Chrome's partitioned
-  third-party storage can keep from the app (`docs/ARCHITECTURE.md`, "Account"); this round finds
-  out whether it does. A Chrome tab signs in with a popup.
+- The installed app on Android signs in with the same popup as a Chrome tab, opened as a Custom Tab
+  over the app (T3.6: the redirect it used before never came back signed in on the ThinkPhone, issue
+  #50). A Custom Tab that does not come back signed in is the thing to report; meanwhile a sign-in
+  from a Chrome tab at the app's address signs the installed app in too (`docs/ARCHITECTURE.md`,
+  "Account").
 - An attempt uploads once its clips are saved, a second or two after it ends; `session.json` goes
   again about two minutes after the session's last change, not with every attempt.
 - The day's quota, per account and UTC day: 6 GB and 1,200 files signed, every signature counted. An

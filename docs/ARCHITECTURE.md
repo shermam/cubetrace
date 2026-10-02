@@ -115,9 +115,9 @@ app starts when a sign-in is remembered (`localStorage` `cubetrace.account`, set
 removed on sign-out).
 
 ```
-Sign in ─▶ ACCOUNT_LOADER (the lazy chunk) ─▶ Google's page: a popup (a laptop, a phone's browser tab)
-                                              or a redirect (the app installed on Android, read at
-                                              the next start) ─▶ the account
+Sign in ─▶ ACCOUNT_LOADER (the lazy chunk) ─▶ Google's page in a popup (a laptop, a phone's browser
+                                              tab; over the app installed on Android, a Custom Tab
+                                              that closes itself) ─▶ the account
 start with a sign-in remembered ─▶ ACCOUNT_LOADER ─▶ the account kept in IndexedDB (offline too)
 the account ─▶ users/{uid} merged: the account, this device's host label and host clock (not awaited)
 ```
@@ -140,11 +140,24 @@ Google's or Firebase's: it passes their requests through (one that fails reaches
 which it reads as a network error), and Google's sign-in page and its helper frame are on
 `cubetrace-cacd9.firebaseapp.com`, outside its scope.
 
-A redirect comes back through that helper frame, on another site than the app's: browsers that
-partition third-party storage, Chrome since version 115 among them, can keep the outcome from the
-app, which then says that signing in did not finish. If the installed app on the phone meets it
-(manual round 3), the fix is to serve the helper from the app's own site (Firebase's
-"signInWithRedirect best practices") or to use the popup there too.
+The popup is the one sign-in flow, in the installed app too (T3.6). Until it, the app installed on
+Android signed in with a redirect, whose outcome comes back through that helper frame, on another
+site than the app's, and browsers that partition third-party storage (Chrome since 115, Safari
+16.1, Firefox 109) keep it from the app: manual round 3 met exactly that on the ThinkPhone (issue
+#50, "Signing in did not finish: Google sent the page back without an account"). Of the fixes
+Firebase lists ("Best practices for using signInWithRedirect on browsers that block third-party
+storage access"), the ones that put the helper on the app's own domain (the app's domain as the
+`authDomain`, a reverse proxy of `/__/auth/`, the helper's files served with the app) need a host
+other than GitHub Pages; the popup passes its outcome from Google's window to the app's by messages,
+not through the helper frame's storage (the owner's laptop, the same Chrome with the same
+partitioning, signs in with it already), and Chrome on Android opens it from an installed app as a
+Custom Tab over the app, which closes itself when Google is done, so the installed app signs in as a
+tab does. If the popup is blocked, or closed before Google is done, in the installed app (display
+mode `standalone`), the message says to sign in once in Chrome itself, at the app's address, and to
+open the installed app again: Chrome's installed apps share the site's storage with Chrome's tabs,
+so the account that Firebase keeps in IndexedDB, and the `localStorage` that remembers it, are the
+installed app's too. A `redirect` value of `cubetrace.account` left by 0.3.0 is removed at start,
+without loading Firebase.
 
 ## Session index (T3.1)
 
