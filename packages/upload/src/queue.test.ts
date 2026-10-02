@@ -306,6 +306,53 @@ describe('UploadQueue', () => {
     await queue.stop();
   });
 
+  it('tries again later a file that signUpload left out of its answer', async () => {
+    const d = device();
+    await oneAttempt(d);
+    d.env.jitter = 0;
+    d.cloud.omitOnce = 'laptop.solve.frames.json';
+    const queue = queueOf(d);
+    await queue.start();
+    await flush();
+    expect(
+      queue.view().active[0].files.find((f) => f.path === 'laptop.solve.frames.json'),
+    ).toMatchObject({
+      state: 'pending',
+      error: 'signUpload did not sign it',
+      retryAtMs: d.env.now() + 1000,
+    });
+    expect(d.cloud.calls.filter((call) => call.startsWith('sign'))).toHaveLength(1);
+    d.env.advance(1000);
+    await flush();
+    expect(d.cloud.calls.filter((call) => call.startsWith('sign')).at(-1)).toBe(
+      `sign ${A}/1 laptop.solve.frames.json`,
+    );
+    expect(queue.view().counts.done).toBe(1);
+    await queue.stop();
+  });
+
+  it('does nothing more once stopped: the operations still queued are dropped', async () => {
+    const d = device({ lock: true });
+    await oneAttempt(d);
+    const holder = queueOf(d);
+    d.http.hold = true;
+    await holder.start();
+    await flush();
+    // A second tab waits for the lock; the app tells it of an attempt, then it is stopped.
+    const waiting = queueOf(d);
+    void waiting.start();
+    await flush();
+    expect(waiting.status).toBe('waiting');
+    const calls = d.cloud.calls.length;
+    waiting.attemptSaved(attempt(B, 1));
+    waiting.rescan();
+    await waiting.stop();
+    await holder.stop();
+    await flush();
+    expect(d.cloud.calls.slice(calls)).toEqual([]);
+    expect(waiting.status).toBe('stopped');
+  });
+
   it('signs a URL that expired again, once', async () => {
     const d = device();
     await record(d, session(A, 1_790_000_000_000), [attempt(A, 1)]);

@@ -1347,9 +1347,12 @@ export class UploadQueue {
       return;
     }
     const usableUntil = asked + URL_LIFETIME_MS - URL_MARGIN_MS;
-    for (const answer of signed) {
-      const file = files.find((candidate) => candidate.path === answer.path);
-      if (file !== undefined) {
+    for (const file of files) {
+      const answer = signed.find((candidate) => candidate.path === file.path);
+      if (answer === undefined) {
+        // Not in the answer: tried again later, rather than asked for again at once.
+        this.#failed(file, 'again', 'signUpload did not sign it');
+      } else {
         file.signed = answer;
         file.usableUntilMs = usableUntil;
       }
@@ -1764,10 +1767,13 @@ export class UploadQueue {
 
   /** Runs `operation` after the queue's earlier operations; it never rejects. */
   #enqueue(operation: () => void | Promise<void>): Promise<void> {
-    const run = this.#serial.then(operation).catch((error: unknown) => {
-      this.#error = messageOf(error);
-      this.#notify();
-    });
+    // Stopped meanwhile, the operations still queued do nothing (no read, no call to the index).
+    const run = this.#serial
+      .then(() => (this.#status === 'stopped' ? undefined : operation()))
+      .catch((error: unknown) => {
+        this.#error = messageOf(error);
+        this.#notify();
+      });
     this.#serial = run;
     return run;
   }

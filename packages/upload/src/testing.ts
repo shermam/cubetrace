@@ -50,6 +50,8 @@ export class FakeUploadCloud implements UploadCloud {
   signError: { error: CloudError; once: boolean } | null = null;
   /** Set: each confirmUpload (of the file `path`, when it is given) is refused with it. */
   confirmError: { error: CloudError; once: boolean; path?: string } | null = null;
+  /** Set: the next signUpload leaves this file out of its answer (and signs it the time after). */
+  omitOnce: string | null = null;
   /** How many times whenIndexed was asked. */
   waits = 0;
   #signatures = 0;
@@ -117,7 +119,9 @@ export class FakeUploadCloud implements UploadCloud {
       };
     });
     this.uploads.set(id, upload);
-    return Promise.resolve(signed);
+    const omitted = this.omitOnce;
+    this.omitOnce = null;
+    return Promise.resolve(signed.filter((file) => file.path !== omitted));
   }
 
   confirmUpload(request: ConfirmRequest): Promise<ConfirmResult> {
