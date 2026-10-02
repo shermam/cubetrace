@@ -89,6 +89,7 @@ export {
   ATTEMPT_SCHEMA_V1,
   CLOUD_ATTEMPT_SCHEMA,
   CLOUD_CUBE_SCHEMA,
+  CLOUD_EVENT_SCHEMA,
   CLOUD_SESSION_SCHEMA,
   FRAMES_SCHEMA,
   GYRO_SCHEMA,
@@ -103,6 +104,7 @@ export {
   parseAttempt,
   parseCloudAttempt,
   parseCloudCube,
+  parseCloudEvent,
   parseCloudSession,
   parseGyro,
   parseSession,
@@ -147,3 +149,24 @@ export {
 // T3.4 — the account's cubes (their MAC addresses) in Firestore
 export type { CloudCube, CloudCubeInput } from './cloud-cube';
 export { CUBE_NAME, MAC_ADDRESS, cloudCube, isCubeDocumentName } from './cloud-cube';
+// T3.9 — the account's diagnostics events in Firestore
+export type {
+  CloudEvent,
+  CloudEventInput,
+  CloudEventWrite,
+  EventData,
+  EventDevice,
+  EventValue,
+} from './cloud-event';
+export {
+  EVENT_DATA_MAX_KEYS,
+  EVENT_ID,
+  EVENT_KIND,
+  EVENT_KIND_MAX_LENGTH,
+  EVENT_TEXT_MAX_LENGTH,
+  cloudEvent,
+  eventId,
+  isEventKind,
+  sanitizeEventData,
+  scrubEventText,
+} from './cloud-event';

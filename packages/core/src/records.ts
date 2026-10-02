@@ -5,7 +5,8 @@
 // so that the app reads its files without one in its bundle; records.test.ts holds them to the
 // schemas with ajv, field by field. Since T3.1 they also read the documents of the session index in
 // Firestore (docs/DATA-MODEL.md §10), which are of version 2 only (cloud.test.ts holds them to theirs),
-// and since T3.4 the account's cubes there, of version 1 (cloud-cube.test.ts).
+// and since T3.4 the account's cubes there, of version 1 (cloud-cube.test.ts), and since T3.9 the
+// diagnostics events, of version 1 (cloud-event.test.ts).
 import type {
   AttemptEvents,
   AttemptMove,
@@ -27,6 +28,8 @@ import type {
 import { CLOUD_UPLOAD_STATES } from './cloud';
 import type { CloudCube } from './cloud-cube';
 import { CUBE_NAME, MAC_ADDRESS } from './cloud-cube';
+import type { CloudEvent, EventData, EventDevice, EventValue } from './cloud-event';
+import { EVENT_DATA_MAX_KEYS, EVENT_TEXT_MAX_LENGTH, isEventKind } from './cloud-event';
 import type { GyroJson, GyroSummary } from './gyro';
 import { GYRO_FILE } from './gyro';
 import type { Face } from './notation';
@@ -51,7 +54,8 @@ import { UUID_V4 } from './session';
 
 /**
  * The files the readers read (the gyro file since T3.7), and the documents of the session index in
- * Firestore (T3.1) and of the account's cubes (T3.4), named by their paths.
+ * Firestore (T3.1), of the account's cubes (T3.4) and of its diagnostics events (T3.9), named by
+ * their paths.
  */
 export type RecordFile =
   | 'session.json'
@@ -59,7 +63,8 @@ export type RecordFile =
   | 'gyro.json'
   | 'sessions/{id}'
   | 'sessions/{id}/attempts/{index}'
-  | 'users/{uid}/cubes/{name}';
+  | 'users/{uid}/cubes/{name}'
+  | 'users/{uid}/events/{eventId}';
 
 /**
  * What {@link parseSession} and {@link parseAttempt} throw for a record they do not accept. The
@@ -138,6 +143,16 @@ export function parseCloudAttempt(json: unknown): CloudAttempt {
  */
 export function parseCloudCube(json: unknown): CloudCube {
   return parseDocument('users/{uid}/cubes/{name}', json, CLOUD_CUBE, 1);
+}
+
+/**
+ * A diagnostics event of an account in Firestore (`users/{uid}/events/{eventId}`, docs/DATA-MODEL.md
+ * §10, T3.9): schema version 1, when it happened, its kind, the build and the device that wrote it,
+ * the session and attempt it belongs to when it does, and its facts. Throws a {@link RecordError}
+ * naming the field on anything else, such as a document of another version.
+ */
+export function parseCloudEvent(json: unknown): CloudEvent {
+  return parseDocument('users/{uid}/events/{eventId}', json, CLOUD_EVENT, 1);
 }
 
 /**
@@ -902,4 +917,59 @@ const CLOUD_CUBE = object<CloudCube>({
   mac: text('a MAC address such as AB:12:CD:34:EF:56 (upper case, colons)', MAC_ADDRESS),
   updatedMs: num({ min: 0 }),
   device: nonEmpty,
+});
+
+// ---- The diagnostics events in Firestore (docs/DATA-MODEL.md §10, T3.9) ----
+
+const eventKind = leaf(
+  'a dotted lowercase name of at most 64 characters, such as attempt.done',
+  (value): value is string => typeof value === 'string' && isEventKind(value),
+);
+
+/** A fact: text of at most 500 characters, a number, a boolean or null. */
+const eventValue = leaf(
+  `a text of at most ${String(EVENT_TEXT_MAX_LENGTH)} characters, a number, true, false or null`,
+  (value): value is EventValue =>
+    value === null ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    (typeof value === 'string' && value.length <= EVENT_TEXT_MAX_LENGTH),
+);
+
+const eventMap = byKey(text(), eventValue);
+
+/** The facts of an event: at most 32, each a fact or a map of facts (one level of nesting). */
+const eventData: Reader<EventData> = {
+  what: `an object of at most ${String(EVENT_DATA_MAX_KEYS)} facts`,
+  read: (value, at) => {
+    if (!isObject(value)) {
+      return fail(at, `must be an object, got ${show(value)}`);
+    }
+    const keys = Object.keys(value);
+    if (keys.length > EVENT_DATA_MAX_KEYS) {
+      fail(
+        at,
+        `must have at most ${String(EVENT_DATA_MAX_KEYS)} facts, got ${String(keys.length)}`,
+      );
+    }
+    const out: EventData = {};
+    for (const key of keys) {
+      const item = value[key];
+      out[key] = isObject(item)
+        ? eventMap.read(item, join(at, key))
+        : eventValue.read(item, join(at, key));
+    }
+    return out;
+  },
+};
+
+const CLOUD_EVENT = object<CloudEvent>({
+  schema: oneOf(1),
+  tsMs: num(),
+  kind: eventKind,
+  app,
+  device: object<EventDevice>({ label: nonEmpty, platform: text(), installed: bool }),
+  session: optional(nonEmpty),
+  attempt: optional(int(1)),
+  data: eventData,
 });
