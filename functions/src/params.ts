@@ -3,7 +3,10 @@
 // bucket is R2, two secrets in Secret Manager.
 import { defineInt, defineSecret, defineString, type SecretParam } from 'firebase-functions/params';
 
-/** `gcs` (Google Cloud Storage, during the free trial) or `r2` (Cloudflare R2). */
+/**
+ * `gcs` (Google Cloud Storage, during the free trial) or `r2` (Cloudflare R2); `local`, the end-to-end
+ * suite's bucket on the same machine, in the Functions emulator only (index.ts, local.ts).
+ */
 export const BUCKET_PROVIDER = defineString('BUCKET_PROVIDER', {
   default: 'gcs',
   description: 'Where uploads go: gcs (Google Cloud Storage) or r2 (Cloudflare R2).',

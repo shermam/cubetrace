@@ -14,6 +14,7 @@
         "firebase-debug.log",
         "firebase-debug.*.log",
         "*.local",
+        ".env.demo-cubetrace",
         "src",
         "tsconfig*.json",
         "vitest.config.ts",
@@ -23,6 +24,9 @@
     }
   ],
   "emulators": {
+    "auth": {
+      "port": 9099
+    },
     "firestore": {
       "port": 8080
     },

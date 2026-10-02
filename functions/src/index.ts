@@ -76,6 +76,11 @@ async function objectStore(): Promise<ObjectStore> {
     ]);
     return gcsObjectStore(new Storage().bucket(bucket));
   }
+  if (provider === 'local') {
+    // The end-to-end suite's, on the same machine: in the Functions emulator only (local.ts).
+    const { localObjectStore } = await import('./local.js');
+    return localObjectStore(process.env);
+  }
   if (provider !== 'r2') {
     return unconfiguredObjectStore(provider, bucket, 'BUCKET_PROVIDER is neither gcs nor r2');
   }
