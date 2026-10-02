@@ -1,6 +1,6 @@
 {
   "name": "@cubetrace/functions",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "The Firebase project's Cloud Functions: signed uploads into the dataset's bucket (Google Cloud Storage or Cloudflare R2) under a daily quota per account. Deployed on its own, so it imports no workspace package.",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@cubetrace/upload",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "The upload queue (phase 3): each attempt's records, clips and frame times put into the dataset's bucket through signed URLs, two at a time, retried, paused by the daily quota and by the network, its state kept in the origin private file system; local clips deleted by policy once uploaded. Plain TypeScript; never imports Angular.",
   "license": "MIT",
