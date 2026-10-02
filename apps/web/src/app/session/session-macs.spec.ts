@@ -1,4 +1,6 @@
+import { cloudAttemptFields, cloudSession } from '@cubetrace/core';
 import { FakeCube } from '@cubetrace/gan';
+import { attemptText, datasetAttempt, sessionText } from '@cubetrace/upload';
 
 import { asGanCube, bluetoothNavigator } from '../cube/cube-testing';
 import { settle } from '../device/fake-browser';
@@ -7,7 +9,8 @@ import { setup, turn } from './session-harness';
 // The cubes' MAC addresses are the account's, never the dataset's (docs/PLAN.md T3.4, issue #21;
 // docs/DATA-MODEL.md §10): a session recorded with a cube whose address was typed and kept in
 // Settings holds none in its records, session.json and attempt.json, which are what an export
-// (Sessions → Export) is made of, and what the uploads (T3.3) send with the clips.
+// (Sessions → Export) is made of, what the uploads (T3.3) send with the clips, and what the session
+// index (T3.1) copies.
 
 /** A MAC address in any usual form: six hex bytes with colons or dashes between them. */
 const MAC_LIKE = /\b[0-9a-f]{2}([:-])[0-9a-f]{2}(?:\1[0-9a-f]{2}){4}\b/i;
@@ -39,11 +42,26 @@ describe("a session's records", () => {
 
     const exported = await s.service.exportSession(session?.id ?? '');
     expect(exported.attempts).toHaveLength(1);
-    const text = JSON.stringify(exported);
-    expect(text).not.toMatch(MAC_LIKE);
-    for (const mac of ['AB:12:CD:34:EF:56', '11:22:33:44:55:66']) {
-      expect(text.toUpperCase()).not.toContain(mac);
-      expect(text.toUpperCase()).not.toContain(mac.replaceAll(':', ''));
+    // What leaves the device: the export; the files that the upload queue sends, attempt.json as
+    // datasetAttempt makes it and session.json; and the session index's documents.
+    const texts: Record<string, string> = {
+      export: JSON.stringify(exported),
+      'uploaded attempt.json': exported.attempts.map((attempt) => attemptText(attempt)).join('\n'),
+      datasetAttempt: JSON.stringify(exported.attempts.map((attempt) => datasetAttempt(attempt))),
+      'uploaded session.json': sessionText(exported.session),
+      'index documents': JSON.stringify([
+        cloudSession(exported.session, 'ada-uid'),
+        ...exported.attempts.map((attempt) =>
+          cloudAttemptFields({ attempt, session: exported.session, owner: 'ada-uid' }),
+        ),
+      ]),
+    };
+    for (const [what, text] of Object.entries(texts)) {
+      expect(text, what).not.toMatch(MAC_LIKE);
+      for (const mac of ['AB:12:CD:34:EF:56', '11:22:33:44:55:66']) {
+        expect(text.toUpperCase(), what).not.toContain(mac);
+        expect(text.toUpperCase(), what).not.toContain(mac.replaceAll(':', ''));
+      }
     }
     // The pattern has teeth: the list Settings keeps would match it.
     expect(JSON.stringify(s.settings.cubeMacs())).toMatch(MAC_LIKE);
