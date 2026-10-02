@@ -141,6 +141,8 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
       hardware: 'e2e-real',
       firmware: '2.3.1',
       gyro: true,
+      // As the app writes the cube since T3.7: with its production date (none, a Gen2 cube).
+      productDate: null,
     };
     const writable = await handle.createWritable();
     await writable.write(`${JSON.stringify(session, null, 2)}\n`);
