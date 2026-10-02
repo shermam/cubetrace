@@ -1,6 +1,6 @@
 {
   "name": "@cubetrace/gan",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "GAN cube driver wrapper (Web Bluetooth) and the fake cube, as one typed event stream. Plain TypeScript; never imports Angular.",
   "license": "MIT",

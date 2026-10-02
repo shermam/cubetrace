@@ -32,8 +32,10 @@ apps/web/public/demo/
 # Local environment (never commit secrets)
 .env
 .env.*
-# ...except the functions' parameters, which are not secrets (functions/README.md)
+# ...except the functions' parameters, which are not secrets (functions/README.md), and those of the
+# emulators' offline project, for the end-to-end suite
 !functions/.env
+!functions/.env.demo-cubetrace
 # The secrets the Functions emulator reads locally (functions/README.md)
 .secret.local
 

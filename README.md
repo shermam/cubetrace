@@ -5,12 +5,13 @@ Cubeast: it shows a scramble, follows the cube while you scramble it, starts the
 first turn, stops it when the cube is solved, and breaks each solve into its CFOP phases. Its side
 effect is a dataset: every attempt is kept with its scramble, every move on the device's clock and
 on the cube's, its phases and, with the device's camera on, two video clips of it in sync with the
-moves. The later phases of the [plan](docs/PLAN.md) add cloud storage, so that every device's
-sessions end up in one dataset, and phones as extra cameras.
+moves. Signed in, the sessions of every device end up in one dataset in the cloud; the later phases
+of the [plan](docs/PLAN.md) add phones as extra cameras.
 
-**Status:** version 0.2.0: phase 2 (the device's own camera) on top of phase 1 (the timer), before
-the owner's second test round on the real cubes, cameras and phones
-([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), Round 2). What each version does is listed in
+**Status:** version 0.3.0: phase 3 (the cloud: an optional account, the session index, the uploads,
+the cubes' MAC addresses on every device) on top of phases 1 (the timer) and 2 (the device's own
+camera), before the owner's third test round, on two devices with one account
+([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), Round 3). What each version does is listed in
 [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 ## Use it
@@ -29,9 +30,9 @@ at once. The GAN driver also needs the cube's MAC address:
 - Without the flag, a dialog asks for the address once the cube is chosen: six hex bytes such as
   `AB:12:CD:34:EF:56` (`chrome://bluetooth-internals` lists nearby devices with their addresses).
   The flag's steps are folded under it, with a Copy button. With "Remember it for this cube" on,
-  Settings keeps it, and the next connection does not ask. Signed in (below), the account keeps
-  Settings' list too, so that an address typed on one of your devices is known on the others from
-  their next start.
+  Settings keeps it, and the next connection does not ask. Signed in (Cloud, below), the account
+  keeps Settings' list too, so that an address typed on one of your devices is known on the others
+  from their next start.
 
 Once the cube is connected, no dialog is left open: the pill shows the cube's model and battery
 (click it for the cube's details and Disconnect). If connecting fails, the reason appears under the
@@ -63,45 +64,8 @@ session with its `session.json` and a folder per attempt with its `attempt.json`
 each session's page, export a session's records as one JSON file, without the video, or delete the
 session with its clips; an attempt's clips are downloaded from its clip badge (Recording, below).
 Clearing the site's data in Chrome deletes all of them. Signed in, the sessions are also uploaded to
-your account's storage in the cloud (Uploads, below), so that the sessions of every device end up in
+your account's storage in the cloud (Cloud, below), so that the sessions of every device end up in
 one dataset.
-
-**An account, if you want one.** Sign in, in the header or in Settings → Account, signs in with Google
-(in a popup; the app installed on Android goes to Google's page and comes back). The account records
-your name, your email and each device's label, keeps the index of your sessions and receives their
-uploads (below). It also keeps the cubes' MAC addresses of Settings → Cube MAC addresses: each device
-merges its list with the account's as it signs in and as it starts, the latest change of each cube
-winning, and sends each change as it is made, so that a cube removed on one device goes on the others
-too; Settings says when the list last merged. The addresses are yours, not the dataset's: no export or
-upload holds one. Signed out, the app works as before and never downloads Firebase.
-
-**The session index.** Signed in, every session of a real cube goes, as it is recorded, to your index
-in the cloud (Firestore): the session's record and each attempt's, without the moves, with the device
-that recorded it and its files, each marked pending until it is uploaded. Offline, it waits on the
-device and goes when the network is back; demo sessions stay on the device; sessions recorded signed
-out are added when you sign in. The Sessions page then lists the sessions of all your devices, each
-with a badge ("this device", "cloud" or "both") and a filter by device; a session recorded on another
-device opens read-only, since its clips and moves are on that device. Sessions → QA view counts the
-attempts by day and device, with what their clips take and what is uploaded, and when this device last
-synced.
-
-**Uploads.** Signed in, each attempt of a real cube's session goes to your account's storage in the
-cloud once it is over and its clips are saved: its `attempt.json` (with the moves), each clip's MP4 and
-frame times, and the session's `session.json` (again when it changes, once the session has been quiet
-for two minutes). Nothing else is uploaded: no demo session, nothing signed out, no cube MAC address
-and no setting. The uploads go two files at a time, through URLs that the account's functions sign
-for each file's exact size and type, within a daily quota (2 GB and 400 files); a failure is tried
-again after 1 s, 2 s, 4 s, … up to 5 minutes, and a file the storage refuses waits for Retry. A
-reload, or the next start, goes on where they were (`uploads.json` in the browser, and your index in
-the cloud, say what is uploaded), without sending a file twice; only one tab uploads at a time. The
-Sessions page has the uploads' panel (the attempts still to upload with their progress and errors,
-Retry, those uploaded last, paused by the quota or waiting for the network), the header an arrow with
-the attempts still to upload, and a session's page each attempt's upload. Settings → Uploads: Upload
-sessions turns them off; Wi-Fi only, on a phone whose browser tells Wi-Fi from mobile data (on by
-default there), waits for Wi-Fi; Keep local copies, off by default on a phone, deletes an attempt's
-clips from the device once all its files are uploaded (its `attempt.json` and frame times stay, and
-the clip says "in the cloud"). In any case, once the browser's storage is 70% full, the oldest uploaded
-clips are deleted until it is under 60%.
 
 ## Recording
 
@@ -210,6 +174,76 @@ which opens the clip viewer: the clip plays next to the attempt's moves by time,
 highlighted (a click on a move goes to it), and Download saves the five files: both MP4s, both
 frames files and `attempt.json` (Chrome may ask once to allow multiple downloads).
 
+## Cloud
+
+An account is optional. Signed in, the sessions of all your devices end up in one dataset: an index
+of them in Firestore, their files in a Google Cloud Storage bucket, and the cubes' MAC addresses
+known on every device. Signed out, the app works as before: nothing leaves the device, and Firebase
+is never downloaded.
+
+**The account.** Sign in, in the header or in Settings → Account, signs in with Google (in a popup;
+the app installed on Android goes to Google's page and comes back). The account records your name,
+your email and each device's label, and stays signed in across reloads, offline too, until Sign out.
+
+**What syncs**, through Firestore, whose cache on the device keeps each change while offline and
+sends it once the network is back:
+
+- **The session index.** Every session of a real cube, as it is recorded: the session's record and
+  each attempt's, without the moves, with the device that recorded it and the state of its upload.
+  Sessions recorded signed out are added at the next sign-in. The Sessions page then lists the
+  sessions of all your devices, each with a badge ("this device", "cloud" or "both") and a filter by
+  device; a session recorded on another device opens read-only, since its clips and moves are on
+  that device (and in the bucket). Sessions → QA view counts the attempts by day and device, with
+  what their clips take, what is uploaded and what is pending, and when this device last synced.
+- **The cubes' MAC addresses** of Settings → Cube MAC addresses (where the connect dialog's
+  "Remember it for this cube" keeps one too): each device merges its list with the account's as it
+  signs in and as it starts, the latest change of each cube winning, and sends each change as it is
+  made, so that an address typed on the phone is known on the laptop, and a cube removed on one
+  device goes on the others. Settings says when the list last merged.
+
+**What uploads.** Each attempt of a real cube's session, once it is over and its clips are saved:
+its `attempt.json` (with the moves), each clip's MP4 and frame times, and the session's
+`session.json` (again when it changes, once the session has been quiet for two minutes), into the
+bucket under `users/<your id>/sessions/<session id>/`. The files go two at a time, each through a
+URL that the account's Cloud Functions sign for its exact size and type, valid 15 minutes; a failure
+is tried again after 1 s, 2 s, 4 s, … up to 5 minutes, and a file the bucket refuses waits for
+Retry. A reload, or the next start, goes on where the uploads were (`uploads.json` on the device,
+and the index, say what is uploaded), without sending a file twice; only one tab uploads at a time.
+The Sessions page has the uploads' panel (the attempts still to upload with their progress and
+errors, Retry, those uploaded last, paused by the quota or waiting for the network), the header an
+arrow with the attempts still to upload, and a session's page each attempt's upload.
+
+**What never leaves the device**: demo sessions (the fake cube), anything while signed out, and the
+settings. The cubes' MAC addresses are the account's, in documents of their own, never the
+dataset's: no record holds one, so no export, upload or document of the index does.
+
+**The policies**, in Settings → Uploads: Upload sessions turns the uploads off; Wi-Fi only, on a
+phone whose browser tells Wi-Fi from mobile data (on by default there), waits for Wi-Fi; Keep local
+copies, on by default on a laptop and off on a phone, keeps the clips on the device once they are
+uploaded: off, an attempt's clips are deleted from it once all its files are uploaded (its
+`attempt.json` and frame times stay, and the clip says "in the cloud"). In any case, once the
+browser's storage is 70% full, the oldest uploaded clips are deleted until it is under 60%. Each
+account may have 2 GB and 400 files signed per UTC day, every signature counted: at most 80 attempts
+with their clips (five files each); past it, the uploads wait for the next UTC day, and the panel
+says until when.
+
+**Whose cloud.** The account, the index and the bucket are the owner's: the Firebase project
+`cubetrace-cacd9` (Authentication with Google, Firestore in `nam5`, the Cloud Functions in
+`us-central1`) and the bucket `cubetrace-data` (Google Cloud Storage, `us-central1`), which is
+private and which only the functions' URLs write to. Each account reads and writes only its own
+documents (the Firestore rules, [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) §10), and its uploads go
+into its own folder of the bucket alone. Anyone can sign in, but until phase 5 of the
+[plan](docs/PLAN.md) brings a consent flow and a way to delete one's data, the cloud is meant for
+the owner's own devices.
+
+**Costs.** The project runs on a Google Cloud free trial whose credit pays, until 2026-12-27,
+Firestore, the functions, the bucket's storage and its egress: one solver's camera makes roughly 100
+to 130 GB a month, a few dollars of storage, and downloading the dataset to the training machine
+costs about US$ 0.12 per GiB. Before the trial ends, the owner chooses between Cloud Storage, paid,
+and Cloudflare R2, without egress fees, which the functions support by configuration
+(`BUCKET_PROVIDER`, [`functions/README.md`](functions/README.md)). Without a choice, the functions
+and the bucket stop with the trial: the uploads wait, and the app goes on recording on the device.
+
 ## Screenshots
 
 Demo mode at real-time speed, taken with Playwright from a production build served as GitHub Pages
@@ -251,6 +285,7 @@ accepts 24.15 and later) with npm 10. Run the commands from the repository root.
 | `npm run test:functions` | builds the Cloud Functions, then runs their tests against the Firestore emulator (needs Java 21) |
 | `npm run test:watch` | package tests in watch mode; for the app, `npm run test -w @cubetrace/web` |
 | `npm run e2e` | Playwright end-to-end tests in Chromium (starts `ng serve` on port 4200 and a production build on port 4300, unless servers already run there) |
+| `npm run e2e:cloud` | the end-to-end tests' cloud project: the app's own Firebase SDK against the Auth, Firestore and Functions emulators, the uploads into a bucket on this machine (needs Java 21; builds the functions, starts the emulators, then `ng serve` and the bucket on port 4600) |
 | `npm run lint` | type-check, `eslint .`, then `ng lint` for the app |
 | `npm run format` / `npm run format:check` | Prettier write / check |
 
@@ -262,8 +297,8 @@ once with `npx playwright install chromium`. The versions and the reasons behind
 Every push to `main` builds the app with `--base-href /cubetrace/` and publishes it to GitHub Pages
 (`.github/workflows/pages.yml`), and deploys the Firestore rules and the Cloud Functions when it
 changes them (`.github/workflows/firebase.yml`). Pull requests and pushes run
-`.github/workflows/ci.yml`: lint, format check, tests, the rules' and the functions' tests, build and
-the end-to-end tests.
+`.github/workflows/ci.yml`: lint, format check, tests, the rules' and the functions' tests, build,
+the end-to-end tests and their cloud project against the emulators.
 
 ## Repository layout
 

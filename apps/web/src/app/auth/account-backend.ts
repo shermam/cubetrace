@@ -151,17 +151,71 @@ export type AccountLoader = () => Promise<AccountBackend>;
 export const E2E_ACCOUNT_LOADER = 'cubetraceE2eAccountLoader';
 
 /**
+ * The window property through which the end-to-end suite's cloud project points the Firebase SDK at
+ * the emulators (`FirebaseEmulators`, set before the app starts: apps/web/e2e/helpers/emulators.ts).
+ * Read only in development builds (`ng serve`), never in production ones.
+ */
+export const E2E_EMULATORS = 'cubetraceE2eEmulators';
+
+/**
+ * The Firebase emulators that the end-to-end suite's cloud project runs (`npm run e2e:cloud`), for the
+ * real SDK to use in place of Google's servers: `firebase-sdk.ts` connects Authentication, Firestore
+ * and the functions to them, under their offline project, and Sign in signs in the Google account of
+ * `googleIdToken`, without Google's page.
+ */
+export interface FirebaseEmulators {
+  /** The emulators' project, `demo-cubetrace`, in place of the web config's. */
+  readonly projectId: string;
+  /** The Auth emulator, `host:port` (as `FIREBASE_AUTH_EMULATOR_HOST` says it). */
+  readonly auth: string;
+  /** The Firestore emulator, `host:port` (as `FIRESTORE_EMULATOR_HOST` says it). */
+  readonly firestore: string;
+  /** The Functions emulator, `host:port`. */
+  readonly functions: string;
+  /**
+   * The Google account that Sign in signs in: an ID token of unsigned claims (`{"sub": …, "email": …,
+   * "name": …}`), which the Auth emulator takes for its Google provider and Google never would.
+   */
+  readonly googleIdToken: string;
+}
+
+/** The window property's value as `FirebaseEmulators`, or null when it is not one (or not there). */
+export function readEmulators(value: unknown): FirebaseEmulators | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const field = (name: keyof FirebaseEmulators): string | null => {
+    const text: unknown = Reflect.get(value, name);
+    return typeof text === 'string' && text !== '' ? text : null;
+  };
+  const projectId = field('projectId');
+  const auth = field('auth');
+  const firestore = field('firestore');
+  const functions = field('functions');
+  const googleIdToken = field('googleIdToken');
+  return projectId === null ||
+    auth === null ||
+    firestore === null ||
+    functions === null ||
+    googleIdToken === null
+    ? null
+    : { projectId, auth, firestore, functions, googleIdToken };
+}
+
+/**
  * The account's loader: a dynamic import of `firebase-sdk.ts`, so that the Firebase SDK is a lazy
- * chunk that only an account in use downloads (`AuthService`); the unit tests provide their own.
+ * chunk that only an account in use downloads (`AuthService`); the unit tests provide their own. In
+ * development builds, the end-to-end suite's fake replaces it, or its emulators redirect the SDK.
  */
 export const ACCOUNT_LOADER = new InjectionToken<AccountLoader>('ACCOUNT_LOADER', {
   providedIn: 'root',
   factory: () => {
-    const e2e: unknown = isDevMode()
-      ? Reflect.get(inject(BROWSER_GLOBALS), E2E_ACCOUNT_LOADER)
-      : null;
-    return typeof e2e === 'function'
-      ? (e2e as AccountLoader)
-      : () => import('./firebase-sdk').then((sdk) => sdk.connectFirebase());
+    const globals = inject(BROWSER_GLOBALS);
+    const e2e: unknown = isDevMode() ? Reflect.get(globals, E2E_ACCOUNT_LOADER) : null;
+    if (typeof e2e === 'function') {
+      return e2e as AccountLoader;
+    }
+    const emulators = isDevMode() ? readEmulators(Reflect.get(globals, E2E_EMULATORS)) : null;
+    return () => import('./firebase-sdk').then((sdk) => sdk.connectFirebase(emulators));
   },
 });

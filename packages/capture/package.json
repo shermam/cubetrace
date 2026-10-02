@@ -1,6 +1,6 @@
 {
   "name": "@cubetrace/capture",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "The host's own camera: constraints, snapshots and manual controls, the sharpness metric and the framing rectangle; the encoder pipeline in a worker, its ring buffer and cuts; the clips, muxed into MP4 and written into the origin private file system by a second worker. Plain TypeScript; never imports Angular.",
   "license": "MIT",

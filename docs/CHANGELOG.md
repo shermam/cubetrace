@@ -5,7 +5,17 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
+Nothing yet.
+
+## 0.3.0 — 2026-10-02
+
+Phase 3 of `docs/PLAN.md`: the cloud. A Google account, optional, gathers the sessions of every
+device into one dataset: signed in, each session of a real cube goes to the account's index in
+Firestore as it is recorded, each attempt's records and clips are uploaded into the dataset's bucket
+through URLs that the account's Cloud Functions sign, within a daily quota, and the cubes' MAC
+addresses are known on every device; offline, all of it waits on the device. Signed out, the app
+works as before and never downloads Firebase. Deployed at https://shermam.github.io/cubetrace/, with
+the owner's Firebase project `cubetrace-cacd9` and the Google Cloud Storage bucket `cubetrace-data`.
 
 ### Added
 
@@ -83,6 +93,12 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
   `cloud-cube.schema.json`), the rules of `users/{uid}/cubes/{name}` (the account's alone, each
   document checked) with their tests, and a cloud of the end-to-end suite's fake that two browser
   contexts share, two devices of one account (`cube-macs.spec.ts`).
+- Development: the end-to-end suite's cloud project (T3.5), `npm run e2e:cloud`, in CI after the
+  other end-to-end tests: the app's own Firebase SDK against the Auth, Firestore and Functions
+  emulators, with the project's rules, its uploads into a bucket on the same machine
+  (`BUCKET_PROVIDER=local`, which the functions refuse outside the Functions emulator): signing in,
+  a session recorded with the camera indexed, uploaded and confirmed, and a second device of the
+  account that lists it and knows the cube's MAC address typed on the first.
 
 ### Changed
 

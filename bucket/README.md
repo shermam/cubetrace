@@ -22,6 +22,9 @@ answers from its CORS policy. `GET` is there for reads through signed URLs later
   `Content-Length`, which the URL also binds, is set by the browser and needs no rule.
 
 Another origin (Firebase Hosting, a second test port) goes into both files and is applied again.
+The end-to-end suite's bucket, a server on the same machine (`apps/web/e2e/helpers/bucket-sink.mts`,
+`npm run e2e:cloud`), answers the browser's preflights from `cors.json`, so that the suite's uploads
+from `http://localhost:4200` cross origins under this policy.
 
 ## Google Cloud Storage (now)
 

@@ -266,3 +266,19 @@ above, and the capture lab's frame timestamps under "VideoFrame.timestamp".
 | MacBook Pro 2021, FaceTime HD | | | | | | |
 | ThinkPhone, front camera | | | | | | |
 | ThinkPhone, rear camera | | | | | | |
+
+## Manual round 3 (v0.3.0)
+
+What the owner's third round measures of the uploads, per device and network
+(`docs/MANUAL-TESTS.md`, "Round 3"), to fill in after it: the upload speed seen (a solve clip's PUT
+in DevTools → Network, or in `chrome://inspect` for the phone: its size over its time), the bytes
+per attempt (one attempt's five files in the bucket's listing, at Standard quality, T2.10) and the
+time to confirm (the latest `upload.files[…].doneMs` of the attempt's document minus its
+`events.solveEnd`, in the Firebase console). The networks' upstream, measured apart
+(`docs/USER-ACTIONS.md`), is the speed to compare with.
+
+| Device, network | Date, Chrome | Upload speed seen | Bytes per attempt | Time to confirm |
+|---|---|---|---|---|
+| MacBook Pro 2021, Wi-Fi | | | | |
+| ThinkPhone, Wi-Fi | | | | |
+| ThinkPhone, mobile data (Wi-Fi only off) | | | | |

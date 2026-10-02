@@ -129,7 +129,8 @@ account (its photo or initial and its name, a menu with Sign out) or Sign in, an
 the same with what went wrong; a failure (the popup closed or blocked, no network, the chunk not
 available offline) is kept in `AuthService.status` and `error`, never thrown to the page. The unit
 tests give `AuthService` a fake of the backend; the end-to-end suite gives the dev server's app one
-through the window (development builds only), so that no test reaches Google.
+through the window (development builds only), so that no test reaches Google, and its cloud project
+runs the app's own SDK against the Firebase emulators ("Testing the cloud", below).
 
 The rules (`firebase/firestore.rules`, `docs/DATA-MODEL.md` §10): an account reads and writes only
 its own `users/{uid}` with its cubes (T3.4), and the sessions, and their attempts, whose `owner` is
@@ -256,7 +257,8 @@ against `https://<account>.r2.cloudflarestorage.com`, whose two keys are secrets
 functions only then. Either way the signature binds the content type and the exact size (GCS:
 `x-goog-content-length-range`; R2: `content-length`, which the browser sets from the body), so an
 upload can be neither of another type nor longer than what the quota counted, and the bucket's CORS
-policy (`bucket/`) lets the app's origins send those headers.
+policy (`bucket/`) lets the app's origins send those headers. A third provider, `local`, is the
+end-to-end suite's bucket on the same machine, in the Functions emulator only ("Testing the cloud").
 
 **Quota.** Per account and UTC day, the bytes and the files signed (2 GB and 400 by default,
 parameters): `users/{uid}.quota = {day, bytes, files}`, reserved in the same transaction that records
@@ -333,3 +335,41 @@ per attempt, once its record is final (solved or DNF, its clips saved or known a
   header, an arrow with the attempts to upload (dashed while paused, red with failures), which opens
   it; a session's page, each attempt's upload (this device's queue's, or the index's for another
   device's session); the QA view counts what `confirmUpload` confirmed.
+
+## Testing the cloud (T3.5)
+
+The end-to-end suite meets the cloud twice: every run of `npm run e2e` with fakes of Firebase (the
+account, the index, the functions and a bucket in the test, `apps/web/e2e/helpers/account.ts`), and
+`npm run e2e:cloud`, after it in CI, with the app's own Firebase SDK against the emulators, in a
+Playwright project of its own, `cloud`:
+
+```
+npm run e2e:cloud ─▶ the functions built ─▶ firebase emulators:exec, offline project demo-cubetrace:
+                     Auth :9099 · Firestore :8080 (firebase/firestore.rules) · Functions :5001
+                     (functions/.env, then .env.demo-cubetrace: BUCKET_PROVIDER=local)
+  └─▶ Playwright, project cloud ─▶ ng serve :4200, each page given window.cubetraceE2eEmulators
+                                 · the bucket sink :4600, preflights answered from bucket/cors.json
+the page ─▶ Sign in: signInWithCredential, a Google ID token of unsigned claims (the emulator's)
+         ─▶ the index's writes, through the rules ─▶ signUpload ─▶ URLs on the sink ─▶ PUT
+         ─▶ confirmUpload: HEAD on the sink ─▶ the attempt's upload done
+the test ─▶ the emulators' REST APIs (the Auth accounts; the documents, past the rules) and the sink
+```
+
+- **Development builds only.** `ACCOUNT_LOADER` reads `window.cubetraceE2eEmulators` only when
+  `isDevMode()`, as it reads the fake's loader; `connectFirebase` then starts the app under the
+  emulators' project and points Authentication, Firestore and the functions at them before anything
+  is asked of them (the Auth emulator's banner left out). Sign in, there, signs in with
+  `signInWithCredential(GoogleAuthProvider.credential(<claims>))`: the Auth emulator's Google
+  provider takes unsigned claims (`sub`, `email`, `name`), so that no window opens and the same
+  `sub` is the same account on any page. A production build ignores the property.
+- **The local bucket.** `BUCKET_PROVIDER=local` (`functions/src/local.ts`) makes URLs on the server
+  at `LOCAL_BUCKET_URL`, the object's key as their path and what each was made for (the content
+  type, the exact size, the expiry) in their query, with GCS's headers, and reads an object's size
+  with `HEAD` there. It fails every call where `FUNCTIONS_EMULATOR` is not `true`, which only the
+  Functions emulator sets, so a deploy configured with it signs nothing;
+  `functions/.env.demo-cubetrace` gives it to the emulators' project alone, and deploys read
+  `functions/.env`.
+- **The sink** (`apps/web/e2e/helpers/bucket-sink.mts`) keeps in memory each `PUT` that is what its
+  URL was made for, as a GCS signature would hold it, and answers the browser's preflights from
+  `bucket/cors.json`, the real bucket's policy, so that the app's uploads cross origins as they do
+  in production.

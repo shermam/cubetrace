@@ -28,8 +28,8 @@ which Cloud Build installs without the lockfile ("Functions", below).
 | mediabunny | 1.60.0 | `packages/capture/package.json` | added by T2.3 to mux the encoded chunks into MP4 without re-encoding, in a worker (the clip worker since T2.4); MPL-2.0; brings `@types/dom-webcodecs` 0.1.13 and `@types/dom-mediacapture-transform` 0.1.12 (type declarations only); see "Clips" below |
 | firebase (the Firebase JavaScript SDK) | 12.19.0 | `apps/web/package.json` | added by T3.0: Authentication and Firestore, modular imports, in one lazy chunk; Apache-2.0; see "Account" below |
 | `@firebase/rules-unit-testing` | 5.0.2 | root `package.json` | added by T3.0: the Firestore rules' tests against the emulator; its peer is the same `firebase` |
-| firebase-tools (the Firebase CLI) | 15.32.1, exact | the `firebase` script of the root `package.json` (npx) | not installed by `npm ci`: the emulators (`npm run test:rules`) and the deploys (`.github/workflows/firebase.yml`); see "Account" below |
-| Java | 21: Temurin in CI, OpenJDK 21.0.10 locally | `.github/workflows/ci.yml` (`actions/setup-java`) | the Firestore emulator, 1.22.0 with firebase-tools 15.32.1, a jar that the CLI downloads into `~/.cache/firebase/emulators` (137 MB), which CI caches; `npm run test:rules` and `npm run test:functions` |
+| firebase-tools (the Firebase CLI) | 15.32.1, exact | the `firebase` script of the root `package.json` (npx) | not installed by `npm ci`: the emulators (`npm run test:rules`, `test:functions` and `e2e:cloud`) and the deploys (`.github/workflows/firebase.yml`); see "Account" and "Cloud end-to-end" below |
+| Java | 21: Temurin in CI, OpenJDK 21.0.10 locally | `.github/workflows/ci.yml` (`actions/setup-java`) | the Firestore emulator, 1.22.0 with firebase-tools 15.32.1, a jar that the CLI downloads into `~/.cache/firebase/emulators` (137 MB), which CI caches; `npm run test:rules`, `npm run test:functions` and `npm run e2e:cloud` (the Auth and Functions emulators are the CLI's own Node code, with nothing to download) |
 | firebase-functions | 7.4.0, exact | `functions/package.json` | added by T3.2: `onCall`, parameters and secrets, the logger, the loader the CLI finds functions with; MIT; see "Functions" below |
 | firebase-admin | 14.5.0, exact | `functions/package.json` | added by T3.2: Firestore for the functions (its Firestore is `@google-cloud/firestore` 9.3, over `@grpc/grpc-js` 1.14.5); needs Node 22; Apache-2.0 |
 | `@google-cloud/storage` | 8.2.0, exact | `functions/package.json` | added by T3.2: V4 signed URLs and object metadata for Google Cloud Storage; firebase-admin's optional dependency, the same copy; Apache-2.0 |
@@ -50,6 +50,7 @@ which Cloud Build installs without the lockfile ("Functions", below).
 | `npm run build -w @cubetrace/functions` | `tsc -p functions/tsconfig.build.json`: the functions compiled into `functions/lib/` (gitignored), which deploys and the Functions emulator load |
 | `npm run firebase -- <arguments>` | the Firebase CLI: `npx --yes firebase-tools@15.32.1 <arguments>`, downloaded into npm's cache on first use |
 | `npm run e2e` | `playwright test -c apps/web/e2e/playwright.config.ts` (Chromium; report in `apps/web/e2e/playwright-report`); starts `ng serve` on port 4200 and a production build under `/cubetrace/` on port 4300 |
+| `npm run e2e:cloud` | `npm run build -w @cubetrace/functions`, then `firebase emulators:exec --only auth,firestore,functions --project demo-cubetrace "playwright test -c apps/web/e2e/playwright.config.ts --project cloud"`: the Playwright project `cloud` against the Auth (9099), Firestore (8080) and Functions (5001) emulators, with `ng serve` on port 4200 and the bucket sink on port 4600 ("Cloud end-to-end", below) |
 | `npm run icons -w @cubetrace/web` | `scripts/generate-icons.mts`: redraws `apps/web/public/icons/` (the SVG and the PNGs the manifest lists) |
 | `npm run format` / `format:check` | `prettier --write .` / `prettier --check .` |
 
@@ -504,6 +505,10 @@ tests and took 2.7 min in CI (2 min 43 s for the `npm run e2e` step, on `main` a
 has 57 tests and took 2.8, 2.9 and 2.9 min locally in three runs in a row on 2026-09-27 (2 min 52 s
 to 2 min 58 s with the servers), and 2.8 min in CI (2 min 50 s for the `npm run e2e` step) in
 its pull request's first run; the specs that record take 132 to 135 s of it, one after the other.
+
+Since T3.5 the suite also has a project `cloud`, which only runs inside the Firebase emulators
+(`npm run e2e:cloud`, after `npm run e2e` in CI; "Cloud end-to-end", below): `npm run e2e` is as it
+was.
 
 ## packages/capture
 
@@ -1524,3 +1529,88 @@ chunks' hashes (with another stamp, the minifier also names the object that hold
 cube sync and the merge are in the lazy chunk that the header's controls and the Settings page
 share, beside `AccountControl` (13.1 kB raw, 6.9 before); the Settings page is 22.1 kB (21.0),
 Firebase's chunk 647.0 kB (646.8).
+
+## Cloud end-to-end (T3.5)
+
+Added by T3.5 on 2026-10-02: the Playwright project `cloud`, which runs the app's own Firebase SDK
+against the Auth, Firestore and Functions emulators, the functions' local bucket and its sink
+(`docs/ARCHITECTURE.md`, "Testing the cloud").
+
+**No new dependency.** The emulators are the pinned CLI's: the Auth and Functions emulators are its
+own Node code, and the Firestore emulator is the jar the rules' tests already download and CI
+caches. The CLI starts the Auth emulator only when `firebase.json` names it (`emulators.auth`, port
+9099); without the entry, `--only auth` says "Not starting the auth emulator, make sure you have run
+firebase init". The tests read the emulators through their REST APIs with `fetch` (the token `Bearer
+owner` reads past the rules), rather than through the Admin SDK, which is the functions' dependency
+and not the end-to-end suite's (`apps/web/e2e/helpers/emulators.ts`).
+
+**The project exists only inside the emulators.** `firebase emulators:exec` sets
+`FIREBASE_EMULATOR_HUB`, with `GCLOUD_PROJECT`, `FIREBASE_AUTH_EMULATOR_HOST` and
+`FIRESTORE_EMULATOR_HOST`, for the command it runs: with it, the config adds the project `cloud`
+(`*.cloud.spec.ts`, which `chromium` ignores) and the sink in place of the production build, which
+no cloud spec uses. `npm run e2e` therefore lists the 73 tests it listed before, and `npm run
+e2e:cloud` runs the three cloud ones.
+
+**Signing in without Google's page.** The app's Firebase chunk is the production one, reached
+through `ACCOUNT_LOADER`; in development builds a `window.cubetraceE2eEmulators` (the emulators'
+addresses, their project, and a Google ID token of unsigned claims) makes `connectFirebase` start
+the app under `demo-cubetrace` with `connectAuthEmulator` (its banner, which would cover the bottom
+of the page, left out), `connectFirestoreEmulator` and `connectFunctionsEmulator`, and Sign in call
+`signInWithCredential(GoogleAuthProvider.credential(<claims>))`. The Auth emulator's Google provider
+takes the claims as they are, so that a test signs in without a window and the same `sub` is the
+same uid in another browser context; the test learns the uid from the emulator's `accounts:lookup`.
+A custom token or an email and password were the other ways the emulator offers: the Google
+credential keeps the provider the app has (`google.com`), with the account's name and email. Each
+spec signs in an account of its own (Ada, Grace, Lin), so the three run in parallel on one set of
+emulators, each one's documents and objects under its own uid.
+
+**The local bucket.** `BUCKET_PROVIDER=local` (`functions/src/local.ts`) is the third provider
+behind `ObjectStore`, given to the emulators' project alone by `functions/.env.demo-cubetrace`,
+which the Functions emulator reads after `.env` ("Loaded environment variables from functions/.env,
+functions/.env.demo-cubetrace") and `firebase.json` keeps out of the deployed source. Its server's
+address, `LOCAL_BUCKET_URL`, is a variable of that file rather than a parameter (`params.ts`), which
+every deploy would need a value for; the deploy's parameters and `functions/.env` are as they were
+(`deploy.test.ts`). It works only where `FUNCTIONS_EMULATOR` is `true`, as the Functions emulator
+sets it (and firebase-functions reads it); elsewhere every call fails, saying so. `local.test.ts` (4
+tests, 98 with the others) checks its URLs and sizes, its refusals, and an upload signed, put and
+confirmed through the deployed functions against a server of the test's.
+
+**The sink.** `apps/web/e2e/helpers/bucket-sink.mts`, started by the config (`node
+e2e/helpers/bucket-sink.mts 4600`, a port that `functions/.env.demo-cubetrace` names too), keeps
+each PUT in memory by key when it is what its URL was made for (the content type, GCS's
+`x-goog-content-length-range`, the exact size, the expiry: 403 or 400 otherwise, "ExpiredToken" for
+a late one, which the queue signs again), answers `HEAD` and `GET` per object and `GET /?prefix=`
+with a listing, and answers the browser's preflights from `bucket/cors.json`: the app at
+`http://localhost:4200` puts across origins to `http://127.0.0.1:4600`, as it does to the bucket.
+
+| Flow | Spec | What it checks |
+|---|---|---|
+| The account | `account.cloud.spec.ts` | Sign in in the header signs in Ada through the Auth emulator; `users/{uid}`, written through the rules, is valid against `user.schema.json`, with `createdMs` the emulator's creation time to the second and the device's label; a reload keeps the account and sees the device again (its time later); Sign out forgets it, across a reload; every request of the browser context went to `localhost` or `127.0.0.1`, but for Firestore's network probe (below). |
+| Uploads | `uploads.cloud.spec.ts` | Chrome's fake camera, demo solve 0 at speed 20, as `uploads.spec.ts` records it: the attempt recorded with its two clips, the session marked as a real cube's, then the Sessions page: the queue's panel says "Up to date"; the session's and the attempt's documents valid against the cloud schemas, without moves, with the device and its camera; the six files in the sink under `users/<uid>/sessions/<id>/`, with the device's sizes and types, `attempt.json` and `session.json` byte for byte; the attempt's `upload` done, each file with its `doneMs`; `users/{uid}.quota` the day's six files and their bytes; the session's page says "uploaded" and the QA view counts the attempt, 0 B pending. |
+| Two devices | `devices.cloud.spec.ts` | Two browser contexts sign in Lin: a MAC address typed on the "laptop" reaches `users/{uid}/cubes` (valid against `cloud-cube.schema.json`) and a session recorded there, marked as a real cube's, the index; the "phone" has the same uid, the address in Settings, the session as "cloud" with the laptop's label, read-only on its page, and `users/{uid}.devices` has both labels. |
+
+**Times.** Locally on four CPUs, over five runs, the three tests took 37.3 to 42.6 s in Playwright
+(two workers; the uploads flow 19.4 to 20.9 s), and `npm run e2e:cloud` 57 to 62 s with the
+functions' build (about 11 s), the emulators' start (about 8 s) and `ng serve`'s. In CI, in the pull
+request's first run, the `npm run e2e:cloud` step took 45 s: 31.0 s of tests (the uploads flow 17.7
+s), the rest the build, the emulators and the servers; the `npm run e2e` step 3 min 55 s, and the
+whole job 7 min 47 s (7 min 52 s in T2.14's last run, without the cloud step: a run's time varies by
+more than the step adds).
+
+**Firestore's network probe.** After a connection error of its transport (the closure library's
+WebChannel, in `@firebase/webchannel-wrapper`), as when a page reloads or signs out, Firestore loads
+`https://www.google.com/images/cleardot.gif` to test the network; the app does it in production too.
+It reaches no service, and it is the one request off the machine that `account.cloud.spec.ts`
+allows: the second full run met it, which an earlier check of every request's host had failed on.
+
+**Sizes** (`ng build`, 2026-10-02, against `main` at 5c79af8): `main` is byte for byte the same but
+for the version, the build's commit and the lazy chunks' hashes, so the initial bundle is 264.63 kB
+raw, as before. Firebase's chunk is 650.7 kB raw (647.0), with `connectAuthEmulator`,
+`connectFirestoreEmulator`, `connectFunctionsEmulator` and `signInWithCredential`, which a
+production build never calls; the chunk of `ACCOUNT_LOADER` 6.8 kB (6.4), with the flag's reader.
+
+**What the emulators log.** At each account the Auth emulator creates, the Functions emulator logs
+"Firebase Authentication function was not triggered due to emulation error. Please file a bug.": the
+Auth emulator offers each new account to the Functions emulator for the project's auth triggers, of
+which there are none, and warns when nobody takes it. In the agents' containers, the CLI also warns
+that each port is free on 127.0.0.1 but not on `::1`, which has no IPv6 there.
