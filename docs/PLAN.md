@@ -1578,7 +1578,7 @@ says to sign in once in Chrome itself, at the app's address, and to open the ins
 (Chrome's installed apps share the site's storage with its tabs); the messages in a tab unchanged;
 no version bump, no change to the workflow, the Firebase configuration or the dependencies.
 
-**Outcome (2026-10-02, PR #T36PR).** `signInWithPopup` everywhere: `SignInFlow`, `signInFlow()`, the
+**Outcome (2026-10-02, PR #51).** `signInWithPopup` everywhere: `SignInFlow`, `signInFlow()`, the
 redirect branches of `signIn()` and `resume()`, `RedirectLostError` and the `redirect` value of
 `cubetrace.account` are gone, with `signInWithRedirect` and `redirectResult` from `AccountBackend`,
 `firebase-sdk.ts` (which keeps `browserPopupRedirectResolver`, passed per call so that a remembered
