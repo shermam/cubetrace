@@ -587,4 +587,39 @@ describe('CameraService', () => {
     await phone.start();
     expect(phone.cameraInfo()).toMatchObject({ label: 'phone-front', facing: 'user' });
   });
+
+  it('says which device is open, for its label in a session: its own label, its name and its id (T2.14)', async () => {
+    const camera = load({ cameras: [FAKE_WEBCAM, FAKE_FACETIME], granted: true });
+    expect(camera.deviceId()).toBeNull();
+    expect(camera.identity()).toBeNull();
+    await camera.start();
+    expect(camera.deviceId()).toBe('fake-webcam');
+    expect(camera.identity()).toEqual({
+      label: 'laptop',
+      deviceLabel: 'fake_device_0',
+      deviceId: 'fake-webcam',
+    });
+    expect(camera.identity()?.label).toBe(camera.cameraInfo()?.label);
+
+    // Another camera of the laptop: the same own label, another name and id.
+    await camera.select('facetime');
+    expect(camera.identity()).toEqual({
+      label: 'laptop',
+      deviceLabel: 'FaceTime HD Camera (3A71:F4B5)',
+      deviceId: 'facetime',
+    });
+    // The id is never in the session's entry.
+    expect(JSON.stringify(camera.cameraInfo())).not.toContain('deviceId');
+    camera.stop();
+    expect(camera.deviceId()).toBeNull();
+    expect(camera.identity()).toBeNull();
+
+    const phone = load({ cameras: [FAKE_PHONE_FRONT, FAKE_PHONE_REAR], userAgent: ANDROID });
+    await phone.start();
+    expect(phone.identity()).toEqual({
+      label: 'phone-front',
+      deviceLabel: 'camera 1, facing front',
+      deviceId: 'phone-front',
+    });
+  });
 });

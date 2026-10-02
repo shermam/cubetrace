@@ -15,6 +15,7 @@ import {
   browserLumaSampler,
   buildConstraints,
   cameraInfo,
+  cameraLabel,
   clampFraming,
   controlValuesOf,
   controlsOf,
@@ -36,7 +37,7 @@ import {
   type LumaSampler,
   type MeteringMode,
 } from '@cubetrace/capture';
-import type { CameraInfo } from '@cubetrace/core';
+import type { CameraIdentity, CameraInfo } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import {
@@ -134,10 +135,11 @@ export function cameraDevices(list: readonly MediaDeviceInfo[]): CameraDevice[] 
  * label, in Settings), opened at the resolution and frame rate that Settings asks for, with fallbacks
  * that say what they did (a camera that is gone, a frame rate it does not have, a mode it cannot
  * start in); its settings and capabilities as the track reports them, its manual controls (applied,
- * and kept per camera label in Settings), the frame rate and frame size measured on the preview,
- * the sharpness meter and the framing rectangle (kept per camera label and frame size). "Camera
- * on" is a setting: the camera opens again when the Timer page loads, and stays open across pages,
- * like the cube's connection. `cameraInfo()` is the session's `cameras[]` entry (T2.4 stores it).
+ * and kept per camera in Settings, by the browser's name for it), the frame rate and frame size
+ * measured on the preview, the sharpness meter and the framing rectangle (kept by the same name and
+ * the frame size). "Camera on" is a setting: the camera opens again when the Timer page loads, and
+ * stays open across pages, like the cube's connection. `cameraInfo()` is the session's `cameras[]`
+ * entry (T2.4 stores it, under the label the session gives the device: T2.14).
  *
  * The browser is read through BROWSER_GLOBALS (`navigator.mediaDevices`), which the unit tests
  * fake; the frames are measured on the preview `<video>` that the Camera preview beside the clock
@@ -156,6 +158,7 @@ export class CameraService {
   private readonly noticeSignal = signal<string | null>(null);
   private readonly streamSignal = signal<MediaStream | null>(null);
   private readonly labelSignal = signal('');
+  private readonly deviceIdSignal = signal<string | null>(null);
   private readonly settingsSignal = signal<JsonObject | null>(null);
   /** The settings as the camera opened, before any control: its automatic modes. */
   private readonly openingSettingsSignal = signal<JsonObject | null>(null);
@@ -179,6 +182,12 @@ export class CameraService {
   readonly stream = this.streamSignal.asReadonly();
   /** The open camera's label, such as "camera 1, facing front"; empty while none is open. */
   readonly label = this.labelSignal.asReadonly();
+  /**
+   * The open camera's device id (`MediaDeviceInfo.deviceId`, from its track's settings), which
+   * tells two cameras of one name apart in a session (T2.14) and is never recorded; null while none
+   * is open, or when the browser gives none.
+   */
+  readonly deviceId = this.deviceIdSignal.asReadonly();
   /** The open camera's `getSettings()` as JSON (see @cubetrace/capture's `snapshot`). */
   readonly settings = this.settingsSignal.asReadonly();
   /** The open camera's `getCapabilities()` as JSON. */
@@ -210,6 +219,23 @@ export class CameraService {
   });
   /** The preview is mirrored, like a mirror, for a front camera; the frames never are. */
   readonly mirrored = computed(() => this.facing() === 'user');
+  /**
+   * The open camera as a session tells it from its other cameras (T2.14, @cubetrace/core's
+   * `labelFor`): its own label, from the host label and the facing as `cameraInfo()` has it
+   * (`laptop`, `phone-front`), the browser's name for it and its device id; null while none is
+   * open. Its label in a session is the session's to give (`SessionService.cameraLabel`).
+   */
+  readonly identity = computed<CameraIdentity | null>(() => {
+    const deviceLabel = this.labelSignal();
+    if (this.settingsSignal() === null) {
+      return null;
+    }
+    return {
+      label: cameraLabel(this.prefs.hostLabel(), this.facing()),
+      deviceLabel,
+      deviceId: this.deviceIdSignal(),
+    };
+  });
   /**
    * The size of the frames as they arrive, measured on the preview; the track's settings until
    * then. A phone held upright delivers portrait frames although its settings may say 1920×1080.
@@ -427,7 +453,8 @@ export class CameraService {
    * The session's `cameras[]` entry for the open camera (@cubetrace/core's `CameraInfo`: label,
    * facing, device label, settings, capabilities, constraints, the framing rectangle as `crop`, null
    * for the whole frame, and `mode: 'full'`; its `microphone` is the recording's to put, T2.12);
-   * null while the camera is not on.
+   * null while the camera is not on. Its label is the camera's own (`laptop`, `phone-front`): the
+   * session gives each of its devices one of its own (T2.14, `SessionService.putCamera`).
    */
   cameraInfo(): CameraInfo | null {
     const track = this.track;
@@ -602,6 +629,7 @@ export class CameraService {
     this.openingSettingsSignal.set(this.settingsSignal());
     const deviceId = track.getSettings().deviceId;
     if (typeof deviceId === 'string' && deviceId !== '') {
+      this.deviceIdSignal.set(deviceId);
       this.prefs.setCameraPick(this.prefs.hostLabel(), deviceId, track.label);
     }
     const messages = [...notes];
@@ -642,6 +670,7 @@ export class CameraService {
     this.choice = null;
     this.streamSignal.set(null);
     this.labelSignal.set('');
+    this.deviceIdSignal.set(null);
     this.settingsSignal.set(null);
     this.openingSettingsSignal.set(null);
     this.capabilitiesSignal.set(null);

@@ -67,8 +67,8 @@ export interface MicrophoneInfo {
 export interface CameraInfo {
   /**
    * Unique within the session, and the first part of its clips' file names: lowercase letters and
-   * digits in words joined by hyphens, such as `laptop` or `phone-front` (docs/DATA-MODEL.md §5). One
-   * per device: a second camera of the laptop in the session is `laptop-2` ({@link labelFor}).
+   * digits in words joined by hyphens, such as `laptop` or `phone-front` (docs/DATA-MODEL.md §5).
+   * One per device: a second camera of the laptop in the session is `laptop-2` ({@link labelFor}).
    */
   label: string;
   /** The host's own camera; phase 2 has no other. */
@@ -96,11 +96,11 @@ export interface CameraInfo {
 }
 
 /**
- * A camera as a session tells it from its other cameras (docs/PLAN.md T2.14, {@link labelFor}): its
- * label, the browser's name for it, and the browser's id for it when known. The records keep the name
- * (`deviceLabel`) and never the id, a hashed identifier of the browser's installation that says
- * nothing about the pictures (@cubetrace/capture's `snapshot` leaves it out): the app knows it only
- * while the page is open.
+ * A camera as a session tells it from its other cameras (docs/PLAN.md T2.14, {@link labelFor}):
+ * its label, the browser's name for it, and the browser's id for it when known. The records keep
+ * the name (`deviceLabel`) and never the id, a hashed identifier of the browser's installation that
+ * says nothing about the pictures (@cubetrace/capture's `snapshot` leaves it out): the app knows it
+ * only while the page is open.
  */
 export interface CameraIdentity {
   /** An entry's label in the session; for a camera to label, its own (`laptop`, `phone-front`). */
@@ -239,8 +239,8 @@ export function summarize(
 }
 
 /**
- * Whether `a` and `b` are the same camera: the browser names them alike and, when the ids of both are
- * known, gives them the same id (two cameras of one model can have one name).
+ * Whether `a` and `b` are the same camera: the browser names them alike and, when the ids of both
+ * are known, gives them the same id (two cameras of one model can have one name).
  */
 export function sameCamera(a: CameraIdentity, b: CameraIdentity): boolean {
   const idA = a.deviceId ?? null;
@@ -249,13 +249,13 @@ export function sameCamera(a: CameraIdentity, b: CameraIdentity): boolean {
 }
 
 /**
- * The label of `camera` among a session's `cameras` (docs/DATA-MODEL.md §6, docs/PLAN.md T2.14): one
- * per device within the session, the same each time the device is used in it. That of the entry of
- * the same camera ({@link sameCamera}; one with the same id first), so that a camera used again gets
- * its label back; else the camera's own label, `camera.label` (from the host and the facing:
- * `laptop`, `phone-front`, @cubetrace/capture's `cameraLabel`), when no entry has it; else the first
- * of `<label>-2`, `<label>-3`, … that no entry has. A new session, whose `cameras` are empty, starts
- * again at the camera's own label.
+ * The label of `camera` among a session's `cameras` (docs/DATA-MODEL.md §6, docs/PLAN.md T2.14):
+ * one per device within the session, the same each time the device is used in it. That of the
+ * entry of the same camera ({@link sameCamera}; one with the same id first), so that a camera used
+ * again gets its label back; else the camera's own label, `camera.label` (from the host and the
+ * facing: `laptop`, `phone-front`, @cubetrace/capture's `cameraLabel`), when no entry has it; else
+ * the first of `<label>-2`, `<label>-3`, … that no entry has. A new session, whose `cameras` are
+ * empty, starts again at the camera's own label.
  */
 export function labelFor(cameras: readonly CameraIdentity[], camera: CameraIdentity): string {
   const id = camera.deviceId ?? null;

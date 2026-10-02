@@ -8,7 +8,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { cameraLabel, isWideFraming } from '@cubetrace/capture';
+import { isWideFraming } from '@cubetrace/capture';
 import type { CameraClock } from '@cubetrace/core';
 
 import { APP_BUILD } from '../../environments/version';
@@ -42,7 +42,7 @@ export type SyncBlock =
 
 /** A check that ended, as the panel says it. */
 export interface SyncCheckResult {
-  /** The camera it measured, by its label in the session (`laptop`, `phone-front`). */
+  /** The camera it measured, by its label in the session (`laptop`, `laptop-2`, `phone-front`). */
   readonly label: string;
   readonly outcome: SyncOutcome;
   /** The camera's lag in the session before this check (a check run again), ms; null if none. */
@@ -77,9 +77,11 @@ export interface SyncCheckResult {
  * scramble and number. On success the lag goes into the session's `clock.cameras[label]` (`rttMs`
  * and `driftPpm` 0: the camera is this device's; the pairs the spread keeps), replacing an earlier
  * check's, and the camera's later clips carry it as their `syncResidualMs`
- * (`SessionService.attachClip`). A check ends as failed when the recording stops or the cube
- * disconnects. Every check that ends writes one line to the console, and its diagnostics can be
- * downloaded (`downloadReport`, sync-report.ts).
+ * (`SessionService.attachClip`). The label is the one the session gives the device (T2.14,
+ * `SessionService.cameraLabel`): each camera of a session has a check of its own, a camera switched
+ * to that has none is due one, and a camera switched back to finds its own. A check ends as failed
+ * when the recording stops or the cube disconnects. Every check that ends writes one line to the
+ * console, and its diagnostics can be downloaded (`downloadReport`, sync-report.ts).
  */
 @Injectable({ providedIn: 'root' })
 export class SyncService {
@@ -97,12 +99,16 @@ export class SyncService {
   private readonly waitingSignal = signal(false);
   private readonly noticeSignal = signal<string | null>(null);
 
-  /** The camera's label in the session (`laptop`, `phone-front`…); null while it is not on. */
-  readonly label = computed(() =>
-    this.camera.status() === 'on'
-      ? cameraLabel(this.settings.hostLabel(), this.camera.facing())
-      : null,
-  );
+  /**
+   * The camera's label in the session (`laptop`, `laptop-2`, `phone-front`…: the one the session
+   * gives the device, T2.14); null while it is not on.
+   */
+  readonly label = computed(() => {
+    const identity = this.camera.identity();
+    return this.camera.status() === 'on' && identity !== null
+      ? this.session.cameraLabel(identity)
+      : null;
+  });
   /** The camera's clock sync in the current session, from an earlier check; null if none. */
   readonly stored = computed<CameraClock | null>(() => {
     const label = this.label();
@@ -229,6 +235,7 @@ export class SyncService {
       return;
     }
     const previousOffsetMs = this.stored()?.offsetMs ?? null;
+    const identity = this.camera.identity();
     const rect = this.camera.framing();
     this.context = {
       label,
@@ -258,7 +265,9 @@ export class SyncService {
             this.session.resumeAfterSyncCheck();
           } else {
             this.session.holdAfterSyncCheck();
-            this.finish(label, previousOffsetMs, outcome, run);
+            // The camera's label in the session now: New session may have come during the check.
+            const now = identity === null ? label : this.session.cameraLabel(identity);
+            this.finish(now, previousOffsetMs, outcome, run);
           }
         },
       }),

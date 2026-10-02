@@ -857,7 +857,8 @@ describe('SessionService', () => {
       s.service.putCamera(camera('FaceTime HD Camera'), false);
       s.service.putCamera(camera('FaceTime HD Camera'), false);
       s.service.putCamera({ ...camera('Phone'), label: 'phone-front' }, false);
-      s.service.putCamera(camera('Studio Display Camera'), false);
+      // Another device under `laptop` gets a label of its own (T2.14).
+      expect(s.service.putCamera(camera('Studio Display Camera'), false)?.label).toBe('laptop-2');
       // The microphone of its clips (T2.12) is written with the entry, and replaced with it.
       const microphone: MicrophoneInfo = {
         label: 'Studio Display Microphone',
@@ -877,10 +878,11 @@ describe('SessionService', () => {
       const stored = (await s.store.exportSession(session)).session;
       expect(stored).toEqual(s.service.session());
       expect(stored.cameras.map((entry) => [entry.label, entry.deviceLabel])).toEqual([
-        ['laptop', 'Studio Display Camera'],
+        ['laptop', 'FaceTime HD Camera'],
         ['phone-front', 'Phone'],
+        ['laptop-2', 'Studio Display Camera'],
       ]);
-      expect(stored.cameras.map((entry) => entry.microphone)).toEqual([microphone, null]);
+      expect(stored.cameras.map((entry) => entry.microphone)).toEqual([null, null, microphone]);
       expect(stored.audio).toBe(false);
       expect(stored.notes).toBe(
         'clip failed: scramble of attempt 1: first\nclip failed: solve of attempt 1: second',
@@ -894,6 +896,88 @@ describe('SessionService', () => {
       await s.service.addNote(session, 'third');
       expect((await s.store.exportSession(session)).session.notes).toMatch(/second\nthird$/);
       expect(s.service.session()?.notes).toBe('');
+    });
+
+    it('gives each device a label of its own in the session, the same each time; a new session starts again (T2.14)', async () => {
+      const s = setup();
+      const facetime = camera('FaceTime HD Camera (3A71:F4B5)');
+      const logitech = camera('Logitech Webcam C930e (046d:0843)');
+      // Without a session: the camera's own label, and nothing to put it in.
+      expect(s.service.cameraLabel(logitech)).toBe('laptop');
+      expect(s.service.putCamera(logitech, true)).toBeNull();
+      const fake = await ready(s);
+      const session = s.service.session()?.id ?? '';
+
+      expect(s.service.putCamera(facetime, true)).toEqual(facetime);
+      // Issue #40: the office laptop's Logitech webcam is `laptop` by the host too.
+      expect(s.service.cameraLabel(logitech)).toBe('laptop-2');
+      expect(s.service.putCamera(logitech, true)).toEqual({ ...logitech, label: 'laptop-2' });
+      // The FaceTime camera again, opened at another size: its label back, its entry replaced.
+      const smaller: CameraInfo = { ...facetime, settings: { width: 1280, height: 720 } };
+      expect(s.service.putCamera(smaller, true)?.label).toBe('laptop');
+      expect(s.service.putCamera(logitech, true)?.label).toBe('laptop-2');
+      expect(s.service.cameraLabel(facetime)).toBe('laptop');
+      expect(s.service.cameraLabel(logitech)).toBe('laptop-2');
+      expect(s.service.cameraLabel(camera('USB Camera'))).toBe('laptop-3');
+      await s.service.whenSaved();
+      expect((await s.store.exportSession(session)).session.cameras).toEqual([
+        smaller,
+        { ...logitech, label: 'laptop-2' },
+      ]);
+
+      // Two cameras of one name: their device ids tell them apart (never in the records).
+      const usb = camera('USB Camera (1234:5678)');
+      expect(s.service.putCamera(usb, true, 'usb-a')?.label).toBe('laptop-3');
+      expect(s.service.cameraLabel({ ...usb, deviceId: 'usb-b' })).toBe('laptop-4');
+      expect(s.service.putCamera(usb, true, 'usb-b')?.label).toBe('laptop-4');
+      expect(s.service.putCamera(usb, true, 'usb-a')?.label).toBe('laptop-3');
+      expect(s.service.cameraLabel({ ...usb, deviceId: 'usb-b' })).toBe('laptop-4');
+      expect(s.service.cameraLabel(usb)).toBe('laptop-3');
+      expect(JSON.stringify(s.service.session())).not.toContain('usb-a');
+
+      // A new session: the first camera takes its own label again.
+      turn(s, fake, 'R U F');
+      turn(s, fake, inverse('R U F'), 500);
+      s.service.newSession();
+      expect(s.service.session()?.cameras).toEqual([]);
+      expect(s.service.cameraLabel(logitech)).toBe('laptop');
+      expect(s.service.putCamera(logitech, true)?.label).toBe('laptop');
+      expect(s.service.putCamera(facetime, true)?.label).toBe('laptop-2');
+      expect(s.service.putCamera(usb, true)?.label).toBe('laptop-3');
+      // The ids known were the last session's: there, `laptop-3` was the camera `usb-a`.
+      expect(s.service.cameraLabel({ ...usb, deviceId: 'usb-b' })).toBe('laptop-3');
+      await s.service.whenSaved();
+      const next = (await s.store.exportSession(s.service.session()?.id ?? '')).session;
+      expect(next.cameras.map((entry) => [entry.label, entry.deviceLabel])).toEqual([
+        ['laptop', logitech.deviceLabel],
+        ['laptop-2', facetime.deviceLabel],
+        ['laptop-3', usb.deviceLabel],
+      ]);
+      expect((await s.store.exportSession(session)).session.cameras).toHaveLength(4);
+    });
+
+    it('gives the cameras of a resumed session their labels back by their names (T2.14)', async () => {
+      const store = new MemorySessionStore();
+      const facetime = camera('FaceTime HD Camera (3A71:F4B5)');
+      const logitech = { ...camera('Logitech Webcam C930e (046d:0843)'), label: 'laptop-2' };
+      await store.createSession({ ...testSession(), cameras: [facetime, logitech] });
+      const localStorage = new FakeLocalStorage();
+      localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
+      const s = setup({ store, localStorage });
+      await ready(s);
+      expect(s.service.session()?.id).toBe(SESSION_A);
+
+      // A page load: no device id is known, the names decide.
+      expect(s.service.cameraLabel({ ...logitech, label: 'laptop' })).toBe('laptop-2');
+      expect(s.service.putCamera({ ...logitech, label: 'laptop' }, true, 'c930e')?.label).toBe(
+        'laptop-2',
+      );
+      expect(s.service.putCamera(facetime, true, 'facetime')?.label).toBe('laptop');
+      expect(s.service.cameraLabel(camera('Studio Display Camera'))).toBe('laptop-3');
+      expect(s.service.session()?.cameras.map((entry) => entry.label)).toEqual([
+        'laptop',
+        'laptop-2',
+      ]);
     });
 
     it("keeps a camera's sync check in clock.cameras, and gives the camera's later clips its lag", async () => {

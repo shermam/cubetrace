@@ -7,7 +7,7 @@ import type { MotionSample } from '@cubetrace/capture';
 import type { FakeCube } from '@cubetrace/gan';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
-import { FAKE_WEBCAM, FakeMediaDevices, settle } from '../device/fake-browser';
+import { FAKE_WEBCAM, FakeMediaDevices, settle, type FakeCamera } from '../device/fake-browser';
 import { ready, setup, turn, type Setup } from '../session/session-harness';
 import { CameraService } from './camera-service';
 import { CAPTURE_STARTER, RecordingService } from './recording-service';
@@ -26,8 +26,9 @@ export interface Rig {
   readonly camera: CameraService;
 }
 
-export function rig(): Rig {
-  const media = new FakeMediaDevices([FAKE_WEBCAM]);
+/** The timer, the recording and the sync check, with the cameras `cameras` (the first one chosen). */
+export function rig(cameras: readonly FakeCamera[] = [FAKE_WEBCAM]): Rig {
+  const media = new FakeMediaDevices(cameras);
   const starter = new FakeCaptureStarter();
   const s = setup({
     navigator: { ...bluetoothNavigator(true), mediaDevices: media },
