@@ -32,7 +32,7 @@ import {
   referenceAt,
   shownOrientation,
 } from './cube-orientation';
-import { TWISTY_LOADER } from './scramble-view';
+import { TWISTY_LOADER } from './twisty-loader';
 
 /** A move as the viewer lists it: its time into the clip. */
 export interface ClipMove {

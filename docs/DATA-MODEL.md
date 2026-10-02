@@ -917,8 +917,13 @@ gyro packets. `q` is the orientation as the cube reports it, to 5 decimals (the 
 fractions), `x, y, z, w` with the scalar last. **The cube's frame**, as the driver states it:
 right-handed, +X through the red face, +Y through the blue face, +Z through the white face. The
 yaw (the turn about the vertical) has an arbitrary reference and drifts, since the cube has no
-magnetometer: the viewer (T3.8) zeroes it on the clip's first sample; the pitch and roll are
-gravity's. `v` is the angular velocity per axis as the cube reports it, raw: the Gen2 cubes (the
+magnetometer; the pitch and roll are gravity's. The clip viewer (T3.8) shows a 3D cube from these
+samples: at the host time a frame shows (the clip's `firstFrameHostMs` plus the time into the clip,
+less the camera's lag, `syncResidualMs` of §7) it takes the sample there, or the slerp of the two
+around it (the first or last sample beyond the file's span; nothing before the first sample of a
+truncated file), relative to the sample at the clip's first frame by default, so that the yaw's
+reference does not matter, or raw on request; the cube's frame above is carried into cubing.js's
+(+X through R, +Y through U, +Z through F: `(x, y, z) → (x, z, −y)`). `v` is the angular velocity per axis as the cube reports it, raw: the Gen2 cubes (the
 GAN 12 ui FreePlay, the GAN 356 i3) send 4-bit signed values, −7 to 7, per packet, in the cube's
 units; null when the cube's gyro packets carry none (a sample without one among others is 0).
 

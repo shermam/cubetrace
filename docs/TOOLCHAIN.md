@@ -399,7 +399,8 @@ alive.
   imports `cubing/twisty` dynamically (`TWISTY_LOADER`, which the unit tests replace), so it is a
   lazy chunk: 116.4 kB raw, 28.7 kB transferred, plus 4 kB of shared helpers. The 2D player never
   loads the 3D renderer, a 509 kB chunk of its own (checked with Playwright's network log on the
-  production build).
+  production build); the clip viewer's 3D cube (T3.8) does, through the same `TWISTY_LOADER`, when
+  a clip is opened (see "The clip viewer's 3D cube" below).
 
 ## Timer and sessions
 
@@ -441,7 +442,7 @@ cube.
 | Mark as solved (T1.14) | `reset.spec.ts` | Demo solve 0 at speed 0.25: "Mark as solved" in the Cube section while the scramble is part-way: the net shows solved, the demo cube stays connected, attempt 1 begins again (0 / 21, the same scramble), no row; the recorded views show the scrambling attempt just before. A page load with `?demo=0&speed=20` then solves attempt 1 in the same session, and the export has that one attempt. |
 | Idle setting (T1.14) | `cube.spec.ts`, last test | Settings shows the idle disconnection at 5 minutes; 1 survives a reload; 61 is refused with its message. The timer itself is tested in the unit tests, on a fake clock. |
 | Scramble marks (T1.13) | `scramble-colours.spec.ts` | Demo solve 1 at speed 20: each of its 11 half turns marked partial after its first quarter turn, then done; every view while scrambling agrees with its progress; all moves but the last done before the attempt arms, all done while armed, none from the solve on. `&misscramble=5` (demo solve 0): move 6 marked wrong exactly while the undo guidance shows, then done; all done while armed. |
-| Recording (T2.4) | `recording.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: four replays with the camera off, then four with it on, each waiting for the last one's clips; every attempt recorded has its two clips in OPFS, their frames files valid, each clip from its margin (2 s before the scramble's first turn, 3 s before the solve's) to at most one GOP earlier and to about 1 s after its segment; the viewer plays the last solve clip (`loadedmetadata`) with its moves, and Download gives the five files with the sizes of the record; the export validates; the median `timeMs` with the camera on is within 5 ms of the median with it off. With the demo cube's gyroscope on (`?gyro=1`, T3.7): attempt 1 without a camera gets its `gyro.json` a second after the solve (truncated: the demo connected a moment before its scramble), attempt 2 with the camera on its six files, the frames files naming the build, the gyro window reaching back 2 s, the download of six files, the export with both summaries. In the capture lab, a 10 s clip saved mid-way: no frame dropped and no double interval in the second after it. The file's three tests run one after the other (`mode: 'default'`): each encodes 1080p30 in software. |
+| Recording (T2.4) | `recording.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: four replays with the camera off, then four with it on, each waiting for the last one's clips; every attempt recorded has its two clips in OPFS, their frames files valid, each clip from its margin (2 s before the scramble's first turn, 3 s before the solve's) to at most one GOP earlier and to about 1 s after its segment; the viewer plays the last solve clip (`loadedmetadata`) with its moves and its 3D cube, whose line says the orientation is not recorded (no gyro file, T3.8), and Download gives the five files with the sizes of the record; the export validates; the median `timeMs` with the camera on is within 5 ms of the median with it off. With the demo cube's gyroscope on (`?gyro=1`, T3.7): attempt 1 without a camera gets its `gyro.json` a second after the solve (truncated: the demo connected a moment before its scramble), attempt 2 with the camera on its six files, the frames files naming the build, the gyro window reaching back 2 s, the download of six files, the export with both summaries; and the viewer's 3D cube (T3.8): the orientation line says it is zeroed at the clip's first frame, the puzzle object's quaternion is the identity before the solve clip plays and changes once it does (`experimentalCurrentThreeJSPuzzleObject` read in the page), the highlighted move advances, and once the video ended the player's alg is the solve's moves in order. In the capture lab, a 10 s clip saved mid-way: no frame dropped and no double interval in the second after it. The file's three tests run one after the other (`mode: 'default'`): each encodes 1080p30 in software. |
 | Sync check (T2.5, T2.8, T2.11) | `sync-check.spec.ts` | Chrome's fake camera at 30 fps, demo solve 0 at speed 20: once the solve is recorded, the camera on; when it records, the check is due and, the whole frame being framed, asks for a rectangle around the cube first ("Edit the framing"; the timer goes on); "Start anyway" starts it: it asks to hold still for a second, then counts down for the first turn (the capture worker's frames counted), the timer's status says `sync-check`, the scramble and "Attempt 2" stay; after 20 s without a turn it fails with "the cube did not move" (the demo has finished: the same outcome every run), with Retry and "Download check data", whose file has the whole motion series, the camera, how its frames were read and the frames' clock within 1 s of the page's; attempt 2 is back with its scramble; Retry, Later and "Sync check" start and hide it; the export has no `clock.cameras` entry and the one attempt of the solve. A second test draws the rectangle with the keyboard in the editor that "Edit the framing" opens: the hint goes, Start starts the check, and Full frame brings the hint back. In the capture lab, a 6 s check with the demo cube's turns shows the latest frame's motion in its bars (the mean difference above 0), the frames' format and "copied out", reports its outcome and the capture worker's time per frame, which it prints, and saves its data. |
 | Session with clips (T2.6) | `session-clips.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: the solve that starts with the page, recorded before the camera is on, is deleted (Delete last); the camera on, the sync check that starts by itself is ended with Later; two replays, each with its two clips; then a new page load straight to the session's page: both attempts listed with a badge "2 clips, …", "4 clips, …" in its header, the first attempt's solve clip plays in the viewer, and the page's Export validates against schema 2; every clip of the records is a file in its attempt's folder in OPFS, the MP4 of the record's size and the frames file valid against its schema, with the record's frame count and first frame, and nothing else is there but `attempt.json`. |
 | First render (T2.6) | `timer-render.spec.ts` | On the production build under `/cubetrace/`, after a demo solve (a session with a stored solve), the first animation frame that shows the clock comes within 2 s of `DOMContentLoaded`, with the camera setting off and on; with the camera (`getUserMedia`) and the storage (`navigator.storage.getDirectory`) each held back 3 s, the clock still comes within 2 s, and the solve list and the camera's preview after them. Recording is off in the file (no `MediaStreamTrackProcessor`), as in `timer-layout.spec.ts`. It prints the times: over three runs, the clock 44 to 83 ms after `DOMContentLoaded` with the camera off or on, the solve list 104 to 177 ms and the preview 137 to 194 ms; held back, the clock 39 to 104 ms, the list 3,056 to 3,121 ms and the preview 3,139 to 3,237 ms. |
@@ -1670,3 +1671,41 @@ the services' calls. The QA page's chunk is 16.2 kB raw against 9.5 (its section
 the Settings page's 23.0 against 22.1, the Firebase chunk 650.47 kB raw against 650.19 (`saveEvents`,
 `listEvents`), and the chunks of the recording services grow by their calls, one to three kB each;
 all the scripts together, 3531.1 kB raw against 3502.5 (1029.2 kB gzipped against 1020.8).
+
+## The clip viewer's 3D cube (T3.8)
+
+Added by T3.8 on 2026-10-02: a 3D cube beside the clip in the viewer, following the video
+(`docs/ARCHITECTURE.md` "The clip viewer", `docs/DATA-MODEL.md` §11).
+
+**No new dependency, no new chunk.** The cube is cubing.js's `<twisty-player>`, from the scramble
+view's lazy chunk (`TWISTY_LOADER`, the dynamic import of `cubing/twisty`), with `visualization="3D"`:
+cubing.js then loads its 3D code, the `twisty-dynamic-3d` chunk that the build already emitted and
+the service worker already prefetched with the other cubing.js chunks (509 kB raw, 109 kB transferred:
+three.js's renderer, the cube's meshes), which the 2D scramble picture never asked for. The viewer
+itself is a lazy chunk of its own (`clip-viewer-<hash>.js`, through the pages' `@defer`), where the
+new code lives. **Sizes** (`ng build`, 2026-10-02, against `main` at 4be2a6d): the viewer's chunk is
+20.1 kB raw, 7.0 kB gzipped (11.4 and 4.2 before: the cube's driving, the orientation maths, the
+controls and the styles); the initial bundle is unchanged (264.57 kB raw), the Timer page's chunk
+31.2 kB as before, `TWISTY_LOADER` having moved to `twisty-loader.ts` (a 163-byte chunk shared by
+the scramble view and the viewer) so that the viewer does not pull the scramble view in; the
+services' chunk grows by `parseGyro`'s reader (387 bytes); all the scripts together 3,540.3 kB raw
+against 3,531.1 (1,010.1 kB gzipped against 1,007.1).
+
+**The player's API** (`node_modules/cubing/dist/lib/cubing/index-*.d.ts`, cubing 0.63.7): the
+properties `alg`, `experimentalSetupAlg`, `timestamp` and `tempoScale` (setters whose getters
+throw; `tempo-scale` and the rest are also attributes, which the template sets), the method
+`experimentalAddMove(move)` (appends to the alg and sets a "catch-up" move that
+`TwistyAnimationController` animates over 500 ms divided by the tempo scale, from the state before
+the move to the end), `experimentalCurrentThreeJSPuzzleObject()` (the `Cube3D` `Object3D`, deprecated
+but the only way to a three.js object; cubing.js never touches its rotation, only its pieces'
+matrices) and `experimentalCurrentVantages()` (the `Twisty3DVantage` elements, whose `scheduleRender`
+draws on the next animation frame). `clip-cube.ts` names these six members in a `CubePlayer`
+interface, which the spec checks against `TwistyPlayer` for the compiler, and the viewer takes the
+element as one only once it has them (`cubePlayerOf`), so that jsdom's unknown element in the unit
+tests, or the element before the chunk loaded, drives nothing; the viewer's spec defines a fake
+`twisty-player` custom element that records the algs, the moves added, the quaternions set and the
+renders asked.
+
+**No live cube on the Timer page**, by the owner's decision: the solver watches the real cube, and a
+WebGL renderer would compete with the capture pipeline for the GPU and the main thread. The viewer
+is off the recording path.

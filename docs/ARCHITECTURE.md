@@ -18,7 +18,8 @@ Chrome only, on Android, macOS and Windows: Web Bluetooth rules out Safari and F
 
 ```
 apps/web (Angular, PWA)
-  timer UI · scramble view (cubing.js twisty-player) · CFOP chart · session list · settings · probe page
+  timer UI · scramble view (cubing.js twisty-player) · CFOP chart · session list · settings · probe page ·
+  clip viewer (a clip's video, its moves by time, and a 3D cube that follows it: cubing.js in 3D, T3.8)
   device services: wake lock · storage persistence · browser support (read the browser through the
                    BROWSER_GLOBALS token; fakes in apps/web/src/app/device/fake-browser.ts)
   account (phase 3): AuthService · Firebase (Authentication, Firestore, Functions) in a lazy chunk behind
@@ -123,6 +124,46 @@ and the median lag of the turns kept (the fifth farthest from the median left ou
 becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
 Idle time is never stored. Remote cameras (phase 4) will cut the same way and ship their clips over
 the WebRTC data channel; phase 3 uploads them.
+
+## The clip viewer
+
+The solve lists' clip badges open the viewer (`apps/web/src/app/timer/clip-viewer.ts`, a modal
+dialog on the Timer and the session pages): it reads the clip's MP4 from the attempt's folder
+(`ATTEMPT_FILES`, behind an object URL let go when the dialog closes) and lists the segment's moves
+by their time into the clip, the one on screen highlighted. Since T3.8 a 3D cube follows the video
+beside it:
+
+```
+attempt.json moves[] ──▶ clipMoves: seconds = (hostMs + lag − firstFrameHostMs) / 1000      lag = the clip's syncResidualMs
+gyro.json ──parseGyro──▶ GyroTrack (sample times, quaternions)                                 (0 before a sync check)
+video frame at t ──▶ host time firstFrameHostMs + t·1000 − lag
+   ├─▶ the last move at or before it ──▶ ClipCube.show: one move on, animated (experimentalAddMove, tempo 5: ~100 ms);
+   │                                      a seek or several moves ──▶ alg = the moves so far, timestamp end
+   └─▶ orientationAt (binary search, slerp) ──▶ conj(reference) · q ──▶ cubing.js's frame ──▶ Object3D.quaternion, scheduleRender
+```
+
+The cube is cubing.js's `<twisty-player>` in 3D (no control panel, no drag input, no hint facelets,
+a transparent background), from the scramble view's lazy chunk (`TWISTY_LOADER`), its 3D code a
+further lazy chunk that cubing.js loads itself. The solve clip's cube starts from the scramble (the
+setup alg; `scrambledFacelets` by definition), the scramble clip's from solved, its moves including a
+mis-scramble's corrections. The viewer follows the video on every frame while it plays
+(`requestVideoFrameCallback`, else an animation frame) and on `timeupdate`, `seeked` and `pause`; the
+same mapping times the moves list, so the highlighted move and the 3D turn agree with the picture,
+the camera's lag applied to both (`docs/DATA-MODEL.md` §7: the picture at `t` shows the world `lag`
+earlier). The orientation (`cube-orientation.ts`, pure) is the gyro sample at that host time, slerped
+between its neighbours along the shorter arc, the first or last sample beyond the file's span and
+nothing before a truncated file's first sample; shown relative to the sample at the clip's first
+frame (`conj(q_ref) · q`: the cube starts upright and moves as the hands moved it, whatever the
+gyro's yaw reference, which is arbitrary and drifts), or to the sample at the current time after
+"Re-zero", or raw with the "Raw" box; then carried from the cube's frame (+X red, +Y blue, +Z white)
+into cubing.js's (+X R, +Y U, +Z F) by one constant, a rotation of −90° about X (`CUBE_TO_PLAYER`).
+The puzzle's three.js object comes from `experimentalCurrentThreeJSPuzzleObject()` and the render from
+the vantages' `scheduleRender()`, only when the orientation changed. Without a gyro file (an older
+attempt, a cube without a gyroscope) the cube still turns and a line says the orientation is not
+recorded; a file that cannot be read is said in that line; a clip in the cloud has no cube. Per frame
+the loop costs one scan of the segment's moves, one binary search over the samples, one slerp and
+one render; nothing runs once the dialog closes. There is no live 3D cube on the Timer page, by
+decision: the solver watches the real cube, and WebGL would compete with the capture pipeline.
 
 ## Account (phase 3)
 
