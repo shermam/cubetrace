@@ -135,7 +135,7 @@ test.describe('the production build under /cubetrace/, signed out', () => {
     assetGroups: { name: string; installMode: string; urls: string[] }[];
   }
 
-  test('never downloads Firebase: the timer works, nothing reaches Google, and the service worker installs without it', async ({
+  test('never downloads Firebase nor the upload queue: the timer works, nothing reaches Google, and the service worker installs without them', async ({
     context,
     page,
     request,
@@ -152,6 +152,14 @@ test.describe('the production build under /cubetrace/, signed out', () => {
     ]);
     const firebaseChunks = account?.urls ?? [];
     expect(shell.filter((url) => firebaseChunks.includes(url))).toEqual([]);
+    // So is the upload queue (T3.3), which only an account signed in with uploads on loads.
+    const uploads = ngsw.assetGroups.find((group) => group.name === 'uploads');
+    expect(uploads?.installMode).toBe('lazy');
+    expect(uploads?.urls).toEqual([
+      expect.stringMatching(/^\/cubetrace\/upload-runtime-[\w-]+\.js$/),
+    ]);
+    const uploadChunks = uploads?.urls ?? [];
+    expect(shell.filter((url) => uploadChunks.includes(url))).toEqual([]);
 
     // Every request the page makes, whether the service worker answers it or not. The service
     // worker's own downloads (Playwright does not report them) all go into its caches, checked below.
@@ -184,6 +192,12 @@ test.describe('the production build under /cubetrace/, signed out', () => {
       firebaseChunks,
     );
     expect(cachedFirebase).toEqual(firebaseChunks.map(() => false));
+    const cachedUploads = await page.evaluate(
+      async (urls) => Promise.all(urls.map(async (url) => (await caches.match(url)) !== undefined)),
+      uploadChunks,
+    );
+    expect(cachedUploads).toEqual(uploadChunks.map(() => false));
+    expect(requests.filter((url) => uploadChunks.some((chunk) => url.endsWith(chunk)))).toEqual([]);
     const toFirebase = requests.filter(
       (url) =>
         /^https:\/\/([\w-]+\.)*(googleapis|firebaseapp|firebaseio|gstatic|google)\.com\//.test(
