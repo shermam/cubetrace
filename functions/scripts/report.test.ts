@@ -338,7 +338,7 @@ function fixture(): ReportEvent[] {
     at(end + 60_000, 'page.viewed', { page: 'sessions', demo: false }),
     at(
       end + 61_000,
-      'download',
+      'files.downloaded',
       { what: 'export', files: 1, names: `cubetrace-session-${SESSION}.json`, attempts: 21 },
       LAPTOP,
       { session: SESSION },
@@ -350,7 +350,7 @@ function fixture(): ReportEvent[] {
     }),
     at(
       end + 64_000,
-      'download',
+      'files.downloaded',
       {
         what: 'clips',
         files: 6,
@@ -593,11 +593,20 @@ describe('the checklist', () => {
     const ids = CHECKLIST.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);
     const doc = readFileSync(new URL('../../docs/DIAGNOSTICS.md', import.meta.url), 'utf8');
+    // The kinds of the catalogue's table, each a dotted lowercase name of at most 64 characters, as
+    // core's EVENT_KIND asks: a kind that is not one makes no event at all.
+    const catalogue = doc.split('\n## The catalogue\n')[1]?.split('\n## ')[0] ?? '';
+    const named = [...catalogue.matchAll(/^\| `([^`]+)` \|/gmu)].map((match) => match[1]);
+    expect(named.length).toBeGreaterThan(30);
+    for (const kind of named) {
+      expect(kind).toMatch(/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/u);
+      expect(kind.length).toBeLessThanOrEqual(64);
+    }
     for (const item of CHECKLIST) {
       expect(item.title.length, item.id).toBeGreaterThan(10);
       expect(item.section, item.id).toMatch(/^(T\d\.\d+ — .+|the cube's whole record)$/u);
       for (const kind of item.kinds) {
-        expect(doc, `${item.id} names ${kind}`).toContain(`\`${kind}\``);
+        expect(named, `${item.id} names ${kind}`).toContain(kind);
       }
       // The table of docs/DIAGNOSTICS.md has a row per item.
       expect(doc, item.id).toContain(`| ${item.id} |`);

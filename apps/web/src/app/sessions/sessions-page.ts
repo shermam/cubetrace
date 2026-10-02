@@ -516,7 +516,7 @@ export class SessionsPage {
       const fileName = exportFileName(item.session.id);
       downloadJson(this.globals, this.document, fileName, exported);
       this.diagnostics.record(
-        'download',
+        'files.downloaded',
         { what: 'export', files: 1, names: fileName, attempts: exported.attempts.length },
         { session: item.session.id },
       );

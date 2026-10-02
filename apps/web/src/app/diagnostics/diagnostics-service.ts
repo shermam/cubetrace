@@ -37,6 +37,9 @@ export interface EventSink {
 }
 
 /** The session and attempt an event belongs to; null or absent for none. */
+/** A kind's name: dotted lowercase, as core's `EVENT_KIND` asks (and checks again at run time). */
+export type EventKind = `${string}.${string}`;
+
 export interface EventScope {
   readonly session?: string | null;
   readonly attempt?: number | null;
@@ -171,7 +174,7 @@ export class DiagnosticsService {
    * facts that cannot be made into an event, are said once in the console and dropped.
    */
   record(
-    kind: string,
+    kind: EventKind,
     data: Readonly<Record<string, unknown>> = {},
     scope?: EventScope | null,
   ): void {

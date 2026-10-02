@@ -113,7 +113,7 @@ know it (a camera without a frame rate, a cube without a production date).
 | `upload.resumed` | The queue goes on. | – |
 | `storage.deleted` | Uploaded clips were deleted from the device by policy. | `files`, `bytes`, `usageBefore`, `usageAfter`, `percent` (after) |
 | `clips.viewed` | The clip viewer opened an attempt. | `clips`, `local` (still on the device), `gyro` |
-| `download` | Files handed to the user. | `what` (`clips`: the viewer's Download; `export`: Sessions → Export or a session's page; `sync-check`: Download check data; `probe`: the probe's report), `files` (count), `names`, `attempts` (an export) |
+| `files.downloaded` | Files handed to the user. | `what` (`clips`: the viewer's Download; `export`: Sessions → Export or a session's page; `sync-check`: Download check data; `probe`: the probe's report), `files` (count), `names`, `attempts` (an export) |
 | `error.app` | What the app says in the console as `cubetrace: …` (a record that could not be saved, the index refusing a write, a cube's write refused, the camera refused, the recording stopped, the uploads not starting, a gyro file not written, the account's record not saved, the cube's state not reset). | `where` (`store`, `index`, `cubes`, `camera`, `recording`, `uploads`, `gyro`, `account`, `cube`), `message`, `label` (the camera) |
 
 ## The checklists, read from the events
@@ -159,7 +159,7 @@ with the camera on and signed in, on both devices, is the round.
 | 1.6.8 | "Next scramble right after a solve" off: the time stays, Next begins the next attempt | `settings.changed`, `attempt.done` | – |
 | 1.6.9 | Cube turned off mid-solve: the time stops; back on and reconnected, the same attempt ends | `cube.disconnected`, `cube.connected`, `attempt.done` | – |
 | 1.6.10 | Reload mid-session, close and reopen: the solve list is back and the next attempt has the next number | `app.start`, `attempt.done`, `session.started` | – |
-| 1.6.11 | Sessions page: the session listed; Export downloads the JSON; Delete asks first, then removes it | `page.viewed`, `download`, `session.deleted` | that the export validates against the schemas (the coordinator, with ajv) |
+| 1.6.11 | Sessions page: the session listed; Export downloads the JSON; Delete asks first, then removes it | `page.viewed`, `files.downloaded`, `session.deleted` | that the export validates against the schemas (the coordinator, with ajv) |
 | 1.6.12 | "Screen on" while a cube is connected during a session; "Screen may sleep" after it disconnects | `wake.lock`, `cube.disconnected` | – |
 
 #### Round 1 (v0.1.0) — T1.7 — PWA on the phone
@@ -206,10 +206,10 @@ with the camera on and signed in, on both devices, is the round.
 | 2.4.2 | Three solves: each row gets "2 clips" about a second after; about 20 MB per attempt | `attempt.done`, `clip.saved` | – |
 | 2.4.3 | The badge opens the viewer: the clips play with sound, the moves follow, a click seeks | `clips.viewed` | the highlighted move against the picture |
 | 2.4.4 | The scramble clip begins 2–3 s before the first turn, the solve clip 3–4 s; both end 1 s after | `clip.saved` | the first move's time in the viewer's list |
-| 2.4.5 | Download in the viewer gives five files, six with gyro.json; the MP4s play | `download` | the MP4s in the system player |
+| 2.4.5 | Download in the viewer gives five files, six with gyro.json; the MP4s play | `files.downloaded` | the MP4s in the system player |
 | 2.4.6 | A DNF during a solve: both clips; a DNF right after the scramble: the scramble clip only | `attempt.done` | – |
 | 2.4.7 | Mark as solved mid-solve: no row, no clip left; the restarted attempt gets its own | `cube.reset`, `attempt.done` | the attempt's folder |
-| 2.4.8 | Sessions page: the storage meter and "N clips, … MB" per session; the export is one JSON file | `page.viewed`, `download` | the meter |
+| 2.4.8 | Sessions page: the storage meter and "N clips, … MB" per session; the export is one JSON file | `page.viewed`, `files.downloaded` | the meter |
 | 2.4.9 | Twenty minutes of solves with the camera on, the phone on its stand: warmth, slowdowns, frames dropped, storage used | `recording.started`, `recording.stopped`, `attempt.done` | how warm the phone got |
 | 2.4.10 | A clip at the edge: camera off right after a solve still saves the clip; a scramble within 2 s of Turn on gets a late clip | `clip.saved`, `camera.off` | – |
 
@@ -230,7 +230,7 @@ with the camera on and signed in, on both devices, is the round.
 | 2.7.3 | The preview stays in view through an attempt; the front camera mirrored | – | the layout |
 | 2.7.4 | The sharpness number stays the same during a solve | – | the meter |
 | 2.7.5 | Fifteen solves or more: the last 12 listed, See all opens the session page with the same ao12 | `attempt.done`, `page.viewed` | the ao12 on both pages |
-| 2.7.6 | The session's page: its facts, a clip badge that opens the viewer and downloads the files, Export, Delete | `page.viewed`, `clips.viewed`, `download`, `session.deleted` | – |
+| 2.7.6 | The session's page: its facts, a clip badge that opens the viewer and downloads the files, Export, Delete | `page.viewed`, `clips.viewed`, `files.downloaded`, `session.deleted` | – |
 | 2.7.7 | Camera settings: closed until the camera is on, then open; kept as left across reloads | – | the disclosure |
 
 #### Round 2 (v0.2.0) — T2.13 — the scramble over the picture (phone)
@@ -246,7 +246,7 @@ with the camera on and signed in, on both devices, is the round.
 | 2.5.1 | The framing hint (T2.8): with the whole frame as the rectangle, the check asks for one first | `sync.check` | the hint and its buttons |
 | 2.5.2 | A check: "Hold still", the countdown, "Turn n of 10", then "Camera lags the cube by X ms (±Y)"; the attempt back on its scramble | `sync.check` | the panel through the check |
 | 2.5.3 | The offset is stable: two checks of one camera within 25 ms, both spreads under 83 ms | `sync.check` | – |
-| 2.5.4 | A failure says why (did not move, no motion, fewer than 4 matches), with Retry and the check data | `sync.check`, `download` | – |
+| 2.5.4 | A failure says why (did not move, no motion, fewer than 4 matches), with Retry and the check data | `sync.check`, `files.downloaded` | – |
 | 2.5.5 | Not offered once a scramble has begun, nor during a solve, nor without a cube | – | the line under the picture |
 | 2.5.6 | Three solves after a check: clock.cameras in the export, the later clips with syncResidualMs | `sync.check`, `clip.saved` | the export (the coordinator) |
 | 2.5.7 | Capture lab: the motion bars, the pixel format, the lag and the cost per frame | `page.viewed` | the lab |
@@ -325,7 +325,7 @@ with the camera on and signed in, on both devices, is the round.
 
 | # | Item | Evidence | Still needs eyes |
 |---|---|---|---|
-| 3.7.1 | One attempt with the camera on: gyro.json beside the record, six files downloaded, the build and the moves' counters in attempt.json, the QA view's Gyro column | `attempt.done`, `download`, `upload.state` | attempt.json's fields and the session's battery in the console (the coordinator) |
+| 3.7.1 | One attempt with the camera on: gyro.json beside the record, six files downloaded, the build and the moves' counters in attempt.json, the QA view's Gyro column | `attempt.done`, `files.downloaded`, `upload.state` | attempt.json's fields and the session's battery in the console (the coordinator) |
 
 ## The QA view
 

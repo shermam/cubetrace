@@ -25,6 +25,7 @@ import {
   FLUSH_AT,
   FLUSH_DELAY_MS,
   RING_SIZE,
+  type EventKind,
 } from './diagnostics-service';
 
 const isCloudEvent = new Ajv2020({ allowUnionTypes: true, allErrors: true }).compile(
@@ -472,7 +473,7 @@ describe('DiagnosticsService', () => {
       await settle();
       signIn(diagnostics);
       expect(() => {
-        diagnostics.record('Not a kind');
+        diagnostics.record('Not a kind' as unknown as EventKind);
         diagnostics.record('attempt.done', {}, { session: 's', attempt: 0 });
         diagnostics.record('cube.connected', { mac: 'AB:12:CD:34:EF:56', fn: () => 1 });
       }).not.toThrow();

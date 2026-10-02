@@ -188,7 +188,7 @@ export class ProbePage {
     setTimeout(() => {
       objectUrls.revokeObjectURL(href);
     }, 60_000);
-    this.diagnostics.record('download', { what: 'probe', files: 1, names: link.download });
+    this.diagnostics.record('files.downloaded', { what: 'probe', files: 1, names: link.download });
     this.notice.set(`Saved ${link.download}.`);
   }
 

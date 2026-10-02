@@ -506,7 +506,7 @@ export class ClipViewer {
       }
       downloadJson(this.globals, this.document, attemptFileName(record, 'attempt.json'), record);
       this.diagnostics.record(
-        'download',
+        'files.downloaded',
         { what: 'clips', files: names.length + 1, names: [...names, 'attempt.json'] },
         { session: record.session, attempt: record.index },
       );

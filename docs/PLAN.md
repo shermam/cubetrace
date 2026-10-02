@@ -1661,6 +1661,57 @@ a 20 s solve at 50 Hz (2,049 samples over a 41 s window) and 183 KiB at 100 Hz. 
 in size (264.63 kB raw initial). Left for the owner: the gyro rate of each cube from the first capture
 (`docs/DEVICES.md`), and the item of `docs/MANUAL-TESTS.md` "After T3.7".
 
+### T3.9 — diagnostics events in the account: evidence for the manual rounds without the owner writing it up, and a report script for the coordinator
+
+`docs/MANUAL-TESTS.md` asks the owner to go through checklists on each device and write the results
+into issues; the owner has no time for that and uses the app daily (130 to 150 attempts a day on a
+laptop and an Android phone, signed in). Contract: (1) events `users/{uid}/events/{eventId}`
+(schema 1; `tsMs`, `kind` ≤ 64, `app`, `device` {label, platform, installed}, `session` and
+`attempt` when they belong to one, `data` of at most 32 facts, texts ≤ 500 characters, one level of
+nesting; never a MAC address, an email, a file's contents, a user agent or another uid), created by
+the client in batches, never updated or deleted (rules, tests, a JSON Schema and a parser in core);
+(2) a `DiagnosticsService` with `record(kind, data, scope?)`, cheap, never throwing, batching every
+5 s, at 20, and when the page hides or goes away, Firestore's cache carrying the batch offline; only
+signed in and with the setting on, the events raised signed out kept in a ring of the last 500 and
+written at a sign-in during the page's life; a cap of 2,000 a local day, then `error.*` alone;
+Settings → Account → Diagnostics, on by default, off after one last `settings.changed`; (3) a
+catalogue derived from the checklists, each item mapped to the kinds that are its evidence, in
+`docs/DIAGNOSTICS.md`; (4) a Diagnostics section of the QA view over the last 500 events; (5)
+`round-report`, for the coordinator, reading every account's events with a key named by
+`GOOGLE_APPLICATION_CREDENTIALS` and printing the counts per device and day, the checklists with
+✅ ⬜ ❗ and the facts, and the last 20 failures, its table logic unit-tested over a fixture; (6)
+tests for all of it, one end-to-end flow with the fake account and the events seen by the cloud
+project; (7) the docs; (8) the costs measured; (9) no version bump, no workflow change, no new
+runtime dependency.
+
+**Outcome (2026-10-02).** As contracted, with these choices. `DiagnosticsService` is a sink the
+services write into, with no dependency on them (no cycle): `AuthService` hands it the account
+(`attach`) and records the sign-ins; `SessionService` keeps the session and attempt under way on it,
+and records `attempt.done` only once the attempt's clips and gyro file are in (`ClipsInFlight`, at
+most 15 s), so that one event counts them; `CubeService` records how the address came, never which,
+and a failure's kind, never its message (which may name the address typed); `UploadService` diffs
+the queue's views into `upload.state` per transition; the service itself watches the settings the
+checklists name, the wake lock, the storage's persistence and the network, and records the pages
+from the router (injected optionally, so the services' unit tests need none). `cloudEvent` in core
+sanitizes every event (a list reads as one text) and scrubs MAC addresses and emails out of every
+text, which the end-to-end flow checks on a run's events. The rules check the id's shape too. The
+catalogue has 35 kinds; the checklists' 110 items map to them in `docs/DIAGNOSTICS.md`, whose table
+the report's own list generates and the report's test holds to the doc, and every kind named to the
+shape core asks (the type of `record`'s kind asks for the dot too): 92 items have an event as
+evidence, 18 have none (the layouts, the colours, the camera's controls, the net, the lab, signed-out
+states, the files searched for an address) and stay the owner's with the round, and 58 of the 92
+keep something for the owner's eyes beside their evidence. The script lives under `functions/scripts/`
+(firebase-admin is the functions' dependency; the deploy ignores the folder), runs on Node 22 as it
+is, reads each account's events in turn rather than a collection group (no index to deploy), and
+names an account by its uid's first characters. Measured in the end-to-end flow: 3 events per
+attempt without uploads (`attempt.done` and two `clip.saved`), 6 with them (three `upload.state`),
+so about 1,000 a day at 150 attempts, under the cap and far under Firestore's 20,000 free writes.
+The QA view reads the events beside the index (one more read). The initial bundle is 264.57 kB raw
+against `main`'s 264.63 (72.65 kB transferred against 72.57): the same code but for the minifier's
+names; the writer rides in the chunk of `SettingsService` and the services, which every page loads
+right after the first render, 68.8 kB raw against 57.7 (21.3 kB transferred against 18.2), and the
+QA page grows by its section, 16.2 kB raw against 9.5.
+
 ## Phases 4 and 5
 
 Outlines only, written into boards when phase 3 ends: **4. Remote cameras** — WebRTC pairing by

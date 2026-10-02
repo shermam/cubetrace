@@ -323,7 +323,11 @@ export class SyncService {
     try {
       const fileName = syncReportFileName(report.createdMs);
       downloadJson(this.globals, this.document, fileName, report);
-      this.diagnostics.record('download', { what: 'sync-check', files: 1, names: fileName });
+      this.diagnostics.record('files.downloaded', {
+        what: 'sync-check',
+        files: 1,
+        names: fileName,
+      });
     } catch (error: unknown) {
       this.noticeSignal.set(`The check's data could not be saved: ${errorMessage(error)}`);
     }

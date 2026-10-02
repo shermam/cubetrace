@@ -4,6 +4,15 @@ Agents cannot run these; the owner does, after the coordinator asks. Each task t
 hardware path appends its checklist here. Record the date, the device, the browser version
 and the result next to each item.
 
+**Since T3.9, the rounds are read from the diagnostics events** (`docs/DIAGNOSTICS.md`): signed
+in, the app records what the items below ask to write down (the build, the cube and how its address
+came, each attempt's outcome and clips, the sync checks, the uploads, the errors), and the
+coordinator's round report (`npm run round-report`) ticks the items from them, with the facts. The
+owner only solves as usual, signed in on both devices with the camera on, and looks at the items
+whose "Still needs eyes" column in `docs/DIAGNOSTICS.md` names something (the layout, the colours,
+the controls, the sound), writing those down as before; everything else needs no notes, no console
+lines and no screenshots.
+
 ## Round 1 (v0.1.0)
 
 The first release's round (`docs/PLAN.md`, T1.10): the T1.5, T1.6 and T1.7 sections below, on

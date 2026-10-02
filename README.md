@@ -220,6 +220,15 @@ arrow with the attempts still to upload, and a session's page each attempt's upl
 settings. The cubes' MAC addresses are the account's, in documents of their own, never the
 dataset's: no record holds one, so no export, upload or document of the index does.
 
+**Diagnostics.** Signed in, the app also keeps a log of its own use in your account
+(`users/<your id>/events`, [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md)): when it starts and which
+build, when a cube connects or disconnects and why, each attempt's outcome and timing, each clip
+saved or failed, the sync checks, the uploads' progress, the settings changed and the errors it
+meets, each with the device's label, never a MAC address, an email, a video or a user agent. The
+owner's round report reads it in place of the manual test checklists. Settings → Account →
+Diagnostics, on by default, turns it off; nothing is kept while signed out either way, and a device
+writes at most 2,000 events a day.
+
 **The policies**, in Settings → Uploads: Upload sessions turns the uploads off; Wi-Fi only, on a
 phone whose browser tells Wi-Fi from mobile data (on by default there), waits for Wi-Fi; Keep local
 copies, on by default on a laptop and off on a phone, keeps the clips on the device once they are

@@ -850,11 +850,11 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     section: 'T1.6 — timer',
     title:
       'Sessions page: the session listed; Export downloads the JSON; Delete asks first, then removes it',
-    kinds: ['page.viewed', 'download', 'session.deleted'],
+    kinds: ['page.viewed', 'files.downloaded', 'session.deleted'],
     eyes: 'that the export validates against the schemas (the coordinator, with ajv)',
     check: (q) => {
       const views = q.where('page.viewed', (e) => text(e, 'page') === 'sessions');
-      const exports = q.where('download', (e) => text(e, 'what') === 'export');
+      const exports = q.where('files.downloaded', (e) => text(e, 'what') === 'export');
       const deleted = q.of('session.deleted');
       const facts = `${count(views, 'view')}; ${count(exports, 'export')}; ${count(deleted, 'deletion')}`;
       return exports.length > 0 && deleted.length > 0 ? ok(facts) : none(facts);
@@ -1301,10 +1301,10 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     round: R2,
     section: 'T2.4 — recording',
     title: 'Download in the viewer gives five files, six with gyro.json; the MP4s play',
-    kinds: ['download'],
+    kinds: ['files.downloaded'],
     eyes: 'the MP4s in the system player',
     check: (q) => {
-      const hits = q.where('download', (e) => text(e, 'what') === 'clips');
+      const hits = q.where('files.downloaded', (e) => text(e, 'what') === 'clips');
       return found(
         hits,
         `${count(hits, 'download')}: ${[...new Set(hits.map((e) => String(num(e, 'files'))))].join(', ')} files`,
@@ -1362,7 +1362,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     section: 'T2.4 — recording',
     title:
       'Sessions page: the storage meter and "N clips, … MB" per session; the export is one JSON file',
-    kinds: ['page.viewed', 'download'],
+    kinds: ['page.viewed', 'files.downloaded'],
     eyes: 'the meter',
     check: (q) => {
       const views = q.where('page.viewed', (e) => text(e, 'page') === 'sessions');
@@ -1574,7 +1574,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     section: 'T2.7 — layout',
     title:
       "The session's page: its facts, a clip badge that opens the viewer and downloads the files, Export, Delete",
-    kinds: ['page.viewed', 'clips.viewed', 'download', 'session.deleted'],
+    kinds: ['page.viewed', 'clips.viewed', 'files.downloaded', 'session.deleted'],
     eyes: null,
     check: (q) => {
       const pages = q.where('page.viewed', (e) => text(e, 'page') === 'session');
@@ -1590,7 +1590,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
             ) !== null,
         );
       const facts = `${count(pages, 'view')}; ${String(viewed.length)} clips viewed from a session page; ${count(
-        q.where('download', (e) => text(e, 'what') === 'export'),
+        q.where('files.downloaded', (e) => text(e, 'what') === 'export'),
         'export',
       )}; ${count(q.of('session.deleted'), 'deletion')}`;
       return pages.length > 0 && viewed.length > 0 ? ok(facts) : none(facts);
@@ -1715,12 +1715,12 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     section: 'T2.5 — sync check',
     title:
       'A failure says why (did not move, no motion, fewer than 4 matches), with Retry and the check data',
-    kinds: ['sync.check', 'download'],
+    kinds: ['sync.check', 'files.downloaded'],
     eyes: null,
     check: (q) => {
       const failures = q.where('sync.check', (e) => text(e, 'outcome') === 'failed');
       const reasons = [...new Set(failures.map((e) => text(e, 'reason') ?? '?'))];
-      const data = q.where('download', (e) => text(e, 'what') === 'sync-check');
+      const data = q.where('files.downloaded', (e) => text(e, 'what') === 'sync-check');
       return found(
         failures,
         `${count(failures, 'failed check')}: ${reasons.join(', ')}; ${count(data, 'check data download')} (expected here, so not a failure)`,
@@ -2450,11 +2450,14 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     section: "the cube's whole record",
     title:
       "One attempt with the camera on: gyro.json beside the record, six files downloaded, the build and the moves' counters in attempt.json, the QA view's Gyro column",
-    kinds: ['attempt.done', 'download', 'upload.state'],
+    kinds: ['attempt.done', 'files.downloaded', 'upload.state'],
     eyes: "attempt.json's fields and the session's battery in the console (the coordinator)",
     check: (q) => {
       const gyro = q.realAttempts().filter((e) => (num(e, 'gyroSamples') ?? 0) > 0);
-      const six = q.where('download', (e) => text(e, 'what') === 'clips' && num(e, 'files') === 6);
+      const six = q.where(
+        'files.downloaded',
+        (e) => text(e, 'what') === 'clips' && num(e, 'files') === 6,
+      );
       const rates = [
         ...new Set(gyro.map((e) => `${e.device.label} ${round(num(e, 'gyroRateHz') ?? 0)} Hz`)),
       ];
