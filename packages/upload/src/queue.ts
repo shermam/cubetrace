@@ -398,7 +398,8 @@ export class UploadQueue {
     this.#wakeAtMs = this.#riderAtMs = null;
     this.#unwatchNetwork?.();
     this.#unwatchNetwork = null;
-    // The operations queued run (against a state that is not written if it was never read).
+    // The operations still queued are dropped (#enqueue); the one under way ends, then the state is
+    // written.
     this.#open();
     await Promise.allSettled([...this.#slots]);
     await this.#serial;
@@ -450,9 +451,12 @@ export class UploadQueue {
   attemptSaved(attempt: AttemptRecord): void {
     void this.#enqueue(async () => {
       const session = this.#sessions.get(attempt.session);
+      if (session?.simulated === true) {
+        return; // A demo session's: never uploaded.
+      }
       if (session === undefined || session.text === null) {
         await this.#loadSession(attempt.session);
-      } else if (!session.simulated) {
+      } else {
         await this.#reconcile(session, attempt, null);
         this.#planRider(session);
         this.#persist();
