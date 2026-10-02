@@ -694,8 +694,16 @@ test("with the demo cube's gyroscope on, each attempt gets its gyro.json, with t
   await badges.first().click();
   await expect(viewer).toBeVisible();
   await expect(video).toHaveAttribute('data-state', 'loaded', { timeout: 10_000 });
+  // The choice is kept to a tenth of a degree, and cubing.js's wrap of the longitude it is asked
+  // for comes back with floating noise (84.60000000000002 for 84.6): compared to a tenth.
   await expect
-    .poll(orbit, { timeout: 10_000 })
+    .poll(
+      async () => {
+        const [latitude, longitude] = await orbit();
+        return [tenth(latitude), tenth(normalizeLongitude(longitude))];
+      },
+      { timeout: 10_000 },
+    )
     .toEqual([tenth(resting[0]), normalizeLongitude(tenth(resting[1]))]);
   await expect(mirror).toHaveValue('left-right');
   await expect(viewer.getByTestId('clip-raw')).not.toBeChecked();

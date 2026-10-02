@@ -1892,7 +1892,7 @@ orbit's driving and the styles); the header's controls chunk, which every page l
 render, 5.7 kB raw, 2.4 kB gzipped, against 2.7 and 1.2 (`ViewerSyncService`); the chunk of core and
 the services 73.3 kB raw, 25.1 kB gzipped, against 71.1 and 24.4 (the mirrors, the choice's model
 and Settings' map); the Settings page's chunk unchanged; all the scripts together 3,551.2 kB raw
-against 3,540.7 (1,017.6 kB gzipped against 1,014.7). Per frame nothing was added to T3.8's loop but
+against 3,540.7 (1,018.0 kB gzipped against 1,014.7). Per frame nothing was added to T3.8's loop but
 the mirror's four sign changes; a drag costs, per report, a settings write (one JSON of a few
 kilobytes in `localStorage`) and, signed in, nothing until a second after the last one.
 Found on the way: the fake of the player's model first kept the longitude in [−180, 180), as
