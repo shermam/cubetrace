@@ -57,27 +57,45 @@ persistent storage more readily (Settings → Keep my data).
 
 **Your data** stays in the browser, in the site's origin private file system (OPFS): a folder per
 session with its `session.json` and a folder per attempt with its `attempt.json` and its clips
-([`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)). Nothing is uploaded. The Sessions page, and each
-session's page, export a session's records as one JSON file, without the video, or delete the
+([`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)). Signed out, nothing is uploaded. The Sessions page, and
+each session's page, export a session's records as one JSON file, without the video, or delete the
 session with its clips; an attempt's clips are downloaded from its clip badge (Recording, below).
-Clearing the site's data in Chrome deletes all of them. Phase 3 adds cloud storage, so that the
-sessions of every device end up in one dataset.
+Clearing the site's data in Chrome deletes all of them. Signed in, the sessions are also uploaded to
+your account's storage in the cloud (Uploads, below), so that the sessions of every device end up in
+one dataset.
 
 **An account, if you want one.** Sign in, in the header or in Settings → Account, signs in with Google
 (in a popup; the app installed on Android goes to Google's page and comes back). The account records
-your name, your email and each device's label, and keeps the index of your sessions (below); nothing
-is uploaded yet, and the sessions stay in the browser as above. Signed out, the app works as before and
-never downloads Firebase.
+your name, your email and each device's label, keeps the index of your sessions and receives their
+uploads (below). Signed out, the app works as before and never downloads Firebase.
 
 **The session index.** Signed in, every session of a real cube goes, as it is recorded, to your index
 in the cloud (Firestore): the session's record and each attempt's, without the moves, with the device
-that recorded it and its files, all marked pending until the uploads come. Offline, it waits on the
+that recorded it and its files, each marked pending until it is uploaded. Offline, it waits on the
 device and goes when the network is back; demo sessions stay on the device; sessions recorded signed
 out are added when you sign in. The Sessions page then lists the sessions of all your devices, each
 with a badge ("this device", "cloud" or "both") and a filter by device; a session recorded on another
 device opens read-only, since its clips and moves are on that device. Sessions → QA view counts the
 attempts by day and device, with what their clips take and what is uploaded, and when this device last
 synced.
+
+**Uploads.** Signed in, each attempt of a real cube's session goes to your account's storage in the
+cloud once it is over and its clips are saved: its `attempt.json` (with the moves), each clip's MP4 and
+frame times, and the session's `session.json` (again when it changes, once the session has been quiet
+for two minutes). Nothing else is uploaded: no demo session, nothing signed out, no cube MAC address
+and no setting. The uploads go two files at a time, through URLs that the account's functions sign
+for each file's exact size and type, within a daily quota (2 GB and 400 files); a failure is tried
+again after 1 s, 2 s, 4 s, … up to 5 minutes, and a file the storage refuses waits for Retry. A
+reload, or the next start, goes on where they were (`uploads.json` in the browser, and your index in
+the cloud, say what is uploaded), without sending a file twice; only one tab uploads at a time. The
+Sessions page has the uploads' panel (the attempts still to upload with their progress and errors,
+Retry, those uploaded last, paused by the quota or waiting for the network), the header an arrow with
+the attempts still to upload, and a session's page each attempt's upload. Settings → Uploads: Upload
+sessions turns them off; Wi-Fi only, on a phone whose browser tells Wi-Fi from mobile data (on by
+default there), waits for Wi-Fi; Keep local copies, off by default on a phone, deletes an attempt's
+clips from the device once all its files are uploaded (its `attempt.json` and frame times stay, and
+the clip says "in the cloud"). In any case, once the browser's storage is 70% full, the oldest uploaded
+clips are deleted until it is under 60%.
 
 ## Recording
 

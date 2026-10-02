@@ -9,6 +9,7 @@ import {
   type CloudUpload,
   type UserRecord,
 } from '@cubetrace/core';
+import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 
 import type {
   AccountBackend,
@@ -36,6 +37,11 @@ export const ADA: BackendUser = {
 /** An error as Firebase Authentication throws them: a message and a code. */
 export function authError(code: string): Error {
   return Object.assign(new Error(`Firebase: Error (${code}).`), { code });
+}
+
+/** An error as a callable function's `HttpsError` reaches the app: `functions/<code>`, its details. */
+export function functionsError(code: string, message: string, details?: unknown): Error {
+  return Object.assign(new Error(message), { code: `functions/${code}`, details });
 }
 
 /**
@@ -88,6 +94,17 @@ export class FakeAccountBackend implements AccountBackend {
   readonly reads: string[] = [];
   /** How many times the loader loaded this backend. */
   loads = 0;
+  /**
+   * The bucket behind the fake functions (T3.2): the objects' sizes by key, as the PUTs left them (a
+   * test puts them), which `confirmUpload` checks.
+   */
+  readonly bucket = new Map<string, number>();
+  /** The functions' calls, in order: `sign <session>/<index> <paths>`, `confirm …`. */
+  readonly uploadCalls: string[] = [];
+  /** Set: the functions refuse every call with it (`functionsError`). */
+  uploadError: Error | null = null;
+  /** How many times `waitForIndexWrites` was asked. */
+  indexWaits = 0;
 
   private readonly watchers = new Set<(user: BackendUser | null) => void>();
   private held: (() => void)[] = [];
@@ -259,6 +276,81 @@ export class FakeAccountBackend implements AccountBackend {
     );
   }
 
+  waitForIndexWrites(): Promise<void> {
+    this.indexWaits++;
+    return Promise.resolve();
+  }
+
+  /**
+   * `signUpload` as the functions do it (functions/README.md): the attempt must be in the index, of
+   * the account signed in; its `upload` records the intent; the URLs are the bucket's keys.
+   */
+  signUpload(request: SignRequest): Promise<SignedFile[]> {
+    const id = `${request.sessionId}/${String(request.attemptIndex)}`;
+    this.uploadCalls.push(`sign ${id} ${request.files.map((file) => file.path).join(',')}`);
+    const attempt = this.uploadTarget(request.sessionId, request.attemptIndex);
+    if (attempt instanceof Error) {
+      return Promise.reject(attempt);
+    }
+    attempt.upload = {
+      ...attempt.upload,
+      state: 'uploading',
+      files: {
+        ...attempt.upload.files,
+        ...Object.fromEntries(
+          request.files.map((file) => [file.path, { bytes: file.bytes, doneMs: null }]),
+        ),
+      },
+    };
+    return Promise.resolve(
+      request.files.map((file) => ({
+        path: file.path,
+        url: `https://bucket.test/${this.objectKey(request.sessionId, request.attemptIndex, file.path)}`,
+        headers: { 'Content-Type': file.contentType },
+        expiresAt: 1_790_000_900_000,
+      })),
+    );
+  }
+
+  /** `confirmUpload` as the functions do it: each file in the bucket with the size signed. */
+  confirmUpload(request: ConfirmRequest): Promise<ConfirmResult> {
+    const id = `${request.sessionId}/${String(request.attemptIndex)}`;
+    this.uploadCalls.push(`confirm ${id} ${request.files.map((file) => file.path).join(',')}`);
+    const attempt = this.uploadTarget(request.sessionId, request.attemptIndex);
+    if (attempt instanceof Error) {
+      return Promise.reject(attempt);
+    }
+    const files = { ...attempt.upload.files };
+    const confirmed: ConfirmResult['confirmed'][number][] = [];
+    for (const { path } of request.files) {
+      const signed = files[path] as (typeof files)[string] | undefined;
+      const size = this.bucket.get(this.objectKey(request.sessionId, request.attemptIndex, path));
+      if (signed === undefined) {
+        return Promise.reject(functionsError('failed-precondition', `${path} was not signed.`));
+      }
+      if (size !== signed.bytes) {
+        return Promise.reject(functionsError('not-found', `${path} is not in the bucket.`));
+      }
+      files[path] = { bytes: signed.bytes, doneMs: signed.doneMs ?? 1_790_000_100_000 };
+      confirmed.push({ path, bytes: signed.bytes, doneMs: files[path].doneMs ?? 0 });
+    }
+    const pending = Object.entries(files)
+      .filter(([, file]) => file.doneMs === null)
+      .map(([path]) => path)
+      .sort();
+    const state = pending.length === 0 ? 'done' : 'uploading';
+    attempt.upload = { ...attempt.upload, state, files };
+    return Promise.resolve({ state, confirmed, pending });
+  }
+
+  /** The bucket's key of a file of an attempt, as the functions name it. */
+  objectKey(sessionId: string, index: number, path: string): string {
+    const session = `users/${this.user?.uid ?? ''}/sessions/${sessionId}`;
+    return path === 'session.json'
+      ? `${session}/session.json`
+      : `${session}/attempts/${attemptDocumentId(index)}/${path}`;
+  }
+
   /** The network is back: the writes made offline reach the server, and their promises resolve. */
   goOnline(): void {
     this.online = true;
@@ -357,6 +449,23 @@ export class FakeAccountBackend implements AccountBackend {
       this.index.set(sessionId, entry);
     }
     return entry;
+  }
+
+  /** The attempt a call of the functions is about, or the error they would answer. */
+  private uploadTarget(sessionId: string, index: number): CloudAttempt | Error {
+    if (this.uploadError !== null) {
+      return this.uploadError;
+    }
+    const uid = this.user?.uid;
+    const session = this.index.get(sessionId);
+    const attempt = session?.attempts.get(attemptDocumentId(index));
+    if (uid === undefined) {
+      return functionsError('unauthenticated', 'Sign in to upload.');
+    }
+    if (session?.session?.owner !== uid || attempt?.owner !== uid) {
+      return functionsError('not-found', `The attempt ${String(index)} is not in the cloud index.`);
+    }
+    return attempt;
   }
 
   private markUnsent(path: string): void {

@@ -31,11 +31,22 @@ export interface OpfsSyncAccessHandle {
   close(): void;
 }
 
-/** The part of `FileSystemFileHandle` the store and the clip writer use. */
+/**
+ * The part of a `File` the store, the clip writer and the upload queue read: its size, and its
+ * content as text or as bytes. In the browser it is the `File` itself, a `Blob`, which the upload
+ * queue (packages/upload) hands to `XMLHttpRequest` as it is.
+ */
+export interface OpfsFile {
+  readonly size: number;
+  text(): Promise<string>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+/** The part of `FileSystemFileHandle` the store, the clip writer and the upload queue use. */
 export interface OpfsFileHandle {
   readonly kind: 'file';
   readonly name: string;
-  getFile(): Promise<{ text(): Promise<string> }>;
+  getFile(): Promise<OpfsFile>;
   createWritable(): Promise<OpfsWritable>;
   /**
    * An access handle on the file (`FileSystemSyncAccessHandle`), where Chrome has one: in dedicated

@@ -57,7 +57,10 @@ export function withCurrent(
     attempts: attempts.length,
     mean: sessionMean(attempts),
     clips: clips.length,
-    clipBytes: clips.reduce((sum, clip) => sum + clip.bytes, 0),
+    clipBytes: clips
+      .filter((clip) => clip.local !== false)
+      .reduce((sum, clip) => sum + clip.bytes, 0),
+    cloudClips: clips.filter((clip) => clip.local === false).length,
     current: true,
     unreadable: at < 0 ? [] : rows[at].unreadable,
   };

@@ -1,14 +1,16 @@
 // The account's backend on the Firebase SDK (docs/ARCHITECTURE.md, "Account"): Authentication with
-// the Google provider, and Firestore for users/{uid} and the session index (T3.1), through the modular
-// API. This is the only file that imports Firebase, and only ACCOUNT_LOADER's dynamic import loads it,
-// so the SDK is a lazy chunk of its own, firebase-sdk-<hash>.js, which the service worker caches only
-// once it has been used (ngsw-config.json): a device that never signs in never downloads it.
+// the Google provider, Firestore for users/{uid} and the session index (T3.1), and the upload's two
+// callable functions (T3.3), through the modular API. This is the only file that imports Firebase,
+// and only ACCOUNT_LOADER's dynamic import loads it, so the SDK is a lazy chunk of its own,
+// firebase-sdk-<hash>.js, which the service worker caches only once it has been used
+// (ngsw-config.json): a device that never signs in never downloads it.
 import {
   attemptDocumentId,
   type CloudAttempt,
   type CloudAttemptFields,
   type CloudSession,
 } from '@cubetrace/core';
+import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 import { initializeApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
@@ -36,6 +38,7 @@ import {
   persistentMultipleTabManager,
   query,
   setDoc,
+  waitForPendingWrites,
   where,
   writeBatch,
   type DocumentReference,
@@ -43,12 +46,16 @@ import {
   type Firestore,
   type QuerySnapshot,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 import { FIREBASE_CONFIG } from '../../environments/firebase';
 import type { AccountBackend, BackendUser, CloudDocument, CloudListing } from './account-backend';
 
 /** The most writes one batch may hold (Firestore's limit). */
 const BATCH_WRITES = 500;
+
+/** Where the functions run (functions/README.md). */
+const FUNCTIONS_REGION = 'us-central1';
 
 /** Starts Firebase: call once per page (`AuthService` keeps the backend). */
 export function connectFirebase(): AccountBackend {
@@ -66,6 +73,11 @@ export function connectFirebase(): AccountBackend {
   const google = new GoogleAuthProvider();
   // Google asks which account to use, rather than taking the browser's only one silently.
   google.setCustomParameters({ prompt: 'select_account' });
+  // The upload's functions (T3.2), called with the account's token; their errors keep the
+  // HttpsError's code (`functions/resource-exhausted`) and details.
+  const functions = getFunctions(app, FUNCTIONS_REGION);
+  const sign = httpsCallable<SignRequest, SignedFile[]>(functions, 'signUpload');
+  const confirm = httpsCallable<ConfirmRequest, ConfirmResult>(functions, 'confirmUpload');
   return {
     watchUser: (next, error) =>
       onAuthStateChanged(
@@ -132,6 +144,9 @@ export function connectFirebase(): AccountBackend {
           ),
         ),
       ),
+    waitForIndexWrites: () => waitForPendingWrites(firestore),
+    signUpload: async (request) => (await sign(request)).data,
+    confirmUpload: async (request) => (await confirm(request)).data,
   };
 }
 

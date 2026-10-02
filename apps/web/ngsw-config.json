@@ -12,6 +12,7 @@
           "/**/*.css",
           "/**/*.js",
           "!/firebase-sdk-*.js",
+          "!/upload-runtime-*.js",
           "/icons/icon.svg"
         ]
       }
@@ -22,6 +23,14 @@
       "updateMode": "prefetch",
       "resources": {
         "files": ["/firebase-sdk-*.js"]
+      }
+    },
+    {
+      "name": "uploads",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": ["/upload-runtime-*.js"]
       }
     },
     {

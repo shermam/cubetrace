@@ -67,7 +67,9 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
  * the video of one (the solve's first), read from the origin private file system behind an object
  * URL that goes when it closes, next to the attempt's moves of that segment by their time into the
  * clip, the one the video shows highlighted (a click on a move goes to it); "Download" gives both
- * clips' MP4s and frames files and the attempt's record, attempt.json.
+ * clips' MP4s and frames files and the attempt's record, attempt.json. A clip deleted from the
+ * device once uploaded (`local` false, T3.3) says it is in the cloud in place of its video, and its
+ * MP4 is not among the files downloaded.
  */
 @Component({
   selector: 'app-clip-viewer',
@@ -97,12 +99,20 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
             @if (clip.truncatedStart) {
               <span class="late" data-testid="clip-segment-late">· late</span>
             }
+            @if (clip.local === false) {
+              <span class="muted" data-testid="clip-segment-cloud">· in the cloud</span>
+            }
           </button>
         }
       </div>
       <div class="body">
         <div class="player">
-          @if (url(); as url) {
+          @if (selected()?.local === false) {
+            <p class="cloud" data-testid="clip-cloud">
+              In the cloud: this clip was deleted from this device once its upload was confirmed
+              (Settings → Uploads). Its frame times and the attempt's record are still here.
+            </p>
+          } @else if (url(); as url) {
             <video
               #video
               data-testid="clip-video"
@@ -152,7 +162,7 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
         >
           Download
         </button>
-        <span class="muted">both clips, their frame times and attempt.json</span>
+        <span class="muted">{{ downloadText() }}</span>
       </div>
       @if (downloadError(); as error) {
         <p class="error" role="alert" data-testid="clip-download-error">{{ error }}</p>
@@ -281,6 +291,13 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
     .late {
       color: var(--warn);
     }
+
+    .cloud {
+      padding: var(--space-4);
+      border: 1px dashed var(--line);
+      border-radius: var(--radius);
+      color: var(--text-muted);
+    }
   `,
 })
 export class ClipViewer {
@@ -338,6 +355,19 @@ export class ClipViewer {
   });
   protected readonly downloading = signal(false);
   protected readonly downloadError = signal<string | null>(null);
+  /** What Download gives: the clips still on this device (T3.3), their frame times and the record. */
+  protected readonly downloadText = computed(() => {
+    const video = this.attempt().video;
+    const here = video.filter((clip) => clip.local !== false).length;
+    if (here === video.length) {
+      return video.length === 1
+        ? 'the clip, its frame times and attempt.json'
+        : 'both clips, their frame times and attempt.json';
+    }
+    return here === 0
+      ? 'the frame times and attempt.json (the clips are in the cloud)'
+      : 'the clip on this device, the frame times and attempt.json';
+  });
   /** Incremented by every clip read: a slower, older read then knows it lost. */
   private reads = 0;
   private stopFollowing: (() => void) | null = null;
@@ -432,7 +462,10 @@ export class ClipViewer {
     this.downloading.set(true);
     this.downloadError.set(null);
     try {
-      const names = record.video.flatMap((clip) => [clip.file, clip.framesFile]);
+      // A clip deleted once uploaded (T3.3) has its frames file here, not its MP4.
+      const names = record.video.flatMap((clip) =>
+        clip.local === false ? [clip.framesFile] : [clip.file, clip.framesFile],
+      );
       const blobs = await Promise.all(
         names.map((name) => this.files.read(record.session, record.index, name)),
       );
@@ -453,7 +486,7 @@ export class ClipViewer {
     this.readError.set(null);
     this.loaded.set(false);
     this.time.set(0);
-    if (clip === null) {
+    if (clip === null || clip.local === false) {
       return;
     }
     try {

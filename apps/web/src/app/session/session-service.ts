@@ -41,6 +41,7 @@ import { WakeLockService } from '../device/wake-lock-service';
 import { SettingsService, hostPlatform } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { PICKUP_THRESHOLD_DEG, rotationDeg, type Quaternion } from './pickup';
+import { SessionChanges } from './session-changes';
 import { SESSION_STORAGE } from './session-storage';
 import { sessionMean } from './session-stats';
 import { timerDisplay } from './timer-display';
@@ -126,9 +127,13 @@ export interface SessionListItem {
   readonly attempts: number;
   /** As the solve list writes the mean: a time, `DNF` or `–`. */
   readonly mean: string;
-  /** The clips of its attempts (their `video` entries), and their MP4s' bytes (T2.4). */
+  /**
+   * The clips of its attempts (their `video` entries, T2.4), the bytes of their MP4s on this device,
+   * and how many are no longer on it, deleted once uploaded (`video[].local` false, T3.3).
+   */
   readonly clips: number;
   readonly clipBytes: number;
+  readonly cloudClips: number;
   /** The session the timer is recording. */
   readonly current: boolean;
   /** Its `attempt.json` files that could not be read, left out of `attempts` and `mean`. */
@@ -304,10 +309,13 @@ export class SessionService {
   private readonly cloudIndex = inject(SessionIndexService);
   /**
    * The store, whose writes also go to the session index in the cloud while an account is signed in
-   * (T3.1, `SessionIndexService`): never awaited, and a refusal is noted in the session.
+   * (T3.1, `SessionIndexService`): never awaited, and a refusal is noted in the session; and then to
+   * `SessionChanges`, which the upload queue follows (T3.3).
    */
-  private readonly store = this.cloudIndex.track(this.sessionStorage.store, (sessionId, line) =>
-    this.addNote(sessionId, line),
+  private readonly store = inject(SessionChanges).track(
+    this.cloudIndex.track(this.sessionStorage.store, (sessionId, line) =>
+      this.addNote(sessionId, line),
+    ),
   );
   private readonly makeScramble = inject(SCRAMBLE_SOURCE);
 
@@ -646,7 +654,10 @@ export class SessionService {
           attempts: attempts[k].length,
           mean: sessionMean(attempts[k]),
           clips: clips.length,
-          clipBytes: clips.reduce((sum, clip) => sum + clip.bytes, 0),
+          clipBytes: clips
+            .filter((clip) => clip.local !== false)
+            .reduce((sum, clip) => sum + clip.bytes, 0),
+          cloudClips: clips.filter((clip) => clip.local === false).length,
           current: session.id === currentId,
           unreadable: problems.filter((p) => p.kind === 'attempt' && p.sessionId === session.id),
         };
@@ -732,6 +743,53 @@ export class SessionService {
       }
     });
     return outcome;
+  }
+
+  /**
+   * Marks the clips `files` (their MP4s' names) of the attempt `ref` as no longer on this device
+   * (`video[].local` false, T3.3: the upload queue deletes a clip's MP4 once its upload is confirmed,
+   * by policy, and does so once this resolves) and saves its record, nothing else changed, also when
+   * its session is not the current one. Resolves to false, changing nothing, when the attempt is not
+   * there (deleted, or begun again with its index) or its session cannot be read.
+   */
+  async markClipsGone(ref: AttemptRef, files: readonly string[]): Promise<boolean> {
+    // The current session's attempts are the timer's once they are read from the store.
+    await this.whenReady();
+    const gone = (record: AttemptRecord): AttemptRecord => ({
+      ...record,
+      video: record.video.map((clip) =>
+        files.includes(clip.file) ? { ...clip, local: false } : clip,
+      ),
+    });
+    const session = this.sessionSignal();
+    if (session?.id === ref.session) {
+      const record = this.attemptsSignal().find((attempt) => isAttempt(attempt, ref));
+      if (record === undefined) {
+        return false;
+      }
+      const updated = gone(record);
+      this.attemptsSignal.update((attempts) => attempts.map((a) => (a === record ? updated : a)));
+      if (this.lastResultSignal() === record) {
+        this.lastResultSignal.set(updated);
+      }
+      await this.save((store) => store.saveAttempt(updated));
+      return true;
+    }
+    let found = false;
+    await this.save(async (store) => {
+      let attempts: AttemptRecord[];
+      try {
+        attempts = await store.loadAttempts(ref.session);
+      } catch {
+        return;
+      }
+      const record = attempts.find((attempt) => isAttempt(attempt, ref));
+      if (record !== undefined) {
+        await store.saveAttempt(gone(record));
+        found = true;
+      }
+    });
+    return found;
   }
 
   /**

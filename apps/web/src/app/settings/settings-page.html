@@ -338,8 +338,57 @@
       settings.hostLabel()
     }}”, in your cubetrace account, and keeps an index of your sessions there: their records without
     the moves, so that the Sessions page of each of your devices lists them all (demo sessions stay
-    on the device), but nothing is uploaded yet: the clips stay on the device that recorded them
-    until the uploads, which come next.
+    on the device). Their files are uploaded as Uploads, below, says.
+  </p>
+</section>
+
+<section id="uploads" aria-labelledby="uploads-heading">
+  <h2 id="uploads-heading">Uploads</h2>
+  <label class="switch">
+    <input
+      #uploadBox
+      type="checkbox"
+      data-testid="upload-sessions"
+      [checked]="settings.uploadSessions()"
+      (change)="settings.setUploadSessions(uploadBox.checked)"
+    />
+    Upload sessions
+  </label>
+  <p class="hint" data-testid="uploads-hint">
+    While you are signed in, each attempt of this device's sessions goes to your account's storage
+    in the cloud once it is over: its attempt.json with the moves, its clips and their frame times,
+    and its session's session.json; two files at a time, again after a failure, and again after a
+    reload where it stopped. The Sessions page shows the queue. Demo sessions never go, nor anything
+    signed out, nor the cubes' MAC addresses.
+  </p>
+  @if (settings.networkTypeKnown) {
+    <label class="switch">
+      <input
+        #wifiBox
+        type="checkbox"
+        data-testid="upload-wifi-only"
+        [checked]="settings.wifiOnlySetting()"
+        (change)="settings.setWifiOnly(wifiBox.checked)"
+      />
+      Wi-Fi only
+    </label>
+    <p class="hint">Uploads wait while this device is on mobile data. On by default on a phone.</p>
+  }
+  <label class="switch">
+    <input
+      #keepBox
+      type="checkbox"
+      data-testid="keep-local-copies"
+      [checked]="settings.keepLocalCopies()"
+      (change)="settings.setKeepLocalCopies(keepBox.checked)"
+    />
+    Keep local copies
+  </label>
+  <p class="hint" data-testid="keep-local-hint">
+    Off, an attempt's clips are deleted from this device once the cloud has confirmed all its files;
+    its attempt.json and frame times stay, and the clip says “in the cloud”. In any case, once the
+    browser's storage is 70% full, the oldest uploaded clips are deleted first, until it is under
+    60%. On by default on a laptop, off on a phone.
   </p>
 </section>
 

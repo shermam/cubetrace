@@ -144,6 +144,13 @@ export interface VideoClip {
    * files (those written before it existed have none); `parseAttempt` reads a missing one as false.
    */
   truncatedStart: boolean;
+  /**
+   * False once the clip's MP4 is no longer on the device that recorded it: the upload queue deleted
+   * it after its upload was confirmed (docs/PLAN.md T3.3), and it is in the dataset's bucket; its
+   * frames file stays. Absent while the MP4 is there (true means the same), and in the uploaded
+   * attempt.json, whose clips are all beside it in the bucket.
+   */
+  local?: boolean;
 }
 
 /**

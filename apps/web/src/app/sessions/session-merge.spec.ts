@@ -17,6 +17,7 @@ function item(session: SessionRecord, attempts: number, current = false): Sessio
     mean: '10.00',
     clips: 0,
     clipBytes: 0,
+    cloudClips: 0,
     current,
     unreadable: [],
   };

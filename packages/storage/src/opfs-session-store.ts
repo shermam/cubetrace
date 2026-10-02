@@ -25,7 +25,7 @@ export const ATTEMPT_FILE = 'attempt.json';
 
 /**
  * What follows `<name>.` in the name of a temporary file of `name`: random base-36 digits and
- * `.tmp`, as in `session.json.k3v9x0qa.tmp` (see writeFile).
+ * `.tmp`, as in `session.json.k3v9x0qa.tmp` (see writeTextFile).
  */
 const TEMPORARY_TAIL = /^[0-9a-z]+\.tmp$/;
 
@@ -162,7 +162,7 @@ export class OpfsSessionStore implements SessionStore, ProblemReporter {
           await removeIn(sessions, folder);
         }
         const dir = await sessions.getDirectoryHandle(folder, { create: true });
-        await writeFile(dir, SESSION_FILE, json);
+        await writeTextFile(dir, SESSION_FILE, json);
       };
     });
   }
@@ -172,7 +172,7 @@ export class OpfsSessionStore implements SessionStore, ProblemReporter {
       const json = recordJson(s);
       return async () => {
         const { dir } = await this.#session(s.id);
-        await writeFile(dir, SESSION_FILE, json);
+        await writeTextFile(dir, SESSION_FILE, json);
       };
     });
   }
@@ -185,7 +185,7 @@ export class OpfsSessionStore implements SessionStore, ProblemReporter {
         const { dir } = await this.#session(a.session);
         const attempts = await dir.getDirectoryHandle(ATTEMPTS_FOLDER, { create: true });
         const attempt = await attempts.getDirectoryHandle(folder, { create: true });
-        await writeFile(attempt, ATTEMPT_FILE, json);
+        await writeTextFile(attempt, ATTEMPT_FILE, json);
       };
     });
   }
@@ -442,9 +442,13 @@ export function isTemporaryOf(entry: string, name: string): boolean {
  * before the move leaves `name` as it was, and the temporary file, which the reads remove; a write
  * that fails removes it. Where the handle has no `move()`, the file is written in place, as before
  * T1.11: Chrome swaps a stream's content in on `close()`, but a file made for the write stays
- * empty if the page goes away first.
+ * empty if the page goes away first. The upload queue writes its `uploads.json` with it (T3.3).
  */
-async function writeFile(dir: OpfsDirectoryHandle, name: string, text: string): Promise<void> {
+export async function writeTextFile(
+  dir: OpfsDirectoryHandle,
+  name: string,
+  text: string,
+): Promise<void> {
   const temporary = temporaryName(name);
   const file = await dir.getFileHandle(temporary, { create: true });
   if (file.move === undefined) {

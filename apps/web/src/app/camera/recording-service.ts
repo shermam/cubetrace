@@ -33,6 +33,7 @@ import type {
 import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { STORAGE_STOP_PERCENT, StorageService } from '../device/storage-service';
+import { ClipsInFlight } from '../session/clips-in-flight';
 import { SessionService, type AttemptMilestone, type AttemptRef } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
@@ -180,6 +181,8 @@ export class RecordingService {
   private readonly storageService = inject(StorageService);
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly starter = inject(CAPTURE_STARTER);
+  /** The attempts whose clips are still to come, for the upload queue (T3.3). */
+  private readonly inFlight = inject(ClipsInFlight);
 
   private readonly statusSignal = signal<RecordingStatus>('off');
   private readonly statsSignal = signal<CaptureStats | null>(null);
@@ -575,6 +578,7 @@ export class RecordingService {
           if (sameAttempt(planned.attempt, attempt)) {
             this.planned.delete(key);
             this.clearTimer(planned.timer);
+            this.inFlight.end(attempt.session, attempt.index);
           }
         }
         for (const clip of milestone.clips) {
@@ -599,6 +603,8 @@ export class RecordingService {
       void saving.finally(() => {
         this.saving.delete(saving);
         this.savingSignal.set(this.saving.size);
+        // Saved in its record (or failed, or its attempt gone): its upload need not wait for it.
+        this.inFlight.end(attempt.session, attempt.index);
       });
       return saving;
     };
@@ -610,7 +616,9 @@ export class RecordingService {
     const previous = this.planned.get(key);
     if (previous !== undefined) {
       this.clearTimer(previous.timer);
+      this.inFlight.end(attempt.session, attempt.index);
     }
+    this.inFlight.begin(attempt.session, attempt.index);
     this.planned.set(key, { timer, attempt, save });
   }
 

@@ -59,7 +59,10 @@ describe('ClipViewer', () => {
   let reads: string[];
   let fixture: ComponentFixture<ClipViewer>;
 
-  async function render(missing: readonly string[] = []): Promise<HTMLElement> {
+  async function render(
+    missing: readonly string[] = [],
+    attempt: AttemptRecord = ATTEMPT,
+  ): Promise<HTMLElement> {
     urls = [];
     revoked = [];
     reads = [];
@@ -102,7 +105,7 @@ describe('ClipViewer', () => {
     });
     TestBed.inject(ClipViewing).open(3);
     fixture = TestBed.createComponent(ClipViewer);
-    fixture.componentRef.setInput('attempt', ATTEMPT);
+    fixture.componentRef.setInput('attempt', attempt);
     await update();
     return fixture.nativeElement as HTMLElement;
   }
@@ -239,6 +242,60 @@ describe('ClipViewer', () => {
       `${prefix}attempt.json`,
     ]);
     expect(element.querySelector('[data-testid="clip-download-error"]')).toBeNull();
+  });
+
+  it('says a clip deleted once uploaded is in the cloud, in place of its video, and downloads what is here', async () => {
+    const solveGone: AttemptRecord = {
+      ...ATTEMPT,
+      video: [clip('scramble', -2000), { ...clip('solve', -1000), local: false }],
+    };
+    const element = await render([], solveGone);
+    expect(reads).toEqual([]);
+    expect(element.querySelector('video')).toBeNull();
+    expect(element.querySelector('[data-testid="clip-cloud"]')?.textContent).toContain(
+      'In the cloud: this clip was deleted from this device once its upload was confirmed',
+    );
+    expect(
+      Array.from(element.querySelectorAll('[data-testid="clip-segment"]'), (button) =>
+        button.textContent.replace(/\s+/g, ' ').trim(),
+      ),
+    ).toEqual(['Scramble', 'Solve · in the cloud']);
+    // Its moves are still listed, by their time into the clip.
+    expect(element.querySelectorAll('[data-testid="clip-move"]')).toHaveLength(3);
+    expect(element.querySelector('.actions .muted')?.textContent.trim()).toBe(
+      'the clip on this device, the frame times and attempt.json',
+    );
+
+    // The scramble's clip is here: it plays.
+    element.querySelector<HTMLButtonElement>('[data-segment="scramble"]')?.click();
+    await update();
+    expect(reads).toEqual([`${SESSION_A}/3/laptop.scramble.mp4`]);
+    expect(video(element).getAttribute('src')).toBe('blob:0:video/mp4');
+
+    const names: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      names.push(this.download);
+    });
+    element.querySelector<HTMLButtonElement>('[data-testid="clip-download"]')?.click();
+    await update();
+    const prefix = `cubetrace-session-${SESSION_A}-attempt-0003-`;
+    expect(names).toEqual([
+      `${prefix}laptop.scramble.mp4`,
+      `${prefix}laptop.scramble.frames.json`,
+      `${prefix}laptop.solve.frames.json`,
+      `${prefix}attempt.json`,
+    ]);
+
+    fixture.componentRef.setInput('attempt', {
+      ...solveGone,
+      video: solveGone.video.map((c) => ({ ...c, local: false })),
+    });
+    await update();
+    expect(element.querySelector('.actions .muted')?.textContent.trim()).toBe(
+      'the frame times and attempt.json (the clips are in the cloud)',
+    );
   });
 
   it('says so when a file cannot be read, and closes', async () => {

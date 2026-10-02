@@ -12,6 +12,7 @@ import { normalizeMac } from '@cubetrace/gan';
 
 import { DEMO_SPEED_DEFAULT, isDemoSpeed } from '../cube/demo';
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
+import { networkConnection } from '../device/network-connection';
 import { errorMessage } from '../shared/error-message';
 
 /** The `localStorage` key of the settings (one JSON object). */
@@ -169,6 +170,12 @@ interface StoredSettings {
   readonly cameraPicks: readonly CameraPick[];
   readonly cameraControls: readonly CameraControlsEntry[];
   readonly cameraFramings: readonly CameraFramingEntry[];
+  /** T3.3: the sessions of this device are uploaded while an account is signed in. */
+  readonly uploadSessions: boolean;
+  /** T3.3: uploads wait off Wi-Fi; null: this device's default (on for a phone). */
+  readonly wifiOnly: boolean | null;
+  /** T3.3: uploaded clips stay on this device; null: this device's default (on for a laptop). */
+  readonly keepLocalCopies: boolean | null;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -190,6 +197,9 @@ const DEFAULTS: StoredSettings = {
   cameraPicks: [],
   cameraControls: [],
   cameraFramings: [],
+  uploadSessions: true,
+  wifiOnly: null,
+  keepLocalCopies: null,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -209,9 +219,11 @@ export function macAddressProblem(text: string): string {
  * label) the manual controls chosen and the framing rectangles; and whether the recording has the
  * microphone's audio (T2.4, on by default, as the design has it), how it asks for the microphone
  * (T2.12, Raw by default), its video quality (T2.10, Standard by default), and whether the Timer
- * page's Camera settings are open (T2.7). Signals, kept in `localStorage` (through BROWSER_GLOBALS)
- * as one JSON object that is written on every change. Where the browser blocks storage the settings
- * last until the page closes, and `saveError` says so.
+ * page's Camera settings are open (T2.7); and the uploads' (T3.3): whether the sessions are uploaded
+ * while an account is signed in, on Wi-Fi only (a phone's default, where the browser tells Wi-Fi from
+ * mobile data), and whether the uploaded clips stay on the device (a laptop's default). Signals, kept
+ * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
+ * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
  */
 @Injectable({ providedIn: 'root' })
 export class SettingsService {
@@ -219,6 +231,14 @@ export class SettingsService {
   private readonly storage = storageOf(this.globals);
   private readonly stored = signal<StoredSettings>(readSettings(this.storage));
   private readonly saveErrorSignal = signal<string | null>(null);
+
+  /** This device is a phone, as its browser says: the uploads' defaults follow it (T3.3). */
+  readonly isPhone = hostPlatform(this.globals.navigator).mobile;
+  /**
+   * The browser says the network's type (`navigator.connection.type`: Chrome on Android), so that
+   * "Wi-Fi only" can be honoured; Settings shows it only then (T3.3).
+   */
+  readonly networkTypeKnown = networkConnection(this.globals.navigator)?.type !== undefined;
 
   /** The label of this device when none is set: its platform, such as "macOS laptop". */
   readonly defaultHostLabel = defaultHostLabel(this.globals.navigator);
@@ -266,6 +286,24 @@ export class SettingsService {
   readonly cameraSettingsOpen = computed(() => this.stored().cameraSettingsOpen);
   /** The framing rectangles of every camera, oldest first. */
   readonly cameraFramings = computed(() => this.stored().cameraFramings);
+  /**
+   * "Upload sessions" (T3.3): while an account is signed in, the sessions of this device go to its
+   * bucket (demo sessions never do); on by default.
+   */
+  readonly uploadSessions = computed(() => this.stored().uploadSessions);
+  /**
+   * "Wi-Fi only" as set, else this device's default: on for a phone. Shown, and honoured, only where
+   * the browser says the network's type ({@link networkTypeKnown}).
+   */
+  readonly wifiOnlySetting = computed(() => this.stored().wifiOnly ?? this.isPhone);
+  /** Whether uploads wait off Wi-Fi now: the setting, where the network's type is known. */
+  readonly wifiOnly = computed(() => this.networkTypeKnown && this.wifiOnlySetting());
+  /**
+   * "Keep local copies" as set, else this device's default: on for a laptop, off for a phone, whose
+   * storage the clips fill (T3.3). Off, an attempt's clips are deleted once all its files are
+   * uploaded; its attempt.json and frames files stay.
+   */
+  readonly keepLocalCopies = computed(() => this.stored().keepLocalCopies ?? !this.isPhone);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -386,6 +424,24 @@ export class SettingsService {
     }
   }
 
+  setUploadSessions(on: boolean): void {
+    if (on !== this.stored().uploadSessions) {
+      this.update({ uploadSessions: on });
+    }
+  }
+
+  setWifiOnly(on: boolean): void {
+    if (on !== this.stored().wifiOnly) {
+      this.update({ wifiOnly: on });
+    }
+  }
+
+  setKeepLocalCopies(on: boolean): void {
+    if (on !== this.stored().keepLocalCopies) {
+      this.update({ keepLocalCopies: on });
+    }
+  }
+
   /** Sets the sharpness threshold; returns false, changing nothing, unless it is above 0. */
   setSharpnessThreshold(threshold: number): boolean {
     if (!isSharpnessThreshold(threshold)) {
@@ -488,6 +544,9 @@ function readSettings(storage: Storage | null): StoredSettings {
   const microphoneProcessing = member(parsed, 'microphoneProcessing');
   const videoQuality = member(parsed, 'videoQuality');
   const cameraSettingsOpen = member(parsed, 'cameraSettingsOpen');
+  const uploadSessions = member(parsed, 'uploadSessions');
+  const wifiOnly = member(parsed, 'wifiOnly');
+  const keepLocalCopies = member(parsed, 'keepLocalCopies');
   return {
     hostLabel:
       typeof hostLabel === 'string' && hostLabel.trim() !== ''
@@ -530,6 +589,11 @@ function readSettings(storage: Storage | null): StoredSettings {
     cameraFramings: readList(member(parsed, 'cameraFramings'), readCameraFraming).slice(
       -MAX_FRAMINGS,
     ),
+    // Settings stored before T3.3 have none: uploads on, and the device's defaults.
+    uploadSessions: typeof uploadSessions === 'boolean' ? uploadSessions : DEFAULTS.uploadSessions,
+    wifiOnly: typeof wifiOnly === 'boolean' ? wifiOnly : DEFAULTS.wifiOnly,
+    keepLocalCopies:
+      typeof keepLocalCopies === 'boolean' ? keepLocalCopies : DEFAULTS.keepLocalCopies,
   };
 }
 

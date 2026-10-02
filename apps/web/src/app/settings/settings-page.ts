@@ -31,8 +31,9 @@ const PERSISTENCE_TEXT: Readonly<Record<StoragePersistence, string>> = {
  * cube connection use (T1.6a): the host label, the cubes' MAC addresses, the idle disconnection
  * (T1.14), inspection, auto-advance, the scramble over the picture on a phone (T2.13), the camera's
  * resolution, frame rate and sharpness threshold (T2.1), Record audio (T2.4), the microphone, raw or
- * voice (T2.12), the video quality (T2.10) and the demo speed, all kept by `SettingsService`; last,
- * the account (T3.0), kept by `AuthService`.
+ * voice (T2.12), the video quality (T2.10) and the demo speed, all kept by `SettingsService`; then
+ * the account (T3.0), kept by `AuthService`, and the uploads (T3.3): Upload sessions, Wi-Fi only
+ * (where the browser tells Wi-Fi from mobile data) and Keep local copies.
  */
 @Component({
   selector: 'app-settings-page',

@@ -21,15 +21,18 @@ apps/web (Angular, PWA)
   timer UI · scramble view (cubing.js twisty-player) · CFOP chart · session list · settings · probe page
   device services: wake lock · storage persistence · browser support (read the browser through the
                    BROWSER_GLOBALS token; fakes in apps/web/src/app/device/fake-browser.ts)
-  account (phase 3): AuthService · Firebase (Authentication, Firestore) in a lazy chunk behind
+  account (phase 3): AuthService · Firebase (Authentication, Firestore, Functions) in a lazy chunk behind
                    ACCOUNT_LOADER (fake in apps/web/src/app/auth/fake-account.ts) · SessionIndexService:
-                   the session index in Firestore, the Sessions page's cloud sessions, the QA view
+                   the session index in Firestore, the Sessions page's cloud sessions, the QA view ·
+                   UploadService: the upload queue, from a lazy chunk of its own, its panel and indicator
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider
   ──uses──▶ packages/capture   (phase 2) camera · capture worker: MediaStreamTrackProcessor → VideoEncoder → ring buffer → cut ·
                                clip worker: mediabunny MP4 + frames.json → OPFS · motion and clapperboard (the sync check)
-  ──uses──▶ packages/storage   (phase 1: OPFS staging of sessions; phase 3: upload queue with signed URLs)
+  ──uses──▶ packages/storage   OPFS staging of sessions (the session store, atomic writes, tolerant reads)
+  ──uses──▶ packages/upload    (phase 3) the upload queue: an attempt's files into the bucket through
+                               signed URLs, retried, throttled, its state in uploads.json; clips deleted by policy
 ```
 
 `packages/*` are plain TypeScript, tested in Node with Vitest, and never import Angular.
@@ -229,3 +232,67 @@ of phase 5. The URLs are signed before the transaction, so a bucket that cannot 
 starts its attempt again. Errors are `HttpsError` codes the queue can act on (`resource-exhausted`
 waits for the next UTC day, `not-found` for an attempt Firestore has not sent yet), and every call is
 one structured entry in Cloud Logging.
+
+**The queue (T3.3).** `packages/upload` is plain TypeScript over three ports, tested in Node with
+fakes: the device (`UploadSource`: the session store, the attempts' files and `uploads.json` in the
+origin private file system, and the deletion of a clip), the cloud (`UploadCloud`: the index's
+`upload` of a session's attempts, `waitForPendingWrites`, and the two functions) and the PUT
+(`UploadHttp`: `XMLHttpRequest`, for the upload's progress and to send a file of the origin private
+file system without reading it into memory), with the device's clock, storage, network and Web Lock
+beside them (`UploadEnvironment`). In the app, `UploadService` (`apps/web/src/app/upload/`) loads it,
+from a lazy chunk of its own (`upload-runtime-<hash>.js`, a lazy group of the service worker), only
+once an account is signed in with Settings → Uploads → Upload sessions on, and stops it on sign-out;
+the header's indicator, a deferred block that only a signed-in account loads, makes the service.
+
+```
+the store's writes (SessionChanges) ──▶ UploadQueue ◀── the recording: an attempt's clips still to come (ClipsInFlight)
+start: the Web Lock (one tab uploads) ─▶ uploads.json ─▶ the device's sessions, the oldest first
+        (a session of a real cube; never a demo session's)
+per attempt, once its record is final (solved or DNF, its clips saved or known absent):
+  attempt.json (the record without local) · each clip's MP4 and frames file · session.json, riding along
+  ─▶ wait for the index's writes (the session index's queue, then waitForPendingWrites)
+  ─▶ signUpload: the attempt's files still to send, in one call, right before they go
+  ─▶ PUT, two at a time, each as a Blob with exactly the headers signed ─▶ confirmUpload ─▶ done
+  ─▶ uploads.json (100 ms after a change, at once on pagehide)
+```
+
+- **What goes.** Per attempt its `attempt.json` (the record as the store writes it, without the clips'
+  `local`), each clip's MP4 and frames file, and the session's `session.json`, which rides with the
+  newest of its attempts still to send, again whenever it changed since it was last confirmed, once
+  it has stayed the same for two minutes: every attempt changes its summary, so a session being
+  recorded sends it in its pauses and at its end rather than with every attempt (each upload of it is a
+  file of the day's quota). An attempt waits until its record is final: the recording says which
+  attempts still have a clip to come (`ClipsInFlight`). Never a demo session (a simulated cube), never
+  anything signed out, and nothing but the records and the clips: no cube MAC address, no setting.
+- **Order and throttling.** The oldest session first, its attempts by index, an attempt's files in
+  their order; two PUTs at a time. A file is signed right before it goes, with its attempt's other
+  files still to send in the same call (the quota counts every signature); a signature is used until a
+  minute before its 15 minutes are up, then signed again.
+- **Failures.** A try that the network or the server failed (no response, a 5xx, a 408, a 429, a
+  function's transient code) is tried again after 1 s, 2 s, 4 s, … up to 5 minutes, each less a random
+  share of up to half of it; an attempt the index has not received yet (`not-found`) waits the same way.
+  Any other 4xx fails the file until Retry (the Sessions page), but for a URL that expired, which is
+  signed again once. A confirmation that failed is asked again before the file is sent again.
+  `resource-exhausted` pauses the queue until the day resets (`resetsAtMs`, at least a minute), across
+  reloads. Offline, or off Wi-Fi with "Wi-Fi only" (where the browser says the network's type,
+  `navigator.connection`), nothing is sent: the PUTs under way are cut off and wait, without counting
+  as failures.
+- **Resumption.** `uploads.json` (`docs/DATA-MODEL.md` §10) keeps each file's state with its size, its
+  tries and its last error, so that a reload resumes where the queue was: a file being sent when the
+  page went is confirmed first (its PUT may have finished), and sent again only when the bucket does
+  not have it. For an attempt the file does not know, or not as all done, the index's `upload` says
+  what the bucket has (`doneMs` and the same size): a device that uploaded before, or whose
+  `uploads.json` was lost or written late, sends nothing twice. Only one tab uploads (a Web Lock);
+  another one's recordings are found by the queue's look at the device's sessions every 10 minutes, or
+  at the next start.
+- **The clips on the device.** Once uploaded, clips are deleted by policy: with "Keep local copies" off
+  (a phone's default; a laptop keeps them), the clips of an attempt once all its files are confirmed;
+  in any case, once the browser's storage is 70% full, the oldest uploaded clips first, until it would
+  be under 60%. The record says so first (`video[].local` false, saved through `SessionService`, which
+  also writes it to the index), then the MP4 is deleted; `attempt.json` and the frames files stay, and
+  the pages say "in the cloud" for such a clip.
+- **The pages.** The Sessions page has the queue's panel (where the uploads are, the attempts still to
+  upload with their progress, their errors and Retry, those uploaded last, the clips freed); the
+  header, an arrow with the attempts to upload (dashed while paused, red with failures), which opens
+  it; a session's page, each attempt's upload (this device's queue's, or the index's for another
+  device's session); the QA view counts what `confirmUpload` confirmed.
