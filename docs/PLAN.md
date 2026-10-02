@@ -1439,6 +1439,30 @@ emulators. Open for the manual round (`docs/MANUAL-TESTS.md`, T3.3): GCS's CORS 
 Issue #21: `users/{uid}/cubes/{name}` mirrors Settings' cube list; union on sign-in, newest
 `updatedAt` wins; never in exports or uploads.
 
+**Outcome (2026-10-02, PR #47).** `users/{uid}/cubes/{name}` is `{schema: 1, name, mac, updatedMs,
+device}` (§10 of `docs/DATA-MODEL.md`: `schema` beside the contract's fields, as every document
+there says its version), with `cloud-cube.schema.json`, `cloudCube`, `isCubeDocumentName` and
+`parseCloudCube` in core, and rules that open the cubes to their account alone and hold each
+document whole and valid after every write (22 tests in a block of their own). `CubeSyncService`
+(`apps/web/src/app/cloud/`), made by the header's controls on every page (the lazy chunk of
+`AccountControl`; `main` byte for byte the same but for the build's commit and the lazy chunks'
+hashes), merges Settings' list with the account's at each sign-in and each start signed in, then
+writes or deletes a document at every change of the list, never awaited. The merge (`cube-merge.ts`,
+pure functions): the union by name ignoring case; of two copies the later `updatedMs`, both ways
+(equal times: the account's); the deletions carried both ways without tombstones, by what the device
+knows the server holds (per account, each document's `updatedMs` as last read from the server or
+confirmed, `localStorage` `cubetrace.cubeSync`): an entry missing on one side in a version the
+server held was deleted there; a listing from the cache never deletes. Settings' entries have
+`updatedMs` (the stored settings are version 2; 0.2.0's entries get the time of their first read,
+written back at once; an edit is dated after the copy it replaces, even one from a clock ahead). The
+writes on their way are kept per account across a sign-out, as Firestore keeps them; a name that
+cannot be a document's id stays on its device. No record holds an address, so neither an export nor
+an upload nor the index does (`session-macs.spec.ts`, `cube-macs.spec.ts`). The e2e fake of Firebase
+gained a cloud that two browser contexts share, two devices of one account. The production rules
+must be deployed for the merge's read to work (until then Settings says the cubes could not be
+read); open for the manual round (`docs/MANUAL-TESTS.md`, T3.4): the ThinkPhone's typed address on
+the MacBook.
+
 ### T3.5 — e2e, docs, `v0.3.0`, manual round 3
 
 Playwright against the Auth and Firestore emulators in CI and a local `PUT` sink for uploads
