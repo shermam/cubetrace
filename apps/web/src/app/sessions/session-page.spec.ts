@@ -36,6 +36,7 @@ import { CURRENT_SESSION_KEY } from '../session/session-service';
 import { SESSION_STORAGE } from '../session/session-storage';
 import { SESSION_A, SESSION_B, testAttempt, testSession } from '../session/session-testing';
 import { ClipViewing } from '../timer/clip-viewing';
+import { TWISTY_LOADER } from '../timer/scramble-view';
 import { UploadService } from '../upload/upload-service';
 import { FakeUploads, attemptView } from '../upload/upload-testing';
 import { SessionPage, camerasText, clipsText } from './session-page';
@@ -83,6 +84,8 @@ describe('SessionPage', () => {
     return [
       provideRouter([]),
       { provide: ActivatedRoute, useValue: { paramMap: params } },
+      // The clip viewer's 3D cube (T3.8) would load cubing.js: not in jsdom.
+      { provide: TWISTY_LOADER, useValue: () => Promise.resolve() },
       {
         provide: ATTEMPT_FILES,
         useValue: {

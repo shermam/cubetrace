@@ -1,4 +1,5 @@
 import {
+  CUSTOM_ELEMENTS_SCHEMA,
   Component,
   DOCUMENT,
   DestroyRef,
@@ -12,7 +13,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import type { AttemptRecord, VideoClip } from '@cubetrace/core';
+import { type AttemptRecord, type VideoClip, parseGyro } from '@cubetrace/core';
 import { attemptFolder } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
@@ -21,14 +22,44 @@ import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { downloadBlob, downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
+import { ClipCube, cubePlayerOf } from './clip-cube';
 import { ClipViewing } from './clip-viewing';
+import {
+  type GyroTrack,
+  type Quat,
+  gyroTrack,
+  orientationAt,
+  referenceAt,
+  shownOrientation,
+} from './cube-orientation';
+import { TWISTY_LOADER } from './scramble-view';
 
 /** A move as the viewer lists it: its time into the clip. */
 export interface ClipMove {
   readonly m: string;
-  /** From the clip's first frame, in seconds: where the video shows it. */
+  /** From the clip's first frame, in seconds: where the video shows it (the camera's lag applied). */
   readonly seconds: number;
   readonly hostMs: number;
+}
+
+/**
+ * How far the camera's picture lags the cube in `clip`, in ms: its `syncResidualMs`, measured by
+ * the sync check (docs/DATA-MODEL.md §6, §7), 0 when none was made. A frame whose host time is `t`
+ * shows the world as it was at `t − lag`, so a move made at host time `m` is in the picture at
+ * `m + lag`.
+ */
+export function clipLagMs(clip: VideoClip): number {
+  return clip.syncResidualMs ?? 0;
+}
+
+/** The host time the picture at `seconds` into `clip` shows: `firstFrameHostMs + seconds × 1000 − lag`. */
+export function clipHostMs(clip: VideoClip, seconds: number): number {
+  return clip.firstFrameHostMs + seconds * 1000 - clipLagMs(clip);
+}
+
+/** Where `clip` shows the host time `hostMs`, in seconds from its first frame: the lag later. */
+export function clipSeconds(clip: VideoClip, hostMs: number): number {
+  return (hostMs + clipLagMs(clip) - clip.firstFrameHostMs) / 1000;
 }
 
 /** The moves of `record` in the segment of `clip`, timed from the clip's first frame. */
@@ -37,17 +68,17 @@ export function clipMoves(record: AttemptRecord, clip: VideoClip): ClipMove[] {
     .filter((move) => move.phase === clip.segment)
     .map((move) => ({
       m: move.m,
-      seconds: (move.hostMs - clip.firstFrameHostMs) / 1000,
+      seconds: clipSeconds(clip, move.hostMs),
       hostMs: move.hostMs,
     }));
 }
 
 /**
- * The move shown at `seconds` into the clip: the last one made at or before the host time
- * `firstFrameHostMs + seconds × 1000`; −1 before the first.
+ * The move shown at `seconds` into the clip: the last one made at or before the host time the
+ * picture shows then ({@link clipHostMs}); −1 before the first.
  */
 export function moveAt(moves: readonly ClipMove[], clip: VideoClip, seconds: number): number {
-  const hostMs = clip.firstFrameHostMs + seconds * 1000;
+  const hostMs = clipHostMs(clip, seconds);
   let at = -1;
   for (const [index, move] of moves.entries()) {
     if (move.hostMs > hostMs) {
@@ -63,6 +94,15 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
   return `cubetrace-session-${record.session}-attempt-${attemptFolder(record.index)}-${name}`;
 }
 
+/** How the viewer stands with the attempt's gyroscope file. */
+export type OrientationState = 'none' | 'reading' | 'ready' | 'failed';
+
+/**
+ * cubing.js's catch-up animation takes 500 ms over the tempo scale: 5 makes a turn complete in
+ * about 100 ms, within the frames that follow the move in the picture.
+ */
+export const CUBE_TEMPO_SCALE = 5;
+
 /**
  * The clips of an attempt (docs/PLAN.md, T2.4), in a modal dialog the solve list's clip badge opens:
  * the video of one (the solve's first), read from the origin private file system behind an object
@@ -72,9 +112,25 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
  * record, attempt.json. A clip deleted from the
  * device once uploaded (`local` false, T3.3) says it is in the cloud in place of its video, and its
  * MP4 is not among the files downloaded.
+ *
+ * Beside the video, a 3D cube follows it (T3.8): cubing.js's `<twisty-player>`, which turns with
+ * the segment's moves as the picture passes them (the next move animated, the state rebuilt after a
+ * seek or when several moves passed in one frame, `ClipCube`) from the segment's starting state
+ * (the scramble as the setup alg for the solve, solved for the scramble, whose moves include a
+ * mis-scramble's corrections), and tilts as the real cube did when the attempt has a gyro file
+ * (`gyro.json`, docs/DATA-MODEL.md §11): the samples around the host time the picture shows, slerped,
+ * relative to the sample at the clip's first frame by default, so that the cube starts upright and
+ * then moves as the hands moved it ("Re-zero" takes the sample at the current time as the reference;
+ * "Raw" shows the samples as they are, their yaw arbitrary), carried into cubing.js's frame
+ * (`cube-orientation.ts`). The camera's lag (`syncResidualMs`) is applied to the moves and the samples
+ * alike: the picture at `t` shows the world `lag` earlier. Without a gyro file (an older attempt, a
+ * cube without a gyroscope) the cube still turns, and a line says the orientation is not recorded;
+ * a file that cannot be read is said in that line. The viewer follows the video frame by frame while
+ * it plays and on every seek, and nothing runs once the dialog closes.
  */
 @Component({
   selector: 'app-clip-viewer',
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
   template: `
     <dialog
       #dialog
@@ -107,7 +163,7 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
           </button>
         }
       </div>
-      <div class="body">
+      <div class="body" [class.with-cube]="cubeShown()" [style.--cube-share]="cubeShare()">
         <div class="player">
           @if (selected()?.local === false) {
             <p class="cloud" data-testid="clip-cloud">
@@ -125,7 +181,8 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
               playsinline
               (loadedmetadata)="onLoaded(video)"
               (timeupdate)="onTime(video)"
-              (seeked)="onTime(video)"
+              (pause)="onTime(video)"
+              (seeked)="onSeeked(video)"
               (play)="follow(video)"
             ></video>
           } @else if (readError(); as error) {
@@ -137,6 +194,56 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
             <p class="muted" data-testid="clip-facts">{{ facts }}</p>
           }
         </div>
+        @if (cubeShown()) {
+          <div class="cube" data-testid="clip-cube">
+            @if (pictureError(); as error) {
+              <p class="error" data-testid="clip-cube-error">No 3D cube: {{ error }}</p>
+            } @else {
+              <twisty-player
+                #cube
+                data-testid="clip-cube-player"
+                puzzle="3x3x3"
+                visualization="3D"
+                background="none"
+                control-panel="none"
+                hint-facelets="none"
+                experimental-drag-input="none"
+                [attr.tempo-scale]="tempoScale"
+                aria-hidden="true"
+              ></twisty-player>
+            }
+            <p
+              class="orientation"
+              [class.error]="orientationState() === 'failed'"
+              data-testid="clip-orientation"
+            >
+              {{ orientationText() }}
+            </p>
+            @if (orientationState() === 'ready') {
+              <div class="orientation-controls">
+                <button
+                  type="button"
+                  data-testid="clip-rezero"
+                  title="Take the orientation at this moment as upright"
+                  [disabled]="raw()"
+                  (click)="rezero()"
+                >
+                  Re-zero
+                </button>
+                <label>
+                  <input
+                    #rawBox
+                    type="checkbox"
+                    data-testid="clip-raw"
+                    [checked]="raw()"
+                    (change)="setRaw(rawBox.checked)"
+                  />
+                  Raw
+                </label>
+              </div>
+            }
+          </div>
+        }
         <ol class="moves" #list data-testid="clip-moves" aria-label="The moves, by their time">
           @for (move of moves(); track $index) {
             <li [class.current]="$index === current()" data-testid="clip-move">
@@ -223,12 +330,22 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
       color: var(--accent);
     }
 
+    /* On a laptop the video, the 3D cube and the moves in one row: the cube's column takes the
+       share of the width left over by the moves that makes its square as tall as the video
+       (height / (width + height) of the clip's frames, --cube-share); on a phone they stack. */
     .body {
       display: grid;
       gap: var(--space-3);
 
       @media (min-width: 40rem) {
         grid-template-columns: minmax(0, 3fr) minmax(9rem, 1fr);
+
+        &.with-cube {
+          grid-template-columns:
+            minmax(0, 1fr)
+            calc((100% - 9rem - 2 * var(--space-3)) * var(--cube-share, 0.36))
+            9rem;
+        }
       }
     }
 
@@ -243,6 +360,45 @@ export function attemptFileName(record: AttemptRecord, name: string): string {
       max-height: 60vh;
       border-radius: var(--radius);
       background: #000;
+    }
+
+    .cube {
+      display: grid;
+      gap: var(--space-2);
+      align-content: start;
+    }
+
+    /* A square as wide as its column (as tall as the video, above), or 12rem under the video on a
+       phone; the player's own size (384 × 256 px) is overridden. */
+    twisty-player {
+      width: min(100%, 12rem);
+      max-height: 60vh;
+      aspect-ratio: 1 / 1;
+      height: auto;
+      justify-self: center;
+
+      @media (min-width: 40rem) {
+        width: 100%;
+      }
+    }
+
+    .orientation,
+    .orientation-controls {
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+    }
+
+    .orientation-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-3);
+      align-items: center;
+
+      label {
+        display: inline-flex;
+        gap: var(--space-1);
+        align-items: center;
+      }
     }
 
     .moves {
@@ -307,6 +463,7 @@ export class ClipViewer {
   readonly attempt = input.required<AttemptRecord>();
   /** Closed with the dialog (the Close button, Esc). */
   protected readonly viewing = inject(ClipViewing);
+  protected readonly tempoScale = CUBE_TEMPO_SCALE;
 
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly document = inject(DOCUMENT);
@@ -315,6 +472,7 @@ export class ClipViewer {
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly list = viewChild<ElementRef<HTMLElement>>('list');
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
+  private readonly cubeElement = viewChild<ElementRef<HTMLElement>>('cube');
 
   /** The clip chosen; the solve's until another is. */
   private readonly chosen = signal<string | null>(null);
@@ -356,6 +514,54 @@ export class ClipViewer {
       `${formatBytes(clip.bytes)}, ${clip.codec}, ${audio}.${late}`
     );
   });
+  /** The 3D cube is shown with a clip on this device (not with one in the cloud, T3.3). */
+  protected readonly cubeShown = computed(() => {
+    const clip = this.selected();
+    return clip !== null && clip.local !== false;
+  });
+  /** The share of the row's width that makes the cube's square as tall as the video (the styles). */
+  protected readonly cubeShare = computed(() => {
+    const clip = this.selected();
+    return clip === null || clip.width + clip.height <= 0
+      ? 0.36
+      : Math.round((clip.height / (clip.width + clip.height)) * 1000) / 1000;
+  });
+  /** `cubing/twisty` could not load: no 3D cube. */
+  protected readonly pictureError = signal<string | null>(null);
+  /** `cubing/twisty` has defined `<twisty-player>`. */
+  private readonly playerReady = signal(false);
+  /** The attempt's gyro samples, once read (T3.8). */
+  private readonly track = signal<GyroTrack | null>(null);
+  protected readonly orientationState = signal<OrientationState>('none');
+  private readonly orientationError = signal<string | null>(null);
+  /** The sample the cube is shown upright at; null without a track. */
+  private readonly reference = signal<Quat | null>(null);
+  /** Where in the clip the reference was taken, in seconds. */
+  private readonly zeroedAt = signal(0);
+  /** "Raw": the samples as recorded, without the reference. */
+  protected readonly raw = signal(false);
+  /** The line under the cube: where its orientation comes from. */
+  protected readonly orientationText = computed(() => {
+    switch (this.orientationState()) {
+      case 'none':
+        return 'Orientation not recorded: the attempt has no gyroscope file. The cube turns with the moves, upright.';
+      case 'reading':
+        return 'Reading the orientation…';
+      case 'failed':
+        return this.orientationError() ?? 'The orientation could not be read.';
+      case 'ready': {
+        const track = this.track();
+        const clip = this.selected();
+        const from =
+          track !== null && clip !== null && track.truncatedStart && track.hostMs.length > 0
+            ? ` Not recorded before ${clipSeconds(clip, track.hostMs[0]).toFixed(2)} s.`
+            : '';
+        return this.raw()
+          ? `Orientation from the gyroscope, as recorded (its yaw is arbitrary).${from}`
+          : `Orientation from the gyroscope, zeroed at ${this.zeroedAt().toFixed(2)} s.${from}`;
+      }
+    }
+  });
   protected readonly downloading = signal(false);
   protected readonly downloadError = signal<string | null>(null);
   /**
@@ -377,7 +583,12 @@ export class ClipViewer {
   });
   /** Incremented by every clip read: a slower, older read then knows it lost. */
   private reads = 0;
+  /** The same for the gyro file. */
+  private gyroReads = 0;
   private stopFollowing: (() => void) | null = null;
+  /** The 3D cube, on the player element it was made for. */
+  private cube: ClipCube | null = null;
+  private cubeOn: HTMLElement | null = null;
   /** The dialog was opened once: once it closes, it stays closed. */
   private shown = false;
 
@@ -390,6 +601,15 @@ export class ClipViewer {
         dialog.showModal();
       }
     });
+    // The 3D cube's element (the scramble view's chunk); the moves list is the record without it.
+    inject(TWISTY_LOADER)().then(
+      () => {
+        this.playerReady.set(true);
+      },
+      (error: unknown) => {
+        this.pictureError.set(errorMessage(error));
+      },
+    );
     // The chosen clip's MP4, read from the file system, behind an object URL.
     effect(() => {
       const clip = this.selected();
@@ -397,6 +617,55 @@ export class ClipViewer {
       const index = this.attempt().index;
       untracked(() => {
         void this.read(clip, session, index);
+      });
+    });
+    // The attempt's gyro file, once per attempt shown (T3.8).
+    effect(() => {
+      const record = this.attempt();
+      untracked(() => {
+        void this.readGyro(record);
+      });
+    });
+    // The 3D cube on its element, loaded with the clip's segment; a new element gets a new cube.
+    effect(() => {
+      const element = this.cubeElement()?.nativeElement ?? null;
+      const ready = this.playerReady();
+      const clip = this.selected();
+      const moves = this.moves();
+      const scramble = this.attempt().scramble;
+      untracked(() => {
+        if (element === null || !ready || clip === null) {
+          this.cube?.dispose();
+          this.cube = null;
+          this.cubeOn = null;
+          return;
+        }
+        if (this.cubeOn !== element) {
+          this.cube?.dispose();
+          const player = cubePlayerOf(element);
+          this.cube = player === null ? null : new ClipCube(player);
+          this.cubeOn = element;
+        }
+        if (this.cube !== null) {
+          this.cube.load(
+            clip.segment === 'solve' ? scramble : '',
+            moves.map((move) => move.m),
+          );
+          this.cube.show(moveAt(moves, clip, this.time()), true);
+          this.cube.orient(this.orientationAt(this.time()));
+        }
+      });
+    });
+    // The reference: the sample at the clip's first frame, for each clip and track.
+    effect(() => {
+      const track = this.track();
+      const clip = this.selected();
+      untracked(() => {
+        this.reference.set(
+          track === null || clip === null ? null : referenceAt(track, clipHostMs(clip, 0)),
+        );
+        this.zeroedAt.set(0);
+        this.reorient();
       });
     });
     // The attempt whose clips are viewed (T3.9, `clips.viewed`), once per attempt shown.
@@ -434,7 +703,10 @@ export class ClipViewer {
     });
     inject(DestroyRef).onDestroy(() => {
       this.reads++;
+      this.gyroReads++;
       this.stopFollowing?.();
+      this.cube?.dispose();
+      this.cube = null;
       this.setUrl(null);
     });
   }
@@ -449,23 +721,49 @@ export class ClipViewer {
 
   protected onLoaded(video: HTMLVideoElement): void {
     this.loaded.set(true);
-    this.onTime(video);
+    this.sync(video.currentTime, true);
   }
 
+  /** `timeupdate` and `pause`: the time moved on, or stopped. */
   protected onTime(video: HTMLVideoElement): void {
-    this.time.set(video.currentTime);
+    this.sync(video.currentTime, false);
   }
 
-  /** While it plays, the time follows every frame shown (where the browser says so). */
+  /** `seeked`: the time jumped; the cube's state is rebuilt rather than animated. */
+  protected onSeeked(video: HTMLVideoElement): void {
+    this.sync(video.currentTime, true);
+  }
+
+  /**
+   * While it plays, the time follows every frame shown (`requestVideoFrameCallback`, where the
+   * browser has it; else every animation frame), until it pauses or ends.
+   */
   protected follow(video: HTMLVideoElement): void {
     this.stopFollowing?.();
-    if (typeof video.requestVideoFrameCallback !== 'function') {
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      let handle = 0;
+      const next = (): void => {
+        handle = video.requestVideoFrameCallback((_now, metadata) => {
+          this.sync(metadata.mediaTime, false);
+          if (!video.paused && !video.ended) {
+            next();
+          }
+        });
+      };
+      next();
+      this.stopFollowing = () => {
+        video.cancelVideoFrameCallback(handle);
+      };
+      return;
+    }
+    const request = this.globals.requestAnimationFrame;
+    if (request === undefined) {
       return;
     }
     let handle = 0;
     const next = (): void => {
-      handle = video.requestVideoFrameCallback((_now, metadata) => {
-        this.time.set(metadata.mediaTime);
+      handle = request(() => {
+        this.sync(video.currentTime, false);
         if (!video.paused && !video.ended) {
           next();
         }
@@ -473,7 +771,7 @@ export class ClipViewer {
     };
     next();
     this.stopFollowing = () => {
-      video.cancelVideoFrameCallback(handle);
+      this.globals.cancelAnimationFrame?.(handle);
     };
   }
 
@@ -482,6 +780,25 @@ export class ClipViewer {
     if (video !== undefined) {
       video.currentTime = Math.max(0, seconds);
     }
+  }
+
+  /** "Re-zero": the orientation at this moment of the clip becomes upright. */
+  protected rezero(): void {
+    const track = this.track();
+    const clip = this.selected();
+    if (track === null || clip === null) {
+      return;
+    }
+    const seconds = this.time();
+    this.reference.set(referenceAt(track, clipHostMs(clip, seconds)));
+    this.zeroedAt.set(seconds);
+    this.reorient();
+  }
+
+  /** "Raw": the samples as recorded, or relative to the reference. */
+  protected setRaw(raw: boolean): void {
+    this.raw.set(raw);
+    this.reorient();
   }
 
   /** Downloads both clips' MP4s and frames files, the gyro file when there is one, and attempt.json. */
@@ -517,6 +834,40 @@ export class ClipViewer {
     }
   }
 
+  /**
+   * The video is at `seconds`: the move shown, the cube's state (animated to the next move as the
+   * time passes it, rebuilt after a `seek`) and its orientation then.
+   */
+  private sync(seconds: number, seek: boolean): void {
+    this.time.set(seconds);
+    const clip = this.selected();
+    if (this.cube === null || clip === null) {
+      return;
+    }
+    this.cube.show(moveAt(this.moves(), clip, seconds), seek);
+    this.cube.orient(this.orientationAt(seconds));
+  }
+
+  /** The cube's orientation at the current time, after a change of reference. */
+  private reorient(): void {
+    this.cube?.orient(this.orientationAt(this.time()));
+  }
+
+  /**
+   * The orientation to show at `seconds` into the clip, in cubing.js's frame: the gyro sample at the
+   * host time the picture shows then, relative to the reference unless raw; null without a track,
+   * or before a truncated file's first sample.
+   */
+  private orientationAt(seconds: number): Quat | null {
+    const track = this.track();
+    const clip = this.selected();
+    if (track === null || clip === null) {
+      return null;
+    }
+    const q = orientationAt(track, clipHostMs(clip, seconds));
+    return q === null ? null : shownOrientation(q, this.raw() ? null : this.reference());
+  }
+
   private async read(clip: VideoClip | null, session: string, index: number): Promise<void> {
     const read = ++this.reads;
     this.setUrl(null);
@@ -539,6 +890,32 @@ export class ClipViewer {
     } catch (error: unknown) {
       if (read === this.reads) {
         this.readError.set(`The clip could not be read: ${errorMessage(error)}`);
+      }
+    }
+  }
+
+  /** The attempt's gyro file (T3.8), parsed into its track; a failure is one line under the cube. */
+  private async readGyro(record: AttemptRecord): Promise<void> {
+    const read = ++this.gyroReads;
+    this.track.set(null);
+    this.orientationError.set(null);
+    if (record.gyro === null) {
+      this.orientationState.set('none');
+      return;
+    }
+    this.orientationState.set('reading');
+    try {
+      const blob = await this.files.read(record.session, record.index, record.gyro.file);
+      const text = await blob.text();
+      if (read !== this.gyroReads) {
+        return;
+      }
+      this.track.set(gyroTrack(parseGyro(JSON.parse(text))));
+      this.orientationState.set('ready');
+    } catch (error: unknown) {
+      if (read === this.gyroReads) {
+        this.orientationError.set(`The orientation could not be read: ${errorMessage(error)}`);
+        this.orientationState.set('failed');
       }
     }
   }
