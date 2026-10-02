@@ -32,8 +32,9 @@ interface AccountState {
  * the two lists are merged (`mergeCubes`: their union, the copy changed last winning, deletions on
  * either side carried to the other); from then on, every change of the list writes or deletes its
  * documents. Nothing waits for the server: Firestore applies the writes to its cache at once, and
- * offline they wait there, across reloads. What goes wrong is said once (the console and `error`),
- * never thrown. Signed out it does nothing, and the list is this device's as before.
+ * offline they wait there, across reloads. What goes wrong is shown while it stands (`error`) and
+ * said once in the console, never thrown. Signed out it does nothing, and the list is this device's
+ * as before.
  */
 @Injectable({ providedIn: 'root' })
 export class CubeSyncService {
@@ -44,8 +45,13 @@ export class CubeSyncService {
   private readonly mergingSignal = signal(false);
   private readonly offlineSignal = signal(false);
   private readonly lastMergeSignal = signal<number | null>(null);
-  private readonly errorSignal = signal<string | null>(null);
-  private readonly unconfirmedSignal = signal(0);
+  /**
+   * What went wrong and still stands, by what it is about (`read`, `write <name>`, …), oldest
+   * first.
+   */
+  private readonly problems = signal<ReadonlyMap<string, string>>(new Map());
+  /** The writes sent and not confirmed yet, counted by account. */
+  private readonly waiting = signal<ReadonlyMap<string, number>>(new Map());
 
   /** An account is signed in: the list is synced with it. */
   readonly active = computed(() => this.auth.cloud() !== null);
@@ -61,20 +67,31 @@ export class CubeSyncService {
    * across page loads); null before the first, and without an account.
    */
   readonly lastMerge = this.lastMergeSignal.asReadonly();
-  /** What went wrong last in this page load (a read, a write refused); null when nothing did. */
-  readonly error = this.errorSignal.asReadonly();
-  /** The writes of this page load that the server has not confirmed yet: offline, they wait. */
-  readonly unconfirmed = this.unconfirmedSignal.asReadonly();
+  /**
+   * What went wrong last and still stands (the list could not be read, a write was refused, a
+   * document or a name is left alone); null when nothing does. A merge starts afresh, and a cube's
+   * write that the server confirms clears its refusal.
+   */
+  readonly error = computed(() => [...this.problems().values()].at(-1) ?? null);
+  /**
+   * The writes of this page load to the account signed in that the server has not confirmed yet:
+   * offline, they wait.
+   */
+  readonly unconfirmed = computed(() => {
+    const uid = this.auth.cloud()?.uid;
+    return uid === undefined ? 0 : (this.waiting().get(uid) ?? 0);
+  });
 
   /** The account merged in this page load: from then on, each change of the list goes to it. */
   private merged: string | null = null;
   /** The account whose merge is under way. */
   private mergingUid: string | null = null;
   /**
-   * The writes sent and not confirmed yet, by document name: the `updatedMs` written, or null for a
-   * deletion. With what the server is known to hold, what it will hold.
+   * The writes sent and not confirmed yet, by account, then by document name: the `updatedMs`
+   * written, or null for a deletion. With what the server is known to hold, what it will hold. They
+   * stay across a sign-out: Firestore keeps an account's writes until it is signed in again.
    */
-  private sent = new Map<string, number | null>();
+  private readonly sent = new Map<string, Map<string, number | null>>();
   /** The names (by `cubeKey`) left alone: the account's documents of them could not be read. */
   private skipped = new Set<string>();
   /** What this page load has said, so that each thing is said once. */
@@ -104,17 +121,15 @@ export class CubeSyncService {
   private onAccount(account: CloudAccount | null): void {
     if (account === null) {
       this.merged = null;
-      this.sent = new Map();
       this.skipped = new Set();
       this.lastMergeSignal.set(null);
       this.offlineSignal.set(false);
-      this.errorSignal.set(null);
+      this.problems.set(new Map());
       return;
     }
     this.lastMergeSignal.set(this.state(account.uid).mergedMs);
     if (this.merged !== account.uid && this.mergingUid !== account.uid) {
       this.merged = null;
-      this.sent = new Map();
       this.work = this.merge(account);
     }
   }
@@ -136,7 +151,7 @@ export class CubeSyncService {
   private async merge(account: CloudAccount): Promise<void> {
     this.mergingUid = account.uid;
     this.mergingSignal.set(true);
-    this.errorSignal.set(null);
+    this.problems.set(new Map());
     try {
       let listing: CloudListing;
       try {
@@ -201,7 +216,7 @@ export class CubeSyncService {
    */
   private reconcile(account: CloudAccount): void {
     const known = new Map(Object.entries(this.state(account.uid).known));
-    for (const [name, written] of this.sent) {
+    for (const [name, written] of this.sentOf(account.uid)) {
       if (written === null) {
         known.delete(name);
       } else {
@@ -209,6 +224,13 @@ export class CubeSyncService {
       }
     }
     const changes = cubeChanges(this.settings.cubeMacs(), known, this.skipped);
+    // A name that cannot name a document stands as a problem while the list has it.
+    const unsyncable = new Set(changes.unsyncable.map((entry) => `name ${entry.name}`));
+    for (const key of this.problems().keys()) {
+      if (key.startsWith('name ') && !unsyncable.has(key)) {
+        this.clear(key);
+      }
+    }
     for (const entry of changes.unsyncable) {
       this.say(
         `name ${entry.name}`,
@@ -247,7 +269,8 @@ export class CubeSyncService {
 
   /**
    * Sends a write (`written`, its `updatedMs`) or a deletion (null) of the document `name`, without
-   * waiting for it: the server's confirmation updates what it is known to hold; a refusal is said.
+   * waiting for it: the server's confirmation updates what it is known to hold, and clears an
+   * earlier refusal of that cube; a refusal is said.
    */
   private send(
     account: CloudAccount,
@@ -256,9 +279,9 @@ export class CubeSyncService {
     failure: string,
     call: (backend: AccountBackend) => Promise<void>,
   ): void {
-    const sent = this.sent;
+    const sent = this.sentOf(account.uid);
     sent.set(name, written);
-    this.unconfirmedSignal.update((count) => count + 1);
+    this.count(account.uid, 1);
     let promise: Promise<void>;
     try {
       promise = call(account.backend);
@@ -266,11 +289,13 @@ export class CubeSyncService {
       promise = Promise.reject(error instanceof Error ? error : new Error(errorMessage(error)));
     }
     const settled = (): void => {
-      this.unconfirmedSignal.update((count) => count - 1);
+      this.count(account.uid, -1);
       if (sent.get(name) === written) {
         sent.delete(name);
       }
     };
+    // The page shows what goes wrong with the account signed in, not with one signed out since.
+    const current = (): boolean => this.auth.cloud()?.uid === account.uid;
     void promise.then(
       () => {
         settled();
@@ -281,20 +306,58 @@ export class CubeSyncService {
             kept.known[name] = written;
           }
         });
+        if (current()) {
+          this.clear(`write ${name}`);
+        }
       },
       (error: unknown) => {
         settled();
-        this.say(`write ${name}`, `The cube ${name} ${failure}: ${reason(error)}`);
+        if (current()) {
+          this.say(`write ${name}`, `The cube ${name} ${failure}: ${reason(error)}`);
+        }
       },
     );
   }
 
-  /** Shows `message` as the last thing that went wrong, and says it in the console once. */
+  /** The writes of the account `uid` on their way. */
+  private sentOf(uid: string): Map<string, number | null> {
+    let sent = this.sent.get(uid);
+    if (sent === undefined) {
+      sent = new Map();
+      this.sent.set(uid, sent);
+    }
+    return sent;
+  }
+
+  /** Counts `change` more writes of the account `uid` waiting for the server. */
+  private count(uid: string, change: number): void {
+    this.waiting.update((waiting) => new Map(waiting).set(uid, (waiting.get(uid) ?? 0) + change));
+  }
+
+  /**
+   * Shows `message` as the last thing that went wrong, until it is cleared, and says it in the
+   * console once per page load.
+   */
   private say(key: string, message: string): void {
-    this.errorSignal.set(`${message}.`);
+    this.problems.update((problems) => {
+      const next = new Map(problems);
+      next.delete(key);
+      return next.set(key, `${message}.`);
+    });
     if (!this.said.has(key)) {
       this.said.add(key);
       console.warn(`cubetrace: cloud: ${message}.`);
+    }
+  }
+
+  /** What `key` was about is no longer wrong. */
+  private clear(key: string): void {
+    if (this.problems().has(key)) {
+      this.problems.update((problems) => {
+        const next = new Map(problems);
+        next.delete(key);
+        return next;
+      });
     }
   }
 

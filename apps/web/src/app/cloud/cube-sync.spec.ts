@@ -308,6 +308,15 @@ describe('CubeSyncService', () => {
     expect(sync.unconfirmed()).toBe(1);
     expect(kept(laptop).known).toEqual({});
 
+    // Signed out, nothing waits for the page; signed in again, the write still does, and is not
+    // sent twice: Firestore keeps it for the account.
+    await auth.signOut();
+    await settleSync(sync);
+    expect(sync.unconfirmed()).toBe(0);
+    await signIn(auth, sync);
+    expect(sync.unconfirmed()).toBe(1);
+    expect(laptop.backend.cubeWrites).toEqual([`${CUBES}/GAN12ui_AB12`]);
+
     laptop.backend.goOnline();
     await settleSync(sync);
     expect(sync.unconfirmed()).toBe(0);
@@ -357,6 +366,30 @@ describe('CubeSyncService', () => {
       settings.saveCubeMac('GAN356i3_CD34', '22:22:22:22:22:22');
       await settleSync(sync);
       expect(Object.keys(cubesInCloud()).sort()).toEqual(['GAN12ui_AB12', 'GAN356i3_CD34']);
+      // Saved at last: the refusal no longer stands.
+      expect(sync.error()).toBeNull();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps on this device a cube whose name cannot name a document, and says so while it is listed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { sync, auth, settings } = load(laptop);
+      await signIn(auth, sync);
+      settings.saveCubeMac('GAN/12', 'AB:12:CD:34:EF:56');
+      settings.saveCubeMac('GAN12ui_AB12', '11:22:33:44:55:66');
+      await settleSync(sync);
+      expect(laptop.backend.cubeWrites).toEqual([`${CUBES}/GAN12ui_AB12`]);
+      expect(sync.error()).toBe(
+        'The cube GAN/12 stays on this device: its name cannot name a document.',
+      );
+      settings.removeCubeMac('GAN/12');
+      await settleSync(sync);
+      expect(sync.error()).toBeNull();
+      expect(laptop.backend.cubeWrites).toEqual([`${CUBES}/GAN12ui_AB12`]);
+      expect(warn).toHaveBeenCalledTimes(1);
     } finally {
       warn.mockRestore();
     }
