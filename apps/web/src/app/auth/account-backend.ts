@@ -69,12 +69,11 @@ export interface AccountBackend {
    * every change, until the returned function is called; `error` if the backend cannot tell.
    */
   watchUser(next: (user: BackendUser | null) => void, error: (error: unknown) => void): () => void;
-  /** Signs in with Google's page in a popup; resolves once signed in. */
+  /**
+   * Signs in with Google's page in a popup (over the installed app on Android, a Custom Tab that
+   * closes itself when Google is done); resolves once signed in.
+   */
   signInWithPopup(): Promise<void>;
-  /** Leaves the page for Google's; the page that comes back reads the outcome with `redirectResult`. */
-  signInWithRedirect(): Promise<void>;
-  /** The account a redirect brought back, or null when there was none (or it was lost). */
-  redirectResult(): Promise<BackendUser | null>;
   signOut(): Promise<void>;
   /**
    * Merges `record` into users/{uid}. Firestore applies it to its local cache at once and sends it

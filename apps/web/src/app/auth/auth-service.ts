@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { userRecord } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, hostNow, type BrowserGlobals } from '../device/browser-globals';
-import { SettingsService, hostPlatform } from '../settings/settings-service';
+import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import {
   ACCOUNT_LOADER,
@@ -10,25 +10,24 @@ import {
   type AccountUser,
   type BackendUser,
 } from './account-backend';
-import { AccountLoadError, RedirectLostError, authErrorMessage } from './auth-error';
+import { AccountLoadError, type AuthErrorContext, authErrorMessage } from './auth-error';
 
 /**
  * The `localStorage` key that remembers the account between page loads, so that the app loads
- * Firebase as it starts only then: `signed-in` once an account is signed in, `redirect` while a
- * sign-in has left the page for Google's (the next start reads its outcome); removed on sign-out.
+ * Firebase as it starts only then: `signed-in` once an account is signed in; removed on sign-out.
+ * (0.3.0 also wrote `redirect` while a sign-in had left the page for Google's; a start that finds it
+ * removes it, and nothing more: T3.6.)
  */
 export const ACCOUNT_STORAGE_KEY = 'cubetrace.account';
 
-type Remembered = 'signed-in' | 'redirect';
+/** The value that remembers an account. */
+const SIGNED_IN = 'signed-in';
 
 /**
  * `signed-out`; `loading` (the account is being loaded or a sign-in is under way); `signed-in`;
  * `error`: the last sign-in, sign-out or start failed, and `AuthService.error` says why.
  */
 export type AuthStatus = 'signed-out' | 'loading' | 'signed-in' | 'error';
-
-/** How signing in shows Google's page. */
-export type SignInFlow = 'popup' | 'redirect';
 
 /** The account signed in and the backend that reaches its data: for the session index (T3.1). */
 export interface CloudAccount {
@@ -37,12 +36,13 @@ export interface CloudAccount {
 }
 
 /**
- * A popup, except in the app installed on Android (display mode standalone), where a popup would
- * leave the app for a browser tab: there the page itself goes to Google's and comes back.
+ * Whether the app runs installed (display mode `standalone`: Chrome's WebAPK on Android, a window of
+ * its own on a laptop) rather than in a browser tab. Signing in is the same popup either way, which
+ * Chrome on Android opens over the installed app as a Custom Tab (docs/ARCHITECTURE.md, "Account");
+ * only what a popup that did not finish says differs (`AuthErrorContext`).
  */
-export function signInFlow(globals: BrowserGlobals): SignInFlow {
-  const installed = globals.matchMedia?.('(display-mode: standalone)').matches === true;
-  return installed && hostPlatform(globals.navigator).platform === 'Android' ? 'redirect' : 'popup';
+export function installedApp(globals: BrowserGlobals): boolean {
+  return globals.matchMedia?.('(display-mode: standalone)').matches === true;
 }
 
 /**
@@ -74,7 +74,7 @@ export class AuthService {
   /** The backend's first report, once it is loading. */
   private firstReport: Promise<BackendUser | null> = Promise.resolve(null);
   /**
-   * Sign-ins under way (a popup, a redirect's outcome being read): meanwhile a report of no account
+   * Sign-ins under way (a popup; a remembered account being loaded): meanwhile a report of no account
    * is the state before them, and leaves the status at `loading`.
    */
   private pending = 0;
@@ -106,14 +106,17 @@ export class AuthService {
   );
 
   constructor() {
-    const remembered = this.remembered();
-    if (remembered !== null) {
+    if (this.remembered()) {
       this.statusSignal.set('loading');
-      void this.resume(remembered);
+      void this.resume();
     }
   }
 
-  /** Signs in with Google: a popup, or a redirect in the app installed on Android. */
+  /**
+   * Signs in with Google's page in a popup, in a browser tab and in the installed app alike: the
+   * popup passes its outcome by messages, where a redirect's went through Firebase's helper frame on
+   * another site, which Chrome's partitioned storage kept from the installed app (issue #50).
+   */
   async signIn(): Promise<void> {
     if (this.statusSignal() === 'loading' || this.userSignal() !== null) {
       return;
@@ -124,19 +127,13 @@ export class AuthService {
     try {
       const backend = await this.connect();
       // A remembered account whose start failed (offline) comes back without Google's page.
-      if (this.remembered() === 'signed-in' && (await this.firstReport) !== null) {
+      if (this.remembered() && (await this.firstReport) !== null) {
         return;
       }
-      if (signInFlow(this.globals) === 'redirect') {
-        this.remember('redirect');
-        // Firebase leaves the page; the next start reads the outcome (resume).
-        await backend.signInWithRedirect();
-      } else {
-        await backend.signInWithPopup();
-        this.expectUser();
-      }
+      await backend.signInWithPopup();
+      this.expectUser();
     } catch (error: unknown) {
-      this.fail(authErrorMessage(error));
+      this.fail(this.message(error));
     } finally {
       this.endPending();
     }
@@ -166,21 +163,14 @@ export class AuthService {
     }
   }
 
-  /** A remembered account, or a redirect's outcome, as the app starts. */
-  private async resume(remembered: Remembered): Promise<void> {
+  /** A remembered account as the app starts: the backend reports it from IndexedDB. */
+  private async resume(): Promise<void> {
     this.pending++;
     try {
-      const backend = await this.connect();
-      if (remembered === 'redirect') {
-        const user = await backend.redirectResult();
-        if (user === null && this.userSignal() === null) {
-          throw new RedirectLostError();
-        }
-        this.expectUser();
-      }
+      await this.connect();
     } catch (error: unknown) {
       // Not loaded (offline): the account is still remembered, for the next start or Sign in.
-      this.fail(authErrorMessage(error), !(error instanceof AccountLoadError));
+      this.fail(this.message(error), !(error instanceof AccountLoadError));
     } finally {
       this.endPending();
     }
@@ -202,7 +192,7 @@ export class AuthService {
               first(user);
             },
             (error: unknown) => {
-              this.fail(authErrorMessage(error));
+              this.fail(this.message(error));
             },
           );
           return backend;
@@ -236,7 +226,7 @@ export class AuthService {
     this.userSignal.set({ uid, displayName, email, photoURL });
     this.statusSignal.set('signed-in');
     this.errorSignal.set(null);
-    this.remember('signed-in');
+    this.remember();
     this.record(user, backend);
   }
 
@@ -314,18 +304,32 @@ export class AuthService {
     console.warn(`cubetrace: ${message}`);
   }
 
-  private remembered(): Remembered | null {
+  /** The sentence for a failure: from the error, and from where the sign-in ran. */
+  private message(error: unknown): string {
+    const context: AuthErrorContext = { installed: installedApp(this.globals) };
+    return authErrorMessage(error, context);
+  }
+
+  /**
+   * Whether an account is remembered. Any other value is stale (0.3.0's `redirect`, left on a phone
+   * by a sign-in that never came back) and is removed, so that the start neither loads Firebase for
+   * it nor says anything.
+   */
+  private remembered(): boolean {
     try {
       const value = this.storage?.getItem(ACCOUNT_STORAGE_KEY) ?? null;
-      return value === 'signed-in' || value === 'redirect' ? value : null;
+      if (value !== null && value !== SIGNED_IN) {
+        this.forget();
+      }
+      return value === SIGNED_IN;
     } catch {
-      return null;
+      return false;
     }
   }
 
-  private remember(value: Remembered): void {
+  private remember(): void {
     try {
-      this.storage?.setItem(ACCOUNT_STORAGE_KEY, value);
+      this.storage?.setItem(ACCOUNT_STORAGE_KEY, SIGNED_IN);
     } catch {
       // Storage blocked: the account is not remembered, and the next start shows Sign in.
     }

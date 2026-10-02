@@ -34,7 +34,7 @@ export interface FakeAccountState {
   readonly user: FakeAccountUser | null;
   /** How many times the app loaded the account's backend (where it would load Firebase). */
   readonly loads: number;
-  /** `popup`, `redirect`, `redirect-result`, `sign-out`, in order. */
+  /** `popup`, `sign-out`, in order. */
   readonly calls: readonly string[];
   readonly saved: readonly { readonly uid: string; readonly record: unknown }[];
   /** The session index, as written (and as the test seeded it). */
@@ -311,14 +311,6 @@ export async function fakeAccount(
           }
           setUser(account);
           return Promise.resolve();
-        },
-        signInWithRedirect(): Promise<void> {
-          change((state) => state.calls.push('redirect'));
-          return Promise.reject(new Error('The end-to-end fake does not redirect.'));
-        },
-        redirectResult(): Promise<FakeAccountUser | null> {
-          change((state) => state.calls.push('redirect-result'));
-          return Promise.resolve(null);
         },
         signOut(): Promise<void> {
           change((state) => state.calls.push('sign-out'));
