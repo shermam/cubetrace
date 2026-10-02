@@ -70,6 +70,19 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
   the bucket and the PUTs; `uploads.json`, its state, at the root of the origin private file system
   (`docs/DATA-MODEL.md` §10); `video[].local` in `attempt.json` (§7), an optional field of version 2;
   the end-to-end suite's fake of the functions with a bucket that the test runs (`uploads.spec.ts`).
+- The cubes' MAC addresses synced with the account (T3.4, issue #21): signed in, the list of
+  Settings → Cube MAC addresses, where the connect dialog's "Remember it for this cube" keeps an
+  address too, is the account's as well, so that an address typed once on a device (a phone whose
+  Chrome cannot read it) is known on the others. Each device merges its list with the account's at
+  each sign-in and each start signed in (the latest change of each cube wins, and a cube removed on
+  one device goes on the others), and sends each change as it is made, offline once the network is
+  back. Settings → Cube MAC addresses says "Synced with your account" with the time of the last
+  merge, and the changes still to be sent. The addresses stay out of the dataset: no export, upload
+  or session index holds one.
+- Development: the account's cubes in `packages/core` (`cloudCube`, `parseCloudCube`,
+  `cloud-cube.schema.json`), the rules of `users/{uid}/cubes/{name}` (the account's alone, each
+  document checked) with their tests, and a cloud of the end-to-end suite's fake that two browser
+  contexts share, two devices of one account (`cube-macs.spec.ts`).
 
 ### Changed
 
@@ -78,6 +91,9 @@ Phase 3 of `docs/PLAN.md` begins: the cloud (0.2.0 was phase 2's).
   Settings → Uploads says (T3.3).
 - The clip counts on the Sessions page and a session's page count the bytes still on the device, and
   say how many clips are in the cloud (T3.3).
+- The settings that the browser keeps are version 2 (T3.4): each cube's MAC address has the time it
+  last changed, and an address kept before gets the time this version first reads it. Settings →
+  Account says that the account keeps the cubes' MAC addresses too.
 
 ## 0.2.0 — 2026-09-27
 

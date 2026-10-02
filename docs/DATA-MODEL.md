@@ -26,9 +26,10 @@ after its upload; a missing one means the file is there), and a camera in `sessi
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
 `attempt.v1.schema.json` for version 1, `user.schema.json` for the account's record in Firestore
-(§10), whose version 1 is its own, and `cloud-session.schema.json` and `cloud-attempt.schema.json`
-for the documents of the session index in Firestore (§10), which have the version of the records
-they copy (2).
+(§10), whose version 1 is its own, `cloud-session.schema.json` and `cloud-attempt.schema.json` for
+the documents of the session index in Firestore (§10), which have the version of the records they
+copy (2), and `cloud-cube.schema.json` for the account's cubes in Firestore (§10), whose version 1
+is its own.
 
 **Reading older records.** Files of version 1 are never rewritten to upgrade them. The readers,
 `parseSession` and `parseAttempt` in `packages/core/src/records.ts` (the app's session store
@@ -479,6 +480,65 @@ when the server refuses it, Settings → Account says so and the console has
 the app writes. The document also holds `quota`, the upload quota, which only the functions write
 (below, "Uploads").
 
+### The account's cubes: `users/{uid}/cubes/{name}`, schema version 1
+
+Settings' list of the cubes' MAC addresses (Settings → Cube MAC addresses, where the connect
+dialog's "Remember it for this cube" keeps one too; `docs/PLAN.md` T3.4, issue #21), one document
+per cube, so that an address typed once on a device of the account, such as a phone whose Chrome
+cannot read it, is known on its other devices. `{name}`, the document's id, is the cube's Bluetooth
+name as Settings has it: as Chrome's list of devices shows it, such as `GAN12ui_AB12` (Settings
+matches names ignoring case).
+
+```jsonc
+// users/Xb3…uid/cubes/GAN12ui_AB12
+{
+  "schema": 1,
+  "name": "GAN12ui_AB12",            // the document's id
+  "mac": "AB:12:CD:34:EF:56",         // six hex bytes, upper case, colons between them
+  "updatedMs": 1790000123456.7,       // when the entry last changed, on the changing device's clock
+  "device": "office-mbp"              // the host label of the device that wrote it
+}
+```
+
+`mac` is the address as Settings keeps it, normalized (`normalizeMac` of `packages/gan`): 17
+characters. `updatedMs` is when the entry last changed, in ms on the host clock (§1) of the device
+that changed it; each entry of Settings' list keeps it too (the settings in `localStorage`,
+`cubetrace.settings`, are version 2 since T3.4: an entry stored before has none, and gets the time
+it is first read, written back at once). A change is dated later than the entry it replaces, also
+when that entry came from a device whose clock runs ahead. `device` is the host label (Settings →
+This device, `host.label` in §6) of the device that wrote the document. An entry whose name cannot
+be a document's id (empty, with a `/`, `.` or `..`, `__…__`, or over 1,500 bytes) stays on its
+device, and Settings says so. `packages/core/schema/cloud-cube.schema.json` (`CLOUD_CUBE_SCHEMA`) is
+this document in machine-readable form, and `parseCloudCube` (`packages/core/src/records.ts`) its
+reader, which refuses a document of another version.
+
+**Writing and merging.** Signed in, each change of the list writes its entry's document whole
+(Firestore's `set`, without merge) or deletes it; an entry renamed, if only in case, writes its new
+document and deletes the old one. Nothing waits for the server: Firestore applies the writes to its
+cache at once and sends them when it can, offline once the network is back. At each sign-in, and at
+each start signed in (once per page load), the device reads the account's cubes and merges them with
+its list, by name ignoring case: their union, where of two copies of a cube the one with the later
+`updatedMs` wins (for equal times, the account's, so that every device ends with the same), the
+account's replacing the device's entry and the device's written to the account; and a deletion on
+either side carried to the other. For the deletions, the device keeps, per account, each document's
+`updatedMs` as it last read it from the server or had a write of it confirmed (`localStorage`
+`cubetrace.cubeSync`, with the time of the last merge with the server's documents, which Settings
+shows): an entry missing on one side in a version the server held was deleted on that side, and is
+deleted on the other; one missing in a version the server never held is new there, and is added. A
+change on one side wins over a deletion on the other. Read from the cache, the server out of reach,
+a missing document is never taken for a deletion, and the merge is not the last one Settings shows.
+A document that cannot be read (of another version) is left as it is, on both sides, and said; a
+write the server refuses is said in Settings and once in the console (`cubetrace: cloud: The cube …
+could not be saved to your account: …`), and tried again at the next change of the list or the next
+start. Signed out, nothing is read or written, and the list is the device's alone.
+
+**Never in the dataset.** The addresses are the account's, not the dataset's: no file of §5 holds
+one (`cube` in session.json names the cube's model, hardware and firmware, never its address), so
+neither an export (Sessions → Export) nor the uploads (T3.3: `attempt.json`, `session.json`, the
+clips and their frames files) nor the session index (below) carries one.
+`apps/web/src/app/session/session-macs.spec.ts` checks it on a session recorded with an address
+typed and kept, and `apps/web/e2e/cube-macs.spec.ts` on an export, signed in with the list synced.
+
 ### The session index: `sessions/{id}` and `sessions/{id}/attempts/{index}`, schema version 2
 
 The index of an account's sessions (`docs/PLAN.md` T3.1): through it the Sessions page of each of the
@@ -680,5 +740,9 @@ leaves the file at the queue's next look.
   `session` and its path's index as `index` (`0017` is 17), `device` and `upload` maps, and no
   `moves`; and the account never changes an attempt's `upload` once the document exists (the
   functions do, past the rules).
-- Nothing else: no other collection, no subcollection of a user's record until a task opens it
-  (T3.4's cubes), and nothing for anyone signed out.
+- `users/{uid}/cubes/{name}` (T3.4): only the account `uid` reads, lists, writes and deletes them; a
+  document must be whole and valid after every write: `schema` 1, its path's name as `name`, `mac`
+  six hex bytes in upper case with colons between them, `updatedMs` a number from 0, `device` a
+  non-empty text, and no other field.
+- Nothing else: no other collection, no other subcollection of a user's record, and nothing for
+  anyone signed out.

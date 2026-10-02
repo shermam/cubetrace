@@ -665,3 +665,33 @@ each call.
   more is sent; sign in again: the upload resumes.
 - [ ] If the browser's storage passes 70% on the phone (Settings → Storage), the oldest uploaded clips
   are deleted until it is under 60%, newest kept; write the usage before and after.
+
+## T3.4 — the cubes' MAC addresses, synced
+
+On https://shermam.github.io/cubetrace/, with the same Google account on the ThinkPhone (the
+installed app; Chrome's MAC address flag off there, as in round 1, so that the connect dialog asks
+for the address) and on the MacBook (Chrome), and the GAN 12 ui. Next to each item, write the
+device, Chrome's version and what happened. The Firebase console (Firestore Database → Data) shows
+the documents under `users/<uid>/cubes`.
+
+- [ ] The ThinkPhone, before signing in with this version: Settings → Cube MAC addresses still lists
+  the cube typed in round 1 (the stored list carried over), and says nothing of an account.
+- [ ] Sign in on the ThinkPhone: Settings → Cube MAC addresses says "Synced with your account. Last
+  merged …" with the time; in the console, `users/<uid>/cubes/<the cube's name>` has `schema` 1, the
+  name, `mac` in upper case with colons, `updatedMs` and `device`, the phone's label. If the list
+  was empty, connect the cube: the dialog asks for the address; with "Remember it for this cube" on,
+  the document appears within a second or two.
+- [ ] The MacBook, signed in, reloaded: Settings lists the phone's cube with its address, and "Last
+  merged" says now. With the flag off there too (or in a Chrome profile without it), Connect a cube
+  connects without asking for the address.
+- [ ] On the MacBook, Edit the address (a wrong one, then the right one) and then Remove the cube:
+  the console follows each change. The ThinkPhone, reloaded: the cube is gone from its list. Connect
+  it there again, typing the address with "Remember it for this cube": the MacBook, reloaded, has it
+  back.
+- [ ] Airplane mode on the ThinkPhone, then Remove the cube there: Settings says "1 change waits to
+  be sent."; airplane mode off: that sentence goes, and the document is gone from the console.
+- [ ] Sign out on the MacBook: Settings → Cube MAC addresses says nothing of an account, and the
+  list stays as it was. Add a cube (any name and address), sign in again: it reaches the console.
+- [ ] A session's export (Sessions → Export) from each device, and the `attempt.json` and
+  `session.json` of an uploaded attempt in the bucket (T3.3): search them for the address, with and
+  without its colons: it is in none.

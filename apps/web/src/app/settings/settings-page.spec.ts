@@ -430,7 +430,8 @@ describe('SettingsPage', () => {
         '“Linux laptop”, in your cubetrace account, and keeps an index of your sessions there: ' +
         'their records without the moves, so that the Sessions page of each of your devices lists ' +
         'them all (demo sessions stay on the device). Their files are uploaded as Uploads, below, ' +
-        'says.',
+        "says. The account also keeps the cubes' MAC addresses (Cube MAC addresses, above), so " +
+        'that one typed on a device is known on the others.',
     );
     expect(backend.loads).toBe(0);
 
