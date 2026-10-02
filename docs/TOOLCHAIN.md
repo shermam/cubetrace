@@ -1585,13 +1585,19 @@ with a listing, and answers the browser's preflights from `bucket/cors.json`: th
 
 | Flow | Spec | What it checks |
 |---|---|---|
-| The account | `account.cloud.spec.ts` | Sign in in the header signs in Ada through the Auth emulator; `users/{uid}`, written through the rules, is valid against `user.schema.json`, with `createdMs` the emulator's creation time to the second and the device's label; a reload keeps the account and sees the device again (its time later); Sign out forgets it, across a reload; every request of the browser context went to `localhost` or `127.0.0.1`. |
+| The account | `account.cloud.spec.ts` | Sign in in the header signs in Ada through the Auth emulator; `users/{uid}`, written through the rules, is valid against `user.schema.json`, with `createdMs` the emulator's creation time to the second and the device's label; a reload keeps the account and sees the device again (its time later); Sign out forgets it, across a reload; every request of the browser context went to `localhost` or `127.0.0.1`, but for Firestore's network probe (below). |
 | Uploads | `uploads.cloud.spec.ts` | Chrome's fake camera, demo solve 0 at speed 20, as `uploads.spec.ts` records it: the attempt recorded with its two clips, the session marked as a real cube's, then the Sessions page: the queue's panel says "Up to date"; the session's and the attempt's documents valid against the cloud schemas, without moves, with the device and its camera; the six files in the sink under `users/<uid>/sessions/<id>/`, with the device's sizes and types, `attempt.json` and `session.json` byte for byte; the attempt's `upload` done, each file with its `doneMs`; `users/{uid}.quota` the day's six files and their bytes; the session's page says "uploaded" and the QA view counts the attempt, 0 B pending. |
 | Two devices | `devices.cloud.spec.ts` | Two browser contexts sign in Lin: a MAC address typed on the "laptop" reaches `users/{uid}/cubes` (valid against `cloud-cube.schema.json`) and a session recorded there, marked as a real cube's, the index; the "phone" has the same uid, the address in Settings, the session as "cloud" with the laptop's label, read-only on its page, and `users/{uid}.devices` has both labels. |
 
-**Times.** Locally on four CPUs, the three tests took 42.6 s in Playwright (two workers; the uploads
-flow 19.6 s), and `npm run e2e:cloud` 62 s with the functions' build (about 11 s), the emulators'
-start (about 8 s) and `ng serve`'s.
+**Times.** Locally on four CPUs, over five runs, the three tests took 37.3 to 42.6 s in Playwright
+(two workers; the uploads flow 19.4 to 20.9 s), and `npm run e2e:cloud` 57 to 62 s with the
+functions' build (about 11 s), the emulators' start (about 8 s) and `ng serve`'s.
+
+**Firestore's network probe.** After a connection error of its transport (the closure library's
+WebChannel, in `@firebase/webchannel-wrapper`), as when a page reloads or signs out, Firestore loads
+`https://www.google.com/images/cleardot.gif` to test the network; the app does it in production too.
+It reaches no service, and it is the one request off the machine that `account.cloud.spec.ts`
+allows: the second full run met it, which an earlier check of every request's host had failed on.
 
 **Sizes** (`ng build`, 2026-10-02, against `main` at 5c79af8): `main` is byte for byte the same but
 for the version, the build's commit and the lazy chunks' hashes, so the initial bundle is 264.63 kB
