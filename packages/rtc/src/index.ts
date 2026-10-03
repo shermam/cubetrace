@@ -5,6 +5,7 @@
 // The data channel's protocol: the messages and their wire form.
 export type {
   CameraState,
+  Clock,
   ControlMessage,
   Cut,
   CutDone,

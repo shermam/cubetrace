@@ -86,6 +86,18 @@ export interface CameraState {
   pendingClips: number;
 }
 
+/**
+ * The clock sync as the host sees it, sent back to the camera device after each answer it took
+ * (T4.1): whether the fit has converged, the phone's clock minus the host's, and the least round
+ * trip; the phone shows them, since only the host measures.
+ */
+export interface Clock {
+  type: 'clock';
+  converged: boolean;
+  offsetMs: number;
+  rttMs: number;
+}
+
 /** A small JPEG of the camera's picture, every 2 s, for the host's list (a binary frame). */
 export interface Thumbnail {
   type: 'thumbnail';
@@ -206,6 +218,7 @@ export type Message =
   | Hello
   | Ping
   | Pong
+  | Clock
   | CameraState
   | Thumbnail
   | Cut
@@ -353,6 +366,13 @@ function decodeControl(text: string): ControlMessage {
       return { type, t1: num(json, 't1') };
     case 'pong':
       return { type, t1: num(json, 't1'), t2: num(json, 't2'), t3: num(json, 't3') };
+    case 'clock':
+      return {
+        type,
+        converged: bool(json, 'converged'),
+        offsetMs: num(json, 'offsetMs'),
+        rttMs: num(json, 'rttMs', 0),
+      };
     case 'state':
       return state(json);
     case 'cut':

@@ -78,6 +78,16 @@ describe('buildConstraints', () => {
     });
   });
 
+  it('asks for the rear camera where none was chosen when the choice says so (the camera device)', () => {
+    expect(buildConstraints({ deviceId: null, facing: 'environment' }).video).toMatchObject({
+      facingMode: { ideal: 'environment' },
+    });
+    // A camera chosen is asked for by its id, whatever the facing says.
+    expect(buildConstraints({ deviceId: 'cam-1', facing: 'environment' }).video).not.toHaveProperty(
+      'facingMode',
+    );
+  });
+
   it('asks for lower ideals, or exactly 60 fps, when the choice says so', () => {
     expect(
       buildConstraints({ deviceId: 'cam-1', width: 1280, height: 720, fps: 30 }).video,
