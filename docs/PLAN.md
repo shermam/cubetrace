@@ -16,7 +16,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | **1. The timer, on any device** | cube connection, scrambles, state tracking, mis-scramble guidance, timer, colour-neutral CFOP breakdown validated against the Cubeast fixtures, session records staged in OPFS, PWA, probe page, fake cube, e2e suite, GitHub Pages deploy. Replaces Cubeast for daily practice. | ✅ v0.1.0 (2026-09-27) |
 | **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ✅ 0.2.0 (2026-10-01: the fixes from the owner's first recordings, T2.8–T2.13, merged; the full round 2 skipped by the owner's decision; the tag from the GitHub UI pending) |
 | 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ✅ 0.3.0 (2026-10-02: T3.0–T3.6 merged and deployed; the tag from the GitHub UI on 2896591 or later). Follow-ups T3.6–T3.9 merged the same day (the installed app's sign-in, the cube's whole record, the 3D cube in the clip viewer, the diagnostics events), for 0.4.0 |
-| 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ⬜ |
+| 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | 🔄 board written 2026-10-03 (T4.0–T4.4), for 0.4.0 |
 | 5. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
 ## Phase 1 task board
@@ -718,6 +718,14 @@ USB webcam, issue #40) share `laptop`, `putCamera` replaces the entry and `putCa
 result, and earlier clips then point at the wrong device; a second device under a label should get
 `laptop-2`, or the clip should name the device~~, done by T2.14: a second device under a label gets
 `laptop-2`.
+Found after phase 3 (2026-10-03), also unscheduled: (f) the clip viewer's drag turns cubing.js's camera
+orbit, whose latitude stops at the poles and which has no roll, so some orientations of the cube in the
+picture cannot be reached by dragging (issue #57; the fix rotates the puzzle itself with a view
+quaternion in place of the orbit); (g) after the phone deleted uploaded clips by policy, the queue
+re-uploaded `attempt.json` for some 35 old attempts at once (14 KB each, harmless, but every file
+counts against the day's quota): the record's re-saves that change nothing the dataset holds should
+not re-sign the file; (h) a diagnostics batch flushed as the page unloads can be lost (T3.9): a
+`keepalive` REST write would close it.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -1909,11 +1917,231 @@ and the cube's maximum heights limit. Left for the owner: the calibration on a r
 straight-on view and a mirror make the tilt match; a mapping that no mirror fixes is still
 `CUBE_TO_PLAYER` alone.
 
-## Phases 4 and 5
+## Phase 4 task board — remote cameras
 
-Outlines only, written into boards when phase 3 ends: **4. Remote cameras** — WebRTC pairing by
-QR code, the data-channel clock sync of the private design (§6), remote cuts and clip transfer in
-16–64 KB messages with backpressure, the desk rig with one or two phones; **5. Community** —
-consent flow, quotas, delete-my-data, community mode (§12 of the private design). Two decisions
-already taken that they must respect: the bucket provider is a configuration, and audio is
-recorded by default.
+**What phase 4 delivers.** The desk rig: the laptop hosts the session (the cube, the timer, the
+attempt's assembly, the upload) while one or two phones film it from other angles, each phone
+recording its own camera at full quality and handing the host two clips per attempt, so that an
+attempt's folder holds `laptop.solve.mp4`, `phone-rear.solve.mp4`, their scramble clips and frames
+files, all on the host clock, uploaded as today. The private design's §3, §4, §6 and §7 are the
+reference; the decisions below are its decisions made concrete against the code as it is after
+phase 3 (T2.0–T2.14, T3.0–T3.10).
+
+**Decisions.**
+
+- **Same app, two roles.** The device that opens a session is the *host*; a phone that joins it is a
+  *camera device*: the same build, on a page of its own (`/camera`), running the capture pipeline
+  of phase 2 (`packages/capture`: WebCodecs in a worker, the ring buffer, the cuts, the MP4s) and
+  nothing of the timer. Both devices are signed in to the same account (phase 3): the pairing's
+  documents live under the account's own data, and the rules let no one else read or write them.
+  A LAN-only pairing without the account is v2 (design §13.13).
+- **Stream for control, record locally for data** (design §4). The connection carries the clock
+  pings, the cut commands, the camera's state, a preview the host can frame by, and finally the
+  finished clip files, over one reliable ordered data channel; a low-bitrate video track for the
+  live preview comes in T4.3 and is never data. Nothing is transcoded on the host.
+- **Transport and signaling.** `RTCPeerConnection` with Google's public STUN server and no TURN:
+  the home Wi-Fi connects the two directly, a guest or office network with client isolation does
+  not, and the office rig stays the laptop's own webcam (design §4). Signaling is the FirebaseRTC
+  pattern on the modular SDK: `sessions/{id}/peers/{peerId}` holds the offer and the answer, with
+  `callerCandidates` and `calleeCandidates` under it; owner-only rules with shape checks; the host
+  deletes a peer's documents when it leaves or after an hour. The QR the host shows is the app's URL
+  with the session id and a one-time pairing token (`/camera?session=<id>&token=<t>`; the token is
+  also typed by hand); the host accepts the first peer that presents it and refuses the token again.
+- **Time.** The dataset stays on the host clock. The phone keeps its own (`performance.timeOrigin +
+  performance.now()`); the host measures the offset over the data channel (the host sends `t1`, the
+  phone answers with `t1, t2, t3`, the host receives at `t4`; the offset from the samples of least
+  round trip, a linear drift fit over the session: design §6), converts the phone's frame times to
+  the host clock when it stores a clip (`t0HostMs` converted, the phone's own `t0RemoteMs` kept
+  beside it in the frames file), and records the fit in `session.json` as
+  `clock.cameras[label].remote = {offsetMs, driftPpm, rttMs, samples, residualP95Ms}`. The
+  clapperboard sync check (T2.8, T2.11) then measures the phone camera's own lag, as it does for the
+  laptop's, and `syncResidualMs` means the same thing for every clip.
+- **Cuts and transfer.** The host decides the windows (the margins of T2.4 and T2.9) and sends each
+  `cut` in the phone's clock at the moment it cuts its own camera (`milestones$`: `armed`, `ended`,
+  `dropped`); the phone cuts from its ring buffer, muxes, stages the MP4 and the frames file in its
+  OPFS, and sends them in messages of 16–64 KB paced by `bufferedAmountLowThreshold`, resumable by
+  offset after a reconnection, acknowledged by the host, then deleted on the phone. The host writes
+  them into the attempt's folder under the camera's label, attaches them to the record
+  (`attachClip`), and the upload queue sends them with the attempt (`ClipsInFlight` holds the attempt
+  until the remote clips are in, up to a limit; a clip that comes later is uploaded as an addition).
+- **Labels and records.** A remote camera is a camera of the session like any other
+  (`session.cameras[]`, `labelFor`: `phone-rear`, `phone-front`, a second phone `phone-2-rear`), with
+  a `remote` field naming the device (its host label and platform); its clips are `video[]` entries
+  with the same fields, their `camera` the label; a sync check's result is `clock.cameras[label]` as
+  today. Schemas stay at version 2 with the new fields optional, like T3.7's.
+- **The host arms as today.** Remote cameras are additive: an attempt never waits for a phone to
+  be framed, synced or connected; what a phone misses is a missing clip, noted in the session's
+  notes, never a lost attempt.
+- **Tests without hardware.** `packages/rtc` keeps the transport and the signaling behind
+  interfaces with in-memory fakes, so that the unit tests and the fast end-to-end suite run
+  without WebRTC; the end-to-end suite pairs two pages of one browser through a fake signaling on
+  a `BroadcastChannel` and the real `RTCPeerConnection` on the loopback interface; the cloud suite
+  signals through the Firestore emulator.
+- **Decisions of earlier phases that hold:** the bucket provider is a configuration; audio is
+  recorded by default, on the phones too; the `cubing.js`, mediabunny and Firebase choices stand.
+
+| Id | Task | Depends on | Status |
+|---|---|---|---|
+| T4.0 | `rtc`: the data-channel protocol, chunked transfer with backpressure and resume, the clock sync maths, Firestore signaling with rules and the pairing token, in-memory fakes | T3.5 | ⬜ |
+| T4.1 | `web`: the Camera page (join by QR or token, preview, framing, sharpness, state) and the host's Cameras panel (Add camera, the list, thumbnails); the connection's lifecycle; the clock sync running; the camera registered in the session | T4.0 | ⬜ |
+| T4.2 | `web`, `capture`, `upload`: remote cuts and clip transfer into the attempt's folder and record; the upload of remote clips, late clips as additions; diagnostics events | T4.1 | ⬜ |
+| T4.3 | `web`, `capture`: the sync check on a remote camera; frame times converted with the drift fit; the live preview track; measurements in `docs/DEVICES.md` | T4.2 | ⬜ |
+| T4.4 | the desk rig: docs, "After T4" items, the round report's checklist, `0.4.0` | T4.3 | ⬜ |
+
+Waves: T4.0 → T4.1 → T4.2 → T4.3 → T4.4, one agent at a time.
+
+### T4.0 — `rtc`: protocol, transfer, clock sync, signaling
+
+**Goal.** Everything of the connection that needs no browser: a new workspace package
+`packages/rtc` with the typed messages of the data channel, the chunked file transfer, the clock
+sync maths, the signaling over Firestore, and the fakes the tests of T4.1–T4.3 drive.
+
+**Scope.** `packages/rtc/src/`: `protocol.ts` (the messages, versioned: `hello` with the device's
+host label, platform, build and camera capabilities; `ping`/`pong` with `t1, t2, t3`; `state`
+(the camera's framing, sharpness, recording, battery and thermal hints, pending clips); `thumbnail`
+(a JPEG of at most 320 px, every 2 s); `cut` (attempt, segment, from and to in the phone's clock,
+the window's reason) and `cut-done`/`cut-failed`; `file-begin` (name, bytes, kind), `file-chunk`
+(offset, bytes), `file-ack` (offset), `file-done`, `file-resume` (name, offset); `leave`), encoded
+as JSON control frames and binary chunk frames; `transfer.ts` (the sender paced by
+`bufferedAmountLowThreshold`, 16–64 KB chunks, resume from the last acknowledged offset, the
+receiver assembling into a writable, integrity by length and a rolling checksum); `clock.ts` in
+`packages/core` (`RemoteClockFit`: the offset from the least-round-trip samples of a sliding
+window, a linear drift fit once the span allows, `toHostMs(remoteMs)`, `toRemoteMs(hostMs)`, the
+fit's record for `clock.cameras[label].remote`, converged when the offset's spread is under 3 ms
+over ten samples); `signaling.ts` (the `Signaling` interface: create an offer document, answer,
+exchange candidates, close; `FirestoreSignaling` on the account backend, `MemorySignaling` for the
+tests); `transport.ts` (the `Transport` interface over a data channel: send a frame, receive
+frames, `bufferedAmount` and its low event, close; `MemoryTransport`, a pair joined in memory with
+an optional delay and loss for the tests; `WebRtcTransport` on `RTCPeerConnection`, with ICE
+restart on failure and the public STUN server); the pairing token (`pairing.ts`: 8 base32
+characters, the URL for the QR, parse). Firestore: `sessions/{id}/peers/{peerId}` with `offer`,
+`answer`, `callerCandidates/{id}`, `calleeCandidates/{id}`, the token's hash in the session's
+`pairing` field written by the host; rules: the owner only, shapes checked, no reads by others;
+tests in `firebase/rules.test.ts`. `AccountBackend` gains the few calls the signaling needs
+(write and watch a peer document and its candidate collections), implemented in `firebase-sdk.ts`
+and both fakes. Docs: `docs/DATA-MODEL.md` §6 (`clock.cameras[label].remote`, `cameras[].remote`),
+§10 (the peer documents), a new `docs/RTC.md` (the protocol, the transfer, the clock sync, the
+failure modes), `docs/ARCHITECTURE.md` (the package), `docs/TOOLCHAIN.md`.
+
+**Acceptance.** Unit tests: the protocol's encoding both ways; the transfer of a 40 MB blob over
+a `MemoryTransport` with a 200 ms delay and 1% loss in under what the pacing allows, resumed after a
+cut in the middle, the checksum refusing a corrupted chunk; the clock fit's offset within 1 ms of a
+simulated truth under 5–40 ms round trips with jitter, the drift fit within 10 ppm over a simulated
+hour, convergence declared and withdrawn correctly; the signaling's offer–answer–candidates
+sequence over `MemorySignaling`; the rules accepting the owner's documents and refusing everyone
+else's and every wrong shape. No change to the app's pages; the bundle's initial size unchanged.
+
+### T4.1 — the Camera page and the host's Cameras panel
+
+**Goal.** A phone joins a session and is seen by the host: the connection's whole life, without
+cuts yet.
+
+**Scope.** `apps/web/src/app/camera-device/`: the `/camera` page, reached from the QR's URL or by
+typing the token; it asks for the camera (the phone's rear camera by default, the controls of
+T2.1), starts the capture pipeline with recording on (the ring buffer runs from the start), shows
+its preview with the framing guide and the sharpness meter, the host's name, the connection's state
+(joining, connected, reconnecting, left), the clock sync's state (syncing, converged, the round
+trip), the battery and a thermal hint when the frame rate drops, and a Leave button; it holds the
+wake lock and asks the user to keep the screen on and the phone plugged in; it reconnects by
+itself (ICE restart, then a new offer) and resumes. The host (`apps/web/src/app/camera/`): a
+Cameras section of the camera panel with Add camera (the QR and the URL), the list of remote
+cameras (name, state, the latest thumbnail, the sync state, the sharpness), Remove; the remote
+camera registered in the session (`putCamera` with `remote`, `labelFor`), its clock fit kept by a
+`RemoteCamerasService` that owns the peers, the pings every 2 s and the fits. Settings: nothing new
+beyond the phone's camera choice, which the Camera page keeps per device. Diagnostics: `rtc.paired`,
+`rtc.connected`, `rtc.disconnected` (with the reason and the duration), `rtc.clock` (the offset and
+the round trip at convergence) on both devices. Docs: `docs/ARCHITECTURE.md` ("Remote cameras"),
+`docs/RTC.md`, `README.md`, `docs/MANUAL-TESTS.md` ("After T4.1": pair the ThinkPhone with the
+MacBook on the home Wi-Fi, read the round trip and the offset, walk away and back, lock and unlock
+the phone), `docs/DIAGNOSTICS.md`.
+
+**Acceptance.** Unit tests of the services with the fakes; an end-to-end test with two pages of one
+browser (the host with the fake cube and a fake camera, the camera device with a fake camera),
+paired through a `BroadcastChannel` signaling and the real `RTCPeerConnection` on loopback: the host
+lists the phone's camera with a thumbnail within 5 s, the sync converges, the camera is in
+`session.json`'s `cameras[]` with `remote`, Leave removes it; the cloud suite pairs through the
+Firestore emulator. Nothing changes for a session without remote cameras.
+
+### T4.2 — remote cuts and clip transfer
+
+**Goal.** The attempt's folder gets the phone's two clips, named after the phone's camera, uploaded
+with the attempt.
+
+**Scope.** The host's `RecordingService` (or a `RemoteCutsService` beside it) sends `cut` for every
+remote camera at the moments it cuts its own (`armed` → the scramble clip, `ended` → the solve clip,
+`dropped` → nothing), the window in the phone's clock through the fit, and marks the attempt in
+`ClipsInFlight` per expected remote clip; the phone cuts, muxes and stages (the clip worker of
+phase 2, the files named `<label>.<segment>.*`), then transfers both files (the frames file first);
+the host writes them into the attempt's folder (`writeAttemptFile`/the clip writer's atomic move),
+converts the frames file's times to the host clock (`t0HostMs` from `t0RemoteMs` through the fit,
+the fit's values in the file's `arrival` or a `remote` field), attaches the clip (`attachClip`:
+`camera`, `firstFrameHostMs`, `truncatedStart`, the sizes) and acknowledges; the phone deletes its
+copy once acknowledged and keeps it otherwise (a reconnection resumes the transfer; a phone that
+rejoins the same session offers its pending clips first). A limit on the wait (120 s after the
+attempt's end): after it the attempt goes to the upload queue without the clip and the session's
+notes say which camera's clip is missing; a clip that arrives later is attached and uploaded as an
+addition (`packages/upload`: an attempt whose files grew is signed again for the new files only).
+Settings: "Record remote cameras" on by default. The QA view counts clips per camera label.
+Diagnostics: `remote.cut` (sent, done, failed, with the window and the delay), `remote.clip`
+(received, bytes, transfer time, throughput), `remote.clip.late`, `remote.clip.missing`. Docs:
+`docs/DATA-MODEL.md` §5 (the files of several cameras), §7, §9 (`t0RemoteMs`), `docs/RTC.md`,
+`docs/ARCHITECTURE.md`, `docs/MANUAL-TESTS.md` ("After T4.2": three solves with the phone paired,
+the attempts' folders with four clips, the viewer switching cameras, the bucket's listing),
+`docs/DIAGNOSTICS.md`.
+
+**Acceptance.** The end-to-end pair records a demo attempt with the camera on both pages: the
+attempt's folder on the host has the laptop's and the phone's clips, `attempt.json` lists four
+clips with the right labels, the frames file of a remote clip has `t0RemoteMs` and a `t0HostMs`
+that differs by the fake transport's offset, the upload (fake signer) sends nine files; a transfer
+cut by closing the channel mid-file resumes after the reconnection; a phone that never answers
+leaves a note and an attempt uploaded on time. Unit tests of the wait, the late addition and the
+conversion.
+
+### T4.3 — the sync check on a remote camera, the drift fit applied, the live preview
+
+**Goal.** A remote clip's `syncResidualMs` means the same as a local one's, and the host frames the
+phone by a live picture.
+
+**Scope.** The clapperboard for a remote camera: the host runs the check as today (hold still, the
+countdown, ten single turns) and sends the turns' host times, in the phone's clock, to the phone,
+which runs the capture's clapperboard analysis on its own frames (`packages/capture`'s
+`clapperboard.ts`, the changed-area metric, the centroid estimator and the trimmed spread of T2.11)
+and answers with the offset and the spread; the host stores `clock.cameras[label]` with `remote`
+beside it and applies the result to the phone's later clips as T2.8 does for the laptop's. The
+frame times of remote clips converted with the drift fit at the clip's time, not the offset at
+pairing. The live preview: the phone adds a video track from its camera stream, sent at a fifth of
+the resolution and at most 300 kbps (`RTCRtpSender.setParameters`), shown in the host's Cameras
+list in place of the thumbnails when it flows, the thumbnails kept as the fallback; measured on the
+ThinkPhone: the encoder's extra cost, the frame rate of the recording with and without it. Settings
+→ Cameras: "Live preview from phones" on by default. `docs/DEVICES.md`: a "Remote cameras" table
+(the Wi-Fi's round trip and the clock sync's spread, the data channel's throughput, the transfer
+time of an attempt's clips, the sync residual of the phone's camera, the phone's temperature after
+20 minutes). `docs/MANUAL-TESTS.md` ("After T4.3": a sync check on the paired phone, the residual
+and the spread; the preview; twenty minutes of solves on the rig).
+
+**Acceptance.** The end-to-end pair runs a sync check on the remote camera with the fake cube's
+turns and a synthetic motion on the phone page's fake camera, the result stored and applied; the
+preview track's presence asserted; unit tests of the conversion with drift.
+
+### T4.4 — the desk rig, docs, `0.4.0`
+
+**Goal.** Phase 4 usable at the owner's desk, documented, released.
+
+**Scope.** `README.md` (the rig: how to pair, where to put the phones, the lamp, what to expect),
+`docs/ARCHITECTURE.md` and `docs/DATA-MODEL.md` read through for phase 4, `docs/MANUAL-TESTS.md`
+("After T4": the whole rig once, two phones if the second one is at hand), the round report's
+checklist (`functions/scripts/report.mts`: the T4 items with their events), `docs/CHANGELOG.md`
+(`## 0.4.0`, the Unreleased section of T3.6–T3.10 and T4.0–T4.3 folded in), the versions `0.4.0`
+everywhere, `docs/USER-ACTIONS.md` (the release from the GitHub UI). No new behaviour unless the
+rounds of T4.1–T4.3 found something small.
+
+**Acceptance.** Everything green; the owner creates the release.
+
+## Phase 5
+
+Outline only, written into a board when phase 4 ends: **Community** — the versioned consent flow
+(the TCLE and Plataforma Brasil's approval first), per-account quotas, delete-my-data (files and
+index entries), community mode, audio opt-in for others, the face-in-frame warning, pseudonymous
+ids, the dataset's license as a separate opt-in (§12 of the private design). The decisions of
+phases 3 and 4 hold: the bucket provider is a configuration, audio is recorded by default for the
+owner.
