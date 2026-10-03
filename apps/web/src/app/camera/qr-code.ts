@@ -514,7 +514,7 @@ function lineScore(at: (i: number) => boolean, n: number): number {
         score += PENALTY_RUN + run - 5;
       }
       pushRun(run);
-      if (last === false && finderLike()) {
+      if (!last && finderLike()) {
         score += PENALTY_FINDER;
       }
     }

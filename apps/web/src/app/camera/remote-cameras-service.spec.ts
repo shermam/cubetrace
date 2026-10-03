@@ -7,7 +7,6 @@ import {
   answerPings,
   hashToken,
   type Clock,
-  type Leave,
   type Message,
 } from '@cubetrace/rtc';
 
@@ -493,7 +492,9 @@ describe('RemoteCamerasService', () => {
     await pass(r.s, 2000);
     expect(r.service.cameras()).toEqual([]);
     all = await events();
-    expect(all.at(-1)?.data).toMatchObject({ reason: expect.stringMatching(/^gave up/) });
+    expect(all.filter((e) => e.kind === 'rtc.disconnected').at(-1)?.data['reason']).toMatch(
+      /^gave up/,
+    );
   });
 
   it('Remove tells the phone, closes the connection and deletes the documents; the entry stays in the session', async () => {
@@ -503,7 +504,7 @@ describe('RemoteCamerasService', () => {
     await pump(r.s, 10);
     const left = phone.of('leave');
     expect(left).toHaveLength(1);
-    expect((left[0] as Leave).reason).toBe('The host removed this camera.');
+    expect(left[0].reason).toBe('The host removed this camera.');
     // The connection closes once the word is out.
     expect(phone.link?.state).toBe('open');
     await pump(r.s, LEAVE_GRACE_MS);

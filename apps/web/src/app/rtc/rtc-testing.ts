@@ -3,7 +3,9 @@
 // the signaling, and the timers of the tests as @cubetrace/rtc's `Timers`. Nothing in the app
 // imports this file, so it is not in the bundle.
 import {
+  CONNECT_TIMEOUT_MS,
   MemoryTransport,
+  REAL_TIMERS,
   type MemoryLinkOptions,
   type Signaling,
   type Timers,
@@ -34,8 +36,9 @@ export interface MemoryConnection {
  * Joins the two sides of each peer connection in memory, as `WebRtcTransport.connect` would over
  * the network: the caller sends its offer through its signaling and waits for the answer, the callee
  * takes the offer and answers, and each side resolves with its end of a `MemoryTransport` pair of the
- * peer (made by whichever side comes first). `failNext` makes the next `connect` reject, as a
- * connection that could not be made.
+ * peer (made by whichever side comes first); a side that waits longer than `WebRtcTransport`'s
+ * timeout (30 s, on the options' timers) fails, as a connection that could not be made. `failNext`
+ * makes the next `connect` reject at once.
  */
 export class MemoryConnector {
   readonly connections: MemoryConnection[] = [];
@@ -52,15 +55,47 @@ export class MemoryConnector {
       await signaling.close();
       throw failure;
     }
-    // The other side closed the documents before the connection was made: it fails, as
-    // WebRtcTransport's does.
+    // The other side closed the documents before the connection was made, or never answered: it
+    // fails, as WebRtcTransport's does.
+    const timers = this.options.timers ?? REAL_TIMERS;
+    let timer: unknown = null;
     const closed = new Promise<never>((_, reject) => {
       signaling.onClosed((reason) => {
         reject(new Error(`The connection closed: the signaling closed: ${reason}.`));
       });
+      timer = timers.setTimeout(() => {
+        void signaling.close().catch(() => undefined);
+        reject(
+          new Error(
+            `The connection failed: the connection did not open within ${String(CONNECT_TIMEOUT_MS / 1000)} s.`,
+          ),
+        );
+      }, CONNECT_TIMEOUT_MS);
     });
     // A closing after the connection was made is the transport's business, not a rejection nobody hears.
     closed.catch(() => undefined);
+    const settled = (): void => {
+      timers.clearTimeout(timer);
+    };
+    try {
+      await this.dance(signaling, closed);
+    } finally {
+      settled();
+    }
+    const transport = this.end(signaling.peerId);
+    const connection = { peerId: signaling.peerId, role: signaling.role, transport };
+    this.connections.push(connection);
+    // The transport closes its signaling when it ends, as WebRtcTransport does.
+    transport.onStateChange((state) => {
+      if (state === 'closed' || state === 'failed') {
+        void signaling.close().catch(() => undefined);
+      }
+    });
+    return transport;
+  };
+
+  /** The offer and the answer over the signaling, for the role; `closed` ends it early. */
+  private async dance(signaling: Signaling, closed: Promise<never>): Promise<void> {
     if (signaling.role === 'caller') {
       const answered = new Promise<void>((resolve) => {
         const off = signaling.onDescription((description) => {
@@ -100,17 +135,7 @@ export class MemoryConnector {
         })
         .catch(() => undefined);
     }
-    const transport = this.end(signaling.peerId);
-    const connection = { peerId: signaling.peerId, role: signaling.role, transport };
-    this.connections.push(connection);
-    // The transport closes its signaling when it ends, as WebRtcTransport does.
-    transport.onStateChange((state) => {
-      if (state === 'closed' || state === 'failed') {
-        void signaling.close().catch(() => undefined);
-      }
-    });
-    return transport;
-  };
+  }
 
   /** The last connection made for `role`. */
   last(role: Signaling['role']): MemoryConnection {

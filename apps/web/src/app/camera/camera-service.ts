@@ -91,17 +91,29 @@ const FPS_UPDATE_SECONDS = 0.5;
 /** The controls that set a group's mode (see @cubetrace/capture's CONTROL_GROUPS). */
 const MODE_CONTROLS: readonly ControlName[] = ['exposureMode', 'focusMode', 'whiteBalanceMode'];
 
-/** The choice for a camera and the resolution and frame rate asked for in Settings. */
+/**
+ * The role this device's camera plays (T4.1): the host's own camera on the Timer page, or the camera
+ * of a phone that films for another host on the Camera page. Each role keeps its own choice of
+ * camera, and the camera device asks for the rear one where none was chosen yet.
+ */
+export type CameraRole = 'host' | 'camera-device';
+
+/**
+ * The choice for a camera and the resolution and frame rate asked for in Settings; `facing` says
+ * which way the browser's default camera should face where none was chosen.
+ */
 export function modeChoice(
   deviceId: string | null,
   resolution: CameraResolution,
   rate: CameraFrameRate,
+  facing: CameraFacing = 'user',
 ): CameraChoice {
   return {
     deviceId,
     ...CAMERA_RESOLUTION_SIZE[resolution],
     fps: rate === '30' ? 30 : 60,
     ...(rate === '60' ? { exactFps: true } : {}),
+    ...(facing === 'environment' ? { facing } : {}),
   };
 }
 
@@ -172,6 +184,7 @@ export class CameraService {
   private readonly frameProblemSignal = signal<string | null>(null);
   private readonly busySignal = signal(false);
   private readonly framingEditingSignal = signal(false);
+  private readonly roleSignal = signal<CameraRole>('host');
 
   /** The browser's name of the camera on, for `camera.on`, `camera.switched` and `camera.off`; null while off. */
   private onLabel: string | null = null;
@@ -214,10 +227,18 @@ export class CameraService {
   });
   /** A control is being applied (or the camera reopened for it). */
   readonly busy = this.busySignal.asReadonly();
-  /** The camera chosen on this host: the open one, or the one that opens next. */
-  readonly selectedId = computed(
-    () => this.prefs.cameraPickFor(this.prefs.hostLabel())?.deviceId ?? null,
+  /** The role the camera plays (T4.1): the host's own, or a camera device's. */
+  readonly role = this.roleSignal.asReadonly();
+  /**
+   * Under which name Settings keep the camera chosen: the host label for the host's own camera, and
+   * the host label marked for the camera device, whose choice is its own (the rear camera, where the
+   * host's Timer page would take the front one).
+   */
+  private readonly pickHost = computed(() =>
+    this.roleSignal() === 'host' ? this.prefs.hostLabel() : `${this.prefs.hostLabel()} (camera)`,
   );
+  /** The camera chosen on this host, for the role: the open one, or the one that opens next. */
+  readonly selectedId = computed(() => this.prefs.cameraPickFor(this.pickHost())?.deviceId ?? null);
   readonly facing = computed(() => {
     const settings = this.settingsSignal();
     return settings === null ? 'unknown' : facingOf(settings, this.labelSignal());
@@ -361,13 +382,27 @@ export class CameraService {
     this.noticeSignal.set(null);
   }
 
-  /** Chooses the camera `deviceId` on this host; a camera that is on switches to it. */
+  /** Chooses the camera `deviceId` on this host, for the role; a camera that is on switches to it. */
   async select(deviceId: string): Promise<void> {
     const device = this.devicesSignal().find((candidate) => candidate.deviceId === deviceId);
     if (device === undefined) {
       return;
     }
-    this.prefs.setCameraPick(this.prefs.hostLabel(), device.deviceId, device.label);
+    this.prefs.setCameraPick(this.pickHost(), device.deviceId, device.label);
+    if (this.statusSignal() !== 'off') {
+      await this.open();
+    }
+  }
+
+  /**
+   * Sets the role the camera plays (T4.1): the Camera page makes it the camera device's while it is
+   * shown, and the host's again when it goes. A camera that is on opens again with the role's choice.
+   */
+  async setRole(role: CameraRole): Promise<void> {
+    if (this.roleSignal() === role) {
+      return;
+    }
+    this.roleSignal.set(role);
     if (this.statusSignal() !== 'off') {
       await this.open();
     }
@@ -551,7 +586,12 @@ export class CameraService {
     if (generation !== this.generation) {
       return;
     }
-    let choice = modeChoice(deviceId, this.prefs.cameraResolution(), this.prefs.cameraFrameRate());
+    let choice = modeChoice(
+      deviceId,
+      this.prefs.cameraResolution(),
+      this.prefs.cameraFrameRate(),
+      this.roleSignal() === 'camera-device' ? 'environment' : 'user',
+    );
     const notes: string[] = [];
     let retriedBusy = false;
     for (;;) {
@@ -589,13 +629,14 @@ export class CameraService {
   }
 
   /**
-   * The camera chosen on this host: its stored id when this device lists it, else the camera with
-   * its label (ids change when site data is cleared), else the stored id anyway (before the
-   * permission, the list has no ids; an id that is gone falls back to the default camera). Null
-   * when none was chosen: the default camera, the front one on a phone.
+   * The camera chosen on this host for the role: its stored id when this device lists it, else the
+   * camera with its label (ids change when site data is cleared), else the stored id anyway (before
+   * the permission, the list has no ids; an id that is gone falls back to the default camera). Null
+   * when none was chosen: the default camera, the front one on a phone (the rear one for the camera
+   * device).
    */
   private async chosenDeviceId(): Promise<string | null> {
-    const pick = this.prefs.cameraPickFor(this.prefs.hostLabel());
+    const pick = this.prefs.cameraPickFor(this.pickHost());
     if (pick === null) {
       return null;
     }
@@ -639,7 +680,7 @@ export class CameraService {
     const deviceId = track.getSettings().deviceId;
     if (typeof deviceId === 'string' && deviceId !== '') {
       this.deviceIdSignal.set(deviceId);
-      this.prefs.setCameraPick(this.prefs.hostLabel(), deviceId, track.label);
+      this.prefs.setCameraPick(this.pickHost(), deviceId, track.label);
     }
     const messages = [...notes];
     const kept = this.prefs.cameraControlsFor(track.label);

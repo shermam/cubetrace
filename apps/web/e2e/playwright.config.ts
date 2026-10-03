@@ -13,7 +13,7 @@ const inCi = Boolean(process.env['CI']);
 // and hold back the demo cube's timers, which recording.spec.ts and capture.spec.ts measure (lost
 // frames, the timing with the camera on and off). The other specs run beside them.
 const encoding =
-  /\/(camera-labels|capture|diagnostics|microphone|recording|session-clips|sync-check|uploads|video-quality)\.spec\.ts$/;
+  /\/(camera-labels|capture|diagnostics|microphone|recording|remote-camera|session-clips|sync-check|uploads|video-quality)\.spec\.ts$/;
 // The specs of the cloud project: the app's own Firebase SDK against the Auth, Firestore and Functions
 // emulators, the uploads into the bucket sink (helpers/emulators.ts). `npm run e2e:cloud` runs
 // Playwright inside `firebase emulators:exec`, which says so in FIREBASE_EMULATOR_HUB: only then is

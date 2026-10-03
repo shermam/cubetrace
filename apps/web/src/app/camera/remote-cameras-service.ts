@@ -25,6 +25,7 @@ import {
   type DeviceInfo,
   type Hello,
   type IncomingOffer,
+  type Signaling,
   type Thumbnail,
   type Transport,
 } from '@cubetrace/rtc';
@@ -132,6 +133,8 @@ interface Peer {
   /** The fit of the phone's clock, kept across its reconnections. */
   readonly fit: RemoteClockFit;
   transport: Transport | null;
+  /** The signaling of the current connection, whose close deletes the peer document. */
+  signaling: Signaling | null;
   link: MessageLink | null;
   pinger: ClockPinger | null;
   /** Stops the handlers of the current connection. */
@@ -222,9 +225,10 @@ export class RemoteCamerasService {
         }
       });
     });
-    // The page goes: the phones are told, and the documents deleted, as far as there is time.
+    // The page goes: the phones are told and the documents deleted, as far as there is time; the
+    // browser closes the connections itself (closing them here would drop the word).
     const onPageHide = (): void => {
-      this.endAll('the host page closed', 0);
+      this.endAll('the host page closed', 0, false);
     };
     this.globals.addEventListener?.('pagehide', onPageHide);
     inject(DestroyRef).onDestroy(() => {
@@ -418,6 +422,7 @@ export class RemoteCamerasService {
       },
       fit: new RemoteClockFit(),
       transport: null,
+      signaling: null,
       link: null,
       pinger: null,
       offs: [],
@@ -438,6 +443,7 @@ export class RemoteCamerasService {
     const generation = ++peer.generation;
     // A connection still up (the phone thought it dead first) makes way for the new one.
     this.detach(peer, 'replaced by a new connection');
+    peer.signaling = offer.signaling;
     this.patch(peer, { peerId: offer.peerId });
     const started = this.timers.now();
     let transport: Transport;
@@ -608,9 +614,10 @@ export class RemoteCamerasService {
 
   /**
    * Ends the peer on the host's initiative: `leave`, the connection closed once the word is out
-   * (`graceMs`; none when the page goes), the camera gone from the list.
+   * (`graceMs`), the camera gone from the list. When the page is going (`close` false), the
+   * connection is left to the browser and the documents deleted at once, as far as there is time.
    */
-  private end(peer: Peer, why: string, message: string, graceMs: number): void {
+  private end(peer: Peer, why: string, message: string, graceMs: number, close = true): void {
     const now = this.timers.now();
     peer.link?.trySend({ type: 'leave', reason: message });
     this.diagnostics.record('rtc.disconnected', {
@@ -622,10 +629,15 @@ export class RemoteCamerasService {
     });
     peer.generation++;
     const transport = peer.transport;
+    const signaling = peer.signaling;
     peer.transport = null;
     this.detach(peer, why);
     if (transport !== null) {
-      this.closeAfter(transport, why, graceMs);
+      if (close) {
+        this.closeAfter(transport, why, graceMs);
+      } else {
+        void signaling?.close().catch(() => undefined);
+      }
     }
     this.drop(peer);
   }
@@ -653,6 +665,7 @@ export class RemoteCamerasService {
     peer.link = null;
     peer.transport?.close(reason);
     peer.transport = null;
+    peer.signaling = null;
     this.clearRecord(peer);
   }
 
@@ -670,9 +683,9 @@ export class RemoteCamerasService {
     );
   }
 
-  private endAll(reason: string, graceMs = LEAVE_GRACE_MS): void {
+  private endAll(reason: string, graceMs = LEAVE_GRACE_MS, close = true): void {
     for (const peer of [...this.peers.values()]) {
-      this.end(peer, reason, `The host let the camera go: ${reason}.`, graceMs);
+      this.end(peer, reason, `The host let the camera go: ${reason}.`, graceMs, close);
     }
     this.clearExpiry();
     if (this.pairingSignal() !== null) {

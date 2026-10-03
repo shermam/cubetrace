@@ -1,0 +1,187 @@
+<h1>Camera</h1>
+<p class="lead">
+  This phone films another device's session from its own angle, in sync with the cube: the host
+  shows a QR code in its Camera settings (Cameras → Add camera), and both devices are signed in to
+  the same account.
+</p>
+
+<section class="connection" aria-label="Connection" data-testid="device-connection">
+  <p class="pill" data-testid="device-state" [attr.data-state]="service.state()">
+    <span class="dot" aria-hidden="true"></span>{{ stateText() }}
+    @if (joined()) {
+      <span class="muted" data-testid="device-host">· {{ hostText() }}</span>
+      <span class="muted" data-testid="device-since">· {{ sinceText() }}</span>
+    }
+  </p>
+  @if (service.problem(); as problem) {
+    <p class="problem" role="alert" data-testid="device-problem">{{ problem }}</p>
+  }
+
+  @switch (service.state()) {
+    @case ('idle') {
+      <form class="code" (submit)="join($event)">
+        <label for="pairing-code">Code or link</label>
+        <input
+          id="pairing-code"
+          type="text"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          placeholder="7KQM 2XAB"
+          data-testid="pairing-input"
+          [value]="code()"
+          (input)="code.set($any($event.target).value)"
+        />
+        <button type="submit" class="primary" data-testid="pairing-join">Join</button>
+      </form>
+      <p class="hint">
+        Scan the QR code with the phone's camera app (it opens this page), or type the 8 characters
+        under it. A code lasts 10 minutes and joins one phone.
+      </p>
+    }
+    @case ('signed-out') {
+      <p class="hint" data-testid="device-sign-in">
+        Sign in to join: the pairing goes through your account, the same as the host's. The code is
+        kept.
+      </p>
+      <app-account-control place="settings" />
+    }
+    @case ('refused') {
+      <button type="button" data-testid="device-again" (click)="again()">Try another code</button>
+    }
+    @case ('left') {
+      <button type="button" data-testid="device-again" (click)="again()">Join again</button>
+    }
+    @case ('host-gone') {
+      <button type="button" data-testid="device-again" (click)="again()">Join again</button>
+    }
+  }
+
+  @if (joined()) {
+    <dl class="facts">
+      <dt>Clock</dt>
+      <dd data-testid="device-clock" [attr.data-converged]="service.clock()?.converged ?? false">
+        {{ clockText() }}
+      </dd>
+      @if (batteryText(); as battery) {
+        <dt>Battery</dt>
+        <dd data-testid="device-battery">{{ battery }}</dd>
+      }
+      <dt>Screen</dt>
+      <dd data-testid="device-wake-lock">{{ wakeLockText().label }}</dd>
+    </dl>
+    @if (thermalText(); as thermal) {
+      <p class="problem" role="status" data-testid="device-thermal">{{ thermal }}</p>
+    }
+    <p class="hint">
+      Keep the screen on and the phone plugged in: the recording runs as long as this page is in
+      front. A short time in the background is survived; a long one needs a new code.
+    </p>
+    <button type="button" data-testid="device-leave" (click)="leave()">Leave</button>
+  }
+</section>
+
+<section class="picture" aria-label="Picture" data-testid="device-picture">
+  <div class="box" [attr.data-status]="camera.status()" [style.--aspect]="aspect()">
+    @if (camera.stream()) {
+      <div class="frame" [class.mirrored]="camera.mirrored()">
+        <video
+          #preview
+          muted
+          playsinline
+          aria-label="Camera preview"
+          data-testid="device-preview"
+        ></video>
+        @if (box(); as area) {
+          <div
+            class="framing"
+            aria-hidden="true"
+            data-testid="device-preview-framing"
+            [style.left.%]="area.left"
+            [style.top.%]="area.top"
+            [style.width.%]="area.width"
+            [style.height.%]="area.height"
+          ></div>
+        }
+      </div>
+    } @else if (camera.status() === 'starting') {
+      <p class="message">Opening the camera…</p>
+    } @else {
+      <p class="message" data-testid="device-camera-off">
+        The camera is not on: {{ camera.error() ?? 'turn it on below.' }}
+      </p>
+    }
+  </div>
+  @if (camera.stream()) {
+    <p class="status" data-testid="device-picture-line">{{ pictureLine() }}</p>
+  }
+  @if (capture.error(); as error) {
+    <p class="problem" role="alert" data-testid="device-recording-error">{{ error }}</p>
+  }
+  @for (notice of capture.notices(); track notice) {
+    <p class="notice" role="status" data-testid="device-recording-notice">{{ notice }}</p>
+  }
+</section>
+
+<details class="settings" data-testid="device-camera-settings">
+  <summary><h2>Camera settings</h2></summary>
+  <div class="panel">
+    <div class="bar">
+      @if (camera.devices().length > 0) {
+        <label class="picker">
+          <span>Camera</span>
+          <select
+            #deviceSelect
+            data-testid="device-camera-select"
+            [disabled]="camera.status() === 'starting'"
+            (change)="select(deviceSelect.value)"
+          >
+            @for (device of camera.devices(); track device.deviceId) {
+              <option
+                [value]="device.deviceId"
+                [selected]="device.deviceId === camera.selectedId()"
+              >
+                {{ device.name }}
+              </option>
+            }
+          </select>
+        </label>
+      }
+      @if (camera.status() === 'off' || camera.status() === 'error') {
+        <button
+          type="button"
+          class="primary"
+          data-testid="device-camera-on"
+          (click)="camera.start()"
+        >
+          Turn on
+        </button>
+      }
+      @if (camera.stream()) {
+        <button
+          type="button"
+          data-testid="device-framing-edit"
+          [attr.aria-pressed]="editing()"
+          (click)="toggleEditing()"
+        >
+          {{ editing() ? 'Done framing' : 'Edit the framing' }}
+        </button>
+      }
+    </div>
+    @if (camera.notice(); as notice) {
+      <p class="notice" role="status">{{ notice }}</p>
+    }
+    @if (camera.stream()) {
+      @if (editing()) {
+        <app-framing-editor />
+      }
+      <app-sharpness-meter />
+      <p class="hint">
+        Of the framing rectangle, twice a second. Aim for good with the cube in the rectangle: light
+        helps most. Resolution, frame rate, video quality and the microphone are in Settings →
+        Camera, the same as for the Timer page.
+      </p>
+      <app-camera-controls />
+    }
+  </div>
+</details>
