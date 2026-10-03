@@ -877,3 +877,47 @@ cube and what happened.
 - [ ] A clip of an attempt before T3.7 (no `gyro.json`): the cube turns with the moves, upright, and
   the line under it says the orientation is not recorded; the view's presets and the drag work all
   the same.
+
+## After T4.1 — remote cameras
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T4.1, the MacBook as the
+host (the GAN 12 ui, the camera on, signed in) and the ThinkPhone as the camera (the same account,
+Chrome or the installed app), both on the home Wi-Fi. The pairing, the picture, the state and the
+clock sync are what T4.1 brings; no clip of the phone's reaches the laptop yet (T4.2), and no sync
+check runs on it (T4.3). The events say most of it (`docs/DIAGNOSTICS.md`, "After T4.1"); write down
+what they cannot show, next to the item, with the device and what happened.
+
+- [ ] The pairing: on the MacBook, Camera settings → Cameras → Add camera shows a QR code, the link
+  and an 8-character code, "Good for 10 min". On the ThinkPhone, scan the code with the camera app:
+  the Camera page opens, asks for the camera (the rear one) and the microphone once, and says
+  "Connected · <the MacBook's label>" within a few seconds; the MacBook lists "ThinkPhone" (its host
+  label) with a picture that changes every 2 s, "connected for …", and the report line ("recording ·
+  29.9 fps · sharpness … · battery …"). Write the time from the scan to "Connected".
+- [ ] The clock sync: on the MacBook, the camera's line goes from "syncing · n samples · round trip
+  …" to "synced · round trip … · offset … · drift … ppm" within about 25 s; on the ThinkPhone, the
+  Clock line says the same round trip and offset. Write both numbers (the round trip of the home
+  Wi-Fi, and the offset between the two clocks, which can be any value), and whether it stayed
+  synced over five minutes (the line, and `rtc.clock` once a minute in the events). A line that never
+  says synced on a quiet Wi-Fi: the ThinkPhone's Wi-Fi power saving (round trips of 100 ms and more
+  between bursts), which T4.3 measures; write the round trip shown.
+- [ ] The code typed: Remove on the MacBook (the phone says "The host let this camera go"), Add
+  camera again, and on the ThinkPhone "Join again", then type the code under the QR (lower case and
+  spaces are fine): connected again, the same camera label (`phone-rear`) in the list.
+- [ ] Walk away and back: with the phone connected, walk out of the Wi-Fi's reach (or turn its Wi-Fi
+  off for a minute): the MacBook's line says "reconnecting for …" within about half a minute, the
+  phone "Reconnecting…"; back in reach (or Wi-Fi on), both say connected again within a minute,
+  without a new code, and the sync line comes back. Write how long each took.
+- [ ] Lock and unlock the phone: locked for 20 s, the picture on the MacBook stops, then goes on when
+  unlocked (the connection survives a short background); locked for 6 minutes, the MacBook lets the
+  camera go after 5 ("removed after 5 min away"), and the phone, unlocked, says the host is gone or
+  reconnecting; a new code pairs it again. The screen stays on while connected ("Screen on" on the
+  page); write what Android did to the page in the background (Chrome, or the installed app).
+- [ ] Leave on the phone: the MacBook's list is empty at once; Sessions → the session's page says
+  the cameras "laptop (…), phone-rear (camera 0, facing back)" (the entry stays); the exported
+  `session.json` has the camera with `remote` and `clock.cameras["phone-rear"].remote` with the
+  fit (the coordinator reads them).
+- [ ] The second phone, if one is at hand (a different host label in its Settings): paired with a
+  second Add camera while the first is connected, listed as `phone-rear-2`; a phone that scans the
+  first phone's code again is refused.
+- [ ] A demo session (no cube): Add camera works all the same, and the Sessions page then lists the
+  demo session as "both" (its document went to the index for the pairing; nothing of it is uploaded).

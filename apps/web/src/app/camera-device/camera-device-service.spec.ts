@@ -375,12 +375,12 @@ describe('CameraDeviceService', () => {
   it.each([
     [
       'a code of another session',
-      async (host: Host) => `${host.token.slice(0, 7)}${host.token[7] === 'A' ? 'B' : 'A'}`,
+      (host: Host): string => `${host.token.slice(0, 7)}${host.token[7] === 'A' ? 'B' : 'A'}`,
       'wrong-token',
     ],
     [
       'a code the host closed',
-      async (host: Host) => {
+      async (host: Host): Promise<string> => {
         await host.signaling.closePairing();
         return host.token;
       },

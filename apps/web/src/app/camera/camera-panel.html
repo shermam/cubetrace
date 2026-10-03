@@ -181,9 +181,11 @@
     <app-recording-panel />
 
     <!-- The phones that film for this host (T4.1): loaded when Add camera is first pressed, so that
-         a session without remote cameras downloads nothing of the connection's code. -->
+         a session without remote cameras downloads nothing of the connection's code. The press is a
+         signal the block waits for (`when`), not an interaction trigger: that one renders the block
+         as soon as its chunk is there, before the placeholder's own click handler has run. -->
     <section class="remote" data-testid="remote-cameras-section">
-      @defer (on interaction(addCamera)) {
+      @defer (when addRequests() > 0) {
         <app-remote-cameras [addRequests]="addRequests()" />
       } @placeholder {
         <h3>Cameras</h3>
@@ -194,7 +196,6 @@
         </p>
         <div class="bar">
           <button
-            #addCamera
             type="button"
             class="primary"
             data-testid="add-camera"

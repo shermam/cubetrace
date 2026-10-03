@@ -7,6 +7,31 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Remote cameras, the pairing and the connection (T4.1, phase 4; `docs/RTC.md` §8, `README.md`
+  "Remote cameras"): a phone films a session from another angle. On the host, Camera settings →
+  Cameras → Add camera publishes a one-time code (10 minutes, one phone) and shows it as a QR code
+  (drawn by the app, no dependency), a link and 8 characters to type; the Cameras section and the
+  connection's code load only then. On the phone, the new Camera page (`/camera`, from the QR's URL
+  or with the code typed or the link pasted; signed in to the same account, with Sign in there when it
+  is not) turns the rear camera on (a camera choice of its own, apart from the Timer page's), runs the
+  capture pipeline from the start, shows the preview with the framing rectangle, the sharpness meter
+  and the camera's controls, the host, the connection's state, the clock sync as the host measures
+  it, the battery and a thermal hint, keeps the screen on, reconnects by itself for five minutes
+  after a drop and then says the host is gone, and leaves with Leave (or when the page goes). The
+  host lists each phone with its name, its label in the session, its state (connected, reconnecting
+  for up to five minutes), the sync (syncing, or synced with the round trip, the offset and the
+  drift), what it reports (recording, frame rate, sharpness, framing, battery, a thermal hint), a
+  picture every 2 s, and Remove; the camera goes into `session.json`'s `cameras[]` with `remote`, and
+  its clock fit into `clock.cameras[<label>].remote` when it converges and every minute after. A
+  demo session pairs too: its document goes to the index for the pairing (its attempts never).
+  Diagnostics: `rtc.paired`, `rtc.connected`, `rtc.disconnected`, `rtc.clock`, `rtc.failed` on both
+  devices. The clips of a remote camera come with T4.2, its sync check and live preview with T4.3.
+- Development: the `clock` message (host to phone) in the protocol; `CameraChoice.facing`;
+  `FramingEditor` and `SharpnessMeter` as components of their own; `openMicrophone` shared by both
+  recordings; the camera device's seams in `apps/web/src/app/rtc/`; the end-to-end suite's signaling
+  over a `BroadcastChannel` (`apps/web/e2e/helpers/signaling.ts`) and its two pairing flows, the
+  fast one on the loopback interface and the cloud one through the Firestore emulator; the QR
+  encoder's test reads its codes back with `jsqr` (a devDependency).
 - Development: the groundwork of the remote cameras (T4.0, phase 4; `docs/RTC.md`), which no page
   uses yet: the package `@cubetrace/rtc` with the data channel's protocol (versioned `hello`, pings,
   the camera's state and thumbnails, cuts, the file messages, `leave`; JSON control frames and binary

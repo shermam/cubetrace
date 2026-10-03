@@ -2102,6 +2102,51 @@ lists the phone's camera with a thumbnail within 5 s, the sync converges, the ca
 `session.json`'s `cameras[]` with `remote`, Leave removes it; the cloud suite pairs through the
 Firestore emulator. Nothing changes for a session without remote cameras.
 
+**Outcome (2026-10-03).** As contracted, with these choices. **The host.** `RemoteCamerasService`
+(`apps/web/src/app/camera/`) owns the pairing and the peers; the Cameras section (`RemoteCameras`)
+loads behind `@defer (when addRequests() > 0)` from a placeholder's Add camera in Camera settings, so
+that a session without remote cameras downloads nothing of `@cubetrace/rtc` (one lazy chunk of
+42.7 kB raw with the QR encoder; the initial bundle 265.96 kB raw against 264.57 kB on `main`, the
+framework's deferred-block runtime); not `on interaction`, which rendered the block in the click's
+own dispatch under `ng serve` and lost the press. The pairing lives in the session's document, so
+Add camera needs the account and a session under way, and `SessionIndexService.indexForPairing`
+writes a demo session's document too (this once and at its later saves; its attempts never): the
+end-to-end suite pairs demo sessions, and the owner can try the rig without a cube. The QR code is
+drawn by the app (`qr-code.ts`: byte mode, level M, versions 1–10, 250 lines; its test reads the
+codes back with `jsqr`, a devDependency), the token shown under it as two halves. The first peer that
+presents the token is answered and the pairing closed; a camera whose connection ended without a
+`leave` stays listed as reconnecting for five minutes, during which its token is taken again (only
+then: a second phone shown the same code cannot take a connected camera's place); a stale or wrong
+offer has its documents deleted, which ends the phone's call at once. `hello` is answered within
+10 s or the peer is sent away (another protocol version too). The camera's entry goes into the
+session with `local: false` and `remote`, under the label the session gives it (`phone-rear`,
+`phone-rear-2`: two phones told apart by their host labels), and the fit's record into
+`clock.cameras[label].remote` at convergence and every minute after, the clapperboard fields at 0
+until T4.3. **The phone.** `CameraDeviceService` and `CameraDeviceCapture`
+(`apps/web/src/app/camera-device/`): the pipeline runs from the moment the page opens, through
+`microphone.ts`'s `openMicrophone` (taken out of `RecordingService`, which the page does not use: it
+follows the host's session and cube and would bring the timer onto the phone); `CameraService` gained
+a role, the camera device's with a camera choice of its own and the rear camera by default
+(`CameraChoice.facing`); a code typed without its link finds the session among the account's newest
+20 by the token's hash; the page keeps a code across the sign-in; the reconnection calls again every
+3 s for five minutes (each call fails after `WebRtcTransport`'s 30 s), then says the host is gone.
+**Both sides** send `leave` and close the connection 250 ms later (`RTCPeerConnection.close` drops
+what the channel holds; the word was lost in the first tests) and, on `pagehide`, send it and leave
+the connection to the browser. The protocol gained `clock` (host to phone: `converged`, `offsetMs`,
+`rttMs`), additive within version 1. **The clock fit** keeps a trip 3 ms over the least when that
+is more than 1.5× it (`REMOTE_CLOCK_RTT_ALLOWANCE_MS`): between two pages of one browser the least
+trip is 1.1 ms and 1.5× it kept 4 of 31 trips in a minute (the main threads encode video and measure
+sharpness), so the fit never converged; the allowance keeps about half, is stricter than the factor
+from a 6 ms trip up, and changes nothing on a Wi-Fi. The `FramingEditor` and the `SharpnessMeter`
+left `CameraPanel` as components, reused on the Camera page. **Diagnostics:** `rtc.paired`,
+`rtc.connected`, `rtc.disconnected`, `rtc.clock`, `rtc.failed`, and the "After T4.1" checklist (8
+items) in `docs/DIAGNOSTICS.md` and the round report. **Tests:** the services with the account fake's
+memory signaling, a memory connector that plays the SDP dance (`rtc-testing.ts`) and the harness's
+fake clock (the host's 13, the phone's 15, the capture's 4, the two components' 10, the QR encoder's
+9); the end-to-end pair over a `BroadcastChannel` signaling (`e2e/helpers/signaling.ts`) and the real
+`RTCPeerConnection` on the machine's interface, in the encoding project, and the cloud pair through
+the Firestore emulator. Counts and sizes in the pull request (#TBD).
+
 ### T4.2 — remote cuts and clip transfer
 
 **Goal.** The attempt's folder gets the phone's two clips, named after the phone's camera, uploaded

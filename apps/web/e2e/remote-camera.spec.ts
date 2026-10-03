@@ -1,9 +1,9 @@
-import type { SessionRecord } from '@cubetrace/core';
+import type { CameraClock, SessionRecord } from '@cubetrace/core';
 import { type Locator, type Page, expect, test } from '@playwright/test';
 
 import { fakeAccount, fakeAccountState } from './helpers/account';
 import { fakeSignaling } from './helpers/signaling';
-import { currentSessionId, demoPath } from './helpers/timer';
+import { currentSessionId, demoPath, expectSolves } from './helpers/timer';
 
 // A remote camera (docs/PLAN.md T4.1, docs/RTC.md) with two pages of one browser: the host (the demo
 // cube, Chrome's fake camera, signed in to the fake account) adds a camera in Camera settings and
@@ -64,8 +64,10 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   await fakeAccount(page);
   await fakeSignaling(page);
   await page.goto(demoPath(0, SPEED));
-  await expect.poll(() => currentSessionId(page), { timeout: 30_000 }).not.toBeNull();
+  // The demo solve that starts with the page, saved: the page is still from then on.
+  await expectSolves(page, 1);
   const sessionId = (await currentSessionId(page)) ?? '';
+  expect(sessionId).not.toBe('');
   await banner(page).getByRole('button', { name: 'Sign in' }).click();
   await expect(banner(page).getByRole('button', { name: 'Account: Ada Lovelace' })).toBeVisible();
 
@@ -74,6 +76,7 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   await section.locator('summary').click();
   await page.getByTestId('camera-toggle').click();
   await expect(page.getByTestId('camera-toggle')).toHaveText('Turn off');
+  await expect(page.getByTestId('camera-measured')).toHaveText(/fps/, { timeout: 10_000 });
   await page.getByTestId('add-camera').click();
   const pairing = page.getByTestId('pairing');
   await expect(pairing).toBeVisible({ timeout: 15_000 });
@@ -97,7 +100,9 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   await phone.goto(path);
   const state = phone.getByTestId('device-state');
   await expect(state).toHaveAttribute('data-state', 'connected', { timeout: 45_000 });
-  await expect(phone.getByTestId('device-host')).toContainText('Linux laptop (Linux)');
+  // The host's label is the browser's default for the machine ("Windows laptop" under Playwright's
+  // Desktop Chrome, which says Windows): the two pages share the settings, as one profile does.
+  await expect(phone.getByTestId('device-host')).toContainText(/ · \w+ laptop \(\w+\)$/u);
   await expect(phone.getByTestId('device-preview')).toBeVisible();
   await expect(phone.getByTestId('device-picture-line')).toContainText('recording', {
     timeout: 15_000,
@@ -109,16 +114,18 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   await expect(row(page).getByTestId('remote-camera-thumbnail')).toHaveAttribute('src', /^blob:/, {
     timeout: 5000,
   });
-  await expect(row(page).getByTestId('remote-camera-name')).toHaveText('Linux laptop');
+  await expect(row(page).getByTestId('remote-camera-name')).toHaveText(/^\w+ laptop$/u);
   // The host's own camera is `laptop`; the phone's, the same fake camera on another device, `laptop-2`.
   await expect(row(page).getByTestId('remote-camera-label')).toHaveText('laptop-2');
   await expect(row(page).getByTestId('remote-camera-report')).toContainText('recording', {
     timeout: 15_000,
   });
 
-  // The clock sync converges: ten answers over ten seconds, within 3 ms of spread; both pages read
-  // the same browser's clock, so the offset is near 0.
-  await expect(row(page)).toHaveAttribute('data-converged', 'true', { timeout: 60_000 });
+  // The clock sync converges: ten kept answers over ten seconds, within 3 ms of spread (on this
+  // loopback the least round trip is about a millisecond, and about half of the trips are kept:
+  // the two main threads encode video and measure sharpness); both pages read the same browser's
+  // clock, so the offset is near 0.
+  await expect(row(page)).toHaveAttribute('data-converged', 'true', { timeout: 90_000 });
   const sync = (await row(page).getByTestId('remote-camera-sync').textContent()) ?? '';
   expect(sync).toMatch(/^synced · round trip [\d.]+ ms · offset /u);
   expect(Math.abs(offsetOf(sync))).toBeLessThan(20);
@@ -128,7 +135,9 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   // session.json: the camera with `remote`, and its clock fit once converged.
   await expect
     .poll(
-      async () => (await sessionJson(page, sessionId)).clock.cameras['laptop-2']?.remote?.samples,
+      async () =>
+        ((await sessionJson(page, sessionId)).clock.cameras['laptop-2'] as CameraClock | undefined)
+          ?.remote?.samples,
       { timeout: 15_000 },
     )
     .toBeGreaterThanOrEqual(10);
@@ -137,8 +146,9 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   expect(remote).toMatchObject({
     local: false,
     deviceLabel: 'fake_device_0',
-    remote: { label: 'Linux laptop', platform: 'Linux' },
+    remote: { label: expect.stringMatching(/ laptop$/u), platform: expect.any(String) },
   });
+  expect(remote?.remote?.label).toBe(session.host.label);
   expect(session.cameras.find((camera) => camera.label === 'laptop')).toMatchObject({
     local: true,
   });

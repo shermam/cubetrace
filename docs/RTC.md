@@ -6,8 +6,9 @@ clips of each attempt, all on the host clock. This document is the contract of t
 T4.0 built it in `packages/rtc` (the code), `packages/core` (the clock maths, the records' fields,
 the documents' shapes) and `firebase/firestore.rules` (the signaling's rules): the messages of the
 data channel, the file transfer, the clock sync, the signaling and the pairing token, and what each
-side does when something fails. The pages that use it come with T4.1–T4.3; `docs/ARCHITECTURE.md`
-("Remote cameras") places it in the app.
+side does when something fails. The pages that use it came with T4.1 (§8 below: the lifecycle as the host's Cameras section and
+the phone's Camera page run it); the cuts and the transfer come with T4.2, the sync check and the
+live preview with T4.3. `docs/ARCHITECTURE.md` ("Remote cameras") places it in the app.
 
 **Stream for control, record locally for data.** One `RTCPeerConnection` between the two devices,
 made with Google's public STUN server (`stun:stun.l.google.com:19302`) and no TURN relay: on one Wi-Fi
@@ -41,6 +42,7 @@ file name without a path).
 | `hello` | both | `v` (1), `role` (`host`, `camera`), `device: {label, platform}`, `app: {version, commit}`, `camera` (the phone's camera as its own session.json would describe it: a `CameraInfo`, read by core's `parseCameraInfo`; null from the host) | once the channel opens; the phone again when its camera changes |
 | `ping` | host | `t1`, the host clock | every 2 s (`PING_INTERVAL_MS`) |
 | `pong` | phone | `t1` back, `t2` (when the ping came) and `t3` (when the answer goes), on the phone's clock | at once, for each ping |
+| `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
 | `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
 | `thumbnail` | phone | `remoteMs`, `width`, `height`, `jpeg` (a JPEG of at most 320 px on its longer side) | every 2 s (binary) |
 | `cut` | host | `attempt`, `segment` (`scramble`, `solve`), `fromRemoteMs`, `toRemoteMs` (the window, in the phone's clock, converted by the host with the clock fit), `reason` (the timer's milestone: `armed`, `ended`) | when the host cuts its own camera |
@@ -146,8 +148,14 @@ rtt    = (t4 − t1) − (t3 − t2)            the round trip, without the phon
 ```
 
 `RemoteClockFit` keeps the last 60 samples (`REMOTE_CLOCK_WINDOW`). Of them, the samples whose round
-trip is within 1.5× the least of the window (`REMOTE_CLOCK_RTT_FACTOR`) are the estimate's: a longer
-trip had more room for an asymmetry between the two legs, which the offset cannot see. The offset is
+trip is within 1.5× the least of the window (`REMOTE_CLOCK_RTT_FACTOR`), or 3 ms over it when that
+is more (`REMOTE_CLOCK_RTT_ALLOWANCE_MS`, T4.1), are the estimate's: a longer trip had more room
+for an asymmetry between the two legs, which the offset cannot see. The allowance is for the links
+whose least trip is a millisecond (two pages of one browser, an Ethernet cable): 1.5× it would keep
+only the samples that met no work at all on either main thread (4 of 31 in a minute, measured in
+the end-to-end suite between two pages encoding video), while a trip 3 ms over the least is off by
+1.5 ms at most, under what the factor already admits from a 6 ms trip up; on a Wi-Fi of 5 ms and
+more nothing changes. The offset is
 the median of their offsets. Once the kept samples span more than 60 s (`REMOTE_CLOCK_DRIFT_SPAN_MS`),
 a least-squares line `offset(t) = a + b·(t − t₀)` through them (host times counted from their mean,
 so that wall-clock values lose no precision) gives the drift, `driftPpm = b · 10⁶` (50 ppm is 3 ms a
@@ -170,7 +178,9 @@ of 100 ms and more between bursts) does not: T4.3 measures this on the ThinkPhon
 
 `ClockPinger` (the host) pings every 2 s and adds each answer to the fit, ignoring an answer to a ping
 it did not send (an old one after a reconnection) and a sample whose clocks ran backwards;
-`answerPings` (the phone) answers. T4.1's `RemoteCamerasService` owns one pinger per phone.
+`answerPings` (the phone) answers. T4.1's `RemoteCamerasService` owns one pinger per phone, keeps the
+fit across the phone's reconnections, sends `clock` back after each answer, and writes the fit's
+record into the session when it converges and every minute after (§8).
 
 ## 5. The signaling and the pairing token (`signaling.ts`, `pairing.ts`)
 
@@ -241,14 +251,67 @@ alone.
 
 | What happens | The host | The phone |
 |---|---|---|
-| The token is wrong, expired or already taken | `watchOffers` gives a peer whose `tokenHash` is not the pairing's: the host leaves the document alone (T4.1 may delete it) and shows nothing | `checkPairing` said so before any document was written; the page says to ask for a new code |
+| The token is wrong, expired or already taken | `watchOffers` gives a peer whose `tokenHash` is not the pairing's (nor a reconnecting camera's): the host deletes its documents and shows nothing | `checkPairing` said so before any document was written; the page says to ask for a new code; a call the host never answers fails after 30 s |
 | Another version of the app on the phone | `hello.v` differs: `leave` with the reason, the connection closed, the camera not registered | the same; the page says to update |
-| The peer connection fails (the Wi-Fi dropped, the phone changed networks) | the transport reports `failed` or `closed`; the camera's entry says reconnecting; the clips in flight wait in the store | `restartIce()` then a new offer through the same peer document; if the connection cannot be made within 30 s, a new peer document (a new `call`) with the same token hash while the pairing lasts, or a new pairing from the host |
+| The peer connection fails (the Wi-Fi dropped, the phone changed networks) | the transport reports `failed` or `closed`; the camera's entry says reconnecting for five minutes, during which a call with its token is answered again; then it goes; the clips in flight wait in the store | `restartIce()` then a new offer through the same peer document; once the transport ends, a new peer document (a new `call`) with the same token hash every few seconds for five minutes (the host answers a camera it lists as reconnecting), then the page says the host is gone |
 | The channel closes in the middle of a file | the receiver keeps the bytes held in its store; the attempt waits (`ClipsInFlight`, 120 s) | the sender's promise rejects with `closed`; the file is kept and sent again over the next connection, from the receiver's offset |
 | A chunk is corrupted (a bit flipped, a misplaced chunk) | the checksum at `file-done` does not match: `file-resume` from 0 | the file goes again, twice at most, then `file-abort`: the clip stays on the phone, the attempt's notes say it is missing |
 | The receiver cannot store a file (no room) | `file-abort` with the reason; the failure reported | the send rejects with `aborted`; the clip stays on the phone |
 | The clocks disagree (the phone slept, its clock stopped) | the new samples disagree with the window's: `converged` is withdrawn, the state says syncing, and comes back once the window turned over (two minutes at 2 s) | nothing to do; the host converts with the fit it has |
 | A busy network (round trips of tens of ms, scattered) | the offset stays within a few ms, the sync is not called converged; T4.1 shows the round trip and the spread | nothing to do |
 | A frame that is not a message (a bug, another app on the channel) | `MessageLink.onError` reports it; the frame is dropped, the connection kept | the same |
-| The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time, then the peer document `closed` (or deleted by the host); the camera's entry says left; the pending clips of the attempt are missing | the phone's `Signaling.close` marks the document; the host deletes it |
-| The host removes the camera or ends the session | `leave`, the transport closed, the peer document deleted with its candidates | `onClosed('the documents are gone')`: the page says the host let it go |
+| The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time: the camera goes from the list at once (its entry stays in the session), the transport closed and the peer document deleted with its candidates; the pending clips of the attempt are missing | Leave sends `leave` and closes the connection 250 ms later, once the word is out; a page that goes (`pagehide`) sends it and leaves the connection to the browser |
+| The host removes the camera or ends the session | `leave`, the connection closed 250 ms later, the peer document deleted with its candidates; a host page that goes (`pagehide`) sends `leave` and deletes the documents, as far as there is time | the page says the host let it go, with the reason; without the word (the host's page died), `onClosed('the documents are gone')` ends the transport and the phone calls again for five minutes, then says the host is gone |
+
+## 8. The lifecycle (T4.1)
+
+How the host's Cameras section (`apps/web/src/app/camera/remote-cameras-service.ts`) and the phone's
+Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the connection
+(`docs/ARCHITECTURE.md`, "Remote cameras", has the pieces; `docs/PLAN.md` T4.1 the contract):
+
+1. **Add camera.** With the account signed in and a session under way, the host makes sure the
+   session's document is in the index (`SessionIndexService.indexForPairing`: a demo session's
+   document goes too, this once, so that the pairing has a document to live in; its attempts never),
+   generates a token, publishes its hash (`publishPairing`, 10 minutes) and shows the QR code (the
+   URL of §5, drawn by `qr-code.ts`), the URL and the token; it watches the session's offers from
+   then on. A second Add camera replaces the pairing; Cancel, the expiry and the session's end close
+   it. The whole section, `@cubetrace/rtc` with it, is a lazy chunk that loads at the first Add
+   camera: a session without remote cameras downloads none of it.
+2. **The phone.** The Camera page (`/camera`) takes the code from the URL, or typed (a token alone
+   names no session: the newest of the account's sessions whose `pairing` holds its hash is the one).
+   Signed out, it keeps the code and shows Sign in. It turns the camera on (the rear one by default:
+   the camera device has a choice of its own in Settings, apart from the Timer page's), runs the
+   capture pipeline from then on (the ring buffer, so that T4.2's first cut has its margin), checks
+   the pairing, calls (`call`, `WebRtcTransport.connect` as the caller) and sends `hello` with its
+   camera as its own session.json would describe it (`local: true`; the host relabels it).
+3. **The answer.** The host answers the first peer whose `tokenHash` is the pairing's, before it
+   expires, and closes the pairing: the token is taken once. Anything else that offers (a wrong or a
+   stale token) has its documents deleted, which ends the phone's call at once rather than after 30 s.
+   The host sends its `hello` as the channel opens and waits 10 s for the phone's: another protocol
+   version, or no hello, is sent away (`leave` with the reason, `rtc.failed`).
+4. **Connected.** The host puts the camera into the session (`SessionService.putCamera`: `local:
+   false`, `remote: {label, platform}` from the phone's hello, the label the session gives the device,
+   `phone-rear` or `phone-rear-2`, two phones told apart by their host labels), pings every 2 s
+   (`ClockPinger`, one `RemoteClockFit` per phone, kept across its reconnections) and sends `clock`
+   after each answer; when the fit converges, and every minute after, the fit's record goes into
+   `clock.cameras[label].remote` (the clapperboard fields stay at 0 until T4.3 measures the lag) and
+   into the diagnostics (`rtc.clock`). The phone answers the pings, sends `state` and a `thumbnail`
+   (a JPEG of at most 320 px from its preview) every 2 s, and `hello` again when its camera changes
+   (another camera, the framing). The host's list shows the name, the label, the state, the sync, the
+   latest report and the picture; the phone shows the host, the state, the clock as reported, the
+   battery and a thermal hint (the frame rate under 80% of the camera's nominal), and holds the wake
+   lock.
+5. **A drop.** The transport restarts ICE by itself (§2). Once it ends without a `leave`, the host
+   lists the camera as reconnecting for five minutes and answers a call that presents its token again
+   (only while reconnecting: a second phone shown the same code cannot take a connected camera's
+   place); the phone calls again every 3 s (each call fails after 30 s without an answer) until it is
+   back or five minutes passed, then says the host is gone. A host page that reloads publishes
+   nothing by itself: the owner adds the camera again, with a new code.
+6. **Leaving.** Leave on the phone, Remove on the host and the session's end send `leave` and close
+   the connection 250 ms later, once the word is out (`RTCPeerConnection.close` drops what the channel
+   still holds); the host deletes the peer document with its candidates whenever its transport closes
+   (`Signaling.close`), and a phone that left goes from the list at once, its entry kept in the
+   session (the session records what filmed it). `pagehide` on either side sends `leave` and leaves
+   the connection to the browser (the host deletes the documents too, as far as there is time).
+7. **Diagnostics** (`docs/DIAGNOSTICS.md`): `rtc.paired`, `rtc.connected`, `rtc.disconnected`,
+   `rtc.clock` and `rtc.failed`, on both devices.

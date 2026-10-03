@@ -26,8 +26,8 @@ export function tokenText(token: string): string {
  * each with its latest thumbnail, its name and label in the session, its state (connected,
  * reconnecting), its clock sync (syncing, or synced with the round trip and the offset), what it
  * reports (recording, frame rate, sharpness, framing, battery, a thermal hint) and Remove. The panel
- * loads it only when Add camera is pressed (`@defer`), and counts that press in `addRequests`, so that
- * the first pairing starts as the section appears.
+ * loads it only when Add camera is pressed (`@defer (when addRequests() > 0)`), and counts the
+ * presses in `addRequests`, so that the first pairing starts as the section appears.
  */
 @Component({
   selector: 'app-remote-cameras',

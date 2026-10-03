@@ -83,8 +83,8 @@ test('two pages pair through the Firestore emulator: the pairing in the session 
     offer: { type: 'offer' },
     answer: { type: 'answer' },
   });
-  expect(String((peer['offer'] as { sdp: string }).sdp)).toMatch(/^v=0/);
-  expect(String((peer['answer'] as { sdp: string }).sdp)).toMatch(/^v=0/);
+  expect((peer['offer'] as { sdp: string }).sdp).toMatch(/^v=0/);
+  expect((peer['answer'] as { sdp: string }).sdp).toMatch(/^v=0/);
   const callers = await firestoreCollection(
     `sessions/${sessionId}/peers/${peerId}/callerCandidates`,
   );

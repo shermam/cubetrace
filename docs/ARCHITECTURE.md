@@ -160,8 +160,39 @@ with the fit, and back when the frames file comes), the labels (`labelFor`, as f
 what it misses is a missing clip, never a lost attempt. Everything of `packages/rtc` but
 `WebRtcTransport` is plain TypeScript tested in Node: the transport and the signaling are interfaces
 with in-memory fakes (`MemoryTransport.pair` with a delay, a bandwidth and losses; `MemorySignaling`
-over `MemorySignalingBackend`), so that T4.1's services are unit-tested without WebRTC and the fast
+over `MemorySignalingBackend`), so that the services are unit-tested without WebRTC and the fast
 end-to-end suite pairs two pages of one browser through a `BroadcastChannel` signaling.
+
+**The pages and the services (T4.1; `docs/RTC.md` §8 has the lifecycle step by step).**
+
+- `apps/web/src/app/rtc/` holds the seams both sides build on: `SESSION_SIGNALING`, the factory of a
+  session's signaling (`FirestoreSignaling` over the account's backend, or, in development builds,
+  the end-to-end suite's fake through `window.cubetraceE2eSignaling`, as the account's loader is
+  replaced); `TRANSPORT_CONNECTOR` (`WebRtcTransport.connect`, or the unit tests' memory pairs:
+  `rtc-testing.ts`'s `MemoryConnector` plays the SDP dance over the signaling and joins
+  `MemoryTransport` pairs); `RTC_TIMERS` (the host clock and the browser's timers, through
+  BROWSER_GLOBALS); `thisDevice` (the host label and the platform of `hello` and of `remote`).
+- The host: `RemoteCamerasService` (`apps/web/src/app/camera/`) owns the pairing, the peers (one
+  `MessageLink`, `ClockPinger` and `RemoteClockFit` each, the fit kept across reconnections), the
+  session's entries (`SessionService.putCamera` with `local: false` and `remote`, `putCameraClock`
+  with the fit's record in `remote`) and the diagnostics events; `RemoteCameras` is the Cameras
+  section of Camera settings (Add camera, the QR code as an SVG path from `qr-code.ts`, the URL and
+  the token, the list with the thumbnails, the states, the sync, the reports, Remove), which
+  `CameraPanel` loads behind `@defer (when …)` from a placeholder's Add camera, counting the press
+  so that the first pairing starts as the section appears: `@cubetrace/rtc` and the section are
+  one lazy chunk. The pairing lives in the session's document of the index, so Add camera needs the
+  account and a session under way, and `SessionIndexService.indexForPairing` writes a demo session's
+  document too (its attempts never).
+- The phone: `CameraDevicePage` (`/camera`, `apps/web/src/app/camera-device/`) with
+  `CameraDeviceService` (the join by the QR's URL or a code typed, the hellos, the pings answered,
+  the `state` and `thumbnail` every 2 s, the `clock` shown, the wake lock, the reconnection for five
+  minutes, Leave) and `CameraDeviceCapture` (the capture pipeline of `packages/capture` on the
+  phone's camera from the moment the page opens, with the microphone as Settings say, through
+  `microphone.ts`'s `openMicrophone`, shared with the host's `RecordingService`, which the page does
+  not use: it follows the host's session and cube). The page reuses `CameraService` in its
+  `camera-device` role (a camera choice of its own, the rear camera by default), the `FramingEditor`,
+  the `SharpnessMeter` and the `CameraControls` of Camera settings, and never shows the timer; leaving
+  it leaves the session and puts the camera back as it was.
 
 ## The clip viewer
 

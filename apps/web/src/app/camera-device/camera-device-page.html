@@ -9,8 +9,8 @@
   <p class="pill" data-testid="device-state" [attr.data-state]="service.state()">
     <span class="dot" aria-hidden="true"></span>{{ stateText() }}
     @if (joined()) {
-      <span class="muted" data-testid="device-host">· {{ hostText() }}</span>
-      <span class="muted" data-testid="device-since">· {{ sinceText() }}</span>
+      <span class="muted" data-testid="device-host"> · {{ hostText() }}</span>
+      <span class="muted" data-testid="device-since"> · {{ sinceText() }}</span>
     }
   </p>
   @if (service.problem(); as problem) {

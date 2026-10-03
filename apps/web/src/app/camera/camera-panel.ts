@@ -42,8 +42,9 @@ import { videoQualityOptions } from './video-quality';
  * found, and from then on it stays as it was left (Settings keeps it). The larger picture
  * (`FramingEditor`) is there only while the framing is edited and the panel is open: a second picture
  * of the camera costs the page some work on every frame. Since T4.1 the panel ends with the Cameras
- * section (`RemoteCameras`, the phones that film for this host), loaded only when Add camera is
- * pressed, so that a session without remote cameras downloads nothing of it.
+ * section (`RemoteCameras`, the phones that film for this host), a deferred block loaded when Add
+ * camera is first pressed (`addRequests`, which the section reads to start the pairing as it
+ * appears), so that a session without remote cameras downloads nothing of it.
  */
 @Component({
   selector: 'app-camera-panel',
