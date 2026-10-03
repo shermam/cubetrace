@@ -242,7 +242,9 @@ export class RemoteClockFit {
         best = sample;
       }
     }
-    return best === null ? null : { offsetMs: best.offsetMs, rttMs: best.rttMs, hostMs: best.hostMs };
+    return best === null
+      ? null
+      : { offsetMs: best.offsetMs, rttMs: best.rttMs, hostMs: best.hostMs };
   }
 
   /**

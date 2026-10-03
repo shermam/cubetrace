@@ -48,8 +48,9 @@ export const STATE_TEXT: Readonly<Record<CameraDeviceState, string>> = {
  * controls of Camera settings here too), runs the capture pipeline from the start
  * (`CameraDeviceCapture`), shows the preview with the framing rectangle and the sharpness meter, the
  * host's name, the connection's state, the clock sync as the host measures it, the battery and a
- * thermal hint, and Leave; it holds the wake lock while joined and asks to keep the screen on and
- * the phone plugged in (`CameraDeviceService`). It never shows the timer and never starts a session
+ * thermal hint, the clips cut for the host and not yet in its hands (T4.2), and Leave; it holds the
+ * wake lock while joined and asks to keep the screen on and the phone plugged in
+ * (`CameraDeviceService`). It never shows the timer and never starts a session
  * of its own; leaving the page leaves the session, and the camera goes back to what it was.
  */
 @Component({
@@ -105,6 +106,13 @@ export class CameraDevicePage {
       : null,
   );
   protected readonly wakeLockText = computed(() => WAKE_LOCK_TEXT[this.wakeLock.status()]);
+  /** The clips cut for the host and not yet in its hands (T4.2). */
+  protected readonly clipsText = computed(() => {
+    const pending = this.service.pendingClips();
+    return pending === 0
+      ? 'each attempt’s clips go to the host as they are cut'
+      : `${String(pending)} ${pending === 1 ? 'clip waits' : 'clips wait'} for the host; kept on this phone until it has them`;
+  });
   /** The frames' proportions, 16:9 until they are known. */
   protected readonly aspect = computed(() => {
     const size = this.camera.frameSize();

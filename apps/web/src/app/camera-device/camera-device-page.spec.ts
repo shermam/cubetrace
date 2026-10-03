@@ -202,6 +202,9 @@ describe('CameraDevicePage', () => {
     expect(text('device-state')).toMatch(/^Connected · office-mbp \(macOS\) · \d+ s$/);
     expect(text('device-clock')).toBe('syncing · 0 pings answered');
     expect(text('device-wake-lock')).toBe('Screen on');
+    // No clip staged for the host (T4.2).
+    expect(text('device-clips')).toBe('each attempt’s clips go to the host as they are cut');
+    expect(element('device-clips')?.getAttribute('data-pending')).toBe('0');
     expect(wakeLock.held()).toBe(1);
     expect(element('device-leave')).not.toBeNull();
     expect(element('pairing-input')).toBeNull();

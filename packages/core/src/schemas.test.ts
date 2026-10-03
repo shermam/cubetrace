@@ -578,10 +578,12 @@ describe('version 2', () => {
     const properties = Object.keys(sync['properties'] as object);
     expect(properties).toEqual([...Object.keys(camera['properties'] as object), 'takenMs']);
     expect(sync['required']).toEqual(properties);
-    expect(camera['required']).toEqual(properties.filter((p) => p !== 'converged' && p !== 'takenMs'));
+    expect(camera['required']).toEqual(
+      properties.filter((p) => p !== 'converged' && p !== 'takenMs'),
+    );
     for (const key of Object.keys(camera['properties'] as object)) {
       expect((sync['properties'] as Record<string, unknown>)[key], key).toMatchObject({
-        type: ((camera['properties'] as Record<string, Record<string, unknown>>)[key])['type'],
+        type: (camera['properties'] as Record<string, Record<string, unknown>>)[key]['type'],
       });
     }
   });

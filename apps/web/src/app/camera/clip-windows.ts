@@ -49,7 +49,11 @@ export function clipWindow(milestone: AttemptMilestone): ClipWindow | null {
       const solveStart = milestone.record.events.solveStart;
       return solveStart === null
         ? null
-        : { segment: 'solve', startMs: solveStart - SOLVE_LEAD_MS, endMs: milestone.endMs + CLIP_TAIL_MS };
+        : {
+            segment: 'solve',
+            startMs: solveStart - SOLVE_LEAD_MS,
+            endMs: milestone.endMs + CLIP_TAIL_MS,
+          };
     }
     case 'dropped':
       return null;

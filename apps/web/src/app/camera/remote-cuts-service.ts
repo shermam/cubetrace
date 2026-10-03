@@ -84,7 +84,11 @@ interface RemoteClip {
    * phone offered without a cut of this page (one of an attempt from before the page was loaded
    * again).
    */
-  readonly window: { readonly fromMs: number; readonly toMs: number; readonly reason: string } | null;
+  readonly window: {
+    readonly fromMs: number;
+    readonly toMs: number;
+    readonly reason: string;
+  } | null;
   /** When it was asked for, host clock. */
   readonly askedMs: number;
   /**
@@ -158,8 +162,7 @@ export class RemoteCutsService {
   private readonly files = inject(ATTEMPT_FILES);
   private readonly timers = inject(RTC_TIMERS);
   /** The wait after an attempt's end; shorter in the end-to-end suite (`E2eRemote.clipWaitMs`). */
-  private readonly waitMs =
-    e2eRemote(inject(BROWSER_GLOBALS)).clipWaitMs ?? REMOTE_CLIP_WAIT_MS;
+  private readonly waitMs = e2eRemote(inject(BROWSER_GLOBALS)).clipWaitMs ?? REMOTE_CLIP_WAIT_MS;
 
   /** The cameras listed, by id. */
   private readonly present = new Map<string, Present>();
@@ -306,7 +309,10 @@ export class RemoteCutsService {
     for (const present of this.present.values()) {
       const label = present.camera.label();
       const known = label === null ? undefined : byLabel.get(label);
-      if (label !== null && (known === undefined || (known.link === null && present.link !== null))) {
+      if (
+        label !== null &&
+        (known === undefined || (known.link === null && present.link !== null))
+      ) {
         byLabel.set(label, present);
       }
     }
@@ -576,7 +582,9 @@ export class RemoteCutsService {
     }
     const kind = description.kind;
     const file = new PartialFile(description.bytes, (complete) =>
-      kind === 'frames' ? this.framesCame(camera, clip, complete) : this.mp4Came(camera, clip, complete),
+      kind === 'frames'
+        ? this.framesCame(camera, clip, complete)
+        : this.mp4Came(camera, clip, complete),
     );
     this.partials.set(key, file);
     return file;

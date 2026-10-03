@@ -89,7 +89,12 @@ export interface SavedClip {
 }
 
 // The clips' windows, which the remote cameras' cuts share (T4.2), live in clip-windows.ts.
-export { CLIP_TAIL_MS, SCRAMBLE_CLIP_MAX_MS, SCRAMBLE_LEAD_MS, SOLVE_LEAD_MS } from './clip-windows';
+export {
+  CLIP_TAIL_MS,
+  SCRAMBLE_CLIP_MAX_MS,
+  SCRAMBLE_LEAD_MS,
+  SOLVE_LEAD_MS,
+} from './clip-windows';
 
 /**
  * A clip is saved this long after its end, so that the frames up to its end have come out of the

@@ -326,7 +326,7 @@ describe('the protocol', () => {
     ],
     ['a cut of attempt 0', '{"type": "cut", "attempt": 0}', /attempt must be an integer ≥ 1/],
     [
-      'a cut without the attempt\'s scramble time',
+      "a cut without the attempt's scramble time",
       '{"type": "cut", "attempt": 1, "segment": "solve"}',
       /scrambleShown must be a number/,
     ],

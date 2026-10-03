@@ -69,6 +69,10 @@
       }
       <dt>Screen</dt>
       <dd data-testid="device-wake-lock">{{ wakeLockText().label }}</dd>
+      <dt>Clips</dt>
+      <dd data-testid="device-clips" [attr.data-pending]="service.pendingClips()">
+        {{ clipsText() }}
+      </dd>
     </dl>
     @if (thermalText(); as thermal) {
       <p class="problem" role="status" data-testid="device-thermal">{{ thermal }}</p>

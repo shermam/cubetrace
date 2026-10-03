@@ -162,11 +162,7 @@ class Phone {
    * Offers the clip of `cut` (`cut-done`) and sends its frames file and its MP4, as the Camera page
    * does; `onProgress` hears the MP4's progress. Resolves with what each send did.
    */
-  async deliver(
-    cut: Cut,
-    bytes = mp4(),
-    onProgress?: (sent: number) => void,
-  ): Promise<string[]> {
+  async deliver(cut: Cut, bytes = mp4(), onProgress?: (sent: number) => void): Promise<string[]> {
     const link = this.link;
     const sender = this.sender;
     if (link === null || sender === null) {
@@ -394,7 +390,10 @@ describe('RemoteCutsService', () => {
       reason: 'armed',
       camera: 'phone-rear',
     });
-    expect(scrambleCut.fromRemoteMs).toBeCloseTo(start - SCRAMBLE_LEAD_MS - CUT_MARGIN_MS + OFFSET_MS, 6);
+    expect(scrambleCut.fromRemoteMs).toBeCloseTo(
+      start - SCRAMBLE_LEAD_MS - CUT_MARGIN_MS + OFFSET_MS,
+      6,
+    );
     expect(scrambleCut.toRemoteMs).toBeCloseTo(done + CLIP_TAIL_MS + CUT_MARGIN_MS + OFFSET_MS, 6);
     // The attempt waits for the phone's clip; the session records what the cut relied on.
     expect(r.inFlight.has(sessionId(), 1)).toBe(true);
@@ -459,12 +458,18 @@ describe('RemoteCutsService', () => {
       syncResidualMs: null,
       truncatedStart: false,
     });
-    expect(r.cuts.stateOf({ session: sessionId(), index: 1, scrambleShown: shown }, 'phone-rear', 'solve')).toBe(
-      'stored',
-    );
+    expect(
+      r.cuts.stateOf(
+        { session: sessionId(), index: 1, scrambleShown: shown },
+        'phone-rear',
+        'solve',
+      ),
+    ).toBe('stored');
 
     const all = remote(await events());
-    expect(all.map((e) => `${e.kind} ${(e.data['outcome'] ?? e.data['segment']) as string}`)).toEqual([
+    expect(
+      all.map((e) => `${e.kind} ${(e.data['outcome'] ?? e.data['segment']) as string}`),
+    ).toEqual([
       'remote.cut sent',
       'remote.cut sent',
       'remote.cut done',
@@ -615,7 +620,9 @@ describe('RemoteCutsService', () => {
       'remote clip missing: solve of attempt 1 from phone-rear: the phone left (it left: the user left)',
     );
     const all = remote(await events());
-    expect(all.map((e) => `${e.kind} ${(e.data['outcome'] ?? e.data['reason']) as string}`)).toEqual([
+    expect(
+      all.map((e) => `${e.kind} ${(e.data['outcome'] ?? e.data['reason']) as string}`),
+    ).toEqual([
       'remote.cut sent',
       'remote.cut failed',
       'remote.clip.missing cut-failed',
