@@ -130,10 +130,18 @@ describe('RemoteClockFit', () => {
 
   it('refuses times that are not finite or run backwards', () => {
     const fit = new RemoteClockFit();
-    expect(() => fit.addSample(0, NaN, 1, 2)).toThrow(RangeError);
-    expect(() => fit.addSample(0, 1, 1, Infinity)).toThrow(RangeError);
-    expect(() => fit.addSample(10, 100, 100, 9)).toThrow(/runs forward/);
-    expect(() => fit.addSample(0, 100, 99, 10)).toThrow(/runs forward/);
+    expect(() => {
+      fit.addSample(0, NaN, 1, 2);
+    }).toThrow(RangeError);
+    expect(() => {
+      fit.addSample(0, 1, 1, Infinity);
+    }).toThrow(RangeError);
+    expect(() => {
+      fit.addSample(10, 100, 100, 9);
+    }).toThrow(/runs forward/);
+    expect(() => {
+      fit.addSample(0, 100, 99, 10);
+    }).toThrow(/runs forward/);
     expect(() => new RemoteClockFit({ window: 0 })).toThrow(RangeError);
     expect(() => new RemoteClockFit({ window: 1.5 })).toThrow(RangeError);
     expect(fit.samples).toBe(0);

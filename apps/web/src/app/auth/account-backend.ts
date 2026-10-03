@@ -8,6 +8,7 @@ import type {
   UserRecord,
   ViewerChoices,
 } from '@cubetrace/core';
+import type { SignalingBackend } from '@cubetrace/rtc';
 import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
@@ -61,11 +62,14 @@ export interface CloudListing {
 /**
  * The few calls the app makes into Firebase: Authentication with the Google provider, Firestore for
  * users/{uid}, the session index, the account's cubes and its diagnostics events
- * (docs/ARCHITECTURE.md, "Account"), and the upload's two callable functions (T3.2, T3.3). `firebase-sdk.ts` implements it with the SDK, in a
- * lazy chunk of its own; the unit tests and the end-to-end suite give fakes, so that neither loads
+ * (docs/ARCHITECTURE.md, "Account"), the upload's two callable functions (T3.2, T3.3), and, since
+ * T4.0, the signaling documents of the remote cameras (`@cubetrace/rtc`'s `SignalingBackend`:
+ * the session's pairing, a peer's document and its candidates, written and watched;
+ * docs/DATA-MODEL.md §10, docs/RTC.md). `firebase-sdk.ts` implements it with the SDK, in a lazy
+ * chunk of its own; the unit tests and the end-to-end suite give fakes, so that neither loads
  * Firebase.
  */
-export interface AccountBackend {
+export interface AccountBackend extends SignalingBackend {
   /**
    * Calls `next` with the account signed in (null: none) once the backend knows it, and again at
    * every change, until the returned function is called; `error` if the backend cannot tell.

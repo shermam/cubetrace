@@ -11,7 +11,10 @@ import type { Page } from '@playwright/test';
 // localStorage too, unless the test gives a cloud (`fakeCloud`) that browser contexts share: two
 // devices of one account; and so are the diagnostics events the app writes (T3.9), in the order of
 // their batches, and users/{uid} as the writes left it (the sign-in's record merged with the clip
-// viewer's choices per camera, T3.10), which stays per context.
+// viewer's choices per camera, T3.10), which stays per context. The signaling documents of the
+// remote cameras (T4.0: the session's pairing, the peers and their candidates) live in the page's
+// memory, their watchers told on each change, as the fast end-to-end suite pairs its two pages
+// through a BroadcastChannel and not through this fake; their writes are listed for the tests.
 
 /** A signed-in account as the backend reports it (src/app/auth/account-backend.ts, BackendUser). */
 export interface FakeAccountUser {
@@ -64,6 +67,11 @@ export interface FakeAccountState {
   }[];
   /** How many batches the events came in. */
   readonly eventBatches: number;
+  /**
+   * The signaling's writes (T4.0), in order: `pairing <session>`, `create <session>/<peer>`,
+   * `update <session>/<peer> <fields>`, `delete <session>/<peer>`, `candidate <session>/<peer>/<side>`.
+   */
+  readonly signalingWrites: readonly string[];
 }
 
 /** An object the fake bucket holds: what its PUT sent. */
@@ -212,6 +220,7 @@ export async function fakeAccount(
         cubeWrites: string[];
         events: { uid: string; id: string; event: Doc }[];
         eventBatches: number;
+        signalingWrites: string[];
       }
       const read = (): State => {
         const stored = JSON.parse(localStorage.getItem(key) ?? 'null') as Partial<State> | null;
@@ -229,6 +238,7 @@ export async function fakeAccount(
           cubeWrites: [],
           events: [],
           eventBatches: 0,
+          signalingWrites: [],
           ...(stored ?? {}),
         };
       };
@@ -304,6 +314,48 @@ export async function fakeAccount(
           state.cubeWrites.push(write);
         });
       };
+      // The signaling of the remote cameras (T4.0), in this page's memory: the peers by
+      // `<session>/<peer>`, the candidates by `<session>/<peer>/<side>`, and the watchers of each,
+      // told asynchronously with the current documents, as Firestore's snapshots come.
+      type SignalingDoc = { id: string; data: Doc };
+      const peers = new Map<string, Doc>();
+      const candidates = new Map<string, Map<string, Doc>>();
+      let nextCandidate = 1;
+      const signalingWatchers = new Map<string, Set<() => void>>();
+      const signalingWrite = (what: string): void => {
+        change((state) => {
+          state.signalingWrites.push(what);
+        });
+      };
+      const notify = (key: string): void => {
+        for (const watcher of [...(signalingWatchers.get(key) ?? [])]) {
+          setTimeout(watcher, 0);
+        }
+      };
+      const subscribe = (key: string, current: () => void): (() => void) => {
+        let set = signalingWatchers.get(key);
+        if (set === undefined) {
+          set = new Set();
+          signalingWatchers.set(key, set);
+        }
+        set.add(current);
+        setTimeout(current, 0);
+        return () => {
+          set.delete(current);
+        };
+      };
+      const peersOf = (sessionId: string, uid: string): SignalingDoc[] =>
+        [...peers.entries()]
+          .filter(([key, peer]) => key.startsWith(`${sessionId}/`) && peer['owner'] === uid)
+          .map(([key, peer]) => ({
+            id: key.slice(sessionId.length + 1),
+            data: structuredClone(peer),
+          }));
+      const candidatesOf = (key: string): SignalingDoc[] =>
+        [...(candidates.get(key) ?? new Map<string, Doc>())].map(([id, data]) => ({
+          id,
+          data: structuredClone(data),
+        }));
       const watchers = new Set<(user: FakeAccountUser | null) => void>();
       const setUser = (user: FakeAccountUser | null): void => {
         change((state) => {
@@ -542,6 +594,102 @@ export async function fakeAccount(
             .map((entry) => ({ id: entry.id, data: entry.event, pending: false }));
           return Promise.resolve({ documents, fromCache: false });
         },
+        // The signaling of the remote cameras (T4.0): the pairing in the index's session document.
+        writePairing(sessionId: string, pairing: Doc | null): Promise<void> {
+          change((state) => {
+            const session = state.index.sessions[sessionId] as Doc | undefined;
+            if (session === undefined) {
+              throw new Error(`No session ${sessionId} to write the pairing into.`);
+            }
+            session['pairing'] = pairing === null ? null : structuredClone(pairing);
+            state.signalingWrites.push(`pairing ${sessionId}`);
+          });
+          return Promise.resolve();
+        },
+        createPeer(sessionId: string, peerId: string, peer: Doc): Promise<void> {
+          const key = `${sessionId}/${peerId}`;
+          if (peers.has(key)) {
+            return Promise.reject(new Error(`The peer ${peerId} exists.`));
+          }
+          peers.set(key, structuredClone(peer));
+          signalingWrite(`create ${key}`);
+          notify(sessionId);
+          notify(key);
+          return Promise.resolve();
+        },
+        updatePeer(sessionId: string, peerId: string, fields: Doc): Promise<void> {
+          const key = `${sessionId}/${peerId}`;
+          const peer = peers.get(key);
+          if (peer === undefined) {
+            return Promise.reject(new Error(`No peer ${peerId} to update.`));
+          }
+          Object.assign(peer, structuredClone(fields));
+          signalingWrite(`update ${key} ${Object.keys(fields).sort().join(',')}`);
+          notify(sessionId);
+          notify(key);
+          return Promise.resolve();
+        },
+        deletePeer(sessionId: string, peerId: string): Promise<void> {
+          const key = `${sessionId}/${peerId}`;
+          peers.delete(key);
+          candidates.delete(`${key}/caller`);
+          candidates.delete(`${key}/callee`);
+          signalingWrite(`delete ${key}`);
+          notify(sessionId);
+          notify(key);
+          return Promise.resolve();
+        },
+        watchPeers(
+          sessionId: string,
+          uid: string,
+          next: (peers: SignalingDoc[]) => void,
+        ): () => void {
+          return subscribe(sessionId, () => {
+            next(peersOf(sessionId, uid));
+          });
+        },
+        watchPeer(
+          sessionId: string,
+          peerId: string,
+          next: (peer: SignalingDoc | null) => void,
+        ): () => void {
+          const key = `${sessionId}/${peerId}`;
+          return subscribe(key, () => {
+            const peer = peers.get(key);
+            next(peer === undefined ? null : { id: peerId, data: structuredClone(peer) });
+          });
+        },
+        addCandidate(
+          sessionId: string,
+          peerId: string,
+          side: string,
+          candidate: Doc,
+        ): Promise<void> {
+          const key = `${sessionId}/${peerId}/${side}`;
+          if (!peers.has(`${sessionId}/${peerId}`)) {
+            return Promise.reject(new Error(`No peer ${peerId} to add a candidate to.`));
+          }
+          let list = candidates.get(key);
+          if (list === undefined) {
+            list = new Map();
+            candidates.set(key, list);
+          }
+          list.set(`c${String(nextCandidate++)}`, structuredClone(candidate));
+          signalingWrite(`candidate ${key}`);
+          notify(key);
+          return Promise.resolve();
+        },
+        watchCandidates(
+          sessionId: string,
+          peerId: string,
+          side: string,
+          next: (candidates: SignalingDoc[]) => void,
+        ): () => void {
+          const key = `${sessionId}/${peerId}/${side}`;
+          return subscribe(key, () => {
+            next(candidatesOf(key));
+          });
+        },
       };
       Reflect.set(window, 'cubetraceE2eAccountLoader', () => {
         change((state) => {
@@ -600,6 +748,7 @@ export async function fakeAccountState(page: Page): Promise<FakeAccountState> {
         cubeWrites: [],
         events: [],
         eventBatches: 0,
+        signalingWrites: [],
       },
     STATE_KEY,
   );

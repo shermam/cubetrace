@@ -123,6 +123,7 @@ export {
   parseCloudSession,
   parseGyro,
   parseSession,
+  parseSessionPairing,
 } from './records';
 // T3.7 — the cube's gyroscope stream: the ring buffer and the gyro file of an attempt
 export type { GyroJson, GyroSummary, GyroWindow } from './gyro';

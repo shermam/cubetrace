@@ -180,6 +180,25 @@ export function parseCloudEvent(json: unknown): CloudEvent {
 }
 
 /**
+ * The `pairing` of a session's document (`sessions/{id}`, docs/DATA-MODEL.md §10, T4.0), alone: the
+ * hash of the token the host shows and until when; null when it is null or absent (no pairing).
+ * Throws a {@link RecordError} on anything else.
+ */
+export function parseSessionPairing(json: unknown): SessionPairing | null {
+  if (json === undefined || json === null) {
+    return null;
+  }
+  try {
+    return pairing.read(json, 'pairing');
+  } catch (error: unknown) {
+    if (error instanceof Invalid) {
+      throw new RecordError('sessions/{id}', 2, error.field, error.problem);
+    }
+    throw error;
+  }
+}
+
+/**
  * The signaling document of a remote camera (`sessions/{id}/peers/{peerId}`, docs/DATA-MODEL.md §10,
  * T4.0): schema version 1, the owner, the phone's offer, the host's answer and the state. Throws a
  * {@link RecordError} naming the field on anything else, such as a document of another version.
