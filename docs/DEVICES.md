@@ -50,11 +50,14 @@ firmware `8.62`, gyroscope present. 12 solves on the laptop (mean 17.2 s) and 3 
 from the gyroscope on every attempt (inspection 2.2–6.8 s). Both exports validate against the
 schemas. The GAN 356 i3 was flat that morning; its round is below.
 
-The gyroscope's rate, in reports per second as the cube sends them, is measured by the first
-capture after T3.7 (`gyro.rateHz` of an attempt's record, or the Gyro column of the QA view; the
-cubes send 4-bit velocities with each report, `docs/DATA-MODEL.md` §11): GAN 12 ui FreePlay: ___ Hz
-on the MacBook, ___ Hz on the ThinkPhone; GAN 356 i3: ___ Hz. Both are Gen2 cubes, which say no
-production date.
+The gyroscope's rate, measured on 2026-10-03 from the first `gyro.json` files (T3.7) of both devices:
+the GAN 12 ui reports its orientation about **11 times a second** (the median interval between
+reports is 89 ms), with stretches at about 17 a second (58 ms intervals: 15% of the intervals) and
+gaps of up to 165 ms; over an attempt's window (the scramble, the inspection and the solve) that is
+12.6–13 reports a second on the laptop and on the phone alike (`gyro.rateHz`, the QA view's Gyro
+column), far under the 50–100 Hz the buffer was sized for, which therefore holds its 10 minutes with
+room. The angular velocity is non-zero in two thirds of the samples of a solve, with components up to
+5 of the 7 the packets allow. The GAN 356 i3 has not recorded a gyro file yet.
 
 What the exports show about the cube's clock (a fit of host time on cube time, per attempt and per
 session, over all 1,802 moves; `fixtures/hardware/README.md`):
