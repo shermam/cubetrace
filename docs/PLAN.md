@@ -2145,7 +2145,7 @@ memory signaling, a memory connector that plays the SDP dance (`rtc-testing.ts`)
 fake clock (the host's 13, the phone's 15, the capture's 4, the two components' 10, the QR encoder's
 9); the end-to-end pair over a `BroadcastChannel` signaling (`e2e/helpers/signaling.ts`) and the real
 `RTCPeerConnection` on the machine's interface, in the encoding project, and the cloud pair through
-the Firestore emulator. Counts and sizes in the pull request (#TBD).
+the Firestore emulator. Counts and sizes in the pull request (#59).
 
 ### T4.2 — remote cuts and clip transfer
 
