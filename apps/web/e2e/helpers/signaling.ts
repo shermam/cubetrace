@@ -56,9 +56,17 @@ export async function fakeSignaling(page: Page): Promise<void> {
         return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
       };
 
+      // The pairings this page published, by session, and the sessions it hosts (it published a
+      // pairing at some point): what the page answers checks with. Shared by the page's instances
+      // (the phone's service makes one per join, and a `BroadcastChannel` also reaches the other
+      // channels of its own page), so that a stale instance never answers for the current one, and
+      // each check is answered once.
+      const pairings = new Map<string, { tokenHash: string; expiresMs: number } | null>();
+      const hosting = new Set<string>();
+      const answered = new Set<string>();
+
       const make = (sessionId: string, uid: string) => {
         const channel = new BroadcastChannel(`cubetrace-e2e-signaling:${sessionId}`);
-        let pairing: { tokenHash: string; expiresMs: number } | null = null;
         // Everything heard on the channel, by peer, so that a side that subscribes late gets what
         // came before (the candidates the phone trickles right after its offer).
         const peers = new Map<string, Peer>();
@@ -110,8 +118,10 @@ export async function fakeSignaling(page: Page): Promise<void> {
         channel.onmessage = (event: MessageEvent<Wire>) => {
           const message = event.data;
           record(message);
-          // The host's page answers the phone's question about the pairing.
-          if (message.kind === 'check' && (pairing !== null || peers.size > 0)) {
+          // The host's page answers the phone's question about the pairing, once.
+          if (message.kind === 'check' && hosting.has(sessionId) && !answered.has(message.id)) {
+            answered.add(message.id);
+            const pairing = pairings.get(sessionId) ?? null;
             const result =
               pairing === null
                 ? 'no-pairing'
@@ -248,11 +258,13 @@ export async function fakeSignaling(page: Page): Promise<void> {
             token: string,
             ttlMs = 10 * 60_000,
           ): Promise<{ tokenHash: string; expiresMs: number }> {
-            pairing = { tokenHash: await hash(token), expiresMs: Date.now() + ttlMs };
+            const pairing = { tokenHash: await hash(token), expiresMs: Date.now() + ttlMs };
+            hosting.add(sessionId);
+            pairings.set(sessionId, pairing);
             return pairing;
           },
           closePairing(): Promise<void> {
-            pairing = null;
+            pairings.set(sessionId, null);
             return Promise.resolve();
           },
           watchOffers(next: (offer: unknown) => void): () => void {

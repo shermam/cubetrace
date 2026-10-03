@@ -174,7 +174,7 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   expect(second).not.toBe(path);
   await phone.getByTestId('device-again').click();
   await expect(state).toHaveAttribute('data-state', 'idle');
-  await phone.getByTestId('pairing-input').fill('not a code');
+  await phone.getByTestId('pairing-input').fill('this is not a code');
   await phone.getByTestId('pairing-join').click();
   await expect(phone.getByTestId('device-problem')).toContainText('That is not a code');
   await phone.getByTestId('pairing-input').fill(new URL(second, phone.url()).href);
