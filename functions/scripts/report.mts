@@ -388,10 +388,18 @@ const R3 = 'Round 3 (v0.3.0)';
 const T37 = 'After T3.7';
 const T41 = 'After T4.1';
 const RTC = 'T4.1 — remote cameras';
+const T42 = 'After T4.2';
+const REMOTE_CLIPS = 'T4.2 — remote clips';
+
+/** A median of `values` in ms as seconds, to one decimal, or `?` without one. */
+function seconds(values: readonly number[]): string {
+  const middle = median(values);
+  return middle === null ? '?' : round(middle / 1000, 1);
+}
 
 /**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
- * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3 and the items after T3.7 and T4.1.
+ * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3 and the items after T3.7, T4.1 and T4.2.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -2643,6 +2651,143 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         paired,
         `${count(paired, 'pairing')} in a demo session`,
         'no pairing in a demo session',
+      );
+    },
+  },
+  // ---- After T4.2 ----
+  {
+    id: '4.2.1',
+    round: T42,
+    section: REMOTE_CLIPS,
+    title:
+      "Three solves with the phone paired: each attempt gets the phone's two clips within seconds of its end, its window widened by the margin, the clock sync converged or not",
+    kinds: ['remote.cut', 'remote.clip'],
+    eyes: "the phone's Clips line, back to none after each attempt",
+    check: (q) => {
+      const clips = q.onLaptop('remote.clip', (e) => flag(e, 'late') !== true);
+      const sent = q.onLaptop('remote.cut', (e) => text(e, 'outcome') === 'sent');
+      const early = sent.filter((e) => flag(e, 'converged') === false);
+      // A clip the phone could not cut or the host could not read; those given up for the wait or
+      // a phone that left are 4.2.5's.
+      const failures = [
+        ...q.onLaptop('remote.cut', (e) => text(e, 'outcome') === 'failed'),
+        ...q.onLaptop('remote.clip.missing', (e) =>
+          ['cut-failed', 'refused'].includes(text(e, 'reason') ?? ''),
+        ),
+      ];
+      const labels = [...new Set(clips.map((e) => text(e, 'camera')))].join(', ');
+      const facts = `${count(clips, 'remote clip')} (${labels || 'no camera'}); ${String(sent.length)} ${sent.length === 1 ? 'cut' : 'cuts'} sent, ${String(early.length)} before the clock sync converged, margin ${String(median(sent.map((e) => num(e, 'marginMs') ?? 0)) ?? '?')} ms; transfer ${seconds(clips.map((e) => num(e, 'transferMs') ?? 0))} s at ${round((median(clips.map((e) => num(e, 'bytesPerSecond') ?? 0)) ?? 0) / 1e6, 2)} MB/s (medians)${failures.length === 0 ? '' : `; ${count(failures, 'failure')}: ${failures.map(failureMessage).slice(-3).join('; ')}`}`;
+      if (failures.length > 0) {
+        return failed(facts);
+      }
+      return clips.length > 0 ? ok(facts) : none('no remote clip on a laptop');
+    },
+  },
+  {
+    id: '4.2.2',
+    round: T42,
+    section: REMOTE_CLIPS,
+    title:
+      "The attempt's folder has four clips, the laptop's and the phone's, attempt.json names them by label; the clip viewer switches between the cameras",
+    kinds: ['attempt.done', 'clips.viewed'],
+    eyes: "the viewer's buttons and pictures; attempt.json (the coordinator)",
+    check: (q) => {
+      const four = q.realAttempts().filter((e) => (num(e, 'clips') ?? 0) >= 4);
+      const settled = four.filter((e) => flag(e, 'settled') === true);
+      const viewed = q.where('clips.viewed', (e) => (num(e, 'clips') ?? 0) >= 4);
+      return found(
+        four,
+        `${count(four, 'real attempt')} with four clips or more (${String(settled.length)} with nothing left to come, ${seconds(settled.map((e) => num(e, 'settledMs') ?? 0))} s after the end, median); ${count(viewed, 'viewing')} of four clips or more`,
+        'no real attempt with four clips',
+      );
+    },
+  },
+  {
+    id: '4.2.3',
+    round: T42,
+    section: REMOTE_CLIPS,
+    title:
+      "The bucket: the attempt's folder lists nine files, the phone's clips beside the laptop's",
+    kinds: ['upload.state'],
+    eyes: "the bucket's listing (the coordinator)",
+    check: (q) => {
+      const nine = q.where(
+        'upload.state',
+        (e) => text(e, 'state') === 'done' && (num(e, 'files') ?? 0) >= 9,
+      );
+      return found(
+        nine,
+        `${count(nine, 'upload')} of nine files or more`,
+        'no upload of nine files',
+      );
+    },
+  },
+  {
+    id: '4.2.4',
+    round: T42,
+    section: REMOTE_CLIPS,
+    title:
+      "Walk away right after a solve, the phone's clip on its way: back in reach, the clip comes, its transfer resumed where it stopped",
+    kinds: ['remote.clip', 'rtc.connected'],
+    eyes: "the phone's Clips line while away",
+    check: (q) => {
+      const resumed = q.onLaptop('remote.clip', (e) => (num(e, 'resumedBytes') ?? 0) > 0);
+      const afterReconnection = q.onLaptop(
+        'remote.clip',
+        (e) =>
+          q.previous(e, 'rtc.connected', 2 * MINUTE, (c) => flag(c, 'reconnection') === true) !==
+          null,
+      );
+      return found(
+        [...resumed, ...afterReconnection],
+        `${count(resumed, 'clip')} resumed in the middle of a file (${String(median(resumed.map((e) => num(e, 'resumedBytes') ?? 0)) ?? '?')} bytes held, median); ${count(afterReconnection, 'clip')} within two minutes of a reconnection`,
+        'no clip after a reconnection',
+      );
+    },
+  },
+  {
+    id: '4.2.5',
+    round: T42,
+    section: REMOTE_CLIPS,
+    title:
+      "The phone's Wi-Fi off once its clip is cut, for three minutes: two minutes after the end the attempt is uploaded without it and the notes name the camera; Wi-Fi on, the clip comes late and is uploaded as an addition",
+    kinds: ['remote.clip.missing', 'remote.clip.late', 'upload.state'],
+    eyes: "the session's notes; the bucket's listing after the addition (the coordinator)",
+    check: (q) => {
+      const missing = q.onLaptop('remote.clip.missing');
+      const late = q.onLaptop('remote.clip.late');
+      const reasons = [...new Set(missing.map((e) => text(e, 'reason')))].join(', ');
+      return found(
+        late,
+        `${count(missing, 'clip')} given up (${reasons || '–'}), ${count(late, 'late clip')} attached ${seconds(late.map((e) => num(e, 'afterEndMs') ?? 0))} s after the attempt's end (median)`,
+        missing.length > 0
+          ? `${count(missing, 'clip')} given up (${reasons}), none came late`
+          : 'no clip given up',
+      );
+    },
+  },
+  {
+    id: '4.2.6',
+    round: T42,
+    section: REMOTE_CLIPS,
+    title:
+      '"Record remote cameras" off: the phone stays connected and records nothing for the session; on again, the next attempt has its clips',
+    kinds: ['settings.changed', 'remote.cut'],
+    eyes: "the phone's Clips line",
+    check: (q) => {
+      const switched = (on: boolean): ReportEvent[] =>
+        q.where(
+          'settings.changed',
+          (e) => text(e, 'key') === 'recordRemoteCameras' && flag(e, 'value') === on,
+        );
+      const off = switched(false);
+      const back = switched(true).filter(
+        (e) => q.next(e, 'remote.cut', HOUR, (c) => text(c, 'outcome') === 'sent') !== null,
+      );
+      return found(
+        off.length > 0 ? back : [],
+        `${count(off, 'switch')} off, ${count(back, 'switch')} on followed by a cut within the hour`,
+        off.length > 0 ? 'switched off, but no cut after it was on again' : 'never switched off',
       );
     },
   },

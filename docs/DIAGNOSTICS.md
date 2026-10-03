@@ -56,8 +56,8 @@ across reloads. A batch flushed as the page goes away is not sure to arrive, tho
 persists it in a moment the page may not have when it unloads at once (a reload, a closed tab), so
 the last seconds of events before one can be lost; a page hidden and alive (a phone backgrounded,
 another tab in front) has that moment, and the app's own navigation never unloads. An attempt's
-`attempt.done` waits for its clips and gyro file (at most 15 s) and is lost the same way if the page
-unloads before. The session and attempt under way (which `SessionService` keeps) go on every event
+`attempt.done` waits for its clips (a remote camera's too, T4.2) and gyro file (at most 15 s) and is
+lost the same way if the page unloads before. The session and attempt under way (which `SessionService` keeps) go on every event
 recorded without a scope of its own.
 
 - **Signed in only.** With no account signed in, the events wait in a ring of the last 500 and go
@@ -79,7 +79,10 @@ recorded without a scope of its own.
   attempts a day) a device writes about 900 events of its attempts and about a hundred of the rest
   (the starts, the pages, the cube, the camera, the settings), so about 1,000 a day, within the cap
   and far under Firestore's free tier of 20,000 writes a day (the session index's writes, about
-  three per attempt, come on top).
+  three per attempt, come on top). A phone paired as a camera (T4.2) adds 6 events per attempt on
+  the host (each clip's `remote.cut` sent and done, and its `remote.clip`) and none on the phone
+  unless a cut fails: about 1,900 a day with a phone, still within the cap, which a day of more
+  than about 155 attempts with a phone would reach (the `error.*` kinds go on all the same).
 - **What goes wrong stays out.** A kind that is not one, facts that cannot be made into an event, a
   batch the server refuses: said once in the console (`cubetrace: diagnostics: …`) and dropped; the
   diagnostics never record themselves.
@@ -96,7 +99,7 @@ know it (a camera without a frame rate, a cube without a production date).
 | `account.signout` | Sign out, written before the account goes. | `installed` |
 | `network.changed` | The window's `online` or `offline` event. | `online` |
 | `page.viewed` | The router ended a navigation (a session page carries the session viewed). | `page` (`timer`, `sessions`, `session`, `qa`, `settings`, `probe`, `capture-lab`), `demo` (the address asked for the demo) |
-| `settings.changed` | A setting the checklists name changed (not its first value): `hostLabel`, `inspection`, `autoAdvance`, `scrambleOverPicture`, `idleDisconnectMinutes`, `cameraResolution`, `cameraFrameRate`, `sharpnessThreshold`, `recordAudio`, `microphoneProcessing`, `videoQuality`, `demoSpeed`, `uploadSessions`, `wifiOnly`, `keepLocalCopies`, `diagnostics`. Settings → Keep the screen on is no setting: `wake.lock` says whether the lock is wanted. | `key`, `value` |
+| `settings.changed` | A setting the checklists name changed (not its first value): `hostLabel`, `inspection`, `autoAdvance`, `scrambleOverPicture`, `idleDisconnectMinutes`, `cameraResolution`, `cameraFrameRate`, `sharpnessThreshold`, `recordAudio`, `microphoneProcessing`, `videoQuality`, `demoSpeed`, `uploadSessions`, `wifiOnly`, `keepLocalCopies`, `diagnostics`, `recordRemoteCameras` (T4.2). Settings → Keep the screen on is no setting: `wake.lock` says whether the lock is wanted. | `key`, `value` |
 | `wake.lock` | The screen wake lock's status changed. | `status` (`active`, `inactive`, `error`, `unsupported`), `wanted` (the Settings switch) |
 | `storage.persistence` | The browser's answer on keeping the data changed (Keep my data, the first session). | `state` (`persistent`, `best-effort`, `unsupported`), `refused` |
 | `cube.connected` | A cube said what it is, right after connecting. | `kind` (`gan`, or `fake` for the demo cube), `model`, `hardware`, `firmware`, `gyro`, `productDate`, `mac` (`stored`: Settings' list, typed here before or synced from the account; `driver`: read by Chrome from the advertisement, the flag; `typed`: the connect dialog; `none`: the demo), `ms` (from the click to the connection), `battery` |
@@ -107,7 +110,7 @@ know it (a camera without a frame rate, a cube without a production date).
 | `cubes.synced` | Settings' cube list merged with the account's (a sign-in, a start signed in). | `count` (the list after the merge), `cloud` (the account's documents read), `unreadable`, `fromServer` (not the cache) |
 | `session.started` | A session was created. | `host`, `platform`, `isPhone`, `model`, `hardware` (`simulated` for the demo), `firmware`, `gyro`, `productDate`, `audio`, `inspection15s`, `autoAdvance`, `battery`, `storage` (`opfs` or `memory`) |
 | `session.deleted` | A session deleted from the device (Sessions, a session's page). | `current` (the session being recorded), `attempts` (known for the current session) |
-| `attempt.done` | An attempt ended (solved or a DNF), once its clips and gyro file were saved or known absent (at most 15 s after the end), so that it counts them. | `status`, `timeMs`, `inspectionMs`, `movesQtm`, `tps`, `replayOk`, `scrambleCorrected`, `scrambleExtraMoves`, `phases` (count), `pickup` (present), `clockResidualP95Ms`, `clockSamples`, `clockA` (the fit's slope), `gyroSamples`, `gyroRateHz`, `gyroTruncated`, `resyncs` (count), `clips` (count), `clipsLate` (truncated starts), `clipBytes`, `syncResidualMs` (of its clips), `scrambleMs` (first turn to done), `settledMs` (from the end to this event), `settled` (nothing of it was still to come) |
+| `attempt.done` | An attempt ended (solved or a DNF), once its clips (a remote camera's too, T4.2) and gyro file were saved or known absent (at most 15 s after the end), so that it counts them. | `status`, `timeMs`, `inspectionMs`, `movesQtm`, `tps`, `replayOk`, `scrambleCorrected`, `scrambleExtraMoves`, `phases` (count), `pickup` (present), `clockResidualP95Ms`, `clockSamples`, `clockA` (the fit's slope), `gyroSamples`, `gyroRateHz`, `gyroTruncated`, `resyncs` (count), `clips` (count), `clipsLate` (truncated starts), `clipBytes`, `syncResidualMs` (of its clips), `scrambleMs` (first turn to done), `settledMs` (from the end to this event), `settled` (nothing of it was still to come) |
 | `attempt.deleted` | Delete last. | `status`, `timeMs`, `clips` |
 | `camera.on` | The camera came on (not a reopening of the same camera: a resolution changed, its controls reset). | `label` (the browser's name of the camera), `facing`, `width`, `height`, `fps` (the track's settings), `asked` (the mode asked for), `notes` (fallbacks on the way) |
 | `camera.switched` | Another camera took the open one's place. | As `camera.on`, and `from` |
@@ -130,16 +133,20 @@ know it (a camera without a frame rate, a cube without a production date).
 | `rtc.disconnected` | A connection with a remote camera ended: the other side left (`left: …`, `host left: …`), the host removed the camera or the session ended (the host), the transport closed or failed (the reason), five minutes without the other side (`gave up: …`). | `reason`, `durationMs` (the connection's), `connectedMs` (host: since the pairing), `peer` / `host`, `camera` |
 | `rtc.clock` | The clock sync of a remote camera (the host): at convergence, once a minute while converged, and when convergence is withdrawn. | `camera`, `peer`, `why` (`converged`, `minute`, `withdrawn`), `converged`, `offsetMs`, `rttMs`, `driftPpm`, `samples`, `residualP95Ms` |
 | `rtc.failed` | A step of the pairing or the connection failed (either side). | `step` (host: `pairing`, `watch`, `connect`, `hello`, `version`; phone: `session`, `check`, `connect`, `hello`, `version`), `reason`, `peer` (host) |
+| `remote.cut` | A remote camera's cut (T4.2, `docs/RTC.md` §9). On the host: sent (once per clip, as soon as the camera is connected and its clock sync has an answer, converged or not), answered with the phone's offer (`done`), or not cut (`failed`, a failure); on the phone: not cut (`failed`). | `outcome` (`sent`, `done`, `failed`), `camera` (the label in the session), `peer` (the host: the phone's host label), `segment`, `reason` (sent: `armed` or `ended`; failed: the phone's words), `windowMs` (the host's window), `marginMs` (how far the window is widened on each side), `waitedMs` (from the milestone to the cut sent), `offsetMs`, `rttMs`, `samples` and `converged` (the clock estimate the cut relied on), `delayMs` (done, failed: from the window's end), `files`, `bytes`, `truncatedStart`, `lateMs` (done: what the phone's capture said) |
+| `remote.clip` | A remote camera's clip is in its attempt's folder and record (the host). | `camera`, `peer`, `segment`, `bytes` (both files), `mp4Bytes`, `transferMs` (from the phone's offer to the record), `bytesPerSecond`, `resumedBytes` (held from an earlier connection: a transfer resumed), `late` (it was given up before), `kept` (for a record still to come), `converged` (the clock estimate its times were converted with), `offsetMs` (`t0RemoteMs` minus `t0HostMs`), `truncatedStart` |
+| `remote.clip.late` | A remote clip given up came after all: attached to its attempt, noted, and uploaded as an addition (the host). | `camera`, `peer`, `segment`, `afterEndMs` (from the attempt's end), `afterMissedMs` (from when it was given up) |
+| `remote.clip.missing` | A remote clip expected is given up (a failure): its attempt goes to the upload queue without it, and the session's notes name the camera (the host). | `camera`, `peer`, `segment`, `reason` (`wait`: none within 120 s of the attempt's end; `cut-failed`: the phone could not cut it; `left`: the phone left or was let go; `refused`: its frames file could not be read), `message`, `afterEndMs` |
 | `error.app` | What the app says in the console as `cubetrace: …` (a record that could not be saved, the index refusing a write, a cube's write refused, the camera refused, the recording stopped, the uploads not starting, a gyro file not written, the account's record not saved, the cube's state not reset, the clip viewer's choices not read or saved). | `where` (`store`, `index`, `cubes`, `camera`, `recording`, `uploads`, `gyro`, `account`, `cube`, `viewer`), `message`, `label` (the camera) |
 
 ## The checklists, read from the events
 
-The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3 and the items after T3.7 and T4.1), each with the kinds
+The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3 and the items after T3.7, T4.1 and T4.2), each with the kinds
 whose presence, with their facts, is its evidence, and what still needs the owner's eyes. The round
 report evaluates the same table (`functions/scripts/report.mts`, `CHECKLIST`; the test holds the
 two to each other): ✅ the evidence is there, with the facts beside it; ⬜ it is not; ❗ the events
 show a failure (an `error.*`, a `clip.failed`, an `upload.state` failed, a `sync.check` failed, a
-`cube.failed` other than the user's). An item whose evidence is `–` has no event that could show it:
+`cube.failed` other than the user's, a `remote.cut` failed, a `remote.clip.missing`). An item whose evidence is `–` has no event that could show it:
 the owner does it with the round, as before. The owner does nothing else for the rounds: solving,
 with the camera on and signed in, on both devices, is the round.
 
@@ -355,6 +362,17 @@ with the camera on and signed in, on both devices, is the round.
 | 4.1.6 | Leave: the list empty at once, the entry kept, `session.json` with `remote` and the clock fit | `rtc.disconnected` | the session's page and the export (the coordinator) |
 | 4.1.7 | A second phone listed as `phone-rear-2`; a phone with a used code refused | `rtc.paired`, `rtc.failed` | – |
 | 4.1.8 | A demo session pairs, and is listed as "both" | `rtc.paired`, `session.started` | the Sessions page |
+
+#### After T4.2 — T4.2 — remote clips
+
+| # | Item | Evidence | Still needs eyes |
+|---|---|---|---|
+| 4.2.1 | Three solves with the phone paired: each attempt gets the phone's two clips within seconds of its end, its window widened by the margin, the clock sync converged or not | `remote.cut`, `remote.clip` | the phone's Clips line, back to none after each attempt |
+| 4.2.2 | The attempt's folder has four clips, the laptop's and the phone's, attempt.json names them by label; the clip viewer switches between the cameras | `attempt.done`, `clips.viewed` | the viewer's buttons and pictures; attempt.json (the coordinator) |
+| 4.2.3 | The bucket: the attempt's folder lists nine files, the phone's clips beside the laptop's | `upload.state` | the bucket's listing (the coordinator) |
+| 4.2.4 | Walk away right after a solve, the phone's clip on its way: back in reach, the clip comes, its transfer resumed where it stopped | `remote.clip`, `rtc.connected` | the phone's Clips line while away |
+| 4.2.5 | The phone's Wi-Fi off once its clip is cut, for three minutes: two minutes after the end the attempt is uploaded without it and the notes name the camera; Wi-Fi on, the clip comes late and is uploaded as an addition | `remote.clip.missing`, `remote.clip.late`, `upload.state` | the session's notes; the bucket's listing after the addition (the coordinator) |
+| 4.2.6 | "Record remote cameras" off: the phone stays connected and records nothing for the session; on again, the next attempt has its clips | `settings.changed`, `remote.cut` | the phone's Clips line |
 
 ## The QA view
 

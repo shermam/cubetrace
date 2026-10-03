@@ -32,7 +32,10 @@ adopted after moves went unseen; read as none) and each move's `serial` and `pac
 the remote cameras; `docs/RTC.md`) added, optional in the same way, in `session.json`: a camera's
 `local` may be false, and then `remote` names the device the camera runs on (§6); and a camera clock's
 `remote`, the clock sync of a remote camera (§6); the files written before have cameras of the host's
-own only, `local` true, and neither field.
+own only, `local` true, and neither field. T4.2 (a remote camera's clips) added, optional in the
+same way: in a remote camera's frames file, `t0RemoteMs` and `remote` (§9), each there exactly when
+the other is; and in `session.json`, `converged` in a camera clock's `remote` (§6), absent from the
+records written before, all of which were written at the fit's convergence.
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -173,6 +176,9 @@ sessions/<sessionId>/
     ├── <camera>.solve.frames.json
     └── gyro.json                      T3.7: the gyroscope samples of the attempt (§11)
 uploads.json                           phase 3: the upload queue's state (§10)
+camera-clips/                          T4.2, on a phone paired as a camera: its clips for a host
+├── index.json                         the clips staged, until the host has them
+└── sessions/<sessionId>/attempts/<index>/<camera>.<segment>.mp4 and .frames.json
 ```
 
 `sessionId` is a UUID v4; `<camera>` is the camera's `label` (§6), one per device of the session:
@@ -185,6 +191,16 @@ the new one even when the page goes away mid-write; readers ignore such leftover
 remove them. Every JSON file names the build that wrote it, `app` (the version and the commit of the
 app, §6): `session.json` since version 1, the others since T3.7, so that the files of a buggy or an
 older build can be told apart later, also within one session, which can outlive an update.
+
+An attempt filmed by several cameras has each camera's clips in its folder, named after their
+labels: since T4.2 (`docs/RTC.md` §9), with a phone paired as a camera, `phone-rear.scramble.mp4`
+and `phone-rear.solve.mp4` and their frames files beside the laptop's, four clips in all. The phone
+cuts them, keeps them apart from its own sessions under `camera-clips/` of its origin private file
+system (the same layout and names, with `index.json`, the clips staged and what its capture said of
+each) until the host says what became of each, then deletes them; the host writes them into the
+attempt's folder as they come. Nothing under `camera-clips/` is a record of the dataset: the
+phone deletes the clips of other sessions when it joins one, and those staged more than a day ago
+when its Camera page opens.
 
 ## 6. `session.json`
 
@@ -218,7 +234,8 @@ older build can be told apart later, also within one session, which can outlive 
                 "phone-rear": {"offsetMs": 63.0, "rttMs": 9.6, "driftPpm": 37.8,
                                "clapperboardResidualMs": 8.1, "clapperboardSamples": 8,
                                "remote": {"offsetMs": -3127.4, "driftPpm": 37.8, "rttMs": 9.6, "samples": 58,
-                                          "residualP95Ms": 1.1, "since": 1730640000123.5}}}   // T4.0
+                                          "residualP95Ms": 1.1, "since": 1730640000123.5,
+                                          "converged": true}}}   // T4.0; converged: T4.2
   },
   "audio": true,
   "settings": {"inspection15s": false, "autoAdvance": true},
@@ -267,7 +284,13 @@ or lost, no audio encoder; since T2.12, the browser's voice processing kept on a
 microphone was asked for raw, `notice: The microphone is not raw: …`, or the raw request refused);
 and, since T3.1, once when the session index in the cloud refuses a write of the session's,
 `cloud: the session could not be indexed: <reason>`, `cloud: attempt <index> could not be indexed:
-<reason>` or `cloud: attempt <index> could not be deleted from the index: <reason>` (§10).
+<reason>` or `cloud: attempt <index> could not be deleted from the index: <reason>` (§10); and,
+since T4.2, one per remote camera's clip given up, `remote clip missing: <segment> of attempt
+<index> from <camera>: <reason>` (no clip within 120 s of the attempt's end, the phone could not cut
+it, the phone left, its frames file could not be read), one per clip given up that came after all,
+`remote clip late: <segment> of attempt <index> from <camera>: attached <s> s after the attempt
+ended`, and one per remote clip that begins later than asked, `clip truncated: <segment> of attempt
+<index> from <camera> starts <s> s late (the phone's buffer held <s> s)` (§7).
 `summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: the host's own (`local: true`) and, since T4.0 (phase 4,
@@ -340,11 +363,18 @@ phone's clock minus the host's, in ms (`remoteMs ≈ hostMs + offsetMs`); `drift
 offset grows, in parts per million (50 ppm is 3 ms a minute; 0 before the samples spanned a minute);
 `rttMs`, the least round trip of the samples the estimate stands on; `samples`, how many they are
 (the samples of the window whose round trip was within 1.5× the least); `residualP95Ms`, the 95th
-percentile of the absolute residuals of their offsets from the estimate; and `since`, the host time
-of the oldest of them. The entry's own `rttMs` and `driftPpm` repeat the fit's; `offsetMs` stays the
-clapperboard's lag, measured on the phone's own frames (T4.3), on top of the clock sync. A local
-camera's entry has no `remote`, and the files written before phase 4 have none. A clip's
-`syncResidualMs` (§7) is its camera's `offsetMs` when it was recorded.
+percentile of the absolute residuals of their offsets from the estimate; `since`, the host time
+of the oldest of them; and, since T4.2, `converged`, whether the fit had converged when the record
+was written: true at the convergence and in the records of each minute after it (T4.1), false for
+the estimate a remote camera's first cut relied on when it went before (T4.2, `docs/RTC.md` §9: the
+cuts never wait for the fit to converge, which a busy Wi-Fi may never let it do), which the
+convergence overwrites; absent from the records written before T4.2, which were all written at
+convergence. The entry's own `rttMs` and `driftPpm` repeat the fit's; `offsetMs` stays the
+clapperboard's lag, measured on the phone's own frames (T4.3), on top of the clock sync, 0 with the
+other clapperboard fields until that check. A local camera's entry has no `remote`, and the files
+written before phase 4 have none. A clip's `syncResidualMs` (§7) is its camera's `offsetMs` when it
+was recorded, once the entry has a check's result (`clapperboardSamples` above 0): a remote camera's
+entry before its sync check gives its clips none.
 
 ## 7. `attempt.json`
 
@@ -483,6 +513,19 @@ cube when the clip was recorded (`offsetMs` of `clock.cameras`, §6), null befor
 `cameras` and in `clock.cameras` (§6): an attempt during which the camera changed has its scramble
 from one camera and its solve from the other.
 
+A remote camera's clips (T4.2, `docs/RTC.md` §9) are entries like the others, named after its label,
+and cut by the phone over the same windows on its own clock, widened on each side by the margin of
+the host's clock estimate (at least 500 ms), since the phone's clock is only known to within it: they
+may begin up to a keyframe interval and the margin earlier than the host's own clip, and end up to
+the margin later. `firstFrameHostMs` is the phone's first frame time converted to the host clock
+(`t0HostMs` of its frames file, which keeps the phone's own time and the estimate used, §9), `crop`
+the phone's framing when it cut, `syncResidualMs` null until the phone's sync check (T4.3), and
+`truncatedStart` true when the phone's buffer did not reach back to the window's start (`notes` says
+how late, §6). A remote clip comes seconds after the attempt's end (cut once its window has ended,
+then sent over the Wi-Fi); the attempt waits for it at most 120 s after its end before its upload
+(§10), and a clip that comes later is added to the record then, and uploaded as an addition. A clip
+that never comes is missing, and `notes` says whose.
+
 `local` is false once the clip's MP4 is no longer on the device that recorded it: the upload queue
 deleted it after the bucket confirmed it, by policy (`docs/PLAN.md` T3.3: "Keep local copies" off,
 or the browser's storage past 70%); its frames file stays, and so does `attempt.json`, which the queue
@@ -546,6 +589,39 @@ jitter of a single arrival; `residualP95Ms` is the 95th percentile of the absolu
 jitter. These times are when the frames reached the browser, later than the light by the camera's
 own latency: that lag is the clip's `syncResidualMs` (§7), measured by the clapperboard (§6), for
 the training pipeline to subtract.
+
+A remote camera's clip (T4.2, `docs/RTC.md` §9) was timed by the phone's capture on the phone's own
+clock, and the host converts its frames file as it writes it into the attempt's folder
+(`remoteFrames` in `packages/core/src/remote-frames.ts`), which adds two fields, each there exactly
+when the other is:
+
+```jsonc
+{
+  "schema": 2,
+  "camera": "phone-rear",
+  "segment": "solve",
+  "app": {"version": "0.4.0", "commit": "abc1234"},
+  "t0HostMs": 1730640017190.4,           // the first frame on the host clock, through `remote`
+  "t0RemoteMs": 1730640020317.8,         // T4.2: the first frame on the phone's own clock
+  "dtMs": [0, 33.3, 33.4, …],
+  "keyframes": [0, 30, …],
+  "arrival": {"offsetMs": 1730634807190.1, "residualP95Ms": 6.1},   // on the phone's clock
+  "remote": {"offsetMs": 3127.4, "driftPpm": 0, "rttMs": 112.3, "samples": 6,
+             "residualP95Ms": 41.0, "since": 1730640001123.5,
+             "converged": false, "takenMs": 1730640024012.5}       // T4.2: the estimate used
+}
+```
+
+`t0RemoteMs` is the phone's time of the first frame, as its capture placed it (the arrival fit above,
+on the phone's clock). `remote` is the host's estimate of the phone's clock that converted it into
+`t0HostMs` when the file came (§6's record: `offsetMs`, `driftPpm`, `rttMs`, `samples`,
+`residualP95Ms`, `since`), with `converged`, whether the fit had converged then, and `takenMs`, the
+host time it was taken: the fit's own once it kept 3 samples, before that the offset of its sample of
+least round trip, `driftPpm` 0. `t0HostMs` is right to within that estimate's error, which the margin
+of the clip's window covers (§7); the training pipeline may convert `t0RemoteMs` again with a better
+fit, the session's `clock.cameras[camera].remote` at its end. The intervals, the keyframes and the
+arrival fit are the phone's: intervals are the same on both clocks to the drift (50 ppm is a
+millisecond in 20 s). The host's own clips have neither field.
 
 ## 10. Cloud records
 

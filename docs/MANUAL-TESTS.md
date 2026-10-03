@@ -883,8 +883,7 @@ cube and what happened.
 On https://shermam.github.io/cubetrace/ once its footer names a commit after T4.1, the MacBook as the
 host (the GAN 12 ui, the camera on, signed in) and the ThinkPhone as the camera (the same account,
 Chrome or the installed app), both on the home Wi-Fi. The pairing, the picture, the state and the
-clock sync are what T4.1 brings; no clip of the phone's reaches the laptop yet (T4.2), and no sync
-check runs on it (T4.3). The events say most of it (`docs/DIAGNOSTICS.md`, "After T4.1"); write down
+clock sync are what T4.1 brings; the phone's clips are T4.2's (below), and its sync check T4.3's. The events say most of it (`docs/DIAGNOSTICS.md`, "After T4.1"); write down
 what they cannot show, next to the item, with the device and what happened.
 
 - [ ] The pairing: on the MacBook, Camera settings → Cameras → Add camera shows a QR code, the link
@@ -921,3 +920,39 @@ what they cannot show, next to the item, with the device and what happened.
   first phone's code again is refused.
 - [ ] A demo session (no cube): Add camera works all the same, and the Sessions page then lists the
   demo session as "both" (its document went to the index for the pairing; nothing of it is uploaded).
+
+## After T4.2 — remote clips
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T4.2, the MacBook as the
+host (the GAN 12 ui, the camera on, signed in, Upload sessions on) and the ThinkPhone paired as its
+camera as in "After T4.1", with Camera settings → Cameras → "Record remote cameras" on (the
+default). Each attempt's clips from the phone come into the MacBook's attempt folder and go to the
+bucket with the attempt. The clock sync need not say "synced": the cuts go with the estimate there
+is, their windows widened by a margin of half a second or more, and the records say whether the sync
+had converged. The events say most of it (`docs/DIAGNOSTICS.md`, "After T4.2"); write down what they
+cannot show, next to the item, with the device and what happened.
+
+- [ ] Three solves with the phone paired: after each, the phone's Clips line says a clip waits for
+  the host for a few seconds, then that each attempt's clips go to the host as they are cut; the
+  session's notes (the session's page) say nothing is missing. Write how long after each solve the
+  phone's line went back.
+- [ ] The folder: the clip viewer of one of the three (the solve list's clip badge) has four
+  buttons, "Scramble · laptop", "Solve · laptop", "Scramble · phone-rear" and "Solve · phone-rear":
+  the phone's solve plays from the phone's angle, its moves in step with the picture (write whether
+  they look early or late, and by how much), and the laptop's plays again when chosen. Download gives
+  the four clips with their frames files and `attempt.json`, whose `video` names the four by
+  `camera`; the phone's frames files have `t0RemoteMs` and `remote` (with `converged` true or false).
+- [ ] The bucket: once the Sessions page says the attempts are uploaded, each attempt's folder in
+  the bucket (the Firebase console, Storage) lists nine files: `attempt.json` and the four clips with
+  their frames files. Sessions → QA view: "Clips by camera" counts `laptop` and `phone-rear`.
+- [ ] Walk away: right after a solve, once the phone's Clips line says a clip waits, walk out of the
+  Wi-Fi's reach for half a minute and back: the phone reconnects (as in "After T4.1"), the clip comes
+  and the line goes back. Write how long the clip took after the reconnection.
+- [ ] The Wi-Fi off: right after a solve, once the phone's Clips line says a clip waits, turn the
+  phone's Wi-Fi off for three minutes. Two minutes after the solve the attempt is uploaded without
+  the phone's clip and the session's notes say `remote clip missing: solve of attempt <n> from
+  phone-rear: …`. Wi-Fi on: the phone reconnects, its clip comes, the notes say `remote clip late:
+  …`, and the attempt is uploaded again with the phone's files added (the bucket lists them).
+- [ ] "Record remote cameras" off (Camera settings → Cameras): the phone stays connected and a solve
+  brings no clip from it (its Clips line does not change); on again, the next solve has the phone's
+  clips.

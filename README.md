@@ -204,9 +204,19 @@ session's (`phone-rear`, a second phone `phone-rear-2`), the phone's host label 
 apart. The phone keeps the screen on and asks to be plugged in; a connection that drops is made
 again by itself for five minutes (the host lists the camera as reconnecting meanwhile), then the
 phone says the host is gone and the host lets the camera go; Leave on the phone, Remove on the host
-or the session's end part the two at once. What works today (T4.1): the pairing, the picture, the
-state and the clock sync. The clips of a remote camera, cut by the host's timer and sent over the
-connection into the attempt's folder, come with T4.2, and its sync check and live preview with T4.3.
+or the session's end part the two at once.
+
+Each attempt's clips from the phone come into the host's attempt folder (T4.2): the host asks for
+the scramble's and the solve's clips at the moments it cuts its own, the window in the phone's clock
+through the clock sync (synced or not: on a busy Wi-Fi the sync may never say synced, and the window
+is widened by half a second or more on each side for the estimate's error); the phone cuts each from
+its 90 s, keeps it until the host has it, and sends it over the connection, going on after a drop.
+An attempt filmed by the laptop and a phone has four clips (`laptop.solve.mp4`,
+`phone-rear.solve.mp4`, …), all uploaded with it; it waits up to two minutes after its end for the
+phone's, then goes without them and the session's notes say which are missing (a clip that comes
+later is added and uploaded then). Camera settings → Cameras → "Record remote cameras" (on by
+default) turns this off. The clip viewer names each clip's camera. The phone's sync check (its
+camera's lag) and a live preview come with T4.3.
 
 ## Cloud
 

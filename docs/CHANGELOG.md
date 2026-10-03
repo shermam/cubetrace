@@ -7,6 +7,30 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Remote cameras' clips (T4.2, phase 4; `docs/RTC.md` §9): a phone paired as a camera now records
+  each attempt. The host asks it for the scramble's and the solve's clips at the moments it cuts its
+  own, the window in the phone's clock through the clock sync's estimate, converged or not (the first
+  real pairing's sync never converged on a home Wi-Fi), widened by half a second or more on each
+  side; the phone cuts and keeps each clip until the host has it, sends it over the data channel
+  (resumed after a reconnection, offered again after a reload or a new pairing to the same session),
+  and the host writes it into the attempt's folder with its times on the host clock: an attempt
+  filmed by the laptop and the phone has four clips, uploaded together. The attempt waits for the
+  phone's clips up to two minutes after its end, then is uploaded without them and the session's
+  notes name the camera; a clip that comes later is added and uploaded then. Camera settings →
+  Cameras has "Record remote cameras" (on by default) and says how many clips a phone still has to
+  send; the phone's Camera page says how many wait. The clip viewer names each clip's camera when an
+  attempt has several, and the QA view counts the clips by camera. The frames file of a phone's clip
+  keeps the phone's own first frame time (`t0RemoteMs`) and the clock estimate that converted it
+  (`remote`), and `clock.cameras[<label>].remote` may say `converged` false (schema 2, optional
+  fields; `docs/DATA-MODEL.md` §6, §9). Diagnostics: `remote.cut`, `remote.clip`,
+  `remote.clip.late`, `remote.clip.missing`; the round report's "After T4.2" items.
+- Development: `cut` names the camera's label and the attempt's `scrambleShown`, `cut-done` carries
+  what the phone's capture said of the clip, and `clip-ack` is new (additive within protocol version
+  1); core's `parseFrames`, `remoteFrames` and the fit's `least` and `rttP95Ms`; the capture's clip
+  worker can stage a clip under a folder of its own (`SaveClipParams.staging`); `writeAttemptFile`
+  takes bytes in parts; the end-to-end suite's `window.cubetraceE2eRemote` (development builds only)
+  moves a camera device's clock, cuts its connection once in the middle of a file, ignores its cuts
+  or shortens the host's wait.
 - Remote cameras, the pairing and the connection (T4.1, phase 4; `docs/RTC.md` §8, `README.md`
   "Remote cameras"): a phone films a session from another angle. On the host, Camera settings →
   Cameras → Add camera publishes a one-time code (10 minutes, one phone) and shows it as a QR code

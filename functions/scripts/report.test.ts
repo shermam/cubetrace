@@ -775,6 +775,186 @@ describe('the checklist', () => {
   });
 });
 
+describe('the checklist after T4.2', () => {
+  /** A day of three solves with the phone paired, as the host's events tell it. */
+  function remoteDay(): ReportEvent[] {
+    const t0 = NOW - 3 * HOUR;
+    const scope = (attempt: number) => ({ session: SESSION, attempt });
+    const events: ReportEvent[] = [];
+    for (let k = 1; k <= 3; k++) {
+      const end = t0 + k * 60_000;
+      for (const segment of ['scramble', 'solve']) {
+        events.push(
+          at(
+            end - (segment === 'scramble' ? 20_000 : 0),
+            'remote.cut',
+            {
+              outcome: 'sent',
+              camera: 'phone-rear',
+              peer: 'ThinkPhone',
+              segment,
+              reason: segment === 'scramble' ? 'armed' : 'ended',
+              windowMs: 15_000,
+              marginMs: k === 1 ? 640 : 500,
+              waitedMs: 0,
+              offsetMs: -2500.4,
+              rttMs: 120,
+              samples: 8,
+              converged: k > 1,
+            },
+            LAPTOP,
+            scope(k),
+          ),
+          at(
+            end + 4000 - (segment === 'scramble' ? 18_000 : 0),
+            'remote.clip',
+            {
+              camera: 'phone-rear',
+              peer: 'ThinkPhone',
+              segment,
+              bytes: 3_000_000,
+              mp4Bytes: 2_998_000,
+              transferMs: 1500,
+              bytesPerSecond: 2_000_000,
+              resumedBytes: 0,
+              late: false,
+              kept: false,
+              converged: k > 1,
+              offsetMs: -2500.4,
+              truncatedStart: false,
+            },
+            LAPTOP,
+            scope(k),
+          ),
+        );
+      }
+      events.push(
+        at(
+          end + 4100,
+          'attempt.done',
+          { status: 'solved', timeMs: 12_000, clips: 4, settledMs: 4100, settled: true },
+          LAPTOP,
+          scope(k),
+        ),
+        at(
+          end + 40_000,
+          'upload.state',
+          { state: 'done', files: 9, bytes: 12_000_000, sent: 12_000_000, tries: 9 },
+          LAPTOP,
+          scope(k),
+        ),
+      );
+    }
+    events.push(
+      at(t0 + 4 * 60_000, 'clips.viewed', { clips: 4, local: 4, gyro: true }, LAPTOP),
+      // The phone walked away during the fourth attempt's clip, and came back.
+      at(t0 + 5 * 60_000, 'rtc.connected', { peer: 'ThinkPhone', reconnection: true }, LAPTOP),
+      at(
+        t0 + 5 * 60_000 + 3000,
+        'remote.clip',
+        {
+          camera: 'phone-rear',
+          segment: 'solve',
+          bytes: 3_000_000,
+          transferMs: 900,
+          bytesPerSecond: 3_333_333,
+          resumedBytes: 1_310_720,
+          late: false,
+        },
+        LAPTOP,
+        scope(4),
+      ),
+      // The fifth's given up, then attached late.
+      at(
+        t0 + 8 * 60_000,
+        'remote.clip.missing',
+        {
+          camera: 'phone-rear',
+          segment: 'solve',
+          reason: 'wait',
+          message: "no clip within 120 s of the attempt's end",
+          afterEndMs: 120_000,
+        },
+        LAPTOP,
+        scope(5),
+      ),
+      at(
+        t0 + 9 * 60_000,
+        'remote.clip.late',
+        { camera: 'phone-rear', segment: 'solve', afterEndMs: 180_000, afterMissedMs: 60_000 },
+        LAPTOP,
+        scope(5),
+      ),
+      // Record remote cameras off, then on again before an attempt.
+      at(t0 + 10 * 60_000, 'settings.changed', { key: 'recordRemoteCameras', value: false }),
+      at(t0 + 11 * 60_000, 'settings.changed', { key: 'recordRemoteCameras', value: true }),
+      at(
+        t0 + 12 * 60_000,
+        'remote.cut',
+        { outcome: 'sent', camera: 'phone-rear', segment: 'scramble', marginMs: 500 },
+        LAPTOP,
+        scope(6),
+      ),
+    );
+    return events;
+  }
+
+  it('ticks the remote clips from the host’s events: the cuts, the clips, the four clips, the nine files, the resumed transfer, the late clip, the switch', () => {
+    const results = new Map(evaluate(remoteDay(), NOW).map((item) => [item.id, item.result]));
+    const status = (id: string): string | undefined => results.get(id)?.status;
+    const facts = (id: string): string => results.get(id)?.facts ?? '';
+
+    expect(status('4.2.1')).toBe('ok');
+    expect(facts('4.2.1')).toBe(
+      '7 remote clips on office-mbp (phone-rear); 7 cuts sent, 2 before the clock sync converged, margin 500 ms; transfer 1.5 s at 2 MB/s (medians)',
+    );
+    expect(status('4.2.2')).toBe('ok');
+    expect(facts('4.2.2')).toBe(
+      '3 real attempts on office-mbp with four clips or more (3 with nothing left to come, 4.1 s after the end, median); 1 viewing on office-mbp of four clips or more',
+    );
+    expect(status('4.2.3')).toBe('ok');
+    expect(facts('4.2.3')).toBe('3 uploads on office-mbp of nine files or more');
+    expect(status('4.2.4')).toBe('ok');
+    expect(facts('4.2.4')).toContain(
+      '1 clip on office-mbp resumed in the middle of a file (1310720 bytes held, median)',
+    );
+    expect(status('4.2.5')).toBe('ok');
+    expect(facts('4.2.5')).toBe(
+      "1 clip on office-mbp given up (wait), 1 late clip on office-mbp attached 180 s after the attempt's end (median)",
+    );
+    expect(status('4.2.6')).toBe('ok');
+    expect(facts('4.2.6')).toBe(
+      '1 switch on office-mbp off, 1 switch on office-mbp on followed by a cut within the hour',
+    );
+
+    // None of it without the events; the failures mark 4.2.1.
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result.status]));
+    for (const id of ['4.2.1', '4.2.2', '4.2.3', '4.2.4', '4.2.5', '4.2.6']) {
+      expect(empty.get(id), id).toBe('none');
+    }
+    const withFailure = [
+      ...remoteDay(),
+      at(
+        NOW - HOUR,
+        'remote.cut',
+        {
+          outcome: 'failed',
+          camera: 'phone-rear',
+          segment: 'solve',
+          reason: 'the phone is not recording',
+        },
+        LAPTOP,
+        { session: SESSION, attempt: 7 },
+      ),
+    ];
+    const failedResult = evaluate(withFailure, NOW).find((item) => item.id === '4.2.1')?.result;
+    expect(failedResult?.status).toBe('failed');
+    expect(failedResult?.facts).toContain(
+      '1 failure on office-mbp: phone-rear solve: the phone is not recording',
+    );
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });

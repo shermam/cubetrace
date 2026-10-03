@@ -1,6 +1,7 @@
 // The QA view's tables (docs/PLAN.md T3.1): the attempts of the session index by day and device,
 // with what their clips take, what of their files is uploaded, and, since T3.7, how many have a gyro
-// file and the median rate of those files. Pure: the page reads the index and draws these.
+// file and the median rate of those files; since T4.2, the clips by camera label, the host's own
+// cameras' and the phones'. Pure: the page reads the index and draws these.
 import type { CloudAttempt } from '@cubetrace/core';
 
 import type { CloudEntry } from '../cloud/session-index';
@@ -39,10 +40,25 @@ export interface QaRow extends QaCounts {
   readonly device: string;
 }
 
+/**
+ * The clips of one camera label (T4.2): the host's own camera (`laptop`) and each phone paired
+ * (`phone-rear`), over the attempts counted.
+ */
+export interface QaCamera {
+  readonly label: string;
+  /** The attempts with a clip of it. */
+  readonly attempts: number;
+  readonly clips: number;
+  /** What its clips' MP4s take. */
+  readonly recordedBytes: number;
+}
+
 export interface QaSummary {
   /** The newest day first, then by device. */
   readonly rows: readonly QaRow[];
   readonly total: QaCounts;
+  /** The clips by camera label, in the labels' order. */
+  readonly cameras: readonly QaCamera[];
 }
 
 /** The counts as they add up, with every gyro rate seen, for the median at the end. */
@@ -86,6 +102,7 @@ export function qaSummary(
   dayOf: (ms: number) => string = localDay,
 ): QaSummary {
   const rows = new Map<string, { day: string; device: string; tally: Tally }>();
+  const cameras = new Map<string, QaCamera>();
   let total = NONE;
   for (const { document, pending } of attempts) {
     const day = dayOf(document.events.scrambleShown);
@@ -94,12 +111,24 @@ export function qaSummary(
     const counts = tallyOf(document, pending);
     rows.set(key, { day, device, tally: add(rows.get(key)?.tally ?? NONE, counts) });
     total = add(total, counts);
+    const labels = new Set<string>();
+    for (const clip of document.video) {
+      const known = cameras.get(clip.camera);
+      cameras.set(clip.camera, {
+        label: clip.camera,
+        attempts: (known?.attempts ?? 0) + (labels.has(clip.camera) ? 0 : 1),
+        clips: (known?.clips ?? 0) + 1,
+        recordedBytes: (known?.recordedBytes ?? 0) + clip.bytes,
+      });
+      labels.add(clip.camera);
+    }
   }
   return {
     rows: [...rows.values()]
       .sort((p, q) => q.day.localeCompare(p.day) || p.device.localeCompare(q.device))
       .map(({ day, device, tally }) => ({ day, device, ...countsOf(tally) })),
     total: countsOf(total),
+    cameras: [...cameras.values()].sort((p, q) => p.label.localeCompare(q.label)),
   };
 }
 
