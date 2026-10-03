@@ -728,7 +728,10 @@ not re-sign the file; (h) a diagnostics batch flushed as the page unloads can be
 `keepalive` REST write would close it; (i) the other `settings.changed` events, `wake.lock` and
 `storage.persistence` are recorded in effects (T3.9), so a change followed at once by an unload loses
 its event (the Diagnostics switch itself settles before the page goes since #59), and a switch toggled
-before `AuthService` attaches the account goes to the ring, which a toggle off then clears.
+before `AuthService` attaches the account goes to the ring, which a toggle off then clears. (j) The remote camera's picture on the host (T4.1) is the thumbnail at the bottom of the Camera
+panel, too far from the host's preview to keep the cube in the phone's frame while solving (issue #60):
+T4.3's live preview belongs next to the host's preview on the Timer page, the thumbnail staying in the
+Cameras list as the pairing's state.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
