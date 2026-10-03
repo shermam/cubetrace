@@ -7,6 +7,24 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Development: the groundwork of the remote cameras (T4.0, phase 4; `docs/RTC.md`), which no page
+  uses yet: the package `@cubetrace/rtc` with the data channel's protocol (versioned `hello`, pings,
+  the camera's state and thumbnails, cuts, the file messages, `leave`; JSON control frames and binary
+  chunk frames), the chunked file transfer (64 KB chunks paced by the channel's buffered amount under
+  a 256 KB threshold, acknowledged every megabyte, resumed from the receiver's offset after a
+  reconnection, the whole file checked by CRC-32 at the end), the clock sync's pings over core's new
+  `RemoteClockFit` (the offset from the samples of least round trip, a drift fit once they span a
+  minute, `toHostMs`/`toRemoteMs`, convergence under 3 ms of spread), the pairing token (8 characters
+  of Crockford's base32 in the QR's URL, stored as its SHA-256), the signaling over Firestore
+  (`FirestoreSignaling` on the account backend's new calls) and `WebRtcTransport` on
+  `RTCPeerConnection` with Google's STUN server and ICE restart; `MemoryTransport`, `MemorySignaling`
+  and `FakeTimers` for the tests. `session.json` keeps schema 2 with optional fields: a camera's
+  `local` may be false, with `remote` naming its device, and a camera clock may carry `remote`, the
+  fit's record (`docs/DATA-MODEL.md` §6). In Firestore, the session's document gains `pairing`, the
+  peer documents and their candidates get their schemas, readers and rules (owner-only, shapes
+  checked; §10), and `AccountBackend` gains `writePairing`, `createPeer`, `updatePeer`, `deletePeer`,
+  `watchPeers`, `watchPeer`, `addCandidate` and `watchCandidates` in the SDK and both fakes.
+
 - The cube's whole record (T3.7; `docs/DATA-MODEL.md` §5, §6, §7, §11): everything the cube sends
   is kept now, to be trimmed later if useless. Each attempt of a cube with a gyroscope gets a
   `gyro.json` in its folder, written a second after the attempt ends, with or without a camera: the

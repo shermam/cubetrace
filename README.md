@@ -332,6 +332,8 @@ apps/web/          the Angular app (standalone components, signals, SCSS, PWA); 
 packages/core/     @cubetrace/core: notation, cube simulator, scrambles, CFOP phases, attempt state machine, records, statistics, JSON Schemas
 packages/gan/      @cubetrace/gan: GAN Bluetooth driver wrapper, Bluetooth support check, fake cube
 packages/storage/  @cubetrace/storage: the session store over the origin private file system
+packages/rtc/      @cubetrace/rtc: the connection to a remote camera (phase 4): the data channel's protocol, the
+                   file transfer, the clock sync's pings, the pairing token, the signaling over Firestore
 packages/capture/  @cubetrace/capture: the camera and the recording
   src/camera.ts, sharpness.ts, framing.ts   constraints, manual controls, snapshots; the sharpness meter; the framing rectangle
   src/pipeline.ts, protocol.ts              startCapture(): the window's side of the capture, and its messages to the workers

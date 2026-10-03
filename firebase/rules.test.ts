@@ -1001,6 +1001,300 @@ describe('an attempt whose clip left the device (T3.3)', () => {
   });
 });
 
+// The signaling of a remote camera (T4.0, docs/RTC.md, docs/DATA-MODEL.md §10): the session's pairing,
+// sessions/{id}/peers/{peerId} and its two candidate collections, all the session's owner's alone.
+const TOKEN_HASH = '7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069';
+const SDP = 'v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n';
+
+/** The pairing the host publishes: the token's hash, good until `expiresMs`. */
+function pairing(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { tokenHash: TOKEN_HASH, expiresMs: 1_790_000_600_000, ...extra };
+}
+
+/** sessions/{id}/peers/{peerId} as the phone creates it, with `extra` changed. */
+function peerDoc(owner: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schema: 1,
+    owner,
+    role: 'camera',
+    createdMs: 1_790_000_000_123.5,
+    tokenHash: TOKEN_HASH,
+    offer: { type: 'offer', sdp: SDP },
+    answer: null,
+    state: 'offered',
+    ...extra,
+  };
+}
+
+/** A candidate as either side writes it. */
+function candidateDoc(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    candidate: 'candidate:1 1 udp 2122260223 192.168.0.7 54321 typ host generation 0',
+    sdpMid: '0',
+    sdpMLineIndex: 0,
+    createdMs: 1_790_000_000_200,
+    ...extra,
+  };
+}
+
+describe("a session's pairing (T4.0)", () => {
+  const session = `sessions/${SESSION_ID}`;
+
+  it("lets the host publish the token's hash in its session's document, read it, and close it", async () => {
+    await seed(session, sessionDoc('alice'));
+    const db = alice().firestore();
+    await assertSucceeds(db.doc(session).set({ pairing: pairing() }, { merge: true }));
+    const stored = await assertSucceeds(db.doc(session).get());
+    expect(stored.get('pairing')).toEqual(pairing());
+    await assertSucceeds(db.doc(session).set({ pairing: null }, { merge: true }));
+    expect((await db.doc(session).get()).get('pairing')).toBeNull();
+    // A session created with its pairing, or written whole without one, is fine too.
+    await assertSucceeds(
+      db.doc(session).set(sessionDoc('alice', SESSION_ID, { pairing: pairing() })),
+    );
+    await assertSucceeds(db.doc(session).set(sessionDoc('alice')));
+    // The record's saves merge around it.
+    await assertSucceeds(db.doc(session).set({ pairing: pairing() }, { merge: true }));
+    await assertSucceeds(
+      db.doc(session).set(sessionDoc('alice', SESSION_ID, { notes: 'x' }), { merge: true }),
+    );
+    expect((await db.doc(session).get()).get('pairing')).toEqual(pairing());
+  });
+
+  it.each([
+    ['a pairing that is text', TOKEN_HASH],
+    ['a pairing without its hash', { expiresMs: 1_790_000_600_000 }],
+    ['a pairing without its expiry', { tokenHash: TOKEN_HASH }],
+    ['a hash in upper case', pairing({ tokenHash: TOKEN_HASH.toUpperCase() })],
+    ['a hash of 63 digits', pairing({ tokenHash: TOKEN_HASH.slice(1) })],
+    ['the token itself', pairing({ token: 'A1B2C3D4' })],
+    ['an expiry that is text', pairing({ expiresMs: 'soon' })],
+  ])('refuses %s', async (_, value) => {
+    await seed(session, sessionDoc('alice'));
+    const db = alice().firestore();
+    await assertFails(db.doc(session).set({ pairing: value }, { merge: true }));
+    await assertFails(db.doc(session).set(sessionDoc('alice', SESSION_ID, { pairing: value })));
+  });
+
+  it("refuses another account, and anyone signed out, the pairing of someone's session", async () => {
+    await seed(session, sessionDoc('alice', SESSION_ID, { pairing: pairing() }));
+    for (const db of [bob().firestore(), nobody().firestore()]) {
+      await assertFails(db.doc(session).get());
+      await assertFails(db.doc(session).set({ pairing: pairing() }, { merge: true }));
+      await assertFails(db.doc(session).set({ pairing: null }, { merge: true }));
+    }
+  });
+});
+
+describe('sessions/{id}/peers/{peerId} (T4.0)', () => {
+  const session = `sessions/${SESSION_ID}`;
+  const peer = `${session}/peers/peer-1`;
+  const callerCandidates = `${peer}/callerCandidates`;
+  const calleeCandidates = `${peer}/calleeCandidates`;
+
+  it("runs the signaling of the session's owner: the offer, the answer, the candidates of both sides, the deletion", async () => {
+    await seed(session, sessionDoc('alice'));
+    const db = alice().firestore();
+    // The phone creates the peer with its offer and adds its candidates.
+    await assertSucceeds(db.doc(peer).set(peerDoc('alice')));
+    await assertSucceeds(db.collection(callerCandidates).add(candidateDoc()));
+    await assertSucceeds(
+      db
+        .collection(callerCandidates)
+        .add(candidateDoc({ candidate: '', sdpMid: null, sdpMLineIndex: null })),
+    );
+    // The host watches the peers it owns, reads the offer, answers, and adds its candidates.
+    await assertSucceeds(db.collection(`${session}/peers`).where('owner', '==', 'alice').get());
+    await assertSucceeds(db.doc(peer).get());
+    await assertSucceeds(
+      db.doc(peer).update({ answer: { type: 'answer', sdp: SDP }, state: 'answered' }),
+    );
+    await assertSucceeds(
+      db.collection(calleeCandidates).add(candidateDoc({ sdpMid: '0', sdpMLineIndex: 0 })),
+    );
+    await assertSucceeds(db.collection(callerCandidates).orderBy('createdMs').get());
+    await assertSucceeds(db.collection(calleeCandidates).get());
+    // An ICE restart: the phone's new offer replaces the old, the answer goes.
+    await assertSucceeds(
+      db.doc(peer).update({
+        offer: { type: 'offer', sdp: `${SDP}a=ice-options:trickle\r\n` },
+        answer: null,
+        state: 'offered',
+      }),
+    );
+    // The phone leaves, the host deletes everything.
+    await assertSucceeds(db.doc(peer).update({ state: 'closed' }));
+    const candidates = await db.collection(callerCandidates).get();
+    const batch = db.batch();
+    for (const document of candidates.docs) {
+      batch.delete(document.ref);
+    }
+    batch.delete(db.doc(peer));
+    await assertSucceeds(batch.commit());
+    // The phone, watching its document, sees it gone rather than a refusal.
+    expect((await assertSucceeds(db.doc(peer).get())).exists).toBe(false);
+    await assertFails(bob().firestore().doc(peer).get());
+    await assertFails(nobody().firestore().doc(peer).get());
+  });
+
+  it('refuses a peer under a session of another account, or without its writer as the owner', async () => {
+    await seed(session, sessionDoc('alice'));
+    await seed(`sessions/${BOBS_ID}`, sessionDoc('bob', BOBS_ID));
+    const db = alice().firestore();
+    await assertFails(db.doc(`sessions/${BOBS_ID}/peers/peer-1`).set(peerDoc('alice')));
+    await assertFails(db.doc(`sessions/${BOBS_ID}/peers/peer-1`).set(peerDoc('bob')));
+    await assertFails(db.doc(peer).set(peerDoc('bob')));
+    const anonymous = peerDoc('alice');
+    Reflect.deleteProperty(anonymous, 'owner');
+    await assertFails(db.doc(peer).set(anonymous));
+    // A peer of a session that does not exist.
+    await assertFails(
+      db.doc(`sessions/${BOBS_ID.replace('9e8d', '1111')}/peers/peer-1`).set(peerDoc('alice')),
+    );
+  });
+
+  it('refuses another account, and anyone signed out, any access to a peer and its candidates', async () => {
+    await seed(session, sessionDoc('alice'));
+    await seed(peer, peerDoc('alice'));
+    await seed(`${callerCandidates}/c1`, candidateDoc());
+    for (const db of [bob().firestore(), nobody().firestore()]) {
+      await assertFails(db.doc(peer).get());
+      await assertFails(db.doc(peer).update({ state: 'closed' }));
+      await assertFails(
+        db.doc(peer).update({ answer: { type: 'answer', sdp: SDP }, state: 'answered' }),
+      );
+      await assertFails(db.doc(peer).delete());
+      await assertFails(db.collection(`${session}/peers`).where('owner', '==', 'alice').get());
+      await assertFails(db.collection(callerCandidates).get());
+      await assertFails(db.doc(`${callerCandidates}/c1`).get());
+      await assertFails(db.collection(calleeCandidates).add(candidateDoc()));
+      await assertFails(db.doc(`${callerCandidates}/c1`).delete());
+    }
+    // Nor may a query leave the owner out.
+    await assertFails(alice().firestore().collection(`${session}/peers`).get());
+  });
+
+  it('never changes the owner, and keeps the document whole and valid after every write', async () => {
+    await seed(session, sessionDoc('alice'));
+    await seed(peer, peerDoc('alice'));
+    const db = alice().firestore();
+    await assertFails(db.doc(peer).update({ owner: 'bob' }));
+    await assertFails(db.doc(peer).update({ state: 'paired' }));
+    await assertFails(db.doc(peer).update({ answer: { type: 'offer', sdp: SDP } }));
+    await assertFails(db.doc(peer).update({ answer: { type: 'answer', sdp: 'x'.repeat(20_001) } }));
+    await assertFails(db.doc(peer).update({ answer: { type: 'answer' } }));
+    await assertFails(db.doc(peer).update({ answer: { type: 'answer', sdp: SDP, ice: 'lite' } }));
+    await assertFails(db.doc(peer).update({ device: 'Android phone' }));
+    await assertFails(db.doc(peer).update({ tokenHash: 'A1B2C3D4' }));
+    await assertSucceeds(
+      db
+        .doc(peer)
+        .update({ answer: { type: 'answer', sdp: 'x'.repeat(20_000) }, state: 'answered' }),
+    );
+  });
+
+  it.each([
+    ['schema version 2', { schema: 2 }],
+    ['no schema', { schema: undefined }],
+    ['a role of host', { role: 'host' }],
+    ['no creation time', { createdMs: undefined }],
+    ['a creation time that is text', { createdMs: 'now' }],
+    ['no token hash', { tokenHash: undefined }],
+    ['a token hash in upper case', { tokenHash: TOKEN_HASH.toUpperCase() }],
+    ['a token hash of 63 digits', { tokenHash: TOKEN_HASH.slice(1) }],
+    ['no offer field', { offer: undefined }],
+    ['an offer that is text', { offer: SDP }],
+    ['an offer of type answer', { offer: { type: 'answer', sdp: SDP } }],
+    ['an offer without its SDP', { offer: { type: 'offer' } }],
+    ['an SDP that is a number', { offer: { type: 'offer', sdp: 1 } }],
+    ['an SDP of 20,001 characters', { offer: { type: 'offer', sdp: 'x'.repeat(20_001) } }],
+    ['an unknown field in a description', { offer: { type: 'offer', sdp: SDP, ice: 'lite' } }],
+    ['no answer field', { answer: undefined }],
+    ['an answer that is text', { answer: SDP }],
+    ['a state of paired', { state: 'paired' }],
+    ['no state', { state: undefined }],
+    ['an unknown field', { device: 'Android phone' }],
+  ])('refuses a peer document with %s', async (_, change) => {
+    await seed(session, sessionDoc('alice'));
+    const document = peerDoc('alice');
+    for (const [field, value] of Object.entries(change)) {
+      if (value === undefined) {
+        Reflect.deleteProperty(document, field);
+      } else {
+        document[field] = value;
+      }
+    }
+    await assertFails(alice().firestore().doc(peer).set(document));
+  });
+
+  it('accepts a peer without an offer yet, answered, or closed, and an SDP of 20,000 characters', async () => {
+    await seed(session, sessionDoc('alice'));
+    const db = alice().firestore();
+    await assertSucceeds(db.doc(peer).set(peerDoc('alice', { offer: null })));
+    await assertSucceeds(
+      db
+        .doc(peer)
+        .set(peerDoc('alice', { answer: { type: 'answer', sdp: SDP }, state: 'answered' })),
+    );
+    await assertSucceeds(db.doc(peer).set(peerDoc('alice', { state: 'closed' })));
+    await assertSucceeds(
+      db.doc(peer).set(peerDoc('alice', { offer: { type: 'offer', sdp: 'x'.repeat(20_000) } })),
+    );
+  });
+
+  it.each([
+    ['no candidate', { candidate: undefined }],
+    ['a candidate that is a number', { candidate: 1 }],
+    ['a candidate of 1,001 characters', { candidate: 'c'.repeat(1001) }],
+    ['a mid that is a number', { sdpMid: 0 }],
+    ['a mid of 101 characters', { sdpMid: 'm'.repeat(101) }],
+    ['no line index field', { sdpMLineIndex: undefined }],
+    ['a negative line index', { sdpMLineIndex: -1 }],
+    ['a fractional line index', { sdpMLineIndex: 0.5 }],
+    ['no creation time', { createdMs: undefined }],
+    ['an unknown field', { usernameFragment: 'abc' }],
+  ])('refuses a candidate with %s', async (_, change) => {
+    await seed(session, sessionDoc('alice'));
+    await seed(peer, peerDoc('alice'));
+    const document = candidateDoc();
+    for (const [field, value] of Object.entries(change)) {
+      if (value === undefined) {
+        Reflect.deleteProperty(document, field);
+      } else {
+        document[field] = value;
+      }
+    }
+    const db = alice().firestore();
+    await assertFails(db.collection(callerCandidates).add(document));
+    await assertFails(db.collection(calleeCandidates).add(document));
+    await assertSucceeds(db.collection(callerCandidates).add(candidateDoc()));
+  });
+
+  it('keeps the candidates to their two collections under a peer that exists, and never changes one', async () => {
+    await seed(session, sessionDoc('alice'));
+    const db = alice().firestore();
+    // No peer yet: no candidate (its collection lists as empty).
+    await assertFails(db.collection(callerCandidates).add(candidateDoc()));
+    expect((await assertSucceeds(db.collection(callerCandidates).get())).empty).toBe(true);
+    await seed(peer, peerDoc('alice'));
+    await assertFails(db.collection(`${peer}/candidates`).add(candidateDoc()));
+    await assertFails(db.collection(`${peer}/notes`).add({ text: 'x' }));
+    await assertFails(db.collection(`${peer}/notes`).get());
+    await assertSucceeds(db.doc(`${callerCandidates}/c1`).set(candidateDoc()));
+    await assertFails(db.doc(`${callerCandidates}/c1`).update({ createdMs: 1 }));
+    await assertFails(db.doc(`${callerCandidates}/c1`).set(candidateDoc({ sdpMid: '1' })));
+    await assertSucceeds(db.doc(`${callerCandidates}/c1`).delete());
+    // A peer of another account under Alice's session (which only an administrator could write):
+    // its candidates are Alice's, the session's owner's, and nobody else's.
+    await seed(`${session}/peers/bobs`, peerDoc('bob'));
+    await assertFails(
+      bob().firestore().collection(`${session}/peers/bobs/callerCandidates`).add(candidateDoc()),
+    );
+    await assertFails(bob().firestore().collection(`${session}/peers/bobs/callerCandidates`).get());
+    await assertSucceeds(db.collection(`${session}/peers/bobs/callerCandidates`).get());
+  });
+});
+
 describe('everything else', () => {
   it('is closed: no collection outside users and sessions, for anyone', async () => {
     await seed('public/notice', { text: 'hello' });

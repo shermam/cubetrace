@@ -28,7 +28,11 @@ T3.7 added, optional in the same way, the cube's whole record: in `attempt.json`
 that wrote it), `gyro` (its gyroscope file, §11; read as null when missing), `resyncs` (the states
 adopted after moves went unseen; read as none) and each move's `serial` and `packetLast`; in
 `session.json`, `cube.productDate` (read as null) and `battery` (read as none); in the frames files,
-`app`; and a new file per attempt, `gyro.json` (§11), with a version of its own, 1.
+`app`; and a new file per attempt, `gyro.json` (§11), with a version of its own, 1. T4.0 (phase 4,
+the remote cameras; `docs/RTC.md`) added, optional in the same way, in `session.json`: a camera's
+`local` may be false, and then `remote` names the device the camera runs on (§6); and a camera clock's
+`remote`, the clock sync of a remote camera (§6); the files written before have cameras of the host's
+own only, `local` true, and neither field.
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -37,8 +41,10 @@ is its own, `user.schema.json` for the account's record in Firestore (§10), who
 own, `cloud-session.schema.json` and `cloud-attempt.schema.json` for the documents of the session
 index in Firestore (§10), which have the version of the records they copy (2),
 `cloud-cube.schema.json` for the account's cubes in Firestore (§10), whose version 1 is its own,
-and `cloud-event.schema.json` for the account's diagnostics events there (§10, T3.9), whose version
-1 is its own too.
+`cloud-event.schema.json` for the account's diagnostics events there (§10, T3.9), whose version
+1 is its own too, and `cloud-peer.schema.json` and `cloud-candidate.schema.json` for the signaling
+documents of the remote cameras (§10, T4.0): the peers' version 1 is its own, and the candidates,
+short-lived documents of one shape, carry no version.
 
 **Reading older records.** Files of version 1 are never rewritten to upgrade them. The readers,
 `parseSession` and `parseAttempt` in `packages/core/src/records.ts` (the app's session store
@@ -198,13 +204,21 @@ older build can be told apart later, also within one session, which can outlive 
      "crop": {"x": 480, "y": 120, "w": 960, "h": 840}, "mode": "full",
      "microphone": {"label": "MacBook Pro Microphone (Built-in)", "processing": "raw",
                     "echoCancellation": false, "noiseSuppression": false, "autoGainControl": false,
-                    "voiceIsolation": null, "sampleRate": 48000, "channelCount": 1}}
+                    "voiceIsolation": null, "sampleRate": 48000, "channelCount": 1}},
+    {"label": "phone-rear", "local": false, "facing": "environment", "deviceLabel": "camera2 0, facing back",
+     "settings": {"…": "…"}, "capabilities": {"…": "…"}, "constraints": {"…": "…"},
+     "crop": null, "mode": "full", "microphone": null,
+     "remote": {"label": "Android phone", "platform": "Android"}}   // T4.0: a remote camera's device
   ],
   "clock": {
     "cube": {"a": 1.0031, "b": 1730639990000.0, "residualP95Ms": 618.7, "samples": 1425},  // coarse
     "cameras": {"laptop": {"offsetMs": 41.5, "rttMs": 0, "driftPpm": 0,
                            "clapperboardResidualMs": 12.3, "clapperboardSamples": 5,
-                           "samples": [{"moveHostMs": 1730640010000.5, "onsetHostMs": 1730640010040.5}, …]}}
+                           "samples": [{"moveHostMs": 1730640010000.5, "onsetHostMs": 1730640010040.5}, …]},
+                "phone-rear": {"offsetMs": 63.0, "rttMs": 9.6, "driftPpm": 37.8,
+                               "clapperboardResidualMs": 8.1, "clapperboardSamples": 8,
+                               "remote": {"offsetMs": -3127.4, "driftPpm": 37.8, "rttMs": 9.6, "samples": 58,
+                                          "residualP95Ms": 1.1, "since": 1730640000123.5}}}   // T4.0
   },
   "audio": true,
   "settings": {"inspection15s": false, "autoAdvance": true},
@@ -256,8 +270,15 @@ and, since T3.1, once when the session index in the cloud refuses a write of the
 <reason>` or `cloud: attempt <index> could not be deleted from the index: <reason>` (§10).
 `summary` is counted from the attempts: each one is solved or a DNF.
 
-`cameras` lists the session's cameras: in phase 2 the host's own (`local: true`); remote cameras
-come with phase 4. `label` names the camera in `clock.cameras`, in the clips' `camera` and in
+`cameras` lists the session's cameras: the host's own (`local: true`) and, since T4.0 (phase 4,
+`docs/RTC.md`), the remote cameras, phones paired over WebRTC that film from another angle and send
+the host their clips (`local: false`). A remote camera's entry has `remote`, the device it runs on:
+`label`, that device's host label (Settings → This device on the phone, `host.label` of its own
+records), and `platform`, its platform (`Android`); the entry's other fields are the phone's camera
+as the phone's own session.json would describe it (its `hello` over the data channel carries them),
+relabelled by the host. A camera of the host's own has no `remote`, and the files written before
+phase 4 have none: `local` false without `remote`, or `remote` on a local camera, is refused. `label`
+names the camera in `clock.cameras`, in the clips' `camera` and in
 their file names (§5), and there is one per device within the session (`docs/PLAN.md` T2.14,
 `labelFor` in `packages/core/src/session.ts`). A camera's own label comes from the host label and
 where the camera faces: `laptop`, or `phone` when the host label says phone, followed by `-front` or
@@ -312,7 +333,17 @@ kept: `moveHostMs`, the turn, and `onsetHostMs`, the middle of its motion since 
 older: until T2.11 it was the first frame of the motion's rise, `offsetMs` the median over every
 turn matched and `clapperboardResidualMs` their spread from the 5th to the 95th percentile; the
 schema is unchanged). `rttMs` and `driftPpm` are the round-trip time and the drift of a remote
-camera's clock sync (phase 4); a local camera shares the host's clock and has 0 for both. A clip's
+camera's clock sync (phase 4); a local camera shares the host's clock and has 0 for both. Since T4.0
+a remote camera's entry carries the clock sync itself in `remote` (`docs/RTC.md` §4, `RemoteClockFit`
+in `packages/core/src/remote-clock.ts`), as it was when the record was written: `offsetMs`, the
+phone's clock minus the host's, in ms (`remoteMs ≈ hostMs + offsetMs`); `driftPpm`, how fast that
+offset grows, in parts per million (50 ppm is 3 ms a minute; 0 before the samples spanned a minute);
+`rttMs`, the least round trip of the samples the estimate stands on; `samples`, how many they are
+(the samples of the window whose round trip was within 1.5× the least); `residualP95Ms`, the 95th
+percentile of the absolute residuals of their offsets from the estimate; and `since`, the host time
+of the oldest of them. The entry's own `rttMs` and `driftPpm` repeat the fit's; `offsetMs` stays the
+clapperboard's lag, measured on the phone's own frames (T4.3), on top of the clock sync. A local
+camera's entry has no `remote`, and the files written before phase 4 have none. A clip's
 `syncResidualMs` (§7) is its camera's `offsetMs` when it was recorded.
 
 ## 7. `attempt.json`
@@ -869,6 +900,55 @@ dropped: the diagnostics never record themselves.
 single-field index, which Firestore keeps by itself); the round report reads every account's events
 of the last days with the Admin SDK, past the rules (`npm run round-report`, `docs/DIAGNOSTICS.md`).
 
+### The signaling of the remote cameras: `sessions/{id}.pairing`, `sessions/{id}/peers/{peerId}` and its candidates (T4.0)
+
+The documents through which a phone joins a session as a remote camera (`docs/RTC.md` §5, `docs/PLAN.md`
+phase 4): the FirebaseRTC pattern, the offer and the answer in one document, the ICE candidates of
+each side in a subcollection under it. They are the account's own, never the dataset's (no file of §5
+holds them), and short-lived: the host deletes a peer's documents when the phone leaves, or after an
+hour.
+
+```jsonc
+// sessions/3f1c…                                       the session's document (above), plus:
+"pairing": {"tokenHash": "7f83b165…6d9069", "expiresMs": 1790000600000}   // null once closed; absent before
+
+// sessions/3f1c…/peers/2b7d…                          schema version 1
+{
+  "schema": 1,
+  "owner": "Xb3…uid",                 // the account that owns the session; both devices are signed in to it
+  "role": "camera",                   // phase 4 has cameras only
+  "createdMs": 1790000000123.5,       // when the phone wrote it, on its clock
+  "tokenHash": "7f83b165…6d9069",     // SHA-256 of the pairing token the phone presents, 64 lowercase hex digits
+  "offer": {"type": "offer", "sdp": "v=0\r\n…"},   // the phone's; null before an ICE restart's new offer
+  "answer": {"type": "answer", "sdp": "v=0\r\n…"}, // the host's; null until it answers
+  "state": "answered"                 // "offered" | "answered" | "closed"
+}
+
+// sessions/3f1c…/peers/2b7d…/callerCandidates/<auto id>   the phone's (the caller's) ICE candidates
+// sessions/3f1c…/peers/2b7d…/calleeCandidates/<auto id>   the host's (the callee's)
+{"candidate": "candidate:1 1 udp 2122260223 192.168.0.7 54321 typ host", "sdpMid": "0", "sdpMLineIndex": 0,
+ "createdMs": 1790000000200}         // RTCIceCandidateInit, with when it was written; no schema field
+```
+
+`pairing` is the one field of the session's document that is not the record's: the host writes it
+apart from the record's saves (`AccountBackend.writePairing`, a merge), when it shows the QR code
+(`tokenHash`, the SHA-256 of the token as the QR carries it, and `expiresMs`, until when the host takes
+it: 10 minutes), and sets it to null once a phone paired or the host closed the pairing; a phone reads
+it to check its token before writing anything (`checkPairing`); `sessionOfDocument` leaves it out of
+the record, and it never reaches `session.json`. `{peerId}` is the phone's choice
+(`crypto.randomUUID()`). `offer` and `answer` are `RTCSessionDescriptionInit` as the browsers give them,
+the SDP at most 20,000 characters (a typical one has one to three thousand); the phone's `Signaling`
+creates the document with its offer in the `offered` state, the host's writes its answer and
+`answered`, an ICE restart replaces the offer and clears the answer, and the phone marks `closed` when
+it leaves. The candidates are `RTCIceCandidateInit` (the line at most 1,000 characters, empty for the
+end-of-candidates mark; `sdpMid` and `sdpMLineIndex` null when the browser leaves them out) with
+`createdMs`, under auto ids, never changed; each side adds to its own collection and watches the
+other's. `packages/core/schema/cloud-peer.schema.json` (`CLOUD_PEER_SCHEMA`) and
+`cloud-candidate.schema.json` (`CLOUD_CANDIDATE_SCHEMA`) are the documents in machine-readable form,
+`parseCloudPeer`, `parseCloudCandidate` and `parseSessionPairing` (`packages/core/src/records.ts`)
+their readers, `cloudPeer` and `cloudCandidate` (`cloud-peer.ts`) their builders; the schema of the
+session's document (`cloud-session.schema.json`) has `pairing`.
+
 ### The rules
 
 `firebase/firestore.rules`, tested against the Firestore emulator by `firebase/rules.test.ts`
@@ -892,7 +972,23 @@ of the last days with the Admin SDK, past the rules (`npm run round-report`, `do
   is a map whose `productDate`, if there, is text or null, and its `battery` a list; an attempt's
   `app` is a map of exactly `version` and `commit`, both text, its `gyro` null or a map of exactly
   `file` (`gyro.json`), `samples` (an integer from 1), `fromHostMs`, `toHostMs` and `rateHz`
-  (numbers, the rate from 0) and `truncatedStart` (a boolean), and its `resyncs` a list.
+  (numbers, the rate from 0) and `truncatedStart` (a boolean), and its `resyncs` a list. A session's
+  `pairing` (T4.0), where it has one, is null or a map of exactly `tokenHash` (64 lowercase hex
+  digits) and `expiresMs` (a number).
+- `sessions/{id}/peers/{peerId}` and its `callerCandidates/{id}` and `calleeCandidates/{id}` (T4.0,
+  `docs/RTC.md`): the session's owner only, for every document. A peer document carries `owner` as the
+  attempts do: only that account reads (a query asks `where('owner', '==', uid)`), updates and
+  deletes it, a new one names its writer under a session of the same owner, and `owner` never
+  changes; a get of a peer document that is not there is the session's owner's too, so that the
+  phone's watcher hears the deletion rather than a refusal. The document is whole and valid after
+  every write: `schema` 1, `role` `camera`, `createdMs` a number, `tokenHash` 64 lowercase hex
+  digits, `offer` null or a map of exactly `type` (`offer`) and `sdp` (text of at most 20,000
+  characters), `answer` null or the same with `type` `answer`, `state` one of `offered`, `answered`,
+  `closed`, and no other field. A candidate, which carries no owner, is read, created and deleted only
+  by the owner of the session it is under (one `get` of the session's document per request), only in
+  those two collections, created only under a peer that exists and whole and valid (`candidate` text of
+  at most 1,000 characters, `sdpMid` null or text of at most 100, `sdpMLineIndex` null or an integer
+  from 0, `createdMs` a number, no other field), and never updated.
 - `users/{uid}/cubes/{name}` (T3.4): only the account `uid` reads, lists, writes and deletes them; a
   document must be whole and valid after every write: `schema` 1, its path's name as `name`, `mac`
   six hex bytes in upper case with colons between them, `updatedMs` a number from 0, `device` a
