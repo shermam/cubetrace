@@ -139,6 +139,9 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The upload quota per account and UTC day is 15 GB and 3,000 files (6 GB and 1,200 before): on
+  2026-10-03 the owner reached 1,199 files with 171 attempts in the day plus the re-signatures of
+  `attempt.json` after clips deleted by policy, and phase 4 adds a phone's clips to each attempt.
 - The clip viewer's layout (T3.10): the 3D cube under the video instead of beside it, the video at
   most 45% of the screen's height and the cube 30%; the view's controls and the mirror in one
   wrapping row under the cube, Re-zero and Raw under the orientation line.

@@ -474,8 +474,8 @@ upload can be neither of another type nor longer than what the quota counted, an
 policy (`bucket/`) lets the app's origins send those headers. A third provider, `local`, is the
 end-to-end suite's bucket on the same machine, in the Functions emulator only ("Testing the cloud").
 
-**Quota.** Per account and UTC day, the bytes and the files signed (6 GB and 1,200 by default,
-parameters): `users/{uid}.quota = {day, bytes, files}`, reserved in the same transaction that records
+**Quota.** Per account and UTC day, the bytes and the files signed (15 GB and 3,000 since 2026-10-03,
+6 GB and 1,200 before; parameters): `users/{uid}.quota = {day, bytes, files}`, reserved in the same transaction that records
 the intent, every signature counted, a call that does not fit refused whole with when the day resets.
 It is a ceiling on what a runaway client can cost while there is one solver, not the community quotas
 of phase 5. The URLs are signed before the transaction, so a bucket that cannot sign counts nothing.

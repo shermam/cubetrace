@@ -207,7 +207,7 @@ cubetrace:cubetrace-data/users/` totals them, and `rclone copy cubetrace:cubetra
   "Account").
 - An attempt uploads once its clips are saved, a second or two after it ends; `session.json` goes
   again about two minutes after the session's last change, not with every attempt.
-- The day's quota, per account and UTC day: 6 GB and 1,200 files signed, every signature counted. An
+- The day's quota, per account and UTC day: 15 GB and 3,000 files signed (6 GB and 1,200 before 2026-10-03), every signature counted. An
   attempt with its clips and its gyro file is six files (T3.7), so at most 200 attempts a day upload
   (fewer with `session.json`); past it, the uploads wait until 00:00 UTC (21:00 in Brasília), and the
   panel says until when.

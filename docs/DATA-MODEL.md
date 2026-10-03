@@ -790,9 +790,10 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
   `<camera>.<segment>.mp4`, `<camera>.<segment>.frames.json`, `gyro.json`), or `session.json`, the
   session's file, recorded on the attempt it was uploaded with; at most 33 files in one call. An
   attempt with one camera and a gyroscope is six files (T3.7: `gyro.json` after the clips), plus
-  `session.json` now and then, each signature a file of the day's quota: with the default 1,200
-  files a day, at most 200 attempts with their clips and gyro files upload in a day (240 before
-  T3.7, at five files), fewer with `session.json`.
+  `session.json` now and then, each signature a file of the day's quota: with the 3,000 files a
+  day set on 2026-10-03 (1,200 before), at most 500 attempts with their clips and gyro files upload
+  in a day, fewer with `session.json` (the owner reached 1,199 files on 2026-10-03 with 171
+  attempts and the re-signatures of follow-up (g)).
 - The objects are `users/{uid}/sessions/{id}/attempts/{index}/<path>`, and
   `users/{uid}/sessions/{id}/session.json` for the session's file, in the bucket of the configuration
   (`bucket/README.md`).
