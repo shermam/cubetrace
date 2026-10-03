@@ -447,11 +447,29 @@ cube.
 | Session with clips (T2.6) | `session-clips.spec.ts` | Chrome's fake camera at 30 fps and its microphone, demo solve 0 at speed 20: the solve that starts with the page, recorded before the camera is on, is deleted (Delete last); the camera on, the sync check that starts by itself is ended with Later; two replays, each with its two clips; then a new page load straight to the session's page: both attempts listed with a badge "2 clips, …", "4 clips, …" in its header, the first attempt's solve clip plays in the viewer, and the page's Export validates against schema 2; every clip of the records is a file in its attempt's folder in OPFS, the MP4 of the record's size and the frames file valid against its schema, with the record's frame count and first frame, and nothing else is there but `attempt.json`. |
 | First render (T2.6) | `timer-render.spec.ts` | On the production build under `/cubetrace/`, after a demo solve (a session with a stored solve), the first animation frame that shows the clock comes within 2 s of `DOMContentLoaded`, with the camera setting off and on; with the camera (`getUserMedia`) and the storage (`navigator.storage.getDirectory`) each held back 3 s, the clock still comes within 2 s, and the solve list and the camera's preview after them. Recording is off in the file (no `MediaStreamTrackProcessor`), as in `timer-layout.spec.ts`. It prints the times: over three runs, the clock 44 to 83 ms after `DOMContentLoaded` with the camera off or on, the solve list 104 to 177 ms and the preview 137 to 194 ms; held back, the clock 39 to 104 ms, the list 3,056 to 3,121 ms and the preview 3,139 to 3,237 ms. |
 | Microphone (T2.12) | `microphone.spec.ts` | Chrome's fake camera at 30 fps and its microphone: Settings → Camera → Microphone says Raw, with its line of help; after demo solve 0 at speed 20, the Timer page without the demo cube (the session resumed, so no attempt and no sync check begins), the camera on: the codecs line ends with "opus, mic raw" and no notice shows; the export's `cameras[0].microphone` says `processing: 'raw'` with the four processing settings false, as the fake microphone reports them raw, and a sample rate and channels; Voice in Camera settings starts the recording again, which says "mic voice", and the export then says echo cancellation, noise suppression and gain control on; after a reload, Voice in Camera settings and in Settings, and "mic voice". It prints both records. |
+| Remote camera (T4.1) | `remote-camera.spec.ts` | Chrome's fake camera at 30 fps and the demo cube, signed in to the fake account: Add camera in Camera settings shows the QR code (its path begins with the finder pattern's first module), the token and the URL; a second page of the same browser context (the account and the settings are the context's) opens the URL as the camera device and pairs through the `BroadcastChannel` signaling (`helpers/signaling.ts`) and the real `RTCPeerConnection` on the machine's own interface: the phone's pill says connected, the host lists it with a thumbnail (`blob:`) within 5 s, as `laptop-2` (the same fake camera on "another device", the host's own being `laptop`), with its report; the sync converges within a minute (both pages read one browser's clock: the offset under 20 ms), `session.json` has the camera with `remote` and `clock.cameras["laptop-2"].remote` with at least 10 samples; Leave empties the list at once and the entry stays; a second pairing by the link pasted into the code field (after a text that is not a code is refused), then Remove on the host, which the phone reports; the events of both pages (`rtc.paired`, `rtc.connected`, `rtc.clock`, `rtc.disconnected`) in the account. In the encoding project (both pages encode). About 70 s. |
 | Camera labels (T2.14) | `camera-labels.spec.ts` | Three of Chrome's fake cameras (`--use-fake-device-for-media-stream=device-count=3,fps=30`) and its microphone, demo solve 0 at speed 20: the solve that starts with the page deleted (Delete last); a solve recorded with `fake_device_0`, one with `fake_device_2`, chosen in Camera settings (the sync check is due for it, a camera without a check in the session: Later sets it aside), and one with `fake_device_0` again (no check is due: the session has its label, whose check was set aside); the export validates, with the entries `laptop` (`fake_device_0`) and `laptop-2` (`fake_device_2`) and no `clock.cameras` (the fake camera gives no check), each attempt's two clips named after its camera's label, in its folder in OPFS beside `attempt.json` alone, and the session's page says "laptop (fake_device_0), laptop-2 (fake_device_2)". `fake_device_1` is left out: it sends 16-bit depth frames (Y16, a `VideoFrame` whose `format` is null), which Chromium's VP9 encoder refuses ("OperationError: Encoding error"), as a probe of the three cameras found on 2026-10-02 (the other two send I420). About 32 s. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
 export), without its time check, which flow 1 makes on a settled page (below). The helpers in
 `apps/web/e2e/helpers/` are shared by the flows:
+
+- **Two pages pair over a `BroadcastChannel`** (T4.1). `signaling.ts` installs, before the app's
+  scripts run, `window.cubetraceE2eSignaling`, which the app's `SESSION_SIGNALING` reads in
+  development builds in place of `FirestoreSignaling`: a function of the session id and the uid that
+  gives the five calls the host's and the phone's services make (`publishPairing`, `closePairing`,
+  `watchOffers`, `checkPairing`, `call`) over a channel named after the session. The host's page keeps
+  the pairing and answers the phone's check over the channel; the offer, the answer and each side's
+  candidates go over it as the FirebaseRTC documents would, kept per peer so that a side that
+  subscribes late gets what came before; `close` tells the other side. The real `RTCPeerConnection`
+  runs over it: Chromium gathers host candidates on the machine's interface (the camera permission
+  granted by `--use-fake-ui-for-media-stream` keeps them unobscured by mDNS) and the two pages connect
+  there; the STUN request to Google's server may go nowhere in CI, which only delays the gathering's
+  end. The cloud project pairs through the Firestore emulator instead (`remote-camera.cloud.spec.ts`:
+  the session's document with `pairing`, the peer document with the offer, the answer and both
+  candidate collections, deleted at Leave). Under `ng serve` the `@defer` block's chunk is
+  preloaded (HMR, Angular's NG0751) and its block rendered when Add camera is pressed, as in the
+  production build, which keeps the chunk lazy.
 
 - **The fixtures are the oracle.** `fixtures.ts` reads `fixtures/solves.json`, whose first 30 solves
   are the demo's, and runs `@cubetrace/core`'s phase detector on them in the test. Specs import
@@ -1758,3 +1776,46 @@ offer–answer–candidates sequence, ICE restart, closings and refusals over `M
 clock fit's own simulations are core's (`remote-clock.test.ts`: the offset within 1 ms at round trips
 of 5–40 ms, the drift within 1 ppm over an hour, convergence declared and withdrawn). The rules of
 the signaling documents are in `firebase/rules.test.ts` (`npm run test:rules`).
+
+## Remote cameras in the app (T4.1)
+
+Added by T4.1 on 2026-10-03 (`docs/RTC.md` §8, `docs/ARCHITECTURE.md` "Remote cameras"):
+
+**The chunks.** `@cubetrace/rtc` reaches the app through two lazy chunks only: the Camera page's
+(`/camera`) and the Cameras section's, which `CameraPanel` loads behind `@defer (when addRequests()
+> 0)` from a placeholder's Add camera button (the press is counted in `addRequests`, so that the
+first pairing starts as the section appears). Not `on interaction`: with the chunk already there
+(HMR preloads every deferred dependency), that trigger renders the block in the click's own dispatch
+and destroys the placeholder before its `(click)` handler runs, so the press was lost under `ng
+serve`; a signal the block waits for runs the handler first on every build. The texts the placeholder
+shares with the section are in `pairing-block.ts`, so that the panel's chunk imports nothing of the
+section's: a value import from `remote-cameras.ts` would pull the whole chunk into the panel's.
+`ng build` on 2026-10-03: the initial bundle 265.96 kB raw against 264.57 kB on `main`, the
+difference the framework's interaction trigger; the section's chunk 42.7 kB raw (the connection's
+code, the QR encoder, the component); the Camera page's its own.
+
+**The QR code.** `apps/web/src/app/camera/qr-code.ts`, 250 lines rather than a dependency: byte
+mode, level M (and L), versions 1 to 10 chosen by the text's size (the pairing URL takes version 6,
+41 modules a side), Reed–Solomon over GF(256) with the polynomial 0x11D, the mask of least penalty,
+the modules as one SVG path of unit squares inside a quiet zone of four. Its test decodes what it
+draws with `jsqr` 1.4.0 (a pure JavaScript reader, a devDependency pinned exactly, no dependencies
+of its own), for the pairing URL and texts of versions 1, 4, 6, 7 and 10 at both levels; the probe
+that found the dark module misplaced (it sat on a format bit) ran every version and level against
+the reader.
+
+**The fakes of the unit tests** (`apps/web/src/app/rtc/rtc-testing.ts`): `MemoryConnector` stands
+for `WebRtcTransport.connect` on both sides: the caller sends its offer and a candidate through its
+signaling and waits for the answer, the callee takes the offer and answers, and each resolves with
+its end of a `MemoryTransport` pair of the peer, after `CONNECT_TIMEOUT_MS` on the test's timers it
+fails as the real one does, and a side whose documents are closed under it fails at once; the
+transport closes its signaling when it ends, as the real one does. `rtcTimers` makes the test's
+fake clock and timers (`fake-browser.ts`) `@cubetrace/rtc`'s `Timers`, and `RTC_TIMERS` reads the
+same through BROWSER_GLOBALS, so that one `advance` drives the services, the pinger, the memory
+transport and the session together. The services' specs pump the clock in steps (a message that
+answers a message needs a step of its own) and settle the promises between them. The fake camera
+(`FakeMediaDevices`) honours `facingMode` now, so that the camera device's rear camera opens.
+
+**Leaving.** `RTCPeerConnection.close` drops what the data channel still holds, so a `leave` sent
+right before it is never heard: both services close the connection 250 ms after the word
+(`LEAVE_GRACE_MS`); on `pagehide` they send it and leave the connection to the browser (the host
+deletes the peer documents too), since a timer may not run.

@@ -46,6 +46,12 @@ export interface CameraChoice {
    * they have 60 at all.
    */
   readonly exactFps?: boolean;
+  /**
+   * Which way the browser's default camera should face when none was chosen (`deviceId` null): the
+   * front one by default (it faces a solver who reads the screen); the camera device of phase 4
+   * asks for the rear one, which films the desk (T4.1). Ignored when a camera is chosen.
+   */
+  readonly facing?: 'user' | 'environment';
 }
 
 /** What the camera is asked for by default: 1920 × 1080, ideally at 60 fps. */
@@ -62,9 +68,10 @@ export function buildConstraints(choice: CameraChoice): {
   const fps = choice.fps ?? DEFAULT_MODE.fps;
   return {
     video: {
-      // The default camera of a phone is its front one, which faces a solver who reads the screen.
+      // The default camera of a phone is its front one, which faces a solver who reads the screen,
+      // unless the choice says which way it should face (the camera device asks for the rear one).
       ...(choice.deviceId === null
-        ? { facingMode: { ideal: 'user' } }
+        ? { facingMode: { ideal: choice.facing ?? 'user' } }
         : { deviceId: { exact: choice.deviceId } }),
       width: { ideal: choice.width ?? DEFAULT_MODE.width },
       height: { ideal: choice.height ?? DEFAULT_MODE.height },

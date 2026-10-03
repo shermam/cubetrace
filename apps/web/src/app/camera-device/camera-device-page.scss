@@ -1,0 +1,190 @@
+:host {
+  display: grid;
+  gap: var(--space-4);
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: var(--space-4) var(--gutter);
+}
+
+h1 {
+  margin: 0;
+}
+
+h2 {
+  display: inline;
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+p {
+  margin: 0;
+}
+
+.lead,
+.hint,
+.muted,
+.status,
+dt {
+  color: var(--text-muted);
+}
+
+.hint {
+  font-size: 0.75rem;
+}
+
+.lead,
+.status {
+  font-size: 0.875rem;
+}
+
+.problem {
+  color: var(--danger);
+}
+
+.notice {
+  color: var(--warn);
+}
+
+.connection,
+.panel {
+  display: grid;
+  gap: var(--space-2);
+}
+
+// The connection's state, as the header's cube pill says the cube's.
+.pill {
+  --state-colour: var(--text-muted);
+
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  font-weight: 600;
+
+  &[data-state='connected'] {
+    --state-colour: var(--ok);
+  }
+
+  &[data-state='joining'],
+  &[data-state='checking'],
+  &[data-state='reconnecting'] {
+    --state-colour: var(--warn);
+  }
+
+  &[data-state='refused'],
+  &[data-state='host-gone'] {
+    --state-colour: var(--danger);
+  }
+
+  .dot {
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 50%;
+    background: var(--state-colour);
+  }
+
+  .muted {
+    font-weight: 400;
+  }
+}
+
+.code {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+
+  input {
+    flex: 1 1 10rem;
+    font-family: var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+dd {
+  margin: 0;
+
+  &[data-converged='true'] {
+    color: var(--ok);
+  }
+}
+
+// The picture, as the Camera preview beside the clock: a box of the frames' proportions.
+.picture {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.box {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: var(--aspect);
+  max-height: 60svh;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: #000;
+  container-type: size;
+}
+
+.frame {
+  position: relative;
+  width: min(100cqw, calc(100cqh * var(--aspect)));
+  aspect-ratio: var(--aspect);
+  overflow: hidden;
+
+  &.mirrored {
+    transform: scaleX(-1);
+  }
+}
+
+video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.framing {
+  position: absolute;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 35%);
+  pointer-events: none;
+}
+
+.message {
+  padding: var(--space-3);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+summary {
+  cursor: pointer;
+}
+
+details[open] summary {
+  margin-bottom: var(--space-3);
+}
+
+.bar,
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+}
+
+.picker select {
+  max-width: 100%;
+}

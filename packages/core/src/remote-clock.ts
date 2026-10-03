@@ -60,6 +60,15 @@ export const REMOTE_CLOCK_WINDOW = 60;
 export const REMOTE_CLOCK_RTT_FACTOR = 1.5;
 
 /**
+ * Or at most this much longer than the least round trip, in ms, when that is more (T4.1): on a
+ * loopback or an Ethernet link the least trip is a millisecond, and 1.5 times it keeps only the
+ * samples that met no work at all on either main thread (4 of 31 in a minute between two pages
+ * encoding video), while a trip 3 ms over the least can be off by 1.5 ms at most, under what the
+ * factor already admits from a 6 ms trip up.
+ */
+export const REMOTE_CLOCK_RTT_ALLOWANCE_MS = 3;
+
+/**
  * The drift is fitted once the samples kept span more than this, in ms: over a shorter span the
  * slope of a line through offsets that jitter by a millisecond would mostly be noise (50 ppm is
  * 3 ms over a minute).
@@ -105,7 +114,8 @@ interface Estimate {
  * The offset and the drift of a remote clock against the host clock, estimated online from the
  * round trips of the data channel's pings (the file comment). The last {@link REMOTE_CLOCK_WINDOW}
  * samples are kept; of them, those whose round trip is within {@link REMOTE_CLOCK_RTT_FACTOR} of
- * the least are the estimate's: the median of their offsets, and, once they span more than
+ * the least (or {@link REMOTE_CLOCK_RTT_ALLOWANCE_MS} over it, when that is more) are the
+ * estimate's: the median of their offsets, and, once they span more than
  * {@link REMOTE_CLOCK_DRIFT_SPAN_MS}, a least-squares line `offset(t) = a + b·(t − t0)` through them
  * for the drift. {@link toHostMs} and {@link toRemoteMs} use the line when there is one and the
  * median before; with no sample at all they are the identity. Pure and synchronous, like the rest of
@@ -251,7 +261,8 @@ export class RemoteClockFit {
 /** The estimate over the window's samples (at least one). */
 function estimate(samples: readonly Measured[]): Estimate {
   const rttMs = Math.min(...samples.map((s) => s.rttMs));
-  const kept = samples.filter((s) => s.rttMs <= REMOTE_CLOCK_RTT_FACTOR * rttMs);
+  const limit = Math.max(REMOTE_CLOCK_RTT_FACTOR * rttMs, rttMs + REMOTE_CLOCK_RTT_ALLOWANCE_MS);
+  const kept = samples.filter((s) => s.rttMs <= limit);
   const t0 = kept.reduce((sum, s) => sum + s.hostMs, 0) / kept.length;
   const span = kept[kept.length - 1].hostMs - kept[0].hostMs;
   let a = median(kept.map((s) => s.offsetMs));

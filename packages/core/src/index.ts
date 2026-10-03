@@ -85,6 +85,7 @@ export type { RemoteClockParams, RemoteClockSample } from './remote-clock';
 export {
   REMOTE_CLOCK_CONVERGED,
   REMOTE_CLOCK_DRIFT_SPAN_MS,
+  REMOTE_CLOCK_RTT_ALLOWANCE_MS,
   REMOTE_CLOCK_RTT_FACTOR,
   REMOTE_CLOCK_WINDOW,
   RemoteClockFit,

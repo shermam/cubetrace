@@ -36,8 +36,7 @@ dt {
 }
 
 .bar,
-.picker,
-.sharpness {
+.picker {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
@@ -64,72 +63,6 @@ p {
   color: var(--warn);
 }
 
-// The picture keeps the frames' proportions (the framing rectangle is drawn in percent of it) and
-// at most 60% of the window's height; a front camera's picture is mirrored, rectangle included.
-.frame {
-  position: relative;
-  width: min(100%, calc(60vh * var(--aspect)));
-  aspect-ratio: var(--aspect);
-  overflow: hidden;
-  border-radius: var(--radius);
-  background: #000;
-
-  &.mirrored {
-    transform: scaleX(-1);
-  }
-}
-
-video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.framing {
-  position: absolute;
-  border: 2px solid var(--accent);
-  // Dims what lies outside the rectangle.
-  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 35%);
-  cursor: move;
-  // Drags on the rectangle move it rather than scroll the page.
-  touch-action: none;
-}
-
-.handle {
-  position: absolute;
-  width: 1.25rem;
-  height: 1.25rem;
-  border: 2px solid var(--bg);
-  border-radius: 50%;
-  background: var(--accent);
-  transform: translate(-50%, -50%);
-}
-
-.nw {
-  top: 0;
-  left: 0;
-  cursor: nwse-resize;
-}
-
-.ne {
-  top: 0;
-  left: 100%;
-  cursor: nesw-resize;
-}
-
-.sw {
-  top: 100%;
-  left: 0;
-  cursor: nesw-resize;
-}
-
-.se {
-  top: 100%;
-  left: 100%;
-  cursor: nwse-resize;
-}
-
 .facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -150,24 +83,6 @@ dd {
   background: none;
   color: var(--accent);
   text-decoration: underline;
-}
-
-meter {
-  width: 8rem;
-}
-
-.value {
-  min-width: 3ch;
-  font-family: var(--font-mono);
-}
-
-.verdict {
-  color: var(--warn);
-  font-weight: 600;
-
-  &.good {
-    color: var(--ok);
-  }
 }
 
 // Resolution, frame rate, video quality, audio and microphone: the settings of Settings → Camera,
@@ -194,5 +109,16 @@ meter {
   select {
     min-width: 0;
     max-width: 100%;
+  }
+}
+
+// The Cameras section's placeholder, before it loads (the section's own styles take over then).
+.remote {
+  display: grid;
+  gap: var(--space-2);
+
+  h3 {
+    margin: 0;
+    font-size: 1rem;
   }
 }

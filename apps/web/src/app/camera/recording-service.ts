@@ -41,12 +41,7 @@ import { SessionService, type AttemptMilestone, type AttemptRef } from '../sessi
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { CameraService } from './camera-service';
-import {
-  DEFAULT_MICROPHONE,
-  microphoneConstraints,
-  microphoneInfo,
-  processingNotice,
-} from './microphone';
+import { openMicrophone } from './microphone';
 
 /**
  * Starts the capture pipeline (@cubetrace/capture's `startCapture`) on a video track and, when there
@@ -501,48 +496,24 @@ export class RecordingService {
   }
 
   /**
-   * The microphone, asked for as `processing` says (T2.12: raw, every voice processing off; voice,
-   * the browser's defaults), with what the browser says it applied; a notice says when the browser
-   * kept some processing on although Raw was asked for. Should the browser refuse the raw request
-   * (an `OverconstrainedError`, which its booleans and ideals ought never to cause), the microphone
-   * is asked for again with the browser's defaults, and the notice says so instead. Null, with a
-   * notice, when it cannot be had: the video is recorded anyway.
+   * The microphone, asked for as `processing` says (T2.12, `openMicrophone`), with what the browser
+   * says it applied; its notice (the browser kept some processing on, or refused the raw request)
+   * is shown with the recording's. Null, with a notice, when it cannot be had: the video is recorded
+   * anyway.
    */
   private async openMicrophone(
     generation: number,
     processing: MicrophoneProcessing,
   ): Promise<OpenMicrophone | null> {
-    const media = this.globals.navigator?.mediaDevices;
-    if (typeof media?.getUserMedia !== 'function') {
-      this.addNotice('Recording without audio: this browser gives no microphone.');
+    const opened = await openMicrophone(this.globals.navigator?.mediaDevices, processing);
+    if (generation !== this.generation) {
+      stopStream(opened.stream);
       return null;
     }
-    let stream: MediaStream;
-    let refusal: { readonly error: unknown } | null = null;
-    try {
-      try {
-        stream = await media.getUserMedia(microphoneConstraints(processing));
-      } catch (error: unknown) {
-        if (processing !== 'raw' || errorName(error) !== 'OverconstrainedError') {
-          throw error;
-        }
-        refusal = { error };
-        stream = await media.getUserMedia(DEFAULT_MICROPHONE);
-      }
-    } catch (error: unknown) {
-      if (generation === this.generation) {
-        this.addNotice(`Recording without audio: ${microphoneProblem(error)}`);
-      }
-      return null;
+    if (opened.notice !== null) {
+      this.addNotice(opened.notice);
     }
-    const track = stream.getAudioTracks().at(0);
-    const info = track === undefined ? null : microphoneInfo(track, processing);
-    const notice =
-      refusal !== null ? rawRefused(refusal.error) : info === null ? null : processingNotice(info);
-    if (notice !== null && generation === this.generation) {
-      this.addNotice(notice);
-    }
-    return { stream, info };
+    return opened.stream === null ? null : { stream: opened.stream, info: opened.info };
   }
 
   /**
@@ -947,36 +918,6 @@ function frameRateOf(entry: CameraInfo): number {
 
 function sameAttempt(p: AttemptRef, q: AttemptRef): boolean {
   return p.session === q.session && p.index === q.index && p.scrambleShown === q.scrambleShown;
-}
-
-/** The `name` of what was thrown, such as `NotAllowedError`; null when it has none. */
-function errorName(error: unknown): unknown {
-  return typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : null;
-}
-
-/** The notice when the browser refused the raw microphone, naming the constraint it refused. */
-function rawRefused(error: unknown): string {
-  const constraint: unknown =
-    typeof error === 'object' && error !== null ? Reflect.get(error, 'constraint') : undefined;
-  const refused = typeof constraint === 'string' && constraint !== '' ? ` (${constraint})` : '';
-  return (
-    `The microphone could not be opened raw: the browser refused the request${refused}, so it ` +
-    "is recorded with the browser's voice processing."
-  );
-}
-
-/** Why the microphone could not be had, in plain words. */
-function microphoneProblem(error: unknown): string {
-  switch (errorName(error)) {
-    case 'NotAllowedError':
-      return 'the microphone was not allowed (Chrome asks once; the site settings can change it).';
-    case 'NotFoundError':
-      return 'this device has no microphone.';
-    case 'NotReadableError':
-      return 'the microphone is in use by another app.';
-    default:
-      return `the microphone could not be opened (${errorMessage(error)}).`;
-  }
 }
 
 function stopStream(stream: MediaStream | null): void {

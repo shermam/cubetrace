@@ -45,6 +45,8 @@ const MESSAGES: Message[] = [
   },
   { type: 'ping', t1: 1_790_000_000_123.5 },
   { type: 'pong', t1: 1_790_000_000_123.5, t2: 1_790_000_003_000.25, t3: 1_790_000_003_001 },
+  { type: 'clock', converged: true, offsetMs: -3127.4, rttMs: 9.6 },
+  { type: 'clock', converged: false, offsetMs: 0, rttMs: 0 },
   {
     type: 'state',
     remoteMs: 1_790_000_003_000,
@@ -236,6 +238,16 @@ describe('the protocol', () => {
     ['a chunk as text', '{"type": "file-chunk"}', /binary frame/],
     ['a ping whose time is text', '{"type": "ping", "t1": "now"}', /t1 must be a number/],
     ['a pong without t3', '{"type": "pong", "t1": 1, "t2": 2}', /t3 must be a number/],
+    [
+      'a clock whose convergence is text',
+      '{"type": "clock", "converged": "yes", "offsetMs": 1, "rttMs": 2}',
+      /converged must be true or false/,
+    ],
+    [
+      'a clock with a negative round trip',
+      '{"type": "clock", "converged": true, "offsetMs": 1, "rttMs": -2}',
+      /rttMs must be a number/,
+    ],
     ['a hello of another version as text', '{"type": "hello", "v": "1"}', /v must be an integer/],
     [
       'a hello of another role',

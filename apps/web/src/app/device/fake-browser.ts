@@ -759,9 +759,18 @@ export class FakeMediaDevices extends EventTarget implements MediaDevices {
     const video = typeof constraints.video === 'object' ? constraints.video : {};
     const wanted = video.deviceId;
     const exactId = typeof wanted === 'object' && !Array.isArray(wanted) ? wanted.exact : undefined;
+    // Without a device, the camera that faces the way `facingMode` asks (ideal or exact), else the first.
+    const facing = video.facingMode;
+    const wantedFacing =
+      typeof facing === 'string'
+        ? facing
+        : typeof facing === 'object' && !Array.isArray(facing)
+          ? (facing.exact ?? facing.ideal)
+          : undefined;
     const camera =
       exactId === undefined
-        ? this.cameras.at(0)
+        ? (this.cameras.find((candidate) => candidate.settings['facingMode'] === wantedFacing) ??
+          this.cameras.at(0))
         : this.cameras.find((candidate) => candidate.deviceId === exactId);
     if (camera === undefined) {
       throw exactId === undefined

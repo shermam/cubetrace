@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   REMOTE_CLOCK_CONVERGED,
   REMOTE_CLOCK_DRIFT_SPAN_MS,
+  REMOTE_CLOCK_RTT_ALLOWANCE_MS,
   REMOTE_CLOCK_RTT_FACTOR,
   REMOTE_CLOCK_WINDOW,
   RemoteClockFit,
@@ -166,6 +167,24 @@ describe('RemoteClockFit', () => {
     expect(fit.params.since).toBe(10);
     expect(fit.params.residualP95Ms).toBe(4);
     expect(REMOTE_CLOCK_RTT_FACTOR).toBe(1.5);
+  });
+
+  it('keeps the trips up to 3 ms over the least when that is more than 1.5× it: a loopback or an Ethernet link', () => {
+    const fit = new RemoteClockFit();
+    // Trips of 1.2 ms at the least, as two pages of one browser give, and the main threads' work
+    // putting 0.5 to 10 ms on top: 1.5 × 1.2 would keep the first alone; 1.2 + 3 keeps those up to
+    // 4.2 ms, off by at most 1.5 ms (the extra all on one leg here).
+    fit.addSample(...trip(0, 50, 1.2));
+    fit.addSample(...trip(2000, 50, 1.7, 0.5)); // read as 50.25: kept
+    fit.addSample(...trip(4000, 50, 4.1, 2.9)); // read as 51.45: kept
+    fit.addSample(...trip(6000, 50, 4.3, 3.1)); // read as 51.55: left out
+    fit.addSample(...trip(8000, 50, 11.2, 10)); // read as 55: left out
+    fit.addSample(...trip(10_000, 50, 1.2));
+    expect(fit.rttMs).toBe(1.2);
+    expect(fit.params.samples).toBe(4);
+    // The kept offsets, 50, 50.25, 51.45 and 50: the median is 50.125.
+    expect(fit.offsetMs).toBeCloseTo(50.125, 6);
+    expect(REMOTE_CLOCK_RTT_ALLOWANCE_MS).toBe(3);
   });
 
   it('keeps the last 60 samples: an outlier is forgotten with the window', () => {

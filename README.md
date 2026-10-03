@@ -185,6 +185,29 @@ To calibrate, pause where the cube is square to the camera and press Re-zero; if
 way, choose a mirror. Download saves the attempt's files: both MP4s, both frames files, `gyro.json`
 when there is one, and `attempt.json` (Chrome may ask once to allow multiple downloads).
 
+## Remote cameras
+
+A phone can film a session from another angle (phase 4, [`docs/RTC.md`](docs/RTC.md)). Both
+devices sign in to the same account. On the host, Camera settings → Cameras → Add camera shows a QR
+code (the app's Camera page with the session and a one-time code, good for 10 minutes, for one
+phone) and the code under it; on the phone, scan it with the camera app, or open cubetrace → `/camera`
+and type the code or paste the link. The phone turns its rear camera on, keeps the last 90 s in
+memory from then on, and connects to the host directly over the Wi-Fi (WebRTC, Google's STUN server,
+no relay: a guest network with client isolation does not connect). The host lists it in the Cameras
+section with its name (the phone's host label), a picture every 2 s, its state, what it reports
+(recording, frame rate, sharpness, framing, battery) and the clock sync: the host measures the offset
+and the drift of the phone's clock with a ping every 2 s and calls it synced once ten answers over
+ten seconds agree within 3 ms, which a phone awake on a quiet Wi-Fi gives; the phone shows the same
+line. The camera goes into the session's `cameras[]` with `remote` naming the phone, and its clock
+fit into `clock.cameras[<label>].remote`, as `docs/DATA-MODEL.md` §6 has them; its label is the
+session's (`phone-rear`, a second phone `phone-rear-2`), the phone's host label telling two phones
+apart. The phone keeps the screen on and asks to be plugged in; a connection that drops is made
+again by itself for five minutes (the host lists the camera as reconnecting meanwhile), then the
+phone says the host is gone and the host lets the camera go; Leave on the phone, Remove on the host
+or the session's end part the two at once. What works today (T4.1): the pairing, the picture, the
+state and the clock sync. The clips of a remote camera, cut by the host's timer and sent over the
+connection into the attempt's folder, come with T4.2, and its sync check and live preview with T4.3.
+
 ## Cloud
 
 An account is optional. Signed in, the sessions of all your devices end up in one dataset: an index

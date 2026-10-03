@@ -36,6 +36,16 @@ export const routes: Routes = [
     loadComponent: () => import('./probe/probe-page').then((m) => m.ProbePage),
   },
   {
+    // The phone as a camera of another device's session (docs/PLAN.md, T4.1): reached from the QR
+    // code the host shows (`?session=<id>&token=<t>`), or by typing the code there; not in the
+    // navigation. Its chunk carries the connection's code (@cubetrace/rtc), which the Timer page's
+    // own Cameras section loads only when a camera is added.
+    path: 'camera',
+    title: 'Camera · cubetrace',
+    loadComponent: () =>
+      import('./camera-device/camera-device-page').then((m) => m.CameraDevicePage),
+  },
+  {
     // The capture pipeline on its own (docs/PLAN.md, T2.2): a tool reached by its address, not in
     // the navigation.
     path: 'capture-lab',

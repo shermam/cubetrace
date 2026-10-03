@@ -66,7 +66,9 @@ recorded without a scope of its own.
   nothing goes under the next account.
 - **The setting.** Settings → Account → Diagnostics, on by default: off, the app records one last
   `settings.changed` (`diagnostics` false), writes it, and keeps nothing more, not even the ring;
-  on again, it records `settings.changed` (`diagnostics` true) and goes on.
+  on again, it records `settings.changed` (`diagnostics` true) and goes on. When the page is hidden
+  or goes away, the switch's new value takes effect before what is queued is written, so its event
+  goes with that batch even when the page is left right after the toggle.
 - **The daily cap.** A device writes at most 2,000 events a local day, counted in `localStorage`
   (`cubetrace.diagnostics`, with the build last seen, for `app.start`); past it, only the `error.*`
   kinds go until the next day. An attempt with the camera on costs 3 events (`attempt.done`, two
@@ -110,8 +112,8 @@ know it (a camera without a frame rate, a cube without a production date).
 | `camera.on` | The camera came on (not a reopening of the same camera: a resolution changed, its controls reset). | `label` (the browser's name of the camera), `facing`, `width`, `height`, `fps` (the track's settings), `asked` (the mode asked for), `notes` (fallbacks on the way) |
 | `camera.switched` | Another camera took the open one's place. | As `camera.on`, and `from` |
 | `camera.off` | Turn off. | `label` |
-| `recording.started` | The pipeline chose its encoder (its first stats). | `camera` (the label in the session), `codec`, `audioCodec`, `bitrate`, `quality`, `audio` (asked for), `processing` (`raw`, `voice`; null without a microphone), `applied` (`echoCancellation`, `noiseSuppression`, `autoGainControl`, `voiceIsolation` as the browser applied them), `width`, `height`, `fps` |
-| `recording.stopped` | The pipeline is to stop. | `why` (`camera-off`, `no-session`, `storage-full`, `unsupported`), `dropped` (frames, at the stop), `bufferSeconds`, `encodedFps` |
+| `recording.started` | The pipeline chose its encoder (its first stats); on a camera device (T4.1) too. | `camera` (the label in the session; the phone's own label on a camera device), `codec`, `audioCodec`, `bitrate`, `quality`, `audio` (asked for), `processing` (`raw`, `voice`; null without a microphone), `applied` (`echoCancellation`, `noiseSuppression`, `autoGainControl`, `voiceIsolation` as the browser applied them; the host only), `width`, `height`, `fps`, `remote` (true on a camera device) |
+| `recording.stopped` | The pipeline is to stop. | `why` (`camera-off`, `no-session`, `storage-full`, `unsupported`; `left` when the Camera page of a camera device closes, T4.1), `dropped` (frames, at the stop), `bufferSeconds`, `encodedFps` |
 | `recording.notice` | A notice of the recording (no audio and why, the microphone not raw, the clip worker failed), once per run. | `message` |
 | `clip.saved` | A clip was written and added to its attempt's record. | `segment`, `camera`, `bytes`, `frames`, `codec`, `audioCodec`, `audio` (present), `truncatedStart`, `lateMs`, `bufferSeconds`, `syncResidualMs`, `audioRebasedMs`, `kept` (for a record still to come) |
 | `clip.failed` | A clip could not be saved (`cubetrace: clip failed: …`). | `segment`, `reason` |
@@ -123,11 +125,16 @@ know it (a camera without a frame rate, a cube without a production date).
 | `storage.deleted` | Uploaded clips were deleted from the device by policy. | `files`, `bytes`, `usageBefore`, `usageAfter`, `percent` (after) |
 | `clips.viewed` | The clip viewer opened an attempt. | `clips`, `local` (still on the device), `gyro` |
 | `files.downloaded` | Files handed to the user. | `what` (`clips`: the viewer's Download; `export`: Sessions → Export or a session's page; `sync-check`: Download check data; `probe`: the probe's report), `files` (count), `names`, `attempts` (an export) |
+| `rtc.paired` | A remote camera paired (T4.1, `docs/RTC.md` §8): the hellos exchanged. On the host: the phone; on the phone: the host. | host: `peer` (the phone's host label), `platform`, `camera` (its label in the session), `facing`, `deviceLabel`, `version` and `commit` (the phone's build), `ms` (from the offer to the hellos); phone: `host`, `platform`, `session`, `version`, `commit`, `ms` |
+| `rtc.connected` | A connection with a remote camera opened: the first one, or one made again after a drop. | As `rtc.paired`'s device facts, and `reconnection` |
+| `rtc.disconnected` | A connection with a remote camera ended: the other side left (`left: …`, `host left: …`), the host removed the camera or the session ended (the host), the transport closed or failed (the reason), five minutes without the other side (`gave up: …`). | `reason`, `durationMs` (the connection's), `connectedMs` (host: since the pairing), `peer` / `host`, `camera` |
+| `rtc.clock` | The clock sync of a remote camera (the host): at convergence, once a minute while converged, and when convergence is withdrawn. | `camera`, `peer`, `why` (`converged`, `minute`, `withdrawn`), `converged`, `offsetMs`, `rttMs`, `driftPpm`, `samples`, `residualP95Ms` |
+| `rtc.failed` | A step of the pairing or the connection failed (either side). | `step` (host: `pairing`, `watch`, `connect`, `hello`, `version`; phone: `session`, `check`, `connect`, `hello`, `version`), `reason`, `peer` (host) |
 | `error.app` | What the app says in the console as `cubetrace: …` (a record that could not be saved, the index refusing a write, a cube's write refused, the camera refused, the recording stopped, the uploads not starting, a gyro file not written, the account's record not saved, the cube's state not reset, the clip viewer's choices not read or saved). | `where` (`store`, `index`, `cubes`, `camera`, `recording`, `uploads`, `gyro`, `account`, `cube`, `viewer`), `message`, `label` (the camera) |
 
 ## The checklists, read from the events
 
-The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3 and the item after T3.7), each with the kinds
+The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3 and the items after T3.7 and T4.1), each with the kinds
 whose presence, with their facts, is its evidence, and what still needs the owner's eyes. The round
 report evaluates the same table (`functions/scripts/report.mts`, `CHECKLIST`; the test holds the
 two to each other): ✅ the evidence is there, with the facts beside it; ⬜ it is not; ❗ the events
@@ -335,6 +342,19 @@ with the camera on and signed in, on both devices, is the round.
 | # | Item | Evidence | Still needs eyes |
 |---|---|---|---|
 | 3.7.1 | One attempt with the camera on: gyro.json beside the record, six files downloaded, the build and the moves' counters in attempt.json, the QA view's Gyro column | `attempt.done`, `files.downloaded`, `upload.state` | attempt.json's fields and the session's battery in the console (the coordinator) |
+
+#### After T4.1 — T4.1 — remote cameras
+
+| # | Item | Evidence | Still needs eyes |
+|---|---|---|---|
+| 4.1.1 | The pairing: the QR scanned on the ThinkPhone, "Connected" within a few seconds, the MacBook lists the phone with a picture every 2 s and its report | `rtc.paired`, `rtc.connected` | the picture and the report line; the time from the scan to "Connected" |
+| 4.1.2 | The clock sync: synced within about 25 s, the round trip and the offset on both devices, synced over five minutes | `rtc.clock` | the phone's Clock line against the MacBook's |
+| 4.1.3 | The code typed: Remove, Add camera again, the code typed on the phone: connected again, the same label | `rtc.disconnected`, `rtc.paired`, `rtc.connected` | the code typed in lower case with spaces |
+| 4.1.4 | Walk away and back: reconnecting on both within half a minute, connected again within a minute without a new code | `rtc.disconnected`, `rtc.connected` | how long each took |
+| 4.1.5 | Lock and unlock the phone: 20 s survived; 6 minutes let go after 5 and paired again with a new code; the screen on while connected | `rtc.disconnected`, `rtc.paired`, `wake.lock` | what Android did to the page in the background |
+| 4.1.6 | Leave: the list empty at once, the entry kept, `session.json` with `remote` and the clock fit | `rtc.disconnected` | the session's page and the export (the coordinator) |
+| 4.1.7 | A second phone listed as `phone-rear-2`; a phone with a used code refused | `rtc.paired`, `rtc.failed` | – |
+| 4.1.8 | A demo session pairs, and is listed as "both" | `rtc.paired`, `session.started` | the Sessions page |
 
 ## The QA view
 

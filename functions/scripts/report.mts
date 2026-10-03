@@ -373,10 +373,12 @@ const R1 = 'Round 1 (v0.1.0)';
 const R2 = 'Round 2 (v0.2.0)';
 const R3 = 'Round 3 (v0.3.0)';
 const T37 = 'After T3.7';
+const T41 = 'After T4.1';
+const RTC = 'T4.1 — remote cameras';
 
 /**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
- * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3 and the item after T3.7.
+ * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3 and the items after T3.7 and T4.1.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -2465,6 +2467,169 @@ export const CHECKLIST: readonly ChecklistItem[] = [
           'upload',
         )} of six files or more`,
         'no real attempt with a gyro file',
+      );
+    },
+  },
+  // ---- After T4.1 ----
+  {
+    id: '4.1.1',
+    round: T41,
+    section: RTC,
+    title:
+      'The pairing: the QR scanned on the ThinkPhone, "Connected" within a few seconds, the MacBook lists the phone with a picture every 2 s and its report',
+    kinds: ['rtc.paired', 'rtc.connected'],
+    eyes: 'the picture and the report line; the time from the scan to "Connected"',
+    check: (q) => {
+      const hosts = q.onLaptop('rtc.paired');
+      const phones = q.onPhone('rtc.paired');
+      return found(
+        hosts.length > 0 && phones.length > 0 ? hosts : [],
+        `${count(hosts, 'pairing')} on a laptop (${[...new Set(hosts.map((e) => text(e, 'peer')))].join(', ')} as ${[...new Set(hosts.map((e) => text(e, 'camera')))].join(', ')}), ${count(phones, 'pairing')} on a phone; the hellos ${String(median(hosts.map((e) => num(e, 'ms') ?? 0)) ?? '?')} ms after the offer (median)`,
+        hosts.length > 0 ? 'no pairing on a phone' : 'no pairing on a laptop',
+      );
+    },
+  },
+  {
+    id: '4.1.2',
+    round: T41,
+    section: RTC,
+    title:
+      'The clock sync: synced within about 25 s, the round trip and the offset on both devices, synced over five minutes',
+    kinds: ['rtc.clock'],
+    eyes: "the phone's Clock line against the MacBook's",
+    check: (q) => {
+      const converged = q.where('rtc.clock', (e) => text(e, 'why') === 'converged');
+      const minutes = q.where('rtc.clock', (e) => text(e, 'why') === 'minute');
+      const withdrawn = q.where('rtc.clock', (e) => text(e, 'why') === 'withdrawn');
+      return found(
+        converged,
+        `${count(converged, 'convergence')}; round trip ${String(median(converged.map((e) => num(e, 'rttMs') ?? 0)) ?? '?')} ms, drift ${String(median(minutes.map((e) => num(e, 'driftPpm') ?? 0)) ?? '?')} ppm, spread ${String(median(converged.map((e) => num(e, 'residualP95Ms') ?? 0)) ?? '?')} ms (medians); ${count(minutes, 'minute record')}, ${count(withdrawn, 'withdrawal')}`,
+        'no clock sync converged',
+      );
+    },
+  },
+  {
+    id: '4.1.3',
+    round: T41,
+    section: RTC,
+    title:
+      'The code typed: Remove, Add camera again, the code typed on the phone: connected again, the same label',
+    kinds: ['rtc.disconnected', 'rtc.paired', 'rtc.connected'],
+    eyes: 'the code typed in lower case with spaces',
+    check: (q) => {
+      const removed = q.onLaptop(
+        'rtc.disconnected',
+        (e) => text(e, 'reason') === 'removed by the host',
+      );
+      const after = removed.filter((e) => q.next(e, 'rtc.paired', 10 * MINUTE) !== null);
+      return found(
+        after,
+        `${count(after, 'removal')} followed by a pairing within 10 minutes`,
+        removed.length > 0 ? 'a removal, but no pairing after it' : 'no camera removed',
+      );
+    },
+  },
+  {
+    id: '4.1.4',
+    round: T41,
+    section: RTC,
+    title:
+      'Walk away and back: reconnecting on both within half a minute, connected again within a minute without a new code',
+    kinds: ['rtc.disconnected', 'rtc.connected'],
+    eyes: 'how long each took',
+    check: (q) => {
+      const back = q.where('rtc.connected', (e) => flag(e, 'reconnection') === true);
+      const drops = q.where(
+        'rtc.disconnected',
+        (e) =>
+          !/^(left|host left|removed|gave up|the session ended|the host page closed|the page closed|the user left)/u.test(
+            text(e, 'reason') ?? '',
+          ),
+      );
+      return found(
+        back,
+        `${count(back, 'reconnection')} (${count(back.filter(isPhone), 'on a phone')}); ${count(drops, 'drop')} after ${String(median(drops.map((e) => num(e, 'durationMs') ?? 0)) ?? '?')} ms connected (median)`,
+        drops.length > 0 ? 'drops, but no reconnection' : 'no drop',
+      );
+    },
+  },
+  {
+    id: '4.1.5',
+    round: T41,
+    section: RTC,
+    title:
+      'Lock and unlock the phone: 20 s survived; 6 minutes let go after 5 and paired again with a new code; the screen on while connected',
+    kinds: ['rtc.disconnected', 'rtc.paired', 'wake.lock'],
+    eyes: 'what Android did to the page in the background',
+    check: (q) => {
+      const gaveUp = q.where('rtc.disconnected', (e) =>
+        (text(e, 'reason') ?? '').startsWith('gave up'),
+      );
+      const again = gaveUp.filter((e) => q.next(e, 'rtc.paired', 30 * MINUTE) !== null);
+      const locks = q.onPhone('wake.lock', (e) => text(e, 'status') === 'active');
+      return found(
+        again,
+        `${count(gaveUp, 'camera given up')} after five minutes, ${count(again, 'paired again')} within half an hour; the phone's screen held ${count(locks, 'time')}`,
+        gaveUp.length > 0
+          ? 'given up, but not paired again'
+          : 'no camera given up after five minutes',
+      );
+    },
+  },
+  {
+    id: '4.1.6',
+    round: T41,
+    section: RTC,
+    title:
+      'Leave: the list empty at once, the entry kept, session.json with remote and the clock fit',
+    kinds: ['rtc.disconnected'],
+    eyes: "the session's page and the export (the coordinator)",
+    check: (q) => {
+      const left = q.onLaptop('rtc.disconnected', (e) =>
+        (text(e, 'reason') ?? '').startsWith('left:'),
+      );
+      return found(
+        left,
+        `${count(left, 'Leave')} heard by a laptop, after ${String(median(left.map((e) => num(e, 'connectedMs') ?? 0)) ?? '?')} ms paired (median)`,
+        'no Leave heard by a laptop',
+      );
+    },
+  },
+  {
+    id: '4.1.7',
+    round: T41,
+    section: RTC,
+    title: 'A second phone listed as phone-rear-2; a phone with a used code refused',
+    kinds: ['rtc.paired', 'rtc.failed'],
+    eyes: null,
+    check: (q) => {
+      const second = q.onLaptop('rtc.paired', (e) => /-2$/u.test(text(e, 'camera') ?? ''));
+      const refused = q.onPhone('rtc.failed', (e) => text(e, 'step') === 'check');
+      return found(
+        second,
+        `${count(second, 'second camera')} (${[...new Set(second.map((e) => text(e, 'camera')))].join(', ')}); ${count(refused, 'code refused')} on a phone`,
+        'no second camera paired',
+      );
+    },
+  },
+  {
+    id: '4.1.8',
+    round: T41,
+    section: RTC,
+    title: 'A demo session pairs, and is listed as "both"',
+    kinds: ['rtc.paired', 'session.started'],
+    eyes: 'the Sessions page',
+    check: (q) => {
+      const demo = new Set(
+        q
+          .where('session.started', (e) => text(e, 'hardware') === 'simulated')
+          .map((e) => e.session),
+      );
+      const paired = q.onLaptop('rtc.paired', (e) => demo.has(e.session));
+      return found(
+        paired,
+        `${count(paired, 'pairing')} in a demo session`,
+        'no pairing in a demo session',
       );
     },
   },

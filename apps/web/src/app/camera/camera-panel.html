@@ -89,70 +89,10 @@
       <!-- The picture to frame the cube on, while the framing is edited (a second <video> of the
            stream, there only then). -->
       @if (open() && editing()) {
-        <div
-          #frame
-          class="frame"
-          data-testid="camera-frame"
-          [class.mirrored]="camera.mirrored()"
-          [style.--aspect]="aspect()"
-        >
-          <video
-            #picture
-            muted
-            playsinline
-            aria-label="Camera picture, with the framing rectangle"
-            data-testid="camera-framing-video"
-          ></video>
-          @if (box(); as area) {
-            <div
-              class="framing"
-              role="group"
-              tabindex="0"
-              aria-label="Framing rectangle: drag it to move it, drag a corner to resize it; arrow keys move it, Shift and arrow keys resize it"
-              data-testid="camera-framing"
-              [style.left.%]="area.left"
-              [style.top.%]="area.top"
-              [style.width.%]="area.width"
-              [style.height.%]="area.height"
-              (pointerdown)="grab($event)"
-              (pointermove)="move($event)"
-              (pointerup)="release($event)"
-              (pointercancel)="release($event)"
-              (keydown)="nudge($event)"
-            >
-              <span class="handle nw" data-handle="nw"></span>
-              <span class="handle ne" data-handle="ne"></span>
-              <span class="handle sw" data-handle="sw"></span>
-              <span class="handle se" data-handle="se"></span>
-            </div>
-          }
-        </div>
+        <app-framing-editor />
       }
 
-      <div
-        class="sharpness"
-        data-testid="camera-sharpness"
-        [attr.data-samples]="camera.sharpnessSamples()"
-        [attr.data-good]="camera.sharpnessGood()"
-      >
-        <span id="camera-sharpness-label">Sharpness</span>
-        <meter
-          aria-labelledby="camera-sharpness-label"
-          min="0"
-          max="1"
-          low="0"
-          optimum="1"
-          [high]="thresholdBar()"
-          [value]="bar()"
-        ></meter>
-        <span class="value" data-testid="camera-sharpness-value">{{ sharpnessValue() }}</span>
-        <span
-          class="verdict"
-          data-testid="camera-sharpness-verdict"
-          [class.good]="camera.sharpnessGood()"
-          >{{ verdict() }}</span
-        >
-      </div>
+      <app-sharpness-meter />
       <p class="hint">
         Of the framing rectangle, twice a second, and not while a solve is under way (drawing a
         frame would hold its moves back); good from {{ threshold() }} up (Settings). Aim for good
@@ -239,5 +179,36 @@
     </p>
 
     <app-recording-panel />
+
+    <!-- The phones that film for this host (T4.1): loaded when Add camera is first pressed, so that
+         a session without remote cameras downloads nothing of the connection's code. The press is a
+         signal the block waits for (`when`), not an interaction trigger: that one renders the block
+         as soon as its chunk is there, before the placeholder's own click handler has run. -->
+    <section class="remote" data-testid="remote-cameras-section">
+      @defer (when addRequests() > 0) {
+        <app-remote-cameras [addRequests]="addRequests()" />
+      } @placeholder {
+        <h3>Cameras</h3>
+        <p class="hint">
+          Phones that film this session from other angles, each recording its own camera. On the
+          phone, open cubetrace signed in to the same account and scan the code, or type it in its
+          Camera page.
+        </p>
+        <div class="bar">
+          <button
+            type="button"
+            class="primary"
+            data-testid="add-camera"
+            [disabled]="addBlocked() !== null"
+            (click)="addRequests.set(addRequests() + 1)"
+          >
+            Add camera
+          </button>
+          @if (addBlocked(); as text) {
+            <span class="muted" data-testid="add-camera-blocked">{{ text }}</span>
+          }
+        </div>
+      }
+    </section>
   </div>
 </details>
