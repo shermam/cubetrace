@@ -38,6 +38,27 @@ export interface RemoteClockParams {
   since: number;
 }
 
+/**
+ * The fit's record as session.json keeps it in `clock.cameras[label].remote` (docs/DATA-MODEL.md §6):
+ * {@link RemoteClockParams}, and since T4.2 whether the fit had converged when the record was
+ * written. The host writes it at convergence (T4.1, `converged` true), and, when a remote camera's
+ * first cut goes before that, the estimate the cut relied on (T4.2, `converged` false). Absent from
+ * the records written before T4.2, which were all written at convergence.
+ */
+export interface RemoteClockRecord extends RemoteClockParams {
+  converged?: boolean;
+}
+
+/** The sample of least round trip of a fit's window ({@link RemoteClockFit.least}). */
+export interface RemoteClockLeast {
+  /** Its offset: the remote clock minus the host's, in ms. */
+  readonly offsetMs: number;
+  /** Its round trip, in ms. */
+  readonly rttMs: number;
+  /** The host time it stands for: the middle of its round trip. */
+  readonly hostMs: number;
+}
+
 /** One round trip: the host's `t1` and `t4`, the remote's `t2` and `t3`, all in ms. */
 export interface RemoteClockSample {
   /** When the host sent the ping, on the host clock. */
@@ -207,6 +228,36 @@ export class RemoteClockFit {
   /** The drift in parts per million; 0 before the fit. */
   get driftPpm(): number {
     return (this.#current()?.b ?? 0) * 1e6;
+  }
+
+  /**
+   * The window's sample of least round trip, whose offset had the least room for an asymmetry
+   * between the two legs (T4.2: the estimate of the cuts before the fit keeps a few samples); null
+   * with no sample.
+   */
+  get least(): RemoteClockLeast | null {
+    let best: Measured | null = null;
+    for (const sample of this.#samples) {
+      if (best === null || sample.rttMs < best.rttMs) {
+        best = sample;
+      }
+    }
+    return best === null ? null : { offsetMs: best.offsetMs, rttMs: best.rttMs, hostMs: best.hostMs };
+  }
+
+  /**
+   * The 95th percentile (nearest rank) of the round trips of the samples the estimate stands on, in
+   * ms (T4.2: the margin of a cut's window); 0 with no sample.
+   */
+  get rttP95Ms(): number {
+    const e = this.#current();
+    if (e === null) {
+      return 0;
+    }
+    return percentile(
+      e.kept.map((s) => s.rttMs).sort((p, q) => p - q),
+      0.95,
+    );
   }
 
   /** Whether the kept samples span enough for the drift to be fitted. */

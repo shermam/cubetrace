@@ -89,8 +89,9 @@ const BY_LABEL = '#/properties/clock/properties/cameras';
  * of: an attempt's app, gyro and resyncs and its moves' serial and packetLast, a session's battery
  * and its cube's productDate, and a frames file's app; and the fields of T4.0, which only a remote
  * camera has: a camera's remote (its device; required by an if/then when local is false) and a
- * camera clock's remote (its clock sync); and those of T4.2, which only a remote camera's clip has:
- * a frames file's t0RemoteMs and remote (each requiring the other, by dependentRequired).
+ * camera clock's remote (its clock sync); and those of T4.2: a remote clock's converged (the records
+ * of T4.0 and T4.1 have none), and, which only a remote camera's clip has, a frames file's t0RemoteMs
+ * and remote (each requiring the other, by dependentRequired).
  */
 const OPTIONAL: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   'session.json version 2': {
@@ -98,6 +99,7 @@ const OPTIONAL: Readonly<Record<string, Readonly<Record<string, readonly string[
     '#/properties/cube': ['productDate'],
     '#/$defs/cameraClock': ['samples', 'remote'],
     '#/$defs/camera': ['microphone', 'remote'],
+    '#/$defs/remoteClock': ['converged'],
   },
   'attempt.json version 2': {
     '#': ['app', 'gyro', 'resyncs'],
@@ -450,8 +452,13 @@ describe('version 2', () => {
     ],
     [
       'an unknown field in a remote clock sync',
-      ['clock', 'cameras', 'phone-rear', 'remote', 'converged'],
+      ['clock', 'cameras', 'phone-rear', 'remote', 'withdrawn'],
       true,
+    ],
+    [
+      'a remote clock sync whose convergence is text (T4.2)',
+      ['clock', 'cameras', 'phone-rear', 'remote', 'converged'],
+      'no',
     ],
     ['a cube clock fit without its sample count', ['clock', 'cube', 'samples'], undefined],
     ['a negative cube residual', ['clock', 'cube', 'residualP95Ms'], -1],
@@ -563,18 +570,20 @@ describe('version 2', () => {
     expect(validateFrames(changed(remoteFramesJson(), path, value))).toBe(false);
   });
 
-  it("gives a remote clip's frames file the clock sync of session.json, with its convergence and time (T4.2)", () => {
+  it("gives a remote clip's frames file the clock sync of session.json, its convergence required, with the time it was taken (T4.2)", () => {
     const sync = (FRAMES_SCHEMA['properties'] as Record<string, Record<string, unknown>>)['remote'];
     const camera = (SESSION_SCHEMA['$defs'] as Record<string, Record<string, unknown>>)[
       'remoteClock'
     ];
     const properties = Object.keys(sync['properties'] as object);
-    expect(properties).toEqual([
-      ...Object.keys(camera['properties'] as object),
-      'converged',
-      'takenMs',
-    ]);
+    expect(properties).toEqual([...Object.keys(camera['properties'] as object), 'takenMs']);
     expect(sync['required']).toEqual(properties);
+    expect(camera['required']).toEqual(properties.filter((p) => p !== 'converged' && p !== 'takenMs'));
+    for (const key of Object.keys(camera['properties'] as object)) {
+      expect((sync['properties'] as Record<string, unknown>)[key], key).toMatchObject({
+        type: ((camera['properties'] as Record<string, Record<string, unknown>>)[key])['type'],
+      });
+    }
   });
 
   const gyroCases: [string, readonly (string | number)[], unknown][] = [

@@ -293,7 +293,7 @@
       }
     },
     "remoteClock": {
-      "description": "The clock sync of a remote camera (T4.0, docs/DATA-MODEL.md §6, docs/RTC.md): the offset and the drift of the phone's clock against the host's, from the data channel's pings, as they were when the record was written. Absent for the host's own cameras.",
+      "description": "The clock sync of a remote camera (T4.0, docs/DATA-MODEL.md §6, docs/RTC.md): the offset and the drift of the phone's clock against the host's, from the data channel's pings, as they were when the record was written, and whether the fit had converged then (T4.2). Absent for the host's own cameras.",
       "type": "object",
       "additionalProperties": false,
       "required": ["offsetMs", "driftPpm", "rttMs", "samples", "residualP95Ms", "since"],
@@ -324,6 +324,10 @@
         "since": {
           "description": "The host time of the oldest sample the estimate stands on.",
           "type": "number"
+        },
+        "converged": {
+          "description": "Whether the fit had converged when the record was written (T4.2): true at convergence and every minute after, false for the estimate a remote camera's first cut relied on before that. Absent from the records written before T4.2, which were all written at convergence.",
+          "type": "boolean"
         }
       }
     },

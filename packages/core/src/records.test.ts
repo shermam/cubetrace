@@ -199,6 +199,11 @@ const CORPUS: [Kind, string, unknown][] = [
   ['attempt', 'the first attempt of the i3, with its clips', hardware('gan356i3').attempts[0]],
   ['session', 'a session with cameras', sessionWithCamera()],
   ['session', 'a new session', sessionRecord()],
+  [
+    'session',
+    "a session whose remote camera's clock was recorded for a cut before the fit converged (T4.2)",
+    changed(sessionWithCamera(), ['clock', 'cameras', 'phone-rear', 'remote', 'converged'], false),
+  ],
   ['session', 'a session of version 1', asVersion1Session(sessionRecord())],
   ['session', 'the session on the phone', hardware('thinkphone').session],
   ['session', 'the session of the i3, with its camera', hardware('gan356i3').session],

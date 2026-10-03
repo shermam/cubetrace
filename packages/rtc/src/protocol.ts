@@ -116,6 +116,12 @@ export interface Thumbnail {
 export interface Cut {
   type: 'cut';
   attempt: number;
+  /**
+   * The attempt's `events.scrambleShown` on the host clock (T4.2), which tells it from an attempt
+   * begun again with the same index (after Mark as solved, or Delete last); every answer about the
+   * clip carries it back.
+   */
+  scrambleShown: number;
   segment: VideoSegment;
   fromRemoteMs: number;
   toRemoteMs: number;
@@ -172,6 +178,8 @@ export interface CutClip {
 export interface CutDone {
   type: 'cut-done';
   attempt: number;
+  /** The cut's `scrambleShown`. */
+  scrambleShown: number;
   segment: VideoSegment;
   files: FileInfo[];
   /** What the capture said of the clip (T4.2). */
@@ -182,6 +190,8 @@ export interface CutDone {
 export interface CutFailed {
   type: 'cut-failed';
   attempt: number;
+  /** The cut's `scrambleShown`. */
+  scrambleShown: number;
   segment: VideoSegment;
   reason: string;
 }
@@ -254,6 +264,8 @@ export interface FileAbort {
 export interface ClipAck {
   type: 'clip-ack';
   attempt: number;
+  /** The cut's `scrambleShown`. */
+  scrambleShown: number;
   segment: VideoSegment;
   stored: boolean;
   reason: string;
@@ -435,6 +447,7 @@ function decodeControl(text: string): ControlMessage {
       return {
         type,
         attempt: int(json, 'attempt', 1),
+        scrambleShown: num(json, 'scrambleShown'),
         segment: segment(json, 'segment'),
         fromRemoteMs: num(json, 'fromRemoteMs'),
         toRemoteMs: num(json, 'toRemoteMs'),
@@ -445,6 +458,7 @@ function decodeControl(text: string): ControlMessage {
       return {
         type,
         attempt: int(json, 'attempt', 1),
+        scrambleShown: num(json, 'scrambleShown'),
         segment: segment(json, 'segment'),
         files: list(json, 'files').map(fileInfo),
         clip: cutClip(field(json, 'clip')),
@@ -453,6 +467,7 @@ function decodeControl(text: string): ControlMessage {
       return {
         type,
         attempt: int(json, 'attempt', 1),
+        scrambleShown: num(json, 'scrambleShown'),
         segment: segment(json, 'segment'),
         reason: text_(json, 'reason'),
       };
@@ -460,6 +475,7 @@ function decodeControl(text: string): ControlMessage {
       return {
         type,
         attempt: int(json, 'attempt', 1),
+        scrambleShown: num(json, 'scrambleShown'),
         segment: segment(json, 'segment'),
         stored: bool(json, 'stored'),
         reason: text_(json, 'reason'),

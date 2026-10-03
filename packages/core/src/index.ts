@@ -82,7 +82,12 @@ export { createSession, labelFor, sameCamera, summarize, withBattery } from './s
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './clock';
 // T4.0 — the clock sync of a remote camera: the offset and the drift of the phone's clock from pings
-export type { RemoteClockParams, RemoteClockSample } from './remote-clock';
+export type {
+  RemoteClockLeast,
+  RemoteClockParams,
+  RemoteClockRecord,
+  RemoteClockSample,
+} from './remote-clock';
 export {
   REMOTE_CLOCK_CONVERGED,
   REMOTE_CLOCK_DRIFT_SPAN_MS,

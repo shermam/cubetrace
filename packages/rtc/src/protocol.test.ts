@@ -81,6 +81,7 @@ const MESSAGES: Message[] = [
   {
     type: 'cut',
     attempt: 17,
+    scrambleShown: 1_790_000_002_500.5,
     segment: 'solve',
     fromRemoteMs: 1_790_000_010_000,
     toRemoteMs: 1_790_000_025_500.5,
@@ -90,6 +91,7 @@ const MESSAGES: Message[] = [
   {
     type: 'cut-done',
     attempt: 17,
+    scrambleShown: 1_790_000_002_500.5,
     segment: 'solve',
     files: [
       { name: 'phone-rear.solve.frames.json', bytes: 2_210, kind: 'frames' },
@@ -112,6 +114,7 @@ const MESSAGES: Message[] = [
   {
     type: 'cut-done',
     attempt: 3,
+    scrambleShown: 1_789_999_000_000,
     segment: 'scramble',
     files: [{ name: 'phone-2-rear.scramble.frames.json', bytes: 940, kind: 'frames' }],
     clip: {
@@ -128,10 +131,18 @@ const MESSAGES: Message[] = [
       audioMissing: 'no audio data from the microphone',
     },
   },
-  { type: 'clip-ack', attempt: 17, segment: 'solve', stored: true, reason: '' },
+  {
+    type: 'clip-ack',
+    attempt: 17,
+    scrambleShown: 1_790_000_002_500.5,
+    segment: 'solve',
+    stored: true,
+    reason: '',
+  },
   {
     type: 'clip-ack',
     attempt: 3,
+    scrambleShown: 1_789_999_000_000,
     segment: 'scramble',
     stored: false,
     reason: 'the attempt is gone',
@@ -139,6 +150,7 @@ const MESSAGES: Message[] = [
   {
     type: 'cut-failed',
     attempt: 17,
+    scrambleShown: 1_790_000_002_500.5,
     segment: 'scramble',
     reason: 'the window is older than the buffer',
   },
@@ -314,13 +326,18 @@ describe('the protocol', () => {
     ],
     ['a cut of attempt 0', '{"type": "cut", "attempt": 0}', /attempt must be an integer ≥ 1/],
     [
+      'a cut without the attempt\'s scramble time',
+      '{"type": "cut", "attempt": 1, "segment": "solve"}',
+      /scrambleShown must be a number/,
+    ],
+    [
       'a cut of another segment',
-      '{"type": "cut", "attempt": 1, "segment": "inspection"}',
+      '{"type": "cut", "attempt": 1, "scrambleShown": 5, "segment": "inspection"}',
       /segment must be one of scramble, solve/,
     ],
     [
       'a cut without a window',
-      '{"type": "cut", "attempt": 1, "segment": "solve"}',
+      '{"type": "cut", "attempt": 1, "scrambleShown": 5, "segment": "solve"}',
       /fromRemoteMs must be a number/,
     ],
     [
@@ -328,6 +345,7 @@ describe('the protocol', () => {
       JSON.stringify({
         type: 'cut',
         attempt: 1,
+        scrambleShown: 5,
         segment: 'solve',
         fromRemoteMs: 1,
         toRemoteMs: 2,
@@ -338,7 +356,7 @@ describe('the protocol', () => {
     ],
     [
       'a cut-done without what the capture said of its clip',
-      '{"type": "cut-done", "attempt": 1, "segment": "solve", "files": []}',
+      '{"type": "cut-done", "attempt": 1, "scrambleShown": 5, "segment": "solve", "files": []}',
       /clip must be an object/,
     ],
     [
@@ -346,6 +364,7 @@ describe('the protocol', () => {
       JSON.stringify({
         type: 'cut-done',
         attempt: 1,
+        scrambleShown: 5,
         segment: 'solve',
         files: [],
         clip: {
@@ -366,17 +385,17 @@ describe('the protocol', () => {
     ],
     [
       'a clip-ack whose stored is text',
-      '{"type": "clip-ack", "attempt": 1, "segment": "solve", "stored": "yes", "reason": ""}',
+      '{"type": "clip-ack", "attempt": 1, "scrambleShown": 5, "segment": "solve", "stored": "yes", "reason": ""}',
       /stored must be true or false/,
     ],
     [
       'a cut-done whose files are an object',
-      '{"type": "cut-done", "attempt": 1, "segment": "solve", "files": {}}',
+      '{"type": "cut-done", "attempt": 1, "scrambleShown": 5, "segment": "solve", "files": {}}',
       /files must be an array/,
     ],
     [
       'a cut-done with a file that is text',
-      '{"type": "cut-done", "attempt": 1, "segment": "solve", "files": ["a.mp4"]}',
+      '{"type": "cut-done", "attempt": 1, "scrambleShown": 5, "segment": "solve", "files": ["a.mp4"]}',
       /not an object/,
     ],
     [

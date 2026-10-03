@@ -43,7 +43,7 @@ import type { PhaseName } from './phases';
 import { PHASE_NAMES } from './phases';
 import type { EdgePos } from './pieces';
 import { EDGE_FACELETS } from './pieces';
-import type { RemoteClockParams } from './remote-clock';
+import type { RemoteClockRecord } from './remote-clock';
 import type {
   AppBuild,
   BatteryReading,
@@ -890,14 +890,18 @@ const camera: Reader<CameraInfo> = {
   },
 };
 
-/** The clock sync of a remote camera (T4.0), as `RemoteClockFit.params` gives it. */
-const remoteClock = object<RemoteClockParams>({
+/**
+ * The clock sync of a remote camera (T4.0), as `RemoteClockFit.params` gives it, and since T4.2
+ * whether it had converged (absent from the records written before).
+ */
+const remoteClock = object<RemoteClockRecord>({
   offsetMs: num(),
   driftPpm: num(),
   rttMs: num({ min: 0 }),
   samples: int(0),
   residualP95Ms: num({ min: 0 }),
   since: num(),
+  converged: optional(bool),
 });
 
 const cameraClock = object<CameraClock>({
