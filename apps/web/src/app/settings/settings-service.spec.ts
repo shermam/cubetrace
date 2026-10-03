@@ -63,6 +63,7 @@ describe('SettingsService', () => {
     expect(settings.uploadSessions()).toBe(true);
     expect(settings.keepLocalCopies()).toBe(true);
     expect(settings.diagnostics()).toBe(true);
+    expect(settings.recordRemoteCameras()).toBe(true);
     expect(settings.networkTypeKnown).toBe(false);
     expect(settings.wifiOnly()).toBe(false);
     expect(settings.saveError()).toBeNull();
@@ -135,6 +136,7 @@ describe('SettingsService', () => {
     settings.setKeepLocalCopies(false);
     settings.setDiagnostics(false);
     settings.setViewerChoice('laptop', { latitude: 90, longitude: 180, mirror: 'left-right' });
+    settings.setRecordRemoteCameras(false);
 
     expect(stored()).toEqual({
       version: 2,
@@ -170,10 +172,12 @@ describe('SettingsService', () => {
       keepLocalCopies: false,
       diagnostics: false,
       viewer: { laptop: { latitude: 90, longitude: 180, mirror: 'left-right' } },
+      recordRemoteCameras: false,
     });
     const reloaded = load();
     expect(reloaded.uploadSessions()).toBe(false);
     expect(reloaded.diagnostics()).toBe(false);
+    expect(reloaded.recordRemoteCameras()).toBe(false);
     expect(reloaded.wifiOnlySetting()).toBe(true);
     // A laptop's browser does not say the network's type: it uploads on any network.
     expect(reloaded.wifiOnly()).toBe(false);
@@ -464,6 +468,26 @@ describe('SettingsService', () => {
 
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ scrambleOverPicture: 'off' }));
     expect(load().scrambleOverPicture()).toBe(true);
+  });
+
+  it('reads the settings stored before Record remote cameras existed as on, and a value that is not a switch as on (T4.2)', () => {
+    // What 0.3.0 stored: no such switch.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ version: 2, cameraOn: true, diagnostics: false }),
+    );
+    const settings = load();
+
+    expect(settings.recordRemoteCameras()).toBe(true);
+    expect(settings.cameraOn()).toBe(true);
+    expect(settings.diagnostics()).toBe(false);
+
+    settings.setRecordRemoteCameras(false);
+    expect(stored()).toMatchObject({ recordRemoteCameras: false, cameraOn: true });
+    expect(load().recordRemoteCameras()).toBe(false);
+
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ recordRemoteCameras: 'no' }));
+    expect(load().recordRemoteCameras()).toBe(true);
   });
 
   it('reads the settings stored before the microphone setting existed as Raw, the rest as stored', () => {

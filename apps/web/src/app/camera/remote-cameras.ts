@@ -2,6 +2,7 @@ import { Component, DestroyRef, computed, effect, inject, input, signal } from '
 
 import { durationText, msText } from '../rtc/device-info';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
+import { SettingsService } from '../settings/settings-service';
 import { fpsText, sharpnessText } from './camera-format';
 import { qrCode, qrSvgPath } from './qr-code';
 import { PAIRING_BLOCK_TEXT } from './pairing-block';
@@ -25,9 +26,11 @@ export function tokenText(token: string): string {
  * `qr-code.ts`), the URL and the token to type; under it the phones paired (`RemoteCamerasService`),
  * each with its latest thumbnail, its name and label in the session, its state (connected,
  * reconnecting), its clock sync (syncing, or synced with the round trip and the offset), what it
- * reports (recording, frame rate, sharpness, framing, battery, a thermal hint) and Remove. The panel
- * loads it only when Add camera is pressed (`@defer (when addRequests() > 0)`), and counts the
- * presses in `addRequests`, so that the first pairing starts as the section appears.
+ * reports (recording, frame rate, sharpness, framing, battery, a thermal hint, the clips it still has
+ * to send) and Remove; and "Record remote cameras" (T4.2, on by default): whether each attempt's clips
+ * are asked of the phones. The panel loads it only when Add camera is pressed (`@defer (when
+ * addRequests() > 0)`), and counts the presses in `addRequests`, so that the first pairing starts as
+ * the section appears.
  */
 @Component({
   selector: 'app-remote-cameras',
@@ -39,6 +42,7 @@ export class RemoteCameras {
   readonly addRequests = input(0);
 
   protected readonly service = inject(RemoteCamerasService);
+  protected readonly settings = inject(SettingsService);
   private readonly timers = inject(RTC_TIMERS);
   /** The host clock, once a second while a camera is listed or a pairing shown: the durations. */
   private readonly now = signal(this.timers.now());
@@ -130,7 +134,10 @@ export class RemoteCameras {
     return `synced · ${trip} · offset ${msText(sync.offsetMs)} · drift ${sync.driftPpm.toFixed(1)} ppm`;
   }
 
-  /** What the phone reports: recording, frame rate, sharpness, framing, battery, a thermal hint. */
+  /**
+   * What the phone reports: recording, frame rate, sharpness, framing, battery, a thermal hint, the
+   * clips it has cut and not sent yet (T4.2).
+   */
   protected reportText(camera: RemoteCamera): string {
     const report = camera.report;
     if (report === null) {
@@ -147,6 +154,9 @@ export class RemoteCameras {
         ? null
         : `battery ${String(Math.round(report.battery.level * 100))}%${report.battery.charging ? ', charging' : ''}`,
       report.thermal === 'throttled' ? 'hot: the frame rate dropped' : null,
+      report.pendingClips === 0
+        ? null
+        : `${String(report.pendingClips)} ${report.pendingClips === 1 ? 'clip' : 'clips'} to send`,
     ];
     return parts.filter((part) => part !== null).join(' · ');
   }

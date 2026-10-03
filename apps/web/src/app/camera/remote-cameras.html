@@ -18,6 +18,22 @@
       <span class="muted" data-testid="add-camera-blocked">{{ text }}</span>
     }
   </div>
+  <label class="switch">
+    <input
+      #recordBox
+      type="checkbox"
+      data-testid="record-remote-cameras"
+      aria-describedby="record-remote-cameras-hint"
+      [checked]="settings.recordRemoteCameras()"
+      (change)="settings.setRecordRemoteCameras(recordBox.checked)"
+    />
+    Record remote cameras
+  </label>
+  <p class="hint" id="record-remote-cameras-hint">
+    Each attempt's scramble and solve clips from every phone listed, in the attempt's folder beside
+    this device's; the attempt waits up to two minutes for them before it is uploaded. Off, the
+    phones stay connected and record nothing for the session.
+  </p>
   @if (service.pairingError(); as error) {
     <p class="error" role="alert" data-testid="pairing-error">{{ error }}</p>
   }

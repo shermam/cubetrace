@@ -564,6 +564,26 @@ describe('isFailure and failureMessage', () => {
     expect(isFailure(at(1, 'cube.failed', { reason: 'cancelled' }))).toBe(false);
     expect(isFailure(at(1, 'cube.failed', { reason: 'no-state' }))).toBe(true);
     expect(isFailure(at(1, 'attempt.done', { status: 'dnf' }))).toBe(false);
+    const failed = at(1, 'remote.cut', {
+      outcome: 'failed',
+      camera: 'phone-rear',
+      segment: 'solve',
+      reason: 'the phone is not recording',
+    });
+    expect(isFailure(failed)).toBe(true);
+    expect(failureMessage(failed)).toBe('phone-rear solve: the phone is not recording');
+    expect(isFailure(at(1, 'remote.cut', { outcome: 'sent', camera: 'phone-rear' }))).toBe(false);
+    const missing = at(1, 'remote.clip.missing', {
+      camera: 'phone-rear',
+      segment: 'scramble',
+      reason: 'wait',
+      message: "no clip within 120 s of the attempt's end",
+    });
+    expect(isFailure(missing)).toBe(true);
+    expect(failureMessage(missing)).toBe(
+      "phone-rear scramble: no clip within 120 s of the attempt's end",
+    );
+    expect(isFailure(at(1, 'remote.clip.late', { camera: 'phone-rear' }))).toBe(false);
   });
 });
 

@@ -53,6 +53,24 @@ describe('isFailure and failureMessage', () => {
         'laptop.solve.mp4',
       ],
       [event('cube.failed', 1, { reason: 'no-state' }), 'no-state'],
+      [
+        event('remote.cut', 1, {
+          outcome: 'failed',
+          camera: 'phone-rear',
+          segment: 'solve',
+          reason: 'the phone is not recording',
+        }),
+        'phone-rear solve: the phone is not recording',
+      ],
+      [
+        event('remote.clip.missing', 1, {
+          camera: 'phone-rear',
+          segment: 'scramble',
+          reason: 'wait',
+          message: "no clip within 120 s of the attempt's end",
+        }),
+        "phone-rear scramble: no clip within 120 s of the attempt's end",
+      ],
     ];
     for (const [failure, message] of failures) {
       expect(isFailure(failure), failure.kind).toBe(true);
@@ -65,6 +83,10 @@ describe('isFailure and failureMessage', () => {
       event('cube.failed', 1, { reason: 'cancelled' }),
       event('cube.failed', 1, { reason: 'no-mac' }),
       event('attempt.done', 1, { status: 'dnf' }),
+      event('remote.cut', 1, { outcome: 'sent', camera: 'phone-rear', segment: 'solve' }),
+      event('remote.cut', 1, { outcome: 'done', camera: 'phone-rear', segment: 'solve' }),
+      event('remote.clip', 1, { camera: 'phone-rear', segment: 'solve', late: false }),
+      event('remote.clip.late', 1, { camera: 'phone-rear', segment: 'solve', afterEndMs: 130_000 }),
     ]) {
       expect(isFailure(fine), `${fine.kind} ${JSON.stringify(fine.data)}`).toBe(false);
     }

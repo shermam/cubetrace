@@ -4,6 +4,7 @@ import {
   SESSIONS_FOLDER,
   attemptFolder,
   writeAttemptFile,
+  type FileContent,
   type OpfsDirectoryHandle,
 } from '@cubetrace/storage';
 
@@ -11,8 +12,9 @@ import { BROWSER_GLOBALS } from '../device/browser-globals';
 
 /**
  * The files of an attempt's folder (docs/DATA-MODEL.md §5) besides its record: its clips' MP4s and
- * frames files (T2.4), which the capture pipeline writes into the origin private file system, and
- * its gyro file (T3.7), which the session service writes through `write`.
+ * frames files (T2.4), which the capture pipeline writes into the origin private file system, its
+ * gyro file (T3.7), which the session service writes through `write`, and a remote camera's clips
+ * (T4.2), which the host writes through `write` as they come from the phone.
  */
 export interface AttemptFiles {
   /**
@@ -21,11 +23,12 @@ export interface AttemptFiles {
    */
   read(sessionId: string, index: number, name: string): Promise<Blob>;
   /**
-   * Writes `text` as the whole file `name` of the folder of attempt `index` of session `sessionId`,
-   * in one step, as the records are written (@cubetrace/storage's `writeAttemptFile`); rejects when
-   * the session's folder is missing, or where the browser has no origin private file system.
+   * Writes `content` (text, or bytes in parts: a remote camera's MP4) as the whole file `name` of the
+   * folder of attempt `index` of session `sessionId`, in one step, as the records are written
+   * (@cubetrace/storage's `writeAttemptFile`); rejects when the session's folder is missing, or where
+   * the browser has no origin private file system.
    */
-  write(sessionId: string, index: number, name: string, text: string): Promise<void>;
+  write(sessionId: string, index: number, name: string, content: FileContent): Promise<void>;
 }
 
 /** The attempts' files in `navigator.storage.getDirectory()`; the unit tests give a fake. */
@@ -48,8 +51,13 @@ export const ATTEMPT_FILES = new InjectionToken<AttemptFiles>('ATTEMPT_FILES', {
         }
         return (await dir.getFileHandle(name)).getFile() as Promise<Blob>;
       },
-      async write(sessionId: string, index: number, name: string, text: string): Promise<void> {
-        await writeAttemptFile(await root(), sessionId, index, name, text);
+      async write(
+        sessionId: string,
+        index: number,
+        name: string,
+        content: FileContent,
+      ): Promise<void> {
+        await writeAttemptFile(await root(), sessionId, index, name, content);
       },
     };
   },

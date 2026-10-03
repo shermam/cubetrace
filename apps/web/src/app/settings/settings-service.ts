@@ -207,6 +207,8 @@ interface StoredSettings {
    * oldest first; synced with the account's `viewer` by ViewerSyncService.
    */
   readonly viewer: ViewerChoices;
+  /** T4.2: the host asks its remote cameras (the phones paired) for each attempt's clips. */
+  readonly recordRemoteCameras: boolean;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -233,6 +235,7 @@ const DEFAULTS: StoredSettings = {
   keepLocalCopies: null,
   diagnostics: true,
   viewer: {},
+  recordRemoteCameras: true,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -257,8 +260,9 @@ export function macAddressProblem(text: string): string {
  * mobile data), and whether the uploaded clips stay on the device (a laptop's default); and the
  * diagnostics (T3.9): whether, signed in, the app records events about its own use in the account;
  * and the clip viewer's choice per camera (T3.10): where its 3D cube is seen from and the mirror
- * applied to its orientation, by the camera's label, synced with the account's by ViewerSyncService.
- * Signals, kept
+ * applied to its orientation, by the camera's label, synced with the account's by ViewerSyncService;
+ * and whether the host records its remote cameras (T4.2: "Record remote cameras", in the Cameras
+ * section of Camera settings). Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
  * Signed in, the cube list is kept in sync with the account's by CubeSyncService (T3.4), which is
@@ -357,6 +361,13 @@ export class SettingsService {
    * the defaults, the cube seen straight on from the front. At most 8, the oldest first.
    */
   readonly viewerChoices = computed(() => this.stored().viewer);
+  /**
+   * "Record remote cameras" (T4.2, the Cameras section of Camera settings): the host asks every
+   * phone paired for each attempt's scramble and solve clips, and waits up to two minutes after the
+   * attempt for them before it uploads the attempt; on by default. Off, no clip is asked for and the
+   * phones stay connected.
+   */
+  readonly recordRemoteCameras = computed(() => this.stored().recordRemoteCameras);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -521,6 +532,12 @@ export class SettingsService {
     }
   }
 
+  setRecordRemoteCameras(on: boolean): void {
+    if (on !== this.stored().recordRemoteCameras) {
+      this.update({ recordRemoteCameras: on });
+    }
+  }
+
   /** The clip viewer's choice for the camera labelled `camera`, or null when it has none. */
   viewerChoiceFor(camera: string): ViewerChoice | null {
     const choices = this.stored().viewer;
@@ -674,6 +691,7 @@ function readSettings(
   const keepLocalCopies = member(parsed, 'keepLocalCopies');
   const diagnostics = member(parsed, 'diagnostics');
   const viewer = member(parsed, 'viewer');
+  const recordRemoteCameras = member(parsed, 'recordRemoteCameras');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
   const settings: StoredSettings = {
     hostLabel:
@@ -727,6 +745,9 @@ function readSettings(
     // Settings stored before T3.10 have none: the defaults for every camera. An entry that is not
     // well formed is dropped; the cap takes the first ones, which are the oldest.
     viewer: parseViewerChoices(viewer),
+    // Settings stored before T4.2 have none: on, as for a new device.
+    recordRemoteCameras:
+      typeof recordRemoteCameras === 'boolean' ? recordRemoteCameras : DEFAULTS.recordRemoteCameras,
   };
   return { settings, migrated: cubeMacs.migrated };
 }

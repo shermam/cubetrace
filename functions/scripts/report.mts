@@ -124,7 +124,8 @@ export function readEvent(uid: string, id: string, document: unknown): ReportEve
 /**
  * Whether an event says something failed (the QA view's rule, apps/web diagnostics-summary.ts): an
  * `error.*` event, a clip that could not be saved, a sync check that failed, an upload that failed,
- * or a cube that could not be connected for a reason other than the user's.
+ * a cube that could not be connected for a reason other than the user's, a remote camera's cut that
+ * failed, or a remote clip an attempt went without.
  */
 export function isFailure(event: ReportEvent): boolean {
   const { kind, data } = event;
@@ -140,7 +141,11 @@ export function isFailure(event: ReportEvent): boolean {
   if (kind === 'cube.failed') {
     return data['reason'] !== 'cancelled' && data['reason'] !== 'no-mac';
   }
-  return false;
+  // T4.2: a remote camera's clip the phone could not cut, or that the attempt went without.
+  if (kind === 'remote.cut') {
+    return data['outcome'] === 'failed';
+  }
+  return kind === 'remote.clip.missing';
 }
 
 /** What a failure's facts say went wrong. */
@@ -154,6 +159,14 @@ export function failureMessage(event: ReportEvent): string {
       return text(event, 'error') ?? text(event, 'failedFile') ?? '';
     case 'cube.failed':
       return text(event, 'reason') ?? '';
+    case 'remote.cut':
+    case 'remote.clip.missing': {
+      const clip = [text(event, 'camera'), text(event, 'segment')]
+        .filter((part) => part !== null)
+        .join(' ');
+      const why = text(event, 'message') ?? text(event, 'reason') ?? '';
+      return clip === '' ? why : `${clip}: ${why}`;
+    }
     default:
       return [text(event, 'where'), text(event, 'message')].filter((p) => p !== null).join(': ');
   }

@@ -16,6 +16,7 @@ import { FakeLocalStorage, settle } from '../device/fake-browser';
 import { MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { ready, setup, type Setup } from '../session/session-harness';
+import { SettingsService } from '../settings/settings-service';
 import { RemoteCameras, tokenText } from './remote-cameras';
 import { RemoteCamerasService } from './remote-cameras-service';
 
@@ -212,6 +213,21 @@ describe('RemoteCameras', () => {
     expect(text('remote-camera-report')).toBe(
       'recording · 29.9 fps · sharpness 41 · framing 800×600 · battery 83%, charging · hot: the frame rate dropped',
     );
+    // Clips the phone still has to send (T4.2).
+    link.send({
+      type: 'state',
+      remoteMs: s.perf.hostMs,
+      recording: true,
+      framing: null,
+      frame: null,
+      fps: null,
+      sharpness: null,
+      battery: null,
+      thermal: null,
+      pendingClips: 2,
+    });
+    await pump(10);
+    expect(text('remote-camera-report')).toBe('recording · full frame · 2 clips to send');
     // Over 20 s the sync converges.
     await pump(22_000, 22);
     expect(row.getAttribute('data-converged')).toBe('true');
@@ -224,6 +240,21 @@ describe('RemoteCameras', () => {
     await pump(0);
     expect(element('remote-camera')).toBeNull();
     expect(text('remote-cameras-none')).toBe('No phone is paired.');
+  });
+
+  it('Record remote cameras is on by default, and its box switches the setting (T4.2)', async () => {
+    await render();
+    const box = element('record-remote-cameras') as HTMLInputElement;
+    const settings = TestBed.inject(SettingsService);
+    expect(box.checked).toBe(true);
+    expect(settings.recordRemoteCameras()).toBe(true);
+    box.click();
+    await pump(0);
+    expect(settings.recordRemoteCameras()).toBe(false);
+    expect(box.checked).toBe(false);
+    box.click();
+    await pump(0);
+    expect(settings.recordRemoteCameras()).toBe(true);
   });
 
   it('shows a phone whose connection dropped as reconnecting', async () => {

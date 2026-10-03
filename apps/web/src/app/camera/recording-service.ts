@@ -41,6 +41,7 @@ import { SessionService, type AttemptMilestone, type AttemptRef } from '../sessi
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { CameraService } from './camera-service';
+import { clipWindow } from './clip-windows';
 import { openMicrophone } from './microphone';
 
 /**
@@ -87,22 +88,8 @@ export interface SavedClip {
   readonly clip: VideoClip;
 }
 
-/** The scramble clip begins this long before the first scramble turn (docs/PLAN.md, T2.4). */
-export const SCRAMBLE_LEAD_MS = 2000;
-
-/**
- * The scramble clip begins at most this long before the scramble is done (docs/PLAN.md, T2.9). A
- * scramble takes 10 to 15 s, and the turns that matter are its last ones before `scrambleDone`: a
- * pause inside it (a sync check that failed, a break) is not worth minutes of video, which the 90 s
- * in memory would not hold anyway.
- */
-export const SCRAMBLE_CLIP_MAX_MS = 60_000;
-
-/** The solve clip begins this long before the first solve turn. */
-export const SOLVE_LEAD_MS = 3000;
-
-/** Both clips end this long after their segment: the scramble done, the cube solved or the DNF. */
-export const CLIP_TAIL_MS = 1000;
+// The clips' windows, which the remote cameras' cuts share (T4.2), live in clip-windows.ts.
+export { CLIP_TAIL_MS, SCRAMBLE_CLIP_MAX_MS, SCRAMBLE_LEAD_MS, SOLVE_LEAD_MS } from './clip-windows';
 
 /**
  * A clip is saved this long after its end, so that the frames up to its end have come out of the
@@ -615,20 +602,10 @@ export class RecordingService {
     const attempt = milestone.attempt;
     switch (milestone.type) {
       case 'armed':
-        this.plan(
-          attempt,
-          'scramble',
-          Math.max(
-            milestone.scrambleStart - SCRAMBLE_LEAD_MS,
-            milestone.scrambleDone - SCRAMBLE_CLIP_MAX_MS,
-          ),
-          milestone.scrambleDone + CLIP_TAIL_MS,
-        );
-        break;
       case 'ended': {
-        const solveStart = milestone.record.events.solveStart;
-        if (solveStart !== null) {
-          this.plan(attempt, 'solve', solveStart - SOLVE_LEAD_MS, milestone.endMs + CLIP_TAIL_MS);
+        const window = clipWindow(milestone);
+        if (window !== null) {
+          this.plan(attempt, window.segment, window.startMs, window.endMs);
         }
         break;
       }
