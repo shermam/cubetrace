@@ -1820,3 +1820,40 @@ answers a message needs a step of its own) and settle the promises between them.
 right before it is never heard: both services close the connection 250 ms after the word
 (`LEAVE_GRACE_MS`); on `pagehide` they send it and leave the connection to the browser (the host
 deletes the peer documents too), since a timer may not run.
+
+## Remote clips in the app (T4.2)
+
+Added by T4.2 on 2026-10-03 (`docs/RTC.md` §9, `docs/ARCHITECTURE.md` "Remote cameras"):
+
+**The chunks.** `RemoteCutsService` is a root service that only `RemoteCamerasService` injects, so it
+ships in the Cameras section's lazy chunk with the clock estimate, and `CameraDeviceClips` with the
+staging in the Camera page's; nothing of either reaches the initial bundle. `ng build` on
+2026-10-03, raw: the initial bundle 264.96 kB, as on `main`; the Cameras section's chunk 40.45 kB
+against 26.72 kB, the Camera page's 41.74 kB against 31.97 kB, the chunk of `@cubetrace/rtc` both
+share 24.30 kB against 17.19 kB (the file transfer, which no page used before), core's shared chunk
+79.62 kB against 77.85 kB (`parseFrames`, `remoteFrames`), the QA page 17.83 kB against 16.21 kB,
+the clip viewer 24.03 kB against 23.73 kB, the clip worker 127.81 kB against 127.59 kB (the staging
+folder).
+
+**The fakes of the unit tests.** The host's spec (`remote-cuts-service.spec.ts`) pairs a phone over
+`MemoryConnector` that answers the pings 1,234.5 ms ahead and each cut with its files through the
+protocol's `FileSender` (at 1 MB/s for the test that drops the connection in the middle of a file),
+on a real `SessionService` whose attempts the session harness turns; the attempt's folder is a fake
+of `ATTEMPT_FILES` that keeps the writes. The phone's spec (`camera-device-clips.spec.ts`) answers
+the capture's saves itself, after planting the files the clip worker would have written in a
+`FakeDirectoryHandle` of `@cubetrace/storage`, and plays the host as the other end of a
+`MemoryTransport` pair whose store keeps a file's bytes across connections. It moves the clock in
+steps of 10 ms with two turns of the event loop each: a chunk is read from a `Blob`, which takes a
+turn, and coarser steps stall the transfer.
+
+**The end-to-end hooks.** `window.cubetraceE2eRemote` (`apps/web/src/app/rtc/e2e-remote.ts`, read in
+development builds only, as `cubetraceE2eSignaling` is): `clockOffsetMs` moves a page's
+`RTC_TIMERS` clock (the camera device's pongs, its cuts' times, its staging dates), since two pages
+of one browser share a clock and the conversion of a clip's times needs one that is off; the phone's
+capture keeps the page's clock, so the camera device moves a cut's window back onto it and the frames
+file's first frame time onto the connection's. `closeAfterBytes` closes the connection once, when
+the sender reads the first chunk of a file at or past the number, after the chunks before it have
+left (the channel's queue empty) and had half a second to arrive: `RTCPeerConnection.close` drops
+what the channel still holds, so a close at a count of bytes sent could leave the host holding
+nothing, and the resumption would not show. `ignoreCuts` plays a phone that never answers;
+`clipWaitMs` shortens the host's wait.
