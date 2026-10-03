@@ -465,6 +465,17 @@ describe('CaptureHandle', () => {
     expect(worker.messages().at(-1)).toEqual({ type: 'mux-and-write', id: 4, ...PARAMS, app });
     clipWorker.reply({ type: 'mux-and-write-done', id: 4, clip: A_CLIP, report: A_REPORT });
     await expect(fourth).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
+    expect(worker.messages().at(-1)).not.toHaveProperty('staging');
+    // A camera device's clip names its staging folder (T4.2).
+    const fifth = capture.saveClip({ ...PARAMS, staging: 'camera-clips' });
+    expect(worker.messages().at(-1)).toEqual({
+      type: 'mux-and-write',
+      id: 5,
+      ...PARAMS,
+      staging: 'camera-clips',
+    });
+    clipWorker.reply({ type: 'mux-and-write-done', id: 5, clip: A_CLIP, report: A_REPORT });
+    await expect(fifth).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
   });
 
   it('asks the clip worker to remove a clip and resolves with whether it did', async () => {

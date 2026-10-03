@@ -478,6 +478,21 @@ describe('writeAttemptFile (T3.7)', () => {
     expect((await store.loadAttempts(A)).map((a) => a.index)).toEqual([7]);
   });
 
+  it("writes bytes, in one piece or in several, as a remote camera's MP4 (T4.2)", async () => {
+    const root = new FakeDirectoryHandle();
+    await new OpfsSessionStore(root).createSession(session(A, 1000));
+    const parts = [new Uint8Array([0, 0, 0, 24]), new Uint8Array([0x66, 0x74, 0x79, 0x70])];
+    await writeAttemptFile(root, A, 3, 'phone-rear.solve.mp4', parts);
+    expect([
+      ...(root.files().get(`sessions/${A}/attempts/0003/phone-rear.solve.mp4`)?.bytes ?? []),
+    ]).toEqual([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]);
+    await writeAttemptFile(root, A, 3, 'phone-rear.solve.mp4', new Uint8Array([9]));
+    expect([
+      ...(root.files().get(`sessions/${A}/attempts/0003/phone-rear.solve.mp4`)?.bytes ?? []),
+    ]).toEqual([9]);
+    expect([...root.files().keys()].filter((path) => path.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('refuses a session that is not there, an index that is not one, and an id that cannot name a folder', async () => {
     const root = new FakeDirectoryHandle();
     await expect(writeAttemptFile(root, A, 1, 'gyro.json', '{}')).rejects.toThrow(

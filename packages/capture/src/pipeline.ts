@@ -264,6 +264,7 @@ class Capture implements CaptureHandle {
           segment: params.segment,
           fpsNominal: params.fpsNominal,
           ...(params.app === undefined ? {} : { app: params.app }),
+          ...(params.staging === undefined ? {} : { staging: params.staging }),
         });
       }),
     );

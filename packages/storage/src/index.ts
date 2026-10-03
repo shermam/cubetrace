@@ -11,7 +11,7 @@ export type {
   OpfsWritable,
 } from './opfs';
 export { isNotFound, opfsAvailable } from './opfs';
-export type { ProblemReporter, StorageProblem } from './opfs-session-store';
+export type { FileContent, ProblemReporter, StorageProblem } from './opfs-session-store';
 export {
   ATTEMPTS_FOLDER,
   ATTEMPT_FILE,

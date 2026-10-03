@@ -110,7 +110,8 @@ export interface Thumbnail {
 
 /**
  * The host asks for a clip: the window of one segment of an attempt, in the camera device's clock
- * (the host converts its own times with the clock fit), and the milestone that decided it.
+ * (the host converts its own times with the clock fit), the milestone that decided it, and the label
+ * the session gives the phone's camera, after which the clip's files are named (T4.2).
  */
 export interface Cut {
   type: 'cut';
@@ -120,6 +121,8 @@ export interface Cut {
   toRemoteMs: number;
   /** Why the window is what it is: the timer's milestone (`armed`, `ended`), as the recording names it. */
   reason: string;
+  /** The camera's label in the host's session (`phone-rear`): the files are `<camera>.<segment>.*`. */
+  camera: string;
 }
 
 /** The kinds of file a camera device sends: a clip's MP4 and its frames file. */
@@ -132,12 +135,47 @@ export interface FileInfo {
   kind: FileKind;
 }
 
-/** The camera device cut and staged the segment's files, which it will send. */
+/**
+ * What the camera device's capture said of a clip it cut (T4.2), for the host's `video[]` entry
+ * (docs/DATA-MODEL.md §7) and its notes: the codecs, the frames' size and count, the camera's frame
+ * rate and framing, and how the clip falls short of the window asked for. Its times are in the frames
+ * file, which the host converts.
+ */
+export interface CutClip {
+  /** The video track's codec string (`avc1.640028`, `vp09.00.40.08`). */
+  codec: string;
+  /** The audio track's codec string (`mp4a.40.2`, `opus`), or null without one. */
+  audio: string | null;
+  /** Of the encoded frames. */
+  width: number;
+  height: number;
+  /** The frame rate the phone's camera track reports. */
+  fpsNominal: number;
+  /** The frames in the clip. */
+  frames: number;
+  /** The phone's framing rectangle when it cut, in the pixels of its frames; null for the whole frame. */
+  crop: CropRect | null;
+  /** The clip begins later than asked: the window's start was older than the phone's buffer. */
+  truncatedStart: boolean;
+  /** How much later than asked it begins, in ms; 0 when it begins where asked. */
+  lateMs: number;
+  /** Seconds of video the phone's buffer held when it cut. */
+  bufferSeconds: number;
+  /** Why the clip has no sound although the phone records it; null when it has, or none is recorded. */
+  audioMissing: string | null;
+}
+
+/**
+ * The camera device cut and staged the segment's files, which it sends next (and offers again,
+ * this first, over each connection until the host answers with `clip-ack`).
+ */
 export interface CutDone {
   type: 'cut-done';
   attempt: number;
   segment: VideoSegment;
   files: FileInfo[];
+  /** What the capture said of the clip (T4.2). */
+  clip: CutClip;
 }
 
 /** The camera device could not cut the segment (the window is older than its buffer, an encoder error). */
@@ -207,6 +245,20 @@ export interface FileAbort {
   reason: string;
 }
 
+/**
+ * The host's word on a clip the camera device sent (T4.2): `stored` when its files are in the
+ * attempt's folder and the clip in the attempt's record; not, with why, when the host will not take
+ * it (the attempt is gone, its frames file could not be read). Either way the camera device deletes
+ * its copy; until it hears this, it keeps the clip and offers it again over the next connection.
+ */
+export interface ClipAck {
+  type: 'clip-ack';
+  attempt: number;
+  segment: VideoSegment;
+  stored: boolean;
+  reason: string;
+}
+
 /** A side leaves on purpose (the phone's Leave, the host's Remove), with why. */
 export interface Leave {
   type: 'leave';
@@ -224,6 +276,7 @@ export type Message =
   | Cut
   | CutDone
   | CutFailed
+  | ClipAck
   | FileBegin
   | FileChunk
   | FileAck
@@ -253,6 +306,9 @@ const MAX_TEXT = 1000;
 
 /** A file's name: a plain name, no path (docs/DATA-MODEL.md §5 names the clips' files). */
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/u;
+
+/** A camera's label (docs/DATA-MODEL.md §5): lowercase letters and digits in words joined by hyphens. */
+const CAMERA_LABEL = /^[a-z0-9]+(-[a-z0-9]+)*$/u;
 
 /** What {@link decode} throws for a frame that is not a message of this protocol. */
 export class ProtocolError extends Error {
@@ -383,6 +439,7 @@ function decodeControl(text: string): ControlMessage {
         fromRemoteMs: num(json, 'fromRemoteMs'),
         toRemoteMs: num(json, 'toRemoteMs'),
         reason: text_(json, 'reason'),
+        camera: cameraLabel(json, 'camera'),
       };
     case 'cut-done':
       return {
@@ -390,12 +447,21 @@ function decodeControl(text: string): ControlMessage {
         attempt: int(json, 'attempt', 1),
         segment: segment(json, 'segment'),
         files: list(json, 'files').map(fileInfo),
+        clip: cutClip(field(json, 'clip')),
       };
     case 'cut-failed':
       return {
         type,
         attempt: int(json, 'attempt', 1),
         segment: segment(json, 'segment'),
+        reason: text_(json, 'reason'),
+      };
+    case 'clip-ack':
+      return {
+        type,
+        attempt: int(json, 'attempt', 1),
+        segment: segment(json, 'segment'),
+        stored: bool(json, 'stored'),
         reason: text_(json, 'reason'),
       };
     case 'file-begin':
@@ -506,6 +572,36 @@ function fileInfo(value: unknown): FileInfo {
   };
 }
 
+/** What the capture said of a clip (`cut-done`'s `clip`), checked. */
+function cutClip(json: Json): CutClip {
+  const crop = json['crop'];
+  const fpsNominal = num(json, 'fpsNominal', 0);
+  if (fpsNominal === 0) {
+    throw new ProtocolError('fpsNominal must be a number > 0, got 0.');
+  }
+  return {
+    codec: text_(json, 'codec'),
+    audio: nullable(json, 'audio', text_),
+    width: int(json, 'width', 1),
+    height: int(json, 'height', 1),
+    fpsNominal,
+    frames: int(json, 'frames', 1),
+    crop:
+      crop === null || crop === undefined
+        ? null
+        : {
+            x: int(field(json, 'crop'), 'x', 0),
+            y: int(field(json, 'crop'), 'y', 0),
+            w: int(field(json, 'crop'), 'w', 1),
+            h: int(field(json, 'crop'), 'h', 1),
+          },
+    truncatedStart: bool(json, 'truncatedStart'),
+    lateMs: num(json, 'lateMs', 0),
+    bufferSeconds: num(json, 'bufferSeconds', 0),
+    audioMissing: nullable(json, 'audioMissing', text_),
+  };
+}
+
 function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -565,6 +661,16 @@ function fileName(json: Json, key: string): string {
   const value = json[key];
   if (typeof value !== 'string' || !FILE_NAME.test(value) || value.includes('..')) {
     throw new ProtocolError(`${key} must be a file name without a path, got ${show(value)}.`);
+  }
+  return value;
+}
+
+function cameraLabel(json: Json, key: string): string {
+  const value = json[key];
+  if (typeof value !== 'string' || value.length > 100 || !CAMERA_LABEL.test(value)) {
+    throw new ProtocolError(
+      `${key} must be a camera label (lowercase letters and digits in words joined by hyphens), got ${show(value)}.`,
+    );
   }
   return value;
 }

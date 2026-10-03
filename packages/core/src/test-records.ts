@@ -233,6 +233,25 @@ export function framesJson(): FramesJson {
   };
 }
 
+/**
+ * The frames file of a remote camera's clip as the host keeps it (T4.2): the phone's first frame time
+ * kept, converted with the phone's clock sync of {@link REMOTE_CLOCK}.
+ */
+export function remoteFramesJson(): FramesJson {
+  return {
+    schema: 2,
+    camera: 'phone-rear',
+    segment: 'solve',
+    app: { ...APP },
+    t0HostMs: 1_790_000_003_939.81,
+    t0RemoteMs: 1_790_000_000_812.4,
+    dtMs: [0, 33.4, 33.3, 66.7],
+    keyframes: [0, 3],
+    arrival: { offsetMs: 1_789_999_990_000.25, residualP95Ms: 9.8 },
+    remote: { ...REMOTE_CLOCK, converged: true, takenMs: 1_790_000_009_250.5 },
+  };
+}
+
 /** The gyro file of a short attempt: four samples at 50 Hz, with velocities (T3.7). */
 export function gyroJson(): GyroJson {
   return {

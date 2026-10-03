@@ -56,6 +56,7 @@ export type {
   CropRect,
   CubeMoveInput,
   FramesJson,
+  FramesRemote,
   MovePhase,
   VideoClip,
   VideoSegment,
@@ -90,6 +91,9 @@ export {
   REMOTE_CLOCK_WINDOW,
   RemoteClockFit,
 } from './remote-clock';
+// T4.2 — a remote camera's clip: its frames file's times placed on the host clock through the fit
+export type { RemoteClockSnapshot } from './remote-frames';
+export { remoteFrames } from './remote-frames';
 export type { PhaseAverage } from './stats';
 export { DNF, aoN, attemptTimes, best, mean, phaseAverages } from './stats';
 export type { SessionStore } from './store';
@@ -122,6 +126,7 @@ export {
   parseCloudEvent,
   parseCloudPeer,
   parseCloudSession,
+  parseFrames,
   parseGyro,
   parseSession,
   parseSessionPairing,

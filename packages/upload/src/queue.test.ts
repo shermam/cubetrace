@@ -1,3 +1,4 @@
+import type { VideoClip } from '@cubetrace/core';
 import { recordJson } from '@cubetrace/storage';
 import { describe, expect, it } from 'vitest';
 
@@ -759,6 +760,85 @@ describe('UploadQueue', () => {
     await flush();
     await queue.stop();
     expect(stateOf(d)?.sessions).toEqual({});
+  });
+
+  it("holds an attempt while a remote camera's clips are to come, sends it without them once released, and a late clip as an addition: only attempt.json and the clip's files are signed again (T4.2)", async () => {
+    const d = device();
+    const s = session(A, 1_790_000_000_000);
+    const laptop = [clip('scramble', 1000), clip('solve', 2000)];
+    await record(d, s, [attempt(A, 1, laptop)]);
+    // The phone's clips are expected (ClipsInFlight): the attempt waits.
+    d.awaiting.add(`${A}/1`);
+    const queue = queueOf(d, { wifiOnly: false, keepLocalCopies: false });
+    await queue.start();
+    await flush();
+    expect(queue.view().counts.waiting).toBe(1);
+    expect(d.cloud.calls.filter((call) => call.startsWith('sign'))).toEqual([]);
+
+    // The wait is over (120 s after the attempt's end): it goes without the phone's clips.
+    d.awaiting.delete(`${A}/1`);
+    queue.refresh();
+    await flush();
+    const signs = (): string[] => d.cloud.calls.filter((call) => call.startsWith('sign'));
+    expect(signs()).toEqual([
+      `sign ${A}/1 attempt.json,laptop.scramble.mp4,laptop.scramble.frames.json,laptop.solve.mp4,laptop.solve.frames.json,session.json`,
+    ]);
+    expect(d.cloud.uploads.get(`${A}/1`)?.state).toBe('done');
+    expect(d.removed).toEqual([`${A}/1 laptop.scramble.mp4,laptop.solve.mp4`]);
+    const firstDone = { ...d.cloud.uploads.get(`${A}/1`)?.files };
+    const putsBefore = d.http.puts.length;
+
+    // The phone's solve clip comes later: attached to the record (the laptop's clips gone from the
+    // device by policy) and written into the folder; its upload is an addition.
+    const phone: VideoClip = {
+      ...clip('solve', 4000),
+      camera: 'phone-rear',
+      file: 'phone-rear.solve.mp4',
+      framesFile: 'phone-rear.solve.frames.json',
+      firstFrameHostMs: 1_790_000_001_012.25,
+    };
+    const [stored] = (await d.store.exportSession(A)).attempts;
+    const grown = { ...stored, video: [...stored.video, phone] };
+    await d.store.saveAttempt(grown);
+    const folder = `sessions/${A}/attempts/0001`;
+    await d.root.plant(`${folder}/${phone.file}`, 'p'.repeat(4000));
+    await d.root.plant(`${folder}/${phone.framesFile}`, 'q'.repeat(FRAMES_BYTES));
+    queue.attemptSaved(grown);
+    await flush();
+    expect(signs().at(-1)).toBe(
+      `sign ${A}/1 attempt.json,phone-rear.solve.mp4,phone-rear.solve.frames.json`,
+    );
+    expect(signs()).toHaveLength(2);
+    expect(
+      d.http.puts
+        .slice(putsBefore)
+        .map((put) => put.key.split('/').at(-1))
+        .sort(),
+    ).toEqual(['attempt.json', 'phone-rear.solve.frames.json', 'phone-rear.solve.mp4']);
+    expect(d.bucket.objects.get(key(A, 'phone-rear.solve.mp4'))).toMatchObject({
+      bytes: 4000,
+      contentType: 'video/mp4',
+    });
+    // The uploaded attempt.json lists the three clips, without `local`.
+    expect(d.bucket.objects.get(key(A, 'attempt.json'))?.text).toBe(
+      recordJson(datasetAttempt(grown)),
+    );
+    // The index: the attempt done again, the laptop's files as they were confirmed the first time.
+    const upload = d.cloud.uploads.get(`${A}/1`);
+    expect(upload?.state).toBe('done');
+    for (const path of [
+      'laptop.scramble.mp4',
+      'laptop.scramble.frames.json',
+      'laptop.solve.mp4',
+      'laptop.solve.frames.json',
+      'session.json',
+    ]) {
+      expect(upload?.files[path], path).toEqual(firstDone[path]);
+    }
+    expect(upload?.files['phone-rear.solve.mp4']).toMatchObject({ bytes: 4000 });
+    // Its MP4 leaves the device by policy, as the others did.
+    expect(d.removed.at(-1)).toBe(`${A}/1 phone-rear.solve.mp4`);
+    await queue.stop();
   });
 
   it('waits for the index: an attempt it has not received yet is tried again', async () => {
