@@ -12,12 +12,16 @@ import {
   SettingsService,
   VIDEO_QUALITIES,
 } from '../settings/settings-service';
+import { AuthService } from '../auth/auth-service';
+import { SessionService } from '../session/session-service';
 import { fpsText, framingText, sizeText, trackText } from './camera-format';
 import { CameraControls } from './camera-controls';
 import { CameraService } from './camera-service';
 import { FramingEditor } from './framing-editor';
+import { PAIRING_BLOCK_TEXT } from './pairing-block';
 import { RecordingPanel } from './recording-panel';
 import { RecordingService } from './recording-service';
+import { RemoteCameras } from './remote-cameras';
 import { SharpnessMeter } from './sharpness-meter';
 import { videoQualityOptions } from './video-quality';
 
@@ -43,7 +47,7 @@ import { videoQualityOptions } from './video-quality';
  */
 @Component({
   selector: 'app-camera-panel',
-  imports: [CameraControls, FramingEditor, RecordingPanel, SharpnessMeter],
+  imports: [CameraControls, FramingEditor, RecordingPanel, RemoteCameras, SharpnessMeter],
   templateUrl: './camera-panel.html',
   styleUrl: './camera-panel.scss',
 })
@@ -51,6 +55,18 @@ export class CameraPanel {
   protected readonly camera = inject(CameraService);
   private readonly recording = inject(RecordingService);
   protected readonly prefs = inject(SettingsService);
+  private readonly auth = inject(AuthService);
+  private readonly session = inject(SessionService);
+
+  /** How many times Add camera was pressed on the placeholder, before the Cameras section loaded. */
+  protected readonly addRequests = signal(0);
+  /** Why Add camera cannot pair now, before the Cameras section loaded; null when it can. */
+  protected readonly addBlocked = computed(() => {
+    if (this.auth.cloud() === null) {
+      return PAIRING_BLOCK_TEXT['signed-out'];
+    }
+    return this.session.session() === null ? PAIRING_BLOCK_TEXT['no-session'] : null;
+  });
 
   /** Whether the disclosure is open: as it was left, closed before it ever was opened. */
   protected readonly open = signal(this.prefs.cameraSettingsOpen() ?? false);

@@ -8,7 +8,7 @@ import {
 } from '@cubetrace/rtc';
 
 import type { CloudAccount } from '../auth/auth-service';
-import { BROWSER_GLOBALS } from '../device/browser-globals';
+import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 
 /**
  * A session's signaling for either device (docs/RTC.md §5): what the host's Cameras panel and the
@@ -59,6 +59,10 @@ export const SESSION_SIGNALING = new InjectionToken<SessionSignalingFactory>('SE
       return (account, sessionId) => make(sessionId, account.uid);
     }
     return (account, sessionId) =>
-      new FirestoreSignaling(account.backend, { sessionId, uid: account.uid });
+      new FirestoreSignaling(account.backend, {
+        sessionId,
+        uid: account.uid,
+        now: () => hostNow(globals),
+      });
   },
 });

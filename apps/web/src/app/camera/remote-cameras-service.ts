@@ -1,0 +1,866 @@
+import {
+  DOCUMENT,
+  DestroyRef,
+  Injectable,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
+import {
+  RemoteClockFit,
+  type AppBuild,
+  type CameraClock,
+  type CameraInfo,
+  type RemoteClockParams,
+} from '@cubetrace/core';
+import {
+  ClockPinger,
+  MessageLink,
+  PROTOCOL_VERSION,
+  generateToken,
+  pairingUrl,
+  type CameraState,
+  type DeviceInfo,
+  type Hello,
+  type IncomingOffer,
+  type Thumbnail,
+  type Transport,
+} from '@cubetrace/rtc';
+
+import { APP_BUILD } from '../../environments/version';
+import { AuthService, type CloudAccount } from '../auth/auth-service';
+import { SessionIndexService } from '../cloud/session-index';
+import { BROWSER_GLOBALS } from '../device/browser-globals';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
+import { thisDevice } from '../rtc/device-info';
+import { RTC_TIMERS } from '../rtc/rtc-timers';
+import { SESSION_SIGNALING, type SessionSignaling } from '../rtc/session-signaling';
+import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
+import { SessionService } from '../session/session-service';
+import { SettingsService } from '../settings/settings-service';
+import { errorMessage } from '../shared/error-message';
+import type { PairingBlock } from './pairing-block';
+
+/**
+ * Where a remote camera is: `connecting` (its offer is answered, the channel not open yet),
+ * `connected` (the channel is open and `hello` exchanged), `reconnecting` (the connection ended
+ * without a `leave`: the phone calls again, the host waits {@link RECONNECT_WINDOW_MS}).
+ */
+export type RemoteCameraState = 'connecting' | 'connected' | 'reconnecting';
+
+/** The clock sync of a remote camera as the host measures it (docs/RTC.md §4). */
+export interface RemoteSync {
+  readonly converged: boolean;
+  /** The phone's clock minus the host's, in ms. */
+  readonly offsetMs: number;
+  /** The least round trip of the samples kept, in ms. */
+  readonly rttMs: number;
+  readonly driftPpm: number;
+  readonly samples: number;
+  readonly residualP95Ms: number;
+}
+
+/** The latest thumbnail of a remote camera: a JPEG as an object URL, when the browser makes one. */
+export interface RemoteThumbnail {
+  /** `blob:` URL of the JPEG; null where the browser has no `URL.createObjectURL` (the tests). */
+  readonly url: string | null;
+  readonly width: number;
+  readonly height: number;
+  readonly bytes: number;
+  /** When the picture was taken, on the phone's clock. */
+  readonly remoteMs: number;
+  /** When it came, on the host clock. */
+  readonly receivedMs: number;
+}
+
+/** A remote camera as the Cameras list shows it (docs/PLAN.md T4.1). */
+export interface RemoteCamera {
+  /** The id of the peer document it paired with: its name in the list, kept across reconnections. */
+  readonly id: string;
+  /** The peer document of its current (or last) connection. */
+  readonly peerId: string;
+  /** The hash of the token it paired with, which it presents again when it calls back. */
+  readonly tokenHash: string;
+  /** The phone, as its `hello` named it. */
+  readonly device: DeviceInfo;
+  readonly app: AppBuild;
+  /** The phone's camera, as its `hello` described it; null until it has one open. */
+  readonly camera: CameraInfo | null;
+  /** Its label in the session (`phone-rear`, `phone-rear-2`); null without a session or a camera. */
+  readonly label: string | null;
+  readonly state: RemoteCameraState;
+  /** When the current state began, on the host clock. */
+  readonly sinceMs: number;
+  /** When it first connected, on the host clock. */
+  readonly pairedMs: number;
+  /** The phone's last `state` message, and when it came. */
+  readonly report: CameraState | null;
+  readonly reportMs: number | null;
+  readonly thumbnail: RemoteThumbnail | null;
+  /** The clock sync; null before the first answer. */
+  readonly sync: RemoteSync | null;
+}
+
+/** A pairing the host shows: the token, the QR's URL and until when the token is taken. */
+export interface Pairing {
+  readonly token: string;
+  readonly tokenHash: string;
+  readonly url: string;
+  readonly expiresMs: number;
+}
+
+/** How long the host waits for the phone's `hello` once the channel is open. */
+export const HELLO_TIMEOUT_MS = 10_000;
+
+/** How long a camera that lost its connection stays listed as reconnecting before it is removed. */
+export const RECONNECT_WINDOW_MS = 5 * 60_000;
+
+/** How often the fit's record goes into the session and the diagnostics while it is converged. */
+export const CLOCK_RECORD_MS = 60_000;
+
+/**
+ * How long a `leave` has to go out before the connection is closed: `RTCPeerConnection.close` drops
+ * what the channel still holds, and a word the phone never hears leaves it reconnecting.
+ */
+export const LEAVE_GRACE_MS = 250;
+
+/** The host's side of one peer: the connection, the pinger and the fit, and the camera's row. */
+interface Peer {
+  camera: RemoteCamera;
+  /** The fit of the phone's clock, kept across its reconnections. */
+  readonly fit: RemoteClockFit;
+  transport: Transport | null;
+  link: MessageLink | null;
+  pinger: ClockPinger | null;
+  /** Stops the handlers of the current connection. */
+  offs: (() => void)[];
+  /** Each connection of the peer has a number: an older one's end is not the newer one's. */
+  generation: number;
+  /** Set once the fit converged, for the convergence event and the record once a minute. */
+  converged: boolean;
+  removalTimer: unknown;
+  recordTimer: unknown;
+}
+
+/**
+ * The remote cameras of the host (docs/PLAN.md T4.1, docs/RTC.md): the phones paired to the session
+ * under way, which film it from other angles. Add camera publishes a pairing (a token, its hash in
+ * the session's document in Firestore for ten minutes, the QR code's URL) and watches for the phone's
+ * offer; the first peer that presents the token is answered (`TRANSPORT_CONNECTOR`, the real
+ * `WebRtcTransport` or the tests' memory pairs) and the pairing closed, so that the token is taken
+ * once. Over the channel the host sends its `hello`, takes the phone's (its device, its build and
+ * its camera), pings every 2 s (`ClockPinger`, one `RemoteClockFit` per phone) and tells the phone
+ * what it measures (`clock`), and keeps the phone's `state` and `thumbnail` for the list. The camera
+ * goes into the session's `cameras[]` with `local: false` and `remote` naming the device, under the
+ * label the session gives it (`SessionService.putCamera`), and its clock fit into
+ * `clock.cameras[label].remote` when the fit converges and every minute after. A phone whose
+ * connection ends without a `leave` is listed as reconnecting for five minutes, during which its
+ * call with the same token is answered again; then it is removed; a phone that leaves, or a camera
+ * the host removes (`leave` sent, the peer document deleted), goes at once. Its entry stays in the
+ * session: the session records what filmed it. Everything ends when the session does, or the page
+ * goes (`pagehide`, best effort). The pairing's documents are the account's own: Add camera needs
+ * the account signed in, and a session under way (its document in the index: `indexForPairing`, a
+ * demo session's too).
+ */
+@Injectable({ providedIn: 'root' })
+export class RemoteCamerasService {
+  private readonly auth = inject(AuthService);
+  private readonly session = inject(SessionService);
+  private readonly index = inject(SessionIndexService);
+  private readonly settings = inject(SettingsService);
+  private readonly diagnostics = inject(DiagnosticsService);
+  private readonly globals = inject(BROWSER_GLOBALS);
+  private readonly document = inject(DOCUMENT);
+  private readonly timers = inject(RTC_TIMERS);
+  private readonly makeSignaling = inject(SESSION_SIGNALING);
+  private readonly connect = inject(TRANSPORT_CONNECTOR);
+
+  private readonly pairingSignal = signal<Pairing | null>(null);
+  private readonly pairingErrorSignal = signal<string | null>(null);
+  private readonly publishingSignal = signal(false);
+  private readonly camerasSignal = signal<readonly RemoteCamera[]>([]);
+
+  /** The pairing shown now (the QR code); null when none is open. */
+  readonly pairing = this.pairingSignal.asReadonly();
+  /** Why the last Add camera, or the pairing, failed; null when nothing did. */
+  readonly pairingError = this.pairingErrorSignal.asReadonly();
+  /** Add camera is publishing the pairing. */
+  readonly publishing = this.publishingSignal.asReadonly();
+  /** The remote cameras, in the order they paired. */
+  readonly cameras = this.camerasSignal.asReadonly();
+  /** Why Add camera cannot pair now; null when it can. */
+  readonly blocked = computed<PairingBlock | null>(() => {
+    if (this.auth.cloud() === null) {
+      return 'signed-out';
+    }
+    return this.session.session() === null ? 'no-session' : null;
+  });
+
+  private readonly peers = new Map<string, Peer>();
+  /** The session's signaling, made for the account and session of the pairing. */
+  private signaling: {
+    account: CloudAccount;
+    sessionId: string;
+    signaling: SessionSignaling;
+  } | null = null;
+  private unwatch: (() => void) | null = null;
+  private expiryTimer: unknown = null;
+  /** The operations under way, for the tests to wait on. */
+  private pending: Promise<unknown> = Promise.resolve();
+
+  constructor() {
+    // The session ended, or another began: the cameras of the old one go, and so does its pairing.
+    let sessionId = this.session.session()?.id ?? null;
+    effect(() => {
+      const next = this.session.session()?.id ?? null;
+      untracked(() => {
+        if (next !== sessionId) {
+          sessionId = next;
+          this.endAll('the session ended');
+        }
+      });
+    });
+    // The page goes: the phones are told, and the documents deleted, as far as there is time.
+    const onPageHide = (): void => {
+      this.endAll('the host page closed', 0);
+    };
+    this.globals.addEventListener?.('pagehide', onPageHide);
+    inject(DestroyRef).onDestroy(() => {
+      this.globals.removeEventListener?.('pagehide', onPageHide);
+      this.endAll('the host page closed', 0);
+    });
+  }
+
+  /**
+   * Publishes a new pairing for the session under way and shows its QR code: the first phone that
+   * presents the token within ten minutes is answered. Nothing without an account or a session
+   * (`blocked`); a pairing already open is replaced.
+   */
+  async addCamera(): Promise<void> {
+    const account = this.auth.cloud();
+    const session = this.session.session();
+    if (account === null || session === null) {
+      this.pairingErrorSignal.set(
+        account === null
+          ? 'Sign in first: the pairing goes through your account.'
+          : 'Connect the cube first: a camera joins the session under way.',
+      );
+      return;
+    }
+    this.publishingSignal.set(true);
+    this.pairingErrorSignal.set(null);
+    const task = (async (): Promise<void> => {
+      try {
+        await this.index.indexForPairing(session);
+        const signaling = this.signalingFor(account, session.id);
+        const token = generateToken();
+        const published = await signaling.publishPairing(token);
+        this.clearExpiry();
+        this.pairingSignal.set({
+          token,
+          tokenHash: published.tokenHash,
+          url: pairingUrl(this.document.baseURI, session.id, token),
+          expiresMs: published.expiresMs,
+        });
+        this.expiryTimer = this.timers.setTimeout(
+          () => {
+            void this.expirePairing();
+          },
+          Math.max(0, published.expiresMs - this.timers.now()),
+        );
+        this.watch(signaling);
+      } catch (error: unknown) {
+        this.pairingErrorSignal.set(`The pairing could not be published: ${errorMessage(error)}`);
+        this.diagnostics.record('rtc.failed', { step: 'pairing', reason: errorMessage(error) });
+      } finally {
+        this.publishingSignal.set(false);
+      }
+    })();
+    this.track(task);
+    await task;
+  }
+
+  /** Takes the QR code down: the token is not taken any more. */
+  async cancelPairing(): Promise<void> {
+    if (this.pairingSignal() === null) {
+      return;
+    }
+    this.clearExpiry();
+    this.pairingSignal.set(null);
+    const signaling = this.signaling?.signaling;
+    if (signaling !== undefined) {
+      const task = signaling.closePairing().catch(() => undefined);
+      this.track(task);
+      await task;
+    }
+  }
+
+  /**
+   * Removes a camera: the phone is told (`leave`), the connection closed and the peer document
+   * deleted; its entry stays in the session.
+   */
+  remove(id: string): void {
+    const peer = this.peers.get(id);
+    if (peer === undefined) {
+      return;
+    }
+    this.end(peer, 'removed by the host', 'The host removed this camera.', LEAVE_GRACE_MS);
+  }
+
+  /** Resolves once the operations under way (pairings, connections) have settled, for the tests. */
+  async whenIdle(): Promise<void> {
+    let last: Promise<unknown> | null = null;
+    while (last !== this.pending) {
+      last = this.pending;
+      await last;
+    }
+  }
+
+  // ---- The pairing ----
+
+  private signalingFor(account: CloudAccount, sessionId: string): SessionSignaling {
+    const known = this.signaling;
+    if (known !== null && known.account === account && known.sessionId === sessionId) {
+      return known.signaling;
+    }
+    this.unwatch?.();
+    this.unwatch = null;
+    const signaling = this.makeSignaling(account, sessionId);
+    this.signaling = { account, sessionId, signaling };
+    return signaling;
+  }
+
+  private watch(signaling: SessionSignaling): void {
+    if (this.unwatch !== null) {
+      return;
+    }
+    this.unwatch = signaling.watchOffers(
+      (offer) => {
+        this.track(this.onOffer(offer));
+      },
+      (error) => {
+        const reason = errorMessage(error);
+        console.warn(`cubetrace: remote cameras: the offers could not be watched: ${reason}`);
+        if (this.pairingSignal() !== null) {
+          this.pairingErrorSignal.set(`The pairing cannot hear the phone: ${reason}`);
+        }
+        this.diagnostics.record('rtc.failed', { step: 'watch', reason });
+      },
+    );
+  }
+
+  private async expirePairing(): Promise<void> {
+    this.expiryTimer = null;
+    if (this.pairingSignal() === null) {
+      return;
+    }
+    this.pairingSignal.set(null);
+    this.pairingErrorSignal.set('The code expired: Add camera shows a new one.');
+    await this.signaling?.signaling.closePairing().catch(() => undefined);
+  }
+
+  private clearExpiry(): void {
+    if (this.expiryTimer !== null) {
+      this.timers.clearTimeout(this.expiryTimer);
+      this.expiryTimer = null;
+    }
+  }
+
+  /**
+   * A phone offers: the one the pairing waits for (its token, before it expires) is answered and the
+   * pairing closed; a camera of the list calling again (its token, after its connection ended) is
+   * answered again; anything else is a stale or a wrong call, whose documents go.
+   */
+  private async onOffer(offer: IncomingOffer): Promise<void> {
+    const now = this.timers.now();
+    const back = [...this.peers.values()].find(
+      (peer) =>
+        peer.camera.tokenHash === offer.peer.tokenHash && peer.camera.state === 'reconnecting',
+    );
+    if (back !== undefined) {
+      await this.connectPeer(back, offer, true);
+      return;
+    }
+    const pairing = this.pairingSignal();
+    if (
+      pairing === null ||
+      offer.peer.tokenHash !== pairing.tokenHash ||
+      now >= pairing.expiresMs
+    ) {
+      console.warn(
+        `cubetrace: remote cameras: a call that presents no open token (peer ${offer.peerId}); its documents go.`,
+      );
+      await offer.signaling.close().catch(() => undefined);
+      return;
+    }
+    // The token is taken: no second phone pairs with it.
+    this.clearExpiry();
+    this.pairingSignal.set(null);
+    void this.signaling?.signaling.closePairing().catch(() => undefined);
+    const peer: Peer = {
+      camera: {
+        id: offer.peerId,
+        peerId: offer.peerId,
+        tokenHash: offer.peer.tokenHash,
+        device: { label: 'phone', platform: '' },
+        app: { version: '', commit: '' },
+        camera: null,
+        label: null,
+        state: 'connecting',
+        sinceMs: now,
+        pairedMs: now,
+        report: null,
+        reportMs: null,
+        thumbnail: null,
+        sync: null,
+      },
+      fit: new RemoteClockFit(),
+      transport: null,
+      link: null,
+      pinger: null,
+      offs: [],
+      generation: 0,
+      converged: false,
+      removalTimer: null,
+      recordTimer: null,
+    };
+    this.peers.set(peer.camera.id, peer);
+    this.camerasSignal.update((cameras) => [...cameras, peer.camera]);
+    await this.connectPeer(peer, offer, false);
+  }
+
+  // ---- The connection ----
+
+  /** Answers `offer` for `peer`: the channel, the hellos, the pings; a failure says why. */
+  private async connectPeer(peer: Peer, offer: IncomingOffer, again: boolean): Promise<void> {
+    const generation = ++peer.generation;
+    // A connection still up (the phone thought it dead first) makes way for the new one.
+    this.detach(peer, 'replaced by a new connection');
+    this.patch(peer, { peerId: offer.peerId });
+    const started = this.timers.now();
+    let transport: Transport;
+    try {
+      transport = await this.connect(offer.signaling);
+    } catch (error: unknown) {
+      this.failed(peer, 'connect', errorMessage(error));
+      if (!again) {
+        this.drop(peer);
+      }
+      return;
+    }
+    if (generation !== peer.generation || !this.peers.has(peer.camera.id)) {
+      transport.close('superseded');
+      return;
+    }
+    const link = new MessageLink(transport);
+    peer.transport = transport;
+    peer.link = link;
+    link.send(this.hello());
+    let hello: Hello;
+    try {
+      hello = await this.withTimeout(
+        link.next('hello'),
+        HELLO_TIMEOUT_MS,
+        'the phone sent no hello',
+      );
+    } catch (error: unknown) {
+      this.failed(peer, 'hello', errorMessage(error));
+      transport.close('no hello');
+      if (!again) {
+        this.drop(peer);
+      }
+      return;
+    }
+    if (generation !== peer.generation) {
+      return;
+    }
+    if (hello.v !== PROTOCOL_VERSION || hello.role !== 'camera') {
+      const reason =
+        hello.v !== PROTOCOL_VERSION
+          ? `the phone runs protocol version ${String(hello.v)}, this host ${String(PROTOCOL_VERSION)}: update the app on both`
+          : `the peer is a ${hello.role}, not a camera`;
+      link.trySend({ type: 'leave', reason });
+      this.failed(peer, 'version', reason);
+      this.closeAfter(transport, 'version', LEAVE_GRACE_MS);
+      this.drop(peer);
+      return;
+    }
+    const now = this.timers.now();
+    this.clearRemoval(peer);
+    this.patch(peer, {
+      device: hello.device,
+      app: hello.app,
+      camera: hello.camera,
+      state: 'connected',
+      sinceMs: now,
+      ...(again ? {} : { pairedMs: now }),
+    });
+    this.putEntry(peer);
+    peer.offs.push(
+      link.on('hello', (message) => {
+        if (message.v === PROTOCOL_VERSION) {
+          this.patch(peer, { device: message.device, app: message.app, camera: message.camera });
+          this.putEntry(peer);
+        }
+      }),
+      link.on('state', (message) => {
+        this.patch(peer, { report: message, reportMs: this.timers.now() });
+      }),
+      link.on('thumbnail', (message) => {
+        this.thumbnail(peer, message);
+      }),
+      link.on('leave', (message) => {
+        this.left(peer, message.reason);
+      }),
+      link.onError((error) => {
+        console.warn(`cubetrace: remote cameras: a frame was not a message: ${error.message}`);
+      }),
+      transport.onStateChange((state, reason) => {
+        if (state === 'closed' || state === 'failed') {
+          this.disconnected(peer, generation, reason ?? state);
+        }
+      }),
+    );
+    const pinger = new ClockPinger(link, peer.fit, { timers: this.timers });
+    peer.pinger = pinger;
+    peer.offs.push(
+      pinger.onSample((fit) => {
+        this.sampled(peer, fit);
+      }),
+    );
+    pinger.start();
+    const facts = {
+      peer: hello.device.label,
+      platform: hello.device.platform,
+      camera: peer.camera.label,
+      ms: Math.round(now - started),
+    };
+    if (!again) {
+      this.diagnostics.record('rtc.paired', {
+        ...facts,
+        facing: hello.camera?.facing ?? null,
+        deviceLabel: hello.camera?.deviceLabel ?? null,
+        version: hello.app.version,
+        commit: hello.app.commit,
+      });
+    }
+    this.diagnostics.record('rtc.connected', { ...facts, reconnection: again });
+  }
+
+  /** The host's `hello`: its device and build, and no camera (the host's own is not the phone's). */
+  private hello(): Hello {
+    return {
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      role: 'host',
+      device: thisDevice(this.settings, this.globals),
+      app: APP_BUILD,
+      camera: null,
+    };
+  }
+
+  /** The phone said `leave`: the camera goes at once; its documents too. */
+  private left(peer: Peer, reason: string): void {
+    this.diagnostics.record('rtc.disconnected', {
+      peer: peer.camera.device.label,
+      camera: peer.camera.label,
+      reason: `left: ${reason}`,
+      durationMs: Math.round(this.timers.now() - peer.camera.sinceMs),
+      connectedMs: Math.round(this.timers.now() - peer.camera.pairedMs),
+    });
+    peer.generation++;
+    this.detach(peer, 'the phone left');
+    this.drop(peer);
+  }
+
+  /** The connection ended without a `leave`: the camera waits for the phone to call again. */
+  private disconnected(peer: Peer, generation: number, reason: string): void {
+    if (generation !== peer.generation || !this.peers.has(peer.camera.id)) {
+      return;
+    }
+    const now = this.timers.now();
+    this.diagnostics.record('rtc.disconnected', {
+      peer: peer.camera.device.label,
+      camera: peer.camera.label,
+      reason,
+      durationMs: Math.round(now - peer.camera.sinceMs),
+      connectedMs: Math.round(now - peer.camera.pairedMs),
+    });
+    peer.generation++;
+    this.detach(peer, reason);
+    this.patch(peer, { state: 'reconnecting', sinceMs: now });
+    if (peer.removalTimer === null) {
+      peer.removalTimer = this.timers.setTimeout(() => {
+        peer.removalTimer = null;
+        this.diagnostics.record('rtc.disconnected', {
+          peer: peer.camera.device.label,
+          camera: peer.camera.label,
+          reason: 'gave up: the phone did not come back within five minutes',
+          durationMs: RECONNECT_WINDOW_MS,
+          connectedMs: Math.round(this.timers.now() - peer.camera.pairedMs),
+        });
+        this.drop(peer);
+      }, RECONNECT_WINDOW_MS);
+    }
+  }
+
+  /**
+   * Ends the peer on the host's initiative: `leave`, the connection closed once the word is out
+   * (`graceMs`; none when the page goes), the camera gone from the list.
+   */
+  private end(peer: Peer, why: string, message: string, graceMs: number): void {
+    const now = this.timers.now();
+    peer.link?.trySend({ type: 'leave', reason: message });
+    this.diagnostics.record('rtc.disconnected', {
+      peer: peer.camera.device.label,
+      camera: peer.camera.label,
+      reason: why,
+      durationMs: Math.round(now - peer.camera.sinceMs),
+      connectedMs: Math.round(now - peer.camera.pairedMs),
+    });
+    peer.generation++;
+    const transport = peer.transport;
+    peer.transport = null;
+    this.detach(peer, why);
+    if (transport !== null) {
+      this.closeAfter(transport, why, graceMs);
+    }
+    this.drop(peer);
+  }
+
+  /** Closes `transport` after `graceMs`, so that a `leave` just sent goes out first. */
+  private closeAfter(transport: Transport, reason: string, graceMs: number): void {
+    if (graceMs <= 0) {
+      transport.close(reason);
+      return;
+    }
+    this.timers.setTimeout(() => {
+      transport.close(reason);
+    }, graceMs);
+  }
+
+  /** Stops the connection's handlers and pinger and closes its transport (which deletes the peer document). */
+  private detach(peer: Peer, reason: string): void {
+    for (const off of peer.offs) {
+      off();
+    }
+    peer.offs = [];
+    peer.pinger?.stop();
+    peer.pinger = null;
+    peer.link?.detach();
+    peer.link = null;
+    peer.transport?.close(reason);
+    peer.transport = null;
+    this.clearRecord(peer);
+  }
+
+  /** Takes the camera off the list; its session entry stays. */
+  private drop(peer: Peer): void {
+    this.clearRemoval(peer);
+    this.clearRecord(peer);
+    const url = peer.camera.thumbnail?.url;
+    if (url !== null && url !== undefined) {
+      this.globals.URL?.revokeObjectURL(url);
+    }
+    this.peers.delete(peer.camera.id);
+    this.camerasSignal.update((cameras) =>
+      cameras.filter((camera) => camera.id !== peer.camera.id),
+    );
+  }
+
+  private endAll(reason: string, graceMs = LEAVE_GRACE_MS): void {
+    for (const peer of [...this.peers.values()]) {
+      this.end(peer, reason, `The host let the camera go: ${reason}.`, graceMs);
+    }
+    this.clearExpiry();
+    if (this.pairingSignal() !== null) {
+      this.pairingSignal.set(null);
+      void this.signaling?.signaling.closePairing().catch(() => undefined);
+    }
+    this.unwatch?.();
+    this.unwatch = null;
+    this.signaling = null;
+  }
+
+  private failed(peer: Peer, step: string, reason: string): void {
+    console.warn(
+      `cubetrace: remote cameras: ${step} failed for ${peer.camera.device.label}: ${reason}`,
+    );
+    this.diagnostics.record('rtc.failed', { step, reason, peer: peer.camera.device.label });
+  }
+
+  // ---- The clock sync ----
+
+  /** An answer came: the sync shown and sent back; the record at convergence and once a minute. */
+  private sampled(peer: Peer, fit: RemoteClockFit): void {
+    const params = fit.params;
+    const converged = fit.converged;
+    this.patch(peer, {
+      sync: {
+        converged,
+        offsetMs: params.offsetMs,
+        rttMs: params.rttMs,
+        driftPpm: params.driftPpm,
+        samples: params.samples,
+        residualP95Ms: params.residualP95Ms,
+      },
+    });
+    peer.link?.trySend({
+      type: 'clock',
+      converged,
+      offsetMs: params.offsetMs,
+      rttMs: params.rttMs,
+    });
+    if (converged && !peer.converged) {
+      peer.converged = true;
+      this.recordClock(peer, params, 'converged');
+      this.putClock(peer, params);
+      this.scheduleRecord(peer);
+    } else if (!converged && peer.converged) {
+      peer.converged = false;
+      this.recordClock(peer, params, 'withdrawn');
+      this.clearRecord(peer);
+    }
+  }
+
+  private scheduleRecord(peer: Peer): void {
+    this.clearRecord(peer);
+    peer.recordTimer = this.timers.setTimeout(() => {
+      peer.recordTimer = null;
+      if (peer.converged && peer.camera.state === 'connected') {
+        const params = peer.fit.params;
+        this.recordClock(peer, params, 'minute');
+        this.putClock(peer, params);
+        this.scheduleRecord(peer);
+      }
+    }, CLOCK_RECORD_MS);
+  }
+
+  private clearRecord(peer: Peer): void {
+    if (peer.recordTimer !== null) {
+      this.timers.clearTimeout(peer.recordTimer);
+      peer.recordTimer = null;
+    }
+  }
+
+  private clearRemoval(peer: Peer): void {
+    if (peer.removalTimer !== null) {
+      this.timers.clearTimeout(peer.removalTimer);
+      peer.removalTimer = null;
+    }
+  }
+
+  private recordClock(peer: Peer, params: RemoteClockParams, why: string): void {
+    this.diagnostics.record('rtc.clock', {
+      peer: peer.camera.device.label,
+      camera: peer.camera.label,
+      why,
+      converged: peer.converged,
+      offsetMs: params.offsetMs,
+      rttMs: params.rttMs,
+      driftPpm: params.driftPpm,
+      samples: params.samples,
+      residualP95Ms: params.residualP95Ms,
+    });
+  }
+
+  /**
+   * The fit's record into the session's `clock.cameras[label].remote`, beside a clapperboard
+   * result there may be (none yet in T4.1: the lag stays 0 until T4.3 measures it).
+   */
+  private putClock(peer: Peer, params: RemoteClockParams): void {
+    const label = peer.camera.label;
+    const session = this.session.session();
+    if (label === null || session === null) {
+      return;
+    }
+    const existing = session.clock.cameras[label] as CameraClock | undefined;
+    const clock: CameraClock = {
+      offsetMs: existing?.offsetMs ?? 0,
+      rttMs: params.rttMs,
+      driftPpm: params.driftPpm,
+      clapperboardResidualMs: existing?.clapperboardResidualMs ?? 0,
+      clapperboardSamples: existing?.clapperboardSamples ?? 0,
+      ...(existing?.samples === undefined ? {} : { samples: existing.samples }),
+      remote: params,
+    };
+    this.session.putCameraClock(label, clock);
+  }
+
+  // ---- The session's entry, the state and the thumbnails ----
+
+  /**
+   * The phone's camera into the session's `cameras[]`, remote, under the label the session gives it
+   * (one per device: the phone's host label tells two phones apart).
+   */
+  private putEntry(peer: Peer): void {
+    const camera = peer.camera.camera;
+    const session = this.session.session();
+    if (camera === null || session === null) {
+      return;
+    }
+    const entry: CameraInfo = {
+      ...camera,
+      local: false,
+      remote: { label: peer.camera.device.label, platform: peer.camera.device.platform },
+    };
+    const saved = this.session.putCamera(
+      entry,
+      session.audio,
+      `remote:${peer.camera.device.label}`,
+    );
+    this.patch(peer, { label: saved?.label ?? null });
+  }
+
+  private thumbnail(peer: Peer, message: Thumbnail): void {
+    const previous = peer.camera.thumbnail?.url;
+    if (previous !== null && previous !== undefined) {
+      this.globals.URL?.revokeObjectURL(previous);
+    }
+    const url =
+      this.globals.URL?.createObjectURL(new Blob([message.jpeg.slice()], { type: 'image/jpeg' })) ??
+      null;
+    this.patch(peer, {
+      thumbnail: {
+        url,
+        width: message.width,
+        height: message.height,
+        bytes: message.jpeg.length,
+        remoteMs: message.remoteMs,
+        receivedMs: this.timers.now(),
+      },
+    });
+  }
+
+  private patch(peer: Peer, changes: Partial<RemoteCamera>): void {
+    peer.camera = { ...peer.camera, ...changes };
+    const camera = peer.camera;
+    this.camerasSignal.update((cameras) =>
+      cameras.map((known) => (known.id === camera.id ? camera : known)),
+    );
+  }
+
+  private track(task: Promise<unknown>): void {
+    this.pending = Promise.allSettled([this.pending, task]);
+  }
+
+  private withTimeout<T>(task: Promise<T>, ms: number, why: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = this.timers.setTimeout(() => {
+        reject(new Error(why));
+      }, ms);
+      task.then(
+        (value) => {
+          this.timers.clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          this.timers.clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
+  }
+}

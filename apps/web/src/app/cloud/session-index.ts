@@ -86,7 +86,8 @@ export type TrackedStore = SessionStore & Partial<ProblemReporter>;
  * across reloads. An attempt's document is created with its `upload`, all pending; its later writes
  * (a clip attached, the catch-up) leave `upload` out, since from then on the upload's functions
  * (T3.2) keep it and the rules refuse the app's changes to it. Demo sessions (a simulated cube)
- * never go. A session saved while no account is signed in, created then or changed, is written
+ * never go, but for the document of one that pairs a remote camera (`indexForPairing`, T4.1), which
+ * the pairing lives in; its attempts still never go. A session saved while no account is signed in, created then or changed, is written
  * whole by the catch-up that runs when an account signs in, or starts signed in: the sessions of
  * this device that are not in its index (`SESSION_INDEX_KEY` says which are), the oldest first, a
  * session and its attempts in one batch, at most {@link CATCH_UP_DOCUMENTS} documents at a time. A
@@ -149,6 +150,11 @@ export class SessionIndexService {
   private readonly created = new Set<string>();
   /** The account whose catch-up this page load has run: once per account and page load. */
   private caughtUp: string | null = null;
+  /**
+   * The demo sessions whose document went to the index for the pairing of a remote camera (T4.1):
+   * their later saves follow, their attempts never.
+   */
+  private readonly paired = new Set<string>();
   private note: NoteWriter = () => Promise.resolve();
 
   constructor() {
@@ -208,6 +214,35 @@ export class SessionIndexService {
   /** Resolves once the index's operations queued so far are done (their writes sent, not confirmed). */
   whenIdle(): Promise<void> {
     return this.queue;
+  }
+
+  /**
+   * Makes sure `session`'s document is in the account's index, so that the pairing of a remote camera
+   * (T4.1, `docs/RTC.md` §5) has a document to live in: a session not indexed yet (created signed
+   * out) is written now, and a demo session too, this once and at its later saves, its attempts never
+   * (nothing of a demo is uploaded). Resolves once the write is sent, after the operations queued
+   * before it (the pairing's write then follows it to the server); rejects without an account.
+   */
+  indexForPairing(session: SessionRecord): Promise<void> {
+    const account = this.auth.cloud();
+    if (account === null) {
+      return Promise.reject(new Error('No account is signed in.'));
+    }
+    this.sessions.set(session.id, session);
+    if (isSimulated(session)) {
+      this.paired.add(session.id);
+    }
+    return new Promise((resolve) => {
+      this.enqueue(() => {
+        if (this.auth.cloud()?.uid === account.uid && !this.isIndexed(account.uid, session.id)) {
+          this.send(account, session.id, 'the session could not be indexed', (backend) =>
+            backend.saveSessionIndex(cloudSession(session, account.uid)),
+          );
+          this.markWritten(session.id);
+        }
+        resolve();
+      });
+    });
   }
 
   /**
@@ -273,7 +308,7 @@ export class SessionIndexService {
 
   private sessionSaved(session: SessionRecord, created: boolean): void {
     this.sessions.set(session.id, session);
-    if (isSimulated(session)) {
+    if (isSimulated(session) && !this.paired.has(session.id)) {
       return;
     }
     this.enqueue(() => {

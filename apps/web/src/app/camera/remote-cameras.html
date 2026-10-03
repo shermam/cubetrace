@@ -1,0 +1,95 @@
+<section class="cameras" aria-labelledby="remote-cameras-heading" data-testid="remote-cameras">
+  <h3 id="remote-cameras-heading">Cameras</h3>
+  <p class="hint">
+    Phones that film this session from other angles, each recording its own camera. On the phone,
+    open cubetrace signed in to the same account and scan the code, or type it in its Camera page.
+  </p>
+  <div class="bar">
+    <button
+      type="button"
+      class="primary"
+      data-testid="add-camera"
+      [disabled]="service.publishing() || service.blocked() !== null"
+      (click)="add()"
+    >
+      {{ service.publishing() ? 'Publishing…' : 'Add camera' }}
+    </button>
+    @if (blockText(); as text) {
+      <span class="muted" data-testid="add-camera-blocked">{{ text }}</span>
+    }
+  </div>
+  @if (service.pairingError(); as error) {
+    <p class="error" role="alert" data-testid="pairing-error">{{ error }}</p>
+  }
+  @if (service.pairing(); as pairing) {
+    <div class="pairing" data-testid="pairing" [attr.data-token]="pairing.token">
+      <svg
+        class="qr"
+        role="img"
+        data-testid="pairing-qr"
+        [attr.viewBox]="qrViewBox()"
+        [attr.aria-label]="'QR code of ' + pairing.url"
+        shape-rendering="crispEdges"
+      >
+        <rect width="100%" height="100%" fill="#fff" />
+        <path [attr.d]="qrPath()" fill="#000" />
+      </svg>
+      <div class="words">
+        <p>
+          Scan it with the phone, or open
+          <a [href]="pairing.url" data-testid="pairing-url">{{ pairing.url }}</a>
+          there, or type the code
+          <strong class="token" data-testid="pairing-token">{{ token() }}</strong>
+          in the phone's Camera page.
+        </p>
+        <p class="muted" data-testid="pairing-expires">
+          Good for {{ expiresIn() }}, for one phone; then Add camera again.
+        </p>
+        <button type="button" class="link" data-testid="cancel-pairing" (click)="cancel()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  }
+  @if (service.cameras().length > 0) {
+    <ul class="list" data-testid="remote-camera-list">
+      @for (camera of service.cameras(); track camera.id) {
+        <li
+          class="camera"
+          data-testid="remote-camera"
+          [attr.data-state]="camera.state"
+          [attr.data-label]="camera.label"
+          [attr.data-converged]="camera.sync?.converged ?? false"
+        >
+          <div class="picture">
+            @if (camera.thumbnail?.url; as url) {
+              <img
+                [src]="url"
+                [alt]="'The latest picture of ' + camera.device.label"
+                data-testid="remote-camera-thumbnail"
+              />
+            } @else {
+              <span class="muted" data-testid="remote-camera-no-picture">no picture yet</span>
+            }
+          </div>
+          <div class="facts">
+            <p class="name">
+              <strong data-testid="remote-camera-name">{{ camera.device.label }}</strong>
+              <span class="muted" data-testid="remote-camera-label">{{
+                camera.label ?? 'no camera yet'
+              }}</span>
+            </p>
+            <p class="state" data-testid="remote-camera-state">{{ stateText(camera) }}</p>
+            <p class="sync" data-testid="remote-camera-sync">{{ syncText(camera) }}</p>
+            <p class="report muted" data-testid="remote-camera-report">{{ reportText(camera) }}</p>
+          </div>
+          <button type="button" data-testid="remove-camera" (click)="remove(camera.id)">
+            Remove
+          </button>
+        </li>
+      }
+    </ul>
+  } @else if (!service.pairing()) {
+    <p class="muted" data-testid="remote-cameras-none">No phone is paired.</p>
+  }
+</section>

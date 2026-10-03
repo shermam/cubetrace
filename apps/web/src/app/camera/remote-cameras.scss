@@ -1,0 +1,144 @@
+:host {
+  display: block;
+}
+
+.cameras {
+  display: grid;
+  gap: var(--space-2);
+}
+
+h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+p {
+  margin: 0;
+}
+
+.hint,
+.muted {
+  color: var(--text-muted);
+}
+
+.hint {
+  font-size: 0.75rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  font-size: 0.875rem;
+}
+
+.pairing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+// The code on a white tile, as a reader wants it; the quiet zone is in the drawing.
+.qr {
+  flex: none;
+  width: 12rem;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+}
+
+.words {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: var(--space-2);
+  font-size: 0.875rem;
+}
+
+.token {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  letter-spacing: 0.1em;
+}
+
+.link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.camera {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+
+  &[data-state='reconnecting'] {
+    border-color: var(--warn);
+  }
+}
+
+.picture {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 10rem;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: #000;
+  font-size: 0.75rem;
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+.facts {
+  display: grid;
+  flex: 1 1 12rem;
+  gap: var(--space-1);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.camera[data-state='reconnecting'] .state {
+  color: var(--warn);
+}
+
+.camera[data-converged='true'] .sync {
+  color: var(--ok);
+}

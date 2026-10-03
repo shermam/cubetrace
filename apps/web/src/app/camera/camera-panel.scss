@@ -111,3 +111,14 @@ dd {
     max-width: 100%;
   }
 }
+
+// The Cameras section's placeholder, before it loads (the section's own styles take over then).
+.remote {
+  display: grid;
+  gap: var(--space-2);
+
+  h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+}

@@ -179,5 +179,35 @@
     </p>
 
     <app-recording-panel />
+
+    <!-- The phones that film for this host (T4.1): loaded when Add camera is first pressed, so that
+         a session without remote cameras downloads nothing of the connection's code. -->
+    <section class="remote" data-testid="remote-cameras-section">
+      @defer (on interaction(addCamera)) {
+        <app-remote-cameras [addRequests]="addRequests()" />
+      } @placeholder {
+        <h3>Cameras</h3>
+        <p class="hint">
+          Phones that film this session from other angles, each recording its own camera. On the
+          phone, open cubetrace signed in to the same account and scan the code, or type it in its
+          Camera page.
+        </p>
+        <div class="bar">
+          <button
+            #addCamera
+            type="button"
+            class="primary"
+            data-testid="add-camera"
+            [disabled]="addBlocked() !== null"
+            (click)="addRequests.set(addRequests() + 1)"
+          >
+            Add camera
+          </button>
+          @if (addBlocked(); as text) {
+            <span class="muted" data-testid="add-camera-blocked">{{ text }}</span>
+          }
+        </div>
+      }
+    </section>
   </div>
 </details>
