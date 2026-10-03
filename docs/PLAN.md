@@ -731,7 +731,11 @@ its event (the Diagnostics switch itself settles before the page goes since #59)
 before `AuthService` attaches the account goes to the ring, which a toggle off then clears. (j) The remote camera's picture on the host (T4.1) is the thumbnail at the bottom of the Camera
 panel, too far from the host's preview to keep the cube in the phone's frame while solving (issue #60):
 T4.3's live preview belongs next to the host's preview on the Timer page, the thumbnail staying in the
-Cameras list as the pairing's state.
+Cameras list as the pairing's state. (k) The remote clock fit never converged in the first real
+pairing (two connections of 12 and 4 minutes on the home Wi-Fi, no `rtc.clock` event; issue #61):
+`REMOTE_CLOCK_CONVERGED` was tuned on loopback and simulations; T4.2 was told not to gate the cuts on
+`converged` (the current estimate, a padded window, the numbers in the record); T4.3 measures the real
+round trips and tunes the criterion.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
