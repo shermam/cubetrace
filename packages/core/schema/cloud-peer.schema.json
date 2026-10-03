@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/cloud-peer.schema.json",
+  "title": "sessions/{id}/peers/{peerId}",
+  "description": "The signaling document of a remote camera in Firestore, schema version 1 (docs/DATA-MODEL.md §10, docs/RTC.md, docs/PLAN.md T4.0): the WebRTC offer of a phone that joins a session as a camera (the caller) and the host's answer (the callee), with the candidates of each side in the subcollections callerCandidates and calleeCandidates (cloud-candidate.schema.json). The session's owner alone reads and writes it; it is never in the dataset.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "owner", "role", "createdMs", "tokenHash", "offer", "answer", "state"],
+  "properties": {
+    "schema": { "const": 1 },
+    "owner": {
+      "description": "The Firebase Authentication uid of the account that owns the session, which both devices are signed in to.",
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "description": "What the peer is to the session; phase 4 has cameras only.",
+      "const": "camera"
+    },
+    "createdMs": {
+      "description": "When the phone wrote the document, in ms, on its clock.",
+      "type": "number"
+    },
+    "tokenHash": {
+      "description": "SHA-256 of the pairing token the phone presents, as 64 lowercase hex digits: the session document's pairing.tokenHash when the token is the one the host shows.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "offer": { "$ref": "#/$defs/offer" },
+    "answer": { "$ref": "#/$defs/answer" },
+    "state": {
+      "description": "offered: the phone wrote its offer and waits; answered: the host answered; closed: the phone left.",
+      "enum": ["offered", "answered", "closed"]
+    }
+  },
+  "$defs": {
+    "offer": {
+      "description": "The phone's offer, as RTCSessionDescriptionInit has it: its type and its SDP, of at most 20,000 characters; null before an ICE restart's new offer is written.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["type", "sdp"],
+      "properties": {
+        "type": { "const": "offer" },
+        "sdp": { "type": "string", "maxLength": 20000 }
+      }
+    },
+    "answer": {
+      "description": "The host's answer, as RTCSessionDescriptionInit has it: its type and its SDP, of at most 20,000 characters; null until the host answers.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["type", "sdp"],
+      "properties": {
+        "type": { "const": "answer" },
+        "sdp": { "type": "string", "maxLength": 20000 }
+      }
+    }
+  }
+}

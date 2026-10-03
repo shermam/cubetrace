@@ -72,6 +72,7 @@ export type {
   HostInfo,
   MicrophoneInfo,
   MicrophoneProcessing,
+  RemoteDevice,
   SessionRecord,
   SessionSettings,
   SessionSummary,
@@ -79,6 +80,15 @@ export type {
 export { createSession, labelFor, sameCamera, summarize, withBattery } from './session';
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './clock';
+// T4.0 — the clock sync of a remote camera: the offset and the drift of the phone's clock from pings
+export type { RemoteClockParams, RemoteClockSample } from './remote-clock';
+export {
+  REMOTE_CLOCK_CONVERGED,
+  REMOTE_CLOCK_DRIFT_SPAN_MS,
+  REMOTE_CLOCK_RTT_FACTOR,
+  REMOTE_CLOCK_WINDOW,
+  RemoteClockFit,
+} from './remote-clock';
 export type { PhaseAverage } from './stats';
 export { DNF, aoN, attemptTimes, best, mean, phaseAverages } from './stats';
 export type { SessionStore } from './store';
@@ -88,8 +98,10 @@ export {
   ATTEMPT_SCHEMA,
   ATTEMPT_SCHEMA_V1,
   CLOUD_ATTEMPT_SCHEMA,
+  CLOUD_CANDIDATE_SCHEMA,
   CLOUD_CUBE_SCHEMA,
   CLOUD_EVENT_SCHEMA,
+  CLOUD_PEER_SCHEMA,
   CLOUD_SESSION_SCHEMA,
   FRAMES_SCHEMA,
   GYRO_SCHEMA,
@@ -102,9 +114,12 @@ export type { RecordFile } from './records';
 export {
   RecordError,
   parseAttempt,
+  parseCameraInfo,
   parseCloudAttempt,
+  parseCloudCandidate,
   parseCloudCube,
   parseCloudEvent,
+  parseCloudPeer,
   parseCloudSession,
   parseGyro,
   parseSession,
@@ -210,3 +225,22 @@ export {
   sanitizeEventData,
   scrubEventText,
 } from './cloud-event';
+// T4.0 — the signaling documents of the remote cameras in Firestore, and the session's pairing
+export type {
+  CandidateSide,
+  CloudCandidate,
+  CloudPeer,
+  CloudPeerInput,
+  PeerState,
+  SessionDescription,
+  SessionPairing,
+} from './cloud-peer';
+export {
+  CANDIDATE_COLLECTIONS,
+  CANDIDATE_MAX_LENGTH,
+  PEER_STATES,
+  SDP_MAX_LENGTH,
+  TOKEN_HASH,
+  cloudCandidate,
+  cloudPeer,
+} from './cloud-peer';

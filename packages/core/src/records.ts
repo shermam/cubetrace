@@ -5,8 +5,9 @@
 // so that the app reads its files without one in its bundle; records.test.ts holds them to the
 // schemas with ajv, field by field. Since T3.1 they also read the documents of the session index in
 // Firestore (docs/DATA-MODEL.md §10), which are of version 2 only (cloud.test.ts holds them to theirs),
-// and since T3.4 the account's cubes there, of version 1 (cloud-cube.test.ts), and since T3.9 the
-// diagnostics events, of version 1 (cloud-event.test.ts).
+// and since T3.4 the account's cubes there, of version 1 (cloud-cube.test.ts), since T3.9 the
+// diagnostics events, of version 1 (cloud-event.test.ts), and since T4.0 the signaling documents of
+// the remote cameras (cloud-peer.test.ts).
 import type {
   AttemptEvents,
   AttemptMove,
@@ -30,6 +31,8 @@ import type { CloudCube } from './cloud-cube';
 import { CUBE_NAME, MAC_ADDRESS } from './cloud-cube';
 import type { CloudEvent, EventData, EventDevice, EventValue } from './cloud-event';
 import { EVENT_DATA_MAX_KEYS, EVENT_TEXT_MAX_LENGTH, isEventKind } from './cloud-event';
+import type { CloudCandidate, CloudPeer, SessionDescription, SessionPairing } from './cloud-peer';
+import { CANDIDATE_MAX_LENGTH, PEER_STATES, SDP_MAX_LENGTH, TOKEN_HASH } from './cloud-peer';
 import type { GyroJson, GyroSummary } from './gyro';
 import { GYRO_FILE } from './gyro';
 import type { Face } from './notation';
@@ -37,6 +40,7 @@ import type { PhaseName } from './phases';
 import { PHASE_NAMES } from './phases';
 import type { EdgePos } from './pieces';
 import { EDGE_FACELETS } from './pieces';
+import type { RemoteClockParams } from './remote-clock';
 import type {
   AppBuild,
   BatteryReading,
@@ -46,6 +50,7 @@ import type {
   CubeInfo,
   HostInfo,
   MicrophoneInfo,
+  RemoteDevice,
   SessionRecord,
   SessionSettings,
   SessionSummary,
@@ -63,6 +68,8 @@ export type RecordFile =
   | 'gyro.json'
   | 'sessions/{id}'
   | 'sessions/{id}/attempts/{index}'
+  | 'sessions/{id}/peers/{peerId}'
+  | 'sessions/{id}/peers/{peerId}/candidates/{id}'
   | 'users/{uid}/cubes/{name}'
   | 'users/{uid}/events/{eventId}';
 
@@ -118,6 +125,23 @@ export function parseSession(json: unknown): SessionRecord {
 }
 
 /**
+ * A camera of a session as an entry of `cameras` in session.json has it (docs/DATA-MODEL.md §6), from
+ * JSON another device sent (the `hello` of a remote camera, docs/RTC.md): the same checks as
+ * {@link parseSession} makes of an entry, as a new object. Throws a {@link RecordError} (naming
+ * session.json, the record the entry belongs to) on anything else.
+ */
+export function parseCameraInfo(json: unknown): CameraInfo {
+  try {
+    return camera.read(json, 'camera');
+  } catch (error: unknown) {
+    if (error instanceof Invalid) {
+      throw new RecordError('session.json', 2, error.field, error.problem);
+    }
+    throw error;
+  }
+}
+
+/**
  * A session's document in the session index (`sessions/{id}`, docs/DATA-MODEL.md §10): session.json of
  * schema version 2 with its `owner`. Throws a {@link RecordError} naming the field on anything else,
  * such as a document of another version, written by another version of the app.
@@ -153,6 +177,44 @@ export function parseCloudCube(json: unknown): CloudCube {
  */
 export function parseCloudEvent(json: unknown): CloudEvent {
   return parseDocument('users/{uid}/events/{eventId}', json, CLOUD_EVENT, 1);
+}
+
+/**
+ * The signaling document of a remote camera (`sessions/{id}/peers/{peerId}`, docs/DATA-MODEL.md §10,
+ * T4.0): schema version 1, the owner, the phone's offer, the host's answer and the state. Throws a
+ * {@link RecordError} naming the field on anything else, such as a document of another version.
+ */
+export function parseCloudPeer(json: unknown): CloudPeer {
+  return parseDocument('sessions/{id}/peers/{peerId}', json, CLOUD_PEER, 1);
+}
+
+/**
+ * One ICE candidate of a remote camera's signaling (`sessions/{id}/peers/{peerId}/callerCandidates/{id}`
+ * or `calleeCandidates/{id}`, docs/DATA-MODEL.md §10, T4.0), which has no schema field. Throws a
+ * {@link RecordError} naming the field on anything else.
+ */
+export function parseCloudCandidate(json: unknown): CloudCandidate {
+  if (!isObject(json)) {
+    throw new RecordError(
+      'sessions/{id}/peers/{peerId}/candidates/{id}',
+      null,
+      '',
+      `must be an object, got ${show(json)}`,
+    );
+  }
+  try {
+    return CLOUD_CANDIDATE.read(json, '');
+  } catch (error: unknown) {
+    if (error instanceof Invalid) {
+      throw new RecordError(
+        'sessions/{id}/peers/{peerId}/candidates/{id}',
+        null,
+        error.field,
+        error.problem,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -756,9 +818,12 @@ const microphone = nullable(
   }),
 );
 
-const camera = object<CameraInfo>({
+/** The device a remote camera runs on (T4.0). */
+const remoteDevice = object<RemoteDevice>({ label: text(), platform: text() });
+
+const cameraFields = object<CameraInfo>({
   label,
-  local: oneOf(true),
+  local: bool,
   facing: oneOf('user', 'environment', 'unknown'),
   deviceLabel: text(),
   settings: snapshot,
@@ -769,6 +834,36 @@ const camera = object<CameraInfo>({
   // Since T2.12; the cameras written before it have none: their microphone, if any, had the
   // browser's defaults, and what it applied was not kept.
   microphone: defaulted(microphone, null),
+  // Since T4.0: a remote camera's device; the host's own cameras, and every camera written before
+  // phase 4, have none.
+  remote: optional(remoteDevice),
+});
+
+/** A camera, whose `remote` is there exactly when it is not the host's own (`local` false). */
+const camera: Reader<CameraInfo> = {
+  what: 'an object',
+  read: (value, at) => {
+    const c = cameraFields.read(value, at);
+    if (c.local === (c.remote !== undefined)) {
+      fail(
+        join(at, 'remote'),
+        c.remote === undefined
+          ? 'is missing: a remote camera names its device'
+          : "must not be there: the host's own camera has no remote device",
+      );
+    }
+    return c;
+  },
+};
+
+/** The clock sync of a remote camera (T4.0), as `RemoteClockFit.params` gives it. */
+const remoteClock = object<RemoteClockParams>({
+  offsetMs: num(),
+  driftPpm: num(),
+  rttMs: num({ min: 0 }),
+  samples: int(0),
+  residualP95Ms: num({ min: 0 }),
+  since: num(),
 });
 
 const cameraClock = object<CameraClock>({
@@ -778,6 +873,8 @@ const cameraClock = object<CameraClock>({
   clapperboardResidualMs: num({ min: 0 }),
   clapperboardSamples: int(0),
   samples: optional(list(object<ClapperboardSample>({ moveHostMs: num(), onsetHostMs: num() }))),
+  // Since T4.0: the data channel's clock sync of a remote camera; a local camera has none.
+  remote: optional(remoteClock),
 });
 
 const cubeFields = { model: text(), hardware: text(), firmware: text(), gyro: bool };
@@ -829,6 +926,12 @@ const SESSION_V2 = object<SessionRecord>({
 /** A Firebase Authentication uid. */
 const owner = nonEmpty;
 
+/** The hash of a pairing token (T4.0): SHA-256 as 64 lowercase hex digits. */
+const tokenHash = text('a SHA-256 digest as 64 lowercase hex digits', TOKEN_HASH);
+
+/** The pairing the host publishes in the session's document (T4.0). */
+const pairing = object<SessionPairing>({ tokenHash, expiresMs: num() });
+
 const CLOUD_SESSION = object<CloudSession>({
   schema: oneOf(2),
   ...sessionStart,
@@ -837,7 +940,47 @@ const CLOUD_SESSION = object<CloudSession>({
   clock: object<SessionRecord['clock']>({ cube: clockFit(0), cameras: byLabel(cameraClock) }),
   ...sessionEnd,
   battery,
+  // Since T4.0; the document's alone: absent before a pairing, null once the host closed it.
+  pairing: optional(nullable(pairing)),
   owner,
+});
+
+// ---- The signaling documents of the remote cameras (docs/DATA-MODEL.md §10, T4.0) ----
+
+/** An SDP of at most {@link SDP_MAX_LENGTH} characters. */
+const sdp = leaf(
+  `a string of at most ${String(SDP_MAX_LENGTH)} characters`,
+  (value): value is string => typeof value === 'string' && value.length <= SDP_MAX_LENGTH,
+);
+
+function description(type: SessionDescription['type']): Reader<SessionDescription> {
+  return object<SessionDescription>({ type: oneOf(type), sdp });
+}
+
+const CLOUD_PEER = object<CloudPeer>({
+  schema: oneOf(1),
+  owner,
+  role: oneOf('camera'),
+  createdMs: num(),
+  tokenHash,
+  offer: nullable(description('offer')),
+  answer: nullable(description('answer')),
+  state: oneOf(...PEER_STATES),
+});
+
+const CLOUD_CANDIDATE = object<CloudCandidate>({
+  candidate: leaf(
+    `a string of at most ${String(CANDIDATE_MAX_LENGTH)} characters`,
+    (value): value is string => typeof value === 'string' && value.length <= CANDIDATE_MAX_LENGTH,
+  ),
+  sdpMid: nullable(
+    leaf(
+      'a string of at most 100 characters',
+      (value): value is string => typeof value === 'string' && value.length <= 100,
+    ),
+  ),
+  sdpMLineIndex: nullable(int(0)),
+  createdMs: num(),
 });
 
 /**

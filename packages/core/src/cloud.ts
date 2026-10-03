@@ -6,6 +6,7 @@
 // records. A document has the schema version of the record it copies (2), and is JSON, as Firestore
 // stores it: the builders here make JSON copies of the records.
 import type { AttemptRecord } from './attempt';
+import type { SessionPairing } from './cloud-peer';
 import type { SessionRecord } from './session';
 
 /**
@@ -52,10 +53,19 @@ export interface CloudDevice {
   cameras: string[];
 }
 
-/** `sessions/{id}`: a session's session.json with its owner (schema version 2, the record's). */
+/**
+ * `sessions/{id}`: a session's session.json with its owner (schema version 2, the record's) and, since
+ * T4.0, the pairing of its remote cameras, which is the document's alone.
+ */
 export interface CloudSession extends SessionRecord {
   /** The Firebase Authentication uid of the account that wrote it, which the rules require. */
   owner: string;
+  /**
+   * The pairing token the host shows for a phone to join as a remote camera, hashed, and until when
+   * (docs/RTC.md); null once the host closed the pairing; absent before one. The host writes it apart
+   * from the record's saves (`AccountBackend.writePairing`), and it never reaches session.json.
+   */
+  pairing?: SessionPairing | null;
 }
 
 /**
@@ -157,10 +167,11 @@ export function cloudAttemptFields(input: {
   };
 }
 
-/** The session.json that a session's document copies: the document without its owner. */
+/** The session.json that a session's document copies: the document without its owner and its pairing. */
 export function sessionOfDocument(document: CloudSession): SessionRecord {
   const copy: Partial<CloudSession> = jsonCopy(document);
   delete copy.owner;
+  delete copy.pairing;
   return copy as SessionRecord;
 }
 

@@ -10,6 +10,8 @@ import type {
   GyroJson,
   GyroSummary,
   MicrophoneInfo,
+  RemoteClockParams,
+  RemoteDevice,
   SessionRecord,
   VideoClip,
   VideoSegment,
@@ -164,9 +166,23 @@ export const CAMERA_CLOCK: CameraClock = {
   ],
 };
 
+/** The phone a remote camera runs on (T4.0), as its own records name it. */
+export const REMOTE_DEVICE: RemoteDevice = { label: 'Android phone', platform: 'Android' };
+
+/** The clock sync of the phone's camera, as the host's `RemoteClockFit` reports it (T4.0). */
+export const REMOTE_CLOCK: RemoteClockParams = {
+  offsetMs: -3127.4,
+  driftPpm: 37.8,
+  rttMs: 9.6,
+  samples: 58,
+  residualP95Ms: 1.1,
+  since: 1_730_640_000_123.5,
+};
+
 /**
- * The session with the laptop's camera and its clock, and a phone's rear camera that recorded
- * without a microphone; its cube says its production date and reported its battery twice (T3.7).
+ * The session with the laptop's camera and its clock, and a phone's rear camera, remote (T4.0), that
+ * recorded without a microphone, with the clock sync of its device beside the clapperboard's result;
+ * its cube says its production date and reported its battery twice (T3.7).
  */
 export function sessionWithCamera(): SessionRecord {
   const s = sessionRecord();
@@ -175,9 +191,28 @@ export function sessionWithCamera(): SessionRecord {
     cube: { ...s.cube, productDate: '2025-03-14' },
     cameras: [
       CAMERA,
-      { ...CAMERA, label: 'phone-rear', facing: 'environment', crop: null, microphone: null },
+      {
+        ...CAMERA,
+        label: 'phone-rear',
+        local: false,
+        facing: 'environment',
+        crop: null,
+        microphone: null,
+        remote: REMOTE_DEVICE,
+      },
     ],
-    clock: { ...s.clock, cameras: { laptop: CAMERA_CLOCK, 'phone-rear': { ...CAMERA_CLOCK } } },
+    clock: {
+      ...s.clock,
+      cameras: {
+        laptop: CAMERA_CLOCK,
+        'phone-rear': {
+          ...CAMERA_CLOCK,
+          rttMs: REMOTE_CLOCK.rttMs,
+          driftPpm: REMOTE_CLOCK.driftPpm,
+          remote: REMOTE_CLOCK,
+        },
+      },
+    },
     battery: [
       { hostMs: 1_730_640_000_100.5, level: 83 },
       { hostMs: 1_730_640_600_100.5, level: 82 },

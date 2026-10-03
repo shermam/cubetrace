@@ -13,6 +13,8 @@ import {
 } from './index';
 import {
   APP,
+  REMOTE_CLOCK,
+  REMOTE_DEVICE,
   asVersion1Attempt,
   asVersion1Session,
   attemptWithVideo,
@@ -82,16 +84,18 @@ const BY_LABEL = '#/properties/clock/properties/cameras';
  * The only fields that may be absent, by schema and object: a phase's slot, a camera clock's
  * samples, a clip's truncatedStart (the clips written before T2.9 have none) and its local (only a
  * clip whose MP4 was deleted after its upload has it, T3.3), a camera's microphone (the cameras
- * written before T2.12 have none), and the fields of T3.7, which the files written before have none
+ * written before T2.12 have none), the fields of T3.7, which the files written before have none
  * of: an attempt's app, gyro and resyncs and its moves' serial and packetLast, a session's battery
- * and its cube's productDate, and a frames file's app.
+ * and its cube's productDate, and a frames file's app; and the fields of T4.0, which only a remote
+ * camera has: a camera's remote (its device; required by an if/then when local is false) and a
+ * camera clock's remote (its clock sync).
  */
 const OPTIONAL: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   'session.json version 2': {
     '#': ['battery'],
     '#/properties/cube': ['productDate'],
-    '#/$defs/cameraClock': ['samples'],
-    '#/$defs/camera': ['microphone'],
+    '#/$defs/cameraClock': ['samples', 'remote'],
+    '#/$defs/camera': ['microphone', 'remote'],
   },
   'attempt.json version 2': {
     '#': ['app', 'gyro', 'resyncs'],
@@ -130,7 +134,7 @@ describe('the JSON Schemas of the records', () => {
   });
 
   it.each([
-    ['session.json version 2', SESSION_SCHEMA, 18],
+    ['session.json version 2', SESSION_SCHEMA, 20],
     ['attempt.json version 2', ATTEMPT_SCHEMA, 11],
     ['session.json version 1', SESSION_SCHEMA_V1, 9],
     ['attempt.json version 1', ATTEMPT_SCHEMA_V1, 5],
@@ -370,7 +374,13 @@ describe('version 2', () => {
     ['an id that is not a UUID v4', ['id'], 'abc'],
     ['schema version 1', ['schema'], 1],
     ['an incomplete camera', ['cameras'], [{ label: 'phone-1' }]],
-    ['a remote camera', ['cameras', 0, 'local'], false],
+    ['a remote camera without its device', ['cameras', 0, 'local'], false],
+    ['a remote camera without its device, after the fact', ['cameras', 1, 'remote'], undefined],
+    ['a local camera with a remote device', ['cameras', 0, 'remote'], REMOTE_DEVICE],
+    ['a remote device without its platform', ['cameras', 1, 'remote', 'platform'], undefined],
+    ['a remote device whose label is a number', ['cameras', 1, 'remote', 'label'], 7],
+    ['an unknown field in a remote device', ['cameras', 1, 'remote', 'isPhone'], true],
+    ['a local that is text', ['cameras', 0, 'local'], 'true'],
     ['a camera facing sideways', ['cameras', 0, 'facing'], 'left'],
     ['a camera without its device label', ['cameras', 0, 'deviceLabel'], undefined],
     ['settings that are a list', ['cameras', 0, 'settings'], [30]],
@@ -414,6 +424,32 @@ describe('version 2', () => {
       undefined,
     ],
     ['an unknown field in a camera clock', ['clock', 'cameras', 'laptop', 'lagMs'], 40],
+    ['a remote clock sync that is a number', ['clock', 'cameras', 'phone-rear', 'remote'], 3],
+    [
+      'a remote clock sync without its drift',
+      ['clock', 'cameras', 'phone-rear', 'remote', 'driftPpm'],
+      undefined,
+    ],
+    [
+      'a remote clock sync with a negative round trip',
+      ['clock', 'cameras', 'phone-rear', 'remote', 'rttMs'],
+      -1,
+    ],
+    [
+      'a remote clock sync with fractional samples',
+      ['clock', 'cameras', 'phone-rear', 'remote', 'samples'],
+      1.5,
+    ],
+    [
+      'a remote clock sync with a negative residual',
+      ['clock', 'cameras', 'phone-rear', 'remote', 'residualP95Ms'],
+      -0.1,
+    ],
+    [
+      'an unknown field in a remote clock sync',
+      ['clock', 'cameras', 'phone-rear', 'remote', 'converged'],
+      true,
+    ],
     ['a cube clock fit without its sample count', ['clock', 'cube', 'samples'], undefined],
     ['a negative cube residual', ['clock', 'cube', 'residualP95Ms'], -1],
     ['fractional attempts', ['summary', 'attempts'], 0.5],
@@ -450,6 +486,20 @@ describe('version 2', () => {
     expect(
       validateSession(changed(session, ['clock', 'cameras', 'laptop', 'samples'], undefined)),
     ).toBe(true);
+  });
+
+  it('accepts a remote camera with its device and its clock sync, and a local camera with neither (T4.0)', () => {
+    expect(session.cameras.map((camera) => camera.local)).toEqual([true, false]);
+    expect(validateSession(session)).toBe(true);
+    // A local camera's clock may say the remote sync too (the schema does not tie the two).
+    expect(
+      validateSession(changed(session, ['clock', 'cameras', 'laptop', 'remote'], REMOTE_CLOCK)),
+    ).toBe(true);
+    expect(
+      validateSession(changed(session, ['clock', 'cameras', 'phone-rear', 'remote'], undefined)),
+    ).toBe(true);
+    // A session written before phase 4: the laptop's camera alone, as before.
+    expect(validateSession({ ...session, cameras: [session.cameras[0]] })).toBe(true);
   });
 
   it('accepts a camera without a microphone, one written before it was kept, and what a browser does not report', () => {

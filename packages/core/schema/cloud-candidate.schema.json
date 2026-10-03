@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/cloud-candidate.schema.json",
+  "title": "sessions/{id}/peers/{peerId}/callerCandidates/{id} and calleeCandidates/{id}",
+  "description": "One ICE candidate of a remote camera's signaling in Firestore (docs/DATA-MODEL.md §10, docs/RTC.md, docs/PLAN.md T4.0), as RTCIceCandidateInit has it, under the peer document of cloud-peer.schema.json: the phone's in callerCandidates, the host's in calleeCandidates. No schema field: the documents are short-lived and have one shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["candidate", "sdpMid", "sdpMLineIndex", "createdMs"],
+  "properties": {
+    "candidate": {
+      "description": "The candidate line (candidate:… ), of at most 1,000 characters; empty for the end-of-candidates mark.",
+      "type": "string",
+      "maxLength": 1000
+    },
+    "sdpMid": { "type": ["string", "null"], "maxLength": 100 },
+    "sdpMLineIndex": { "type": ["integer", "null"], "minimum": 0 },
+    "createdMs": {
+      "description": "When the device wrote it, in ms, on its clock.",
+      "type": "number"
+    }
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/shermam/cubetrace/main/packages/core/schema/session.schema.json",
   "title": "session.json",
-  "description": "One cubetrace session, schema version 2 (docs/DATA-MODEL.md §6; version 1 is session.v1.schema.json). Times are host milliseconds: performance.timeOrigin + performance.now() on the host device. The fields of T3.7 (cube.productDate, battery) are optional: the files written before have none.",
+  "description": "One cubetrace session, schema version 2 (docs/DATA-MODEL.md §6; version 1 is session.v1.schema.json). Times are host milliseconds: performance.timeOrigin + performance.now() on the host device. The fields of T3.7 (cube.productDate, battery) and of T4.0 (a camera's remote, a camera clock's remote) are optional: the files written before have none.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -65,7 +65,7 @@
       }
     },
     "cameras": {
-      "description": "The cameras of the session (docs/DATA-MODEL.md §6); in phase 2, the host's own.",
+      "description": "The cameras of the session (docs/DATA-MODEL.md §6): the host's own (local true) and, since T4.0, the remote cameras (local false, with the device each runs on in remote).",
       "type": "array",
       "items": { "$ref": "#/$defs/camera" }
     },
@@ -168,7 +168,10 @@
       ],
       "properties": {
         "label": { "$ref": "#/$defs/cameraLabel" },
-        "local": { "description": "The host's own camera (phase 2 has no other).", "const": true },
+        "local": {
+          "description": "The host's own camera (true), or a remote camera (false, since T4.0: a phone paired over WebRTC, whose device is remote); phase 2 had only the former.",
+          "type": "boolean"
+        },
         "facing": { "enum": ["user", "environment", "unknown"] },
         "deviceLabel": {
           "description": "The camera's name as the browser gives it (MediaDeviceInfo.label).",
@@ -191,7 +194,24 @@
           "description": "full: whole frames are recorded (phase 2); crop: only the crop rectangle.",
           "enum": ["full", "crop"]
         },
-        "microphone": { "$ref": "#/$defs/microphone" }
+        "microphone": { "$ref": "#/$defs/microphone" },
+        "remote": { "$ref": "#/$defs/remoteDevice" }
+      },
+      "if": { "properties": { "local": { "const": false } } },
+      "then": { "required": ["remote"] },
+      "else": { "not": { "required": ["remote"] } }
+    },
+    "remoteDevice": {
+      "description": "The device a remote camera runs on (T4.0, docs/DATA-MODEL.md §6): there exactly when the camera's local is false. Absent from the files written before phase 4.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "platform"],
+      "properties": {
+        "label": {
+          "description": "The device's host label (Settings → This device on the phone).",
+          "type": "string"
+        },
+        "platform": { "description": "Its platform, such as Android.", "type": "string" }
       }
     },
     "microphone": {
@@ -268,6 +288,42 @@
           "description": "The matched pairs, when kept.",
           "type": "array",
           "items": { "$ref": "#/$defs/clapperboardSample" }
+        },
+        "remote": { "$ref": "#/$defs/remoteClock" }
+      }
+    },
+    "remoteClock": {
+      "description": "The clock sync of a remote camera (T4.0, docs/DATA-MODEL.md §6, docs/RTC.md): the offset and the drift of the phone's clock against the host's, from the data channel's pings, as they were when the record was written. Absent for the host's own cameras.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offsetMs", "driftPpm", "rttMs", "samples", "residualP95Ms", "since"],
+      "properties": {
+        "offsetMs": {
+          "description": "The phone's clock minus the host's, in ms: remoteMs ≈ hostMs + offsetMs.",
+          "type": "number"
+        },
+        "driftPpm": {
+          "description": "How fast the offset grows, in parts per million (50 ppm: 3 ms a minute); 0 before the samples spanned a minute.",
+          "type": "number"
+        },
+        "rttMs": {
+          "description": "The least round trip of the samples the estimate stands on, in ms.",
+          "type": "number",
+          "minimum": 0
+        },
+        "samples": {
+          "description": "The samples the estimate stands on.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "residualP95Ms": {
+          "description": "95th percentile (nearest rank) of the absolute residuals of those samples' offsets from the estimate, in ms.",
+          "type": "number",
+          "minimum": 0
+        },
+        "since": {
+          "description": "The host time of the oldest sample the estimate stands on.",
+          "type": "number"
         }
       }
     },
