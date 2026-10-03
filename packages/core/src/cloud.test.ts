@@ -43,6 +43,12 @@ const isCloudAttempt = ajv.compile<CloudAttempt>(CLOUD_ATTEMPT_SCHEMA);
 
 const OWNER = 'ada-uid';
 
+/** A pairing as the host publishes it (T4.0): the hash of its token, good for five minutes. */
+const PAIRING = {
+  tokenHash: 'a'.repeat(32) + '0123456789abcdef0123456789abcdef',
+  expiresMs: 1.79e12,
+};
+
 /** The laptop's session with its two cameras, as the index writes it. */
 function sessionDocument(): CloudSession {
   return cloudSession(sessionWithCamera(), OWNER);
@@ -67,6 +73,17 @@ function attemptDocument(): CloudAttempt {
 }
 
 describe('the documents of the session index', () => {
+  it("accept the host's pairing of a remote camera in a session's document (T4.0), and leave it out of the record", () => {
+    const document = { ...sessionDocument(), pairing: PAIRING };
+    expect(isCloudSession(document), JSON.stringify(isCloudSession.errors)).toBe(true);
+    expect(isCloudSession({ ...document, pairing: null })).toBe(true);
+    expect(parseCloudSession(structuredClone(document))).toEqual(document);
+    expect(parseCloudSession({ ...document, pairing: null }).pairing).toBeNull();
+    expect(sessionOfDocument(document)).toEqual(sessionWithCamera());
+    expect('pairing' in sessionOfDocument(document)).toBe(false);
+    expect('pairing' in sessionOfDocument({ ...document, pairing: null })).toBe(false);
+  });
+
   it('copy session.json with its owner, sharing nothing with the record', () => {
     const session = sessionWithCamera();
     const document = cloudSession(session, OWNER);
@@ -175,8 +192,14 @@ describe('the JSON Schemas of the documents', () => {
     const cloud = CLOUD_SESSION_SCHEMA as Readonly<Record<string, Record<string, unknown>>>;
     expect(cloud['properties']).toEqual({
       ...session['properties'],
+      pairing: cloud['properties']['pairing'],
       owner: cloud['properties']['owner'],
     });
+    expect(Object.keys(cloud['properties'])).toEqual([
+      ...Object.keys(session['properties']),
+      'pairing',
+      'owner',
+    ]);
     expect(cloud['$defs']).toEqual(session['$defs']);
     expect(CLOUD_SESSION_SCHEMA['required']).toEqual([
       ...(SESSION_SCHEMA['required'] as string[]),
@@ -280,6 +303,21 @@ describe('the JSON Schemas of the documents', () => {
     ['resyncs that are an object', 'attempt', { resyncs: {} }],
     ['battery reports that are an object', 'session', { battery: {} }],
     ['a production date that is a number', 'session', { cube: { productDate: 2025 } }],
+    ['a pairing that is text', 'session', { pairing: PAIRING.tokenHash }],
+    ['a pairing without its hash', 'session', { pairing: { expiresMs: PAIRING.expiresMs } }],
+    ['a pairing without its expiry', 'session', { pairing: { tokenHash: PAIRING.tokenHash } }],
+    [
+      'a pairing hash in upper case',
+      'session',
+      { pairing: { ...PAIRING, tokenHash: PAIRING.tokenHash.toUpperCase() } },
+    ],
+    [
+      'a pairing hash of 63 digits',
+      'session',
+      { pairing: { ...PAIRING, tokenHash: PAIRING.tokenHash.slice(1) } },
+    ],
+    ['a pairing with the token itself', 'session', { pairing: { ...PAIRING, token: 'A1B2C3D4' } }],
+    ['a pairing whose expiry is text', 'session', { pairing: { ...PAIRING, expiresMs: 'soon' } }],
   ] as [string, 'session' | 'attempt', Record<string, unknown>][])(
     'refuse a document with %s (%s)',
     (_, kind, change) => {
@@ -391,8 +429,11 @@ describe('parseCloudSession and parseCloudAttempt', () => {
     const session = sessionDocument();
     const read = parseCloudSession(structuredClone(session));
     expect(read).toEqual(session);
-    // In the order of the schemas' fields (the optional ones of T3.7 among them).
-    expect(Object.keys(read)).toEqual(Object.keys(CLOUD_SESSION_SCHEMA['properties'] as object));
+    // In the order of the schemas' fields (the optional ones of T3.7 among them; the pairing of T4.0
+    // is left out where the document has none).
+    const fields = Object.keys(CLOUD_SESSION_SCHEMA['properties'] as object);
+    expect(Object.keys(read)).toEqual(fields.filter((field) => field !== 'pairing'));
+    expect(Object.keys(parseCloudSession({ ...session, pairing: null }))).toEqual(fields);
     const attempt = attemptDocument();
     const input = structuredClone(attempt);
     const parsed = parseCloudAttempt(input);

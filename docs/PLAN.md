@@ -2031,6 +2031,46 @@ hour, convergence declared and withdrawn correctly; the signaling's offer–answ
 sequence over `MemorySignaling`; the rules accepting the owner's documents and refusing everyone
 else's and every wrong shape. No change to the app's pages; the bundle's initial size unchanged.
 
+**Outcome (2026-10-03).** As contracted, with these choices. The protocol (`docs/RTC.md` §1) gained
+`file-abort`, so that either side can give a file up with a reason (the sender after three refused
+checksums, the receiver for a chunk that leaves a gap or a store with no room); the file messages
+carry an `id` the sender numbers in `file-begin` beside the file's `name`, and the binary chunk
+header is the id and the offset (13 bytes); `file-ack` says `done` once the file is complete and
+checked, so that a periodic ack at the file's size is never taken for the end; a reader ignores the
+fields it does not know within a version. The receiver never gives a file up on a checksum: it
+discards and asks for it again from 0, and the sender counts (`MAX_CHECKSUM_RETRIES`, 2). The
+`Transport` reports frames and state through callbacks (`onFrame`, `onBufferedAmountLow`,
+`onStateChange`) rather than an async iterable, which the data channel's events map onto directly;
+`MemoryTransport.pair` models the network as a reliable channel over a lossy link (a lost frame
+arrives late and holds back those behind it, never drops), with a bandwidth and jitter, so that the
+pacing has something to wait for; the clock the tests drive is `FakeTimers`, with `run(promise)`.
+The `Signaling` interface is one peer connection's path for one role (`sendDescription`,
+`sendCandidate`, `onDescription`, `onCandidate`, `onClosed`, `close`); `FirestoreSignaling` is a
+session's for either device over a `SignalingBackend` of nine calls, which `AccountBackend`
+extends (a type-only import of the package in the app; the bundle unchanged); `MemorySignaling` joins
+a host and a phone over `MemorySignalingBackend`, and the unit-test fake of the account delegates to
+one, so that T4.1's services pair in memory. The peer document carries `tokenHash`, so that the host
+can check the token a peer presents against its pairing; `watchPeers` takes the account's uid for
+`where('owner', '==', uid)`; the candidates, which carry no owner, are opened by the rules to the
+session's owner (one `get` of the session's document per request), only under a peer that exists;
+and a get of a deleted peer document is the owner's too, so that the phone's watcher sees the
+deletion rather than a refusal. The token is Crockford's base32 (no I, L, O, U; the lookalikes read
+as 1 and 0 when typed) and the pairing lasts 10 minutes by default; `checkPairing` reads the session
+document's `pairing` alone, so that a record of another version still pairs. `RemoteClockFit`
+measures the convergence spread on the residuals from the estimate (the line, once there is one), so
+that a drift does not withdraw it; its `samples` are the kept ones and `since` the oldest of them.
+The numbers (the simulations in `remote-clock.test.ts` and `transfer.test.ts`): the offset within
+1 ms at round trips of 5, 20 and 40 ms with 1, 2 and 3 ms of exponential jitter per leg; the drift
+fitted to 0.8 ppm over an hour; on a busy network (40 ms, 30 ms of jitter) the offset within 2 ms but
+not converged, which the 3 ms rule makes a requirement on the Wi-Fi (a phone in power saving will not
+converge: for T4.3 to measure); 40 MB over 200 ms at 20 MB/s with 1% loss in 2.9 s (14.5 MB/s; the
+wire 2.1 s, the three retransmissions 1.8 s; at most 262,242 bytes queued: the threshold and one
+chunk), the resume after a cut sending only the bytes left, a flipped bit caught and the file sent
+again. `CameraInfo.local` is a boolean now (a remote camera's `remote` required exactly when it is
+false, in the schema by `if`/`then` and in the readers); `parseCameraInfo` reads a camera alone, for
+the phone's `hello`. The rules' tests grew from 135 to 180; the bundle's initial size is 264.57 kB
+raw, as on `main`.
+
 ### T4.1 — the Camera page and the host's Cameras panel
 
 **Goal.** A phone joins a session and is seen by the host: the connection's whole life, without

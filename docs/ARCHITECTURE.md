@@ -38,6 +38,9 @@ apps/web (Angular, PWA)
   ──uses──▶ packages/storage   OPFS staging of sessions (the session store, atomic writes, tolerant reads)
   ──uses──▶ packages/upload    (phase 3) the upload queue: an attempt's files into the bucket through
                                signed URLs, retried, throttled, its state in uploads.json; clips deleted by policy
+  ──uses──▶ packages/rtc       (phase 4) the connection to a remote camera: the data channel's protocol · the file
+                               transfer (paced, resumable, checked) · the clock sync's pings · the pairing token ·
+                               the signaling over Firestore · WebRtcTransport; fakes of the transport and the signaling
 ```
 
 `packages/*` are plain TypeScript, tested in Node with Vitest, and never import Angular.
@@ -79,10 +82,13 @@ suite.
 ## Time
 
 All timestamps are host milliseconds. Cube time is mapped by a linear fit of (cubeMs, hostMs) pairs
-per attempt (docs/DEVICES.md). Remote phones (phase 4) are mapped by a data-channel ping protocol;
-video frames carry their own timestamps and their arrival time in the capture worker; a
-"clapperboard", one face flicked and flicked back five times at session start, measures each camera's
-constant latency. See the private design for the measurements and the reasoning.
+per attempt (docs/DEVICES.md). Remote phones (phase 4) are mapped by a data-channel ping protocol
+(`docs/RTC.md` §4: the host pings every 2 s, the offset from the samples of least round trip, a drift
+fit once they span a minute, `RemoteClockFit` in core; the fit's record in `session.json` as
+`clock.cameras[label].remote`); video frames carry their own timestamps and their arrival time in
+the capture worker; a "clapperboard", one face flicked and flicked back five times at session start,
+measures each camera's constant latency. See the private design for the measurements and the
+reasoning.
 
 ## Capture (phase 2)
 
@@ -126,6 +132,36 @@ and the median lag of the turns kept (the fifth farthest from the median left ou
 becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
 Idle time is never stored. Remote cameras (phase 4) will cut the same way and ship their clips over
 the WebRTC data channel; phase 3 uploads them.
+
+## Remote cameras (phase 4)
+
+A phone joins a session as a camera (`docs/PLAN.md`, the phase 4 board; the contract in
+`docs/RTC.md`): the same app on a page of its own, the capture pipeline above running on the phone,
+and one `RTCPeerConnection` to the host with a reliable ordered data channel, made with Google's
+public STUN server and no TURN (the two devices on one Wi-Fi). T4.0 built what needs no page,
+`packages/rtc`; the pages, the services and the cuts come with T4.1–T4.3:
+
+```
+host (the session's device)                                                 phone (the camera device)
+show the QR: the token's hash in sessions/{id}.pairing  ─ ─ ─ ─ ─ ─▶  checkPairing, then call(): the offer
+FirestoreSignaling.watchOffers ◀── sessions/{id}/peers/{peerId} ──▶  (offer, answer, candidates: Firestore,
+answer, candidates                                                    the AccountBackend's few calls)
+WebRtcTransport (callee) ◀══════ the data channel ══════▶ WebRtcTransport (caller)
+MessageLink: hello ─▶ ClockPinger ─▶ RemoteClockFit ◀─ pong ◀─ answerPings; state, thumbnail ◀─ the phone
+cut (the window in the phone's clock) ─▶                             the ring buffer cut, muxed, staged
+FileReceiver ◀── file-begin / chunks / file-done ◀── FileSender       64 KB chunks under a 256 KB threshold,
+  ──▶ file-resume / file-ack ──▶                                        resumed by offset, CRC-32 checked
+the attempt's folder: <label>.<segment>.mp4 + frames.json (times converted to the host clock) ─▶ upload
+```
+
+The host decides everything the dataset needs: the cuts' windows (converted into the phone's clock
+with the fit, and back when the frames file comes), the labels (`labelFor`, as for any camera, with
+`remote` naming the device), the records, the upload. The phone only films, cuts, stages and sends;
+what it misses is a missing clip, never a lost attempt. Everything of `packages/rtc` but
+`WebRtcTransport` is plain TypeScript tested in Node: the transport and the signaling are interfaces
+with in-memory fakes (`MemoryTransport.pair` with a delay, a bandwidth and losses; `MemorySignaling`
+over `MemorySignalingBackend`), so that T4.1's services are unit-tested without WebRTC and the fast
+end-to-end suite pairs two pages of one browser through a `BroadcastChannel` signaling.
 
 ## The clip viewer
 

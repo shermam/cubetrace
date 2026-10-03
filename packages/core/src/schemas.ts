@@ -5,12 +5,15 @@
 // and its diagnostics events (T3.9). They live as JSON
 // files in packages/core/schema/, imported here as JSON modules (TypeScript resolves them with the
 // base tsconfig's `moduleResolution: bundler`; the bundlers inline them). The app itself reads
-// records with records.ts, which checks the same rules without a validator.
+// records with records.ts, which checks the same rules without a validator. Since T4.0 also the
+// signaling documents of the remote cameras (the peers and their candidates).
 import attemptSchemaV1 from '../schema/attempt.v1.schema.json';
 import attemptSchema from '../schema/attempt.schema.json';
 import cloudAttemptSchema from '../schema/cloud-attempt.schema.json';
+import cloudCandidateSchema from '../schema/cloud-candidate.schema.json';
 import cloudCubeSchema from '../schema/cloud-cube.schema.json';
 import cloudEventSchema from '../schema/cloud-event.schema.json';
+import cloudPeerSchema from '../schema/cloud-peer.schema.json';
 import cloudSessionSchema from '../schema/cloud-session.schema.json';
 import framesSchema from '../schema/frames.schema.json';
 import gyroSchema from '../schema/gyro.schema.json';
@@ -71,3 +74,15 @@ export const CLOUD_CUBE_SCHEMA: JsonSchema = cloudCubeSchema;
  * (schema version 1, §10, T3.9; the catalogue of kinds is docs/DIAGNOSTICS.md).
  */
 export const CLOUD_EVENT_SCHEMA: JsonSchema = cloudEventSchema;
+
+/**
+ * The schema of `sessions/{id}/peers/{peerId}` in Firestore, the signaling document of a remote
+ * camera (schema version 1, §10, T4.0): the phone's offer and the host's answer.
+ */
+export const CLOUD_PEER_SCHEMA: JsonSchema = cloudPeerSchema;
+
+/**
+ * The schema of `sessions/{id}/peers/{peerId}/callerCandidates/{id}` and `calleeCandidates/{id}` in
+ * Firestore, one ICE candidate of a remote camera's signaling (§10, T4.0; no version of its own).
+ */
+export const CLOUD_CANDIDATE_SCHEMA: JsonSchema = cloudCandidateSchema;

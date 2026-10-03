@@ -14,12 +14,15 @@ import {
   SESSION_SCHEMA,
   SESSION_SCHEMA_V1,
   parseAttempt,
+  parseCameraInfo,
   parseGyro,
   parseSession,
   type AttemptRecord,
   type SessionRecord,
 } from './index';
 import {
+  REMOTE_CLOCK,
+  REMOTE_DEVICE,
   asVersion1Attempt,
   asVersion1Session,
   attemptWithVideo,
@@ -319,6 +322,50 @@ describe('parseAttempt and parseSession', () => {
     const input = structuredClone(session);
     expect(parseSession(input).cameras[0].microphone).toEqual(input.cameras[0].microphone);
     expect(parseSession(input).cameras[0].microphone).not.toBe(input.cameras[0].microphone);
+  });
+
+  it('read a remote camera with its device and its clock sync, and refuse the device on the wrong camera (T4.0)', () => {
+    const session = sessionWithCamera();
+    const read = parseSession(structuredClone(session));
+    expect(read.cameras[1].local).toBe(false);
+    expect(read.cameras[1].remote).toEqual(REMOTE_DEVICE);
+    expect(read.cameras[1].remote).not.toBe(session.cameras[1].remote);
+    expect(read.clock.cameras['phone-rear'].remote).toEqual(REMOTE_CLOCK);
+    expect(read.clock.cameras['phone-rear'].remote).not.toBe(
+      session.clock.cameras['phone-rear'].remote,
+    );
+    // The host's own camera has neither, and the keys stay in the schema's order.
+    expect('remote' in read.cameras[0]).toBe(false);
+    expect('remote' in read.clock.cameras['laptop']).toBe(false);
+    expect(Object.keys(read.cameras[1]).at(-1)).toBe('remote');
+    expect(Object.keys(read.clock.cameras['phone-rear']).at(-1)).toBe('remote');
+    // A remote camera names its device; a local one has none to name.
+    const headless = changed(session, ['cameras', 1, 'remote'], undefined);
+    expect(VALIDATE.session[2](headless)).toBe(false);
+    expect(() => parseSession(headless)).toThrow(
+      'session.json (schema 2): cameras[1].remote is missing: a remote camera names its device.',
+    );
+    const confused = changed(session, ['cameras', 0, 'remote'], REMOTE_DEVICE);
+    expect(VALIDATE.session[2](confused)).toBe(false);
+    expect(() => parseSession(confused)).toThrow(
+      "session.json (schema 2): cameras[0].remote must not be there: the host's own camera has no remote device.",
+    );
+    expect(() => parseSession(changed(session, ['cameras', 1, 'remote', 'platform'], 1))).toThrow(
+      'session.json (schema 2): cameras[1].remote.platform must be a string, got 1.',
+    );
+    expect(() =>
+      parseSession(changed(session, ['clock', 'cameras', 'phone-rear', 'remote', 'samples'], -1)),
+    ).toThrow('clock.cameras.phone-rear.remote.samples must be an integer ≥ 0, got -1.');
+    // The same checks on a camera alone, as a remote camera's hello sends it (docs/RTC.md).
+    expect(parseCameraInfo(structuredClone(session.cameras[1]))).toEqual(session.cameras[1]);
+    expect(parseCameraInfo(session.cameras[0])).toEqual(session.cameras[0]);
+    expect(() => parseCameraInfo({ ...session.cameras[1], remote: undefined })).toThrow(
+      'session.json (schema 2): camera.remote is missing: a remote camera names its device.',
+    );
+    expect(() => parseCameraInfo('laptop')).toThrow(
+      'session.json (schema 2): camera must be an object, got "laptop".',
+    );
+    expect(() => parseCameraInfo({ ...session.cameras[0], label: 'Laptop' })).toThrow(RecordError);
   });
 
   it('upgrade a record of version 1 in memory: no clock, no clip, no camera, none of T3.7', () => {

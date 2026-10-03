@@ -1721,3 +1721,40 @@ specs is `clip-cube-testing.ts`.
 **No live cube on the Timer page**, by the owner's decision: the solver watches the real cube, and a
 WebGL renderer would compete with the capture pipeline for the GPU and the main thread. The viewer
 is off the recording path.
+
+## packages/rtc (T4.0)
+
+Added by T4.0 on 2026-10-03: `@cubetrace/rtc`, a workspace package like the others (plain TypeScript,
+`src/index.ts` through the `@cubetrace/*` paths, Vitest in Node, `sideEffects: false`), with
+`@cubetrace/core` as its one dependency: the connection between the host and a remote camera
+(`docs/RTC.md`, `docs/ARCHITECTURE.md` "Remote cameras"). `apps/web` lists it as a dependency for
+`AccountBackend`, which extends its `SignalingBackend` interface (a type-only import); no page imports
+its code yet, and the initial bundle is unchanged (264.57 kB raw, `ng build` on 2026-10-03 against
+`main` at 30af38c: `main` byte for byte the same but for the build's commit).
+
+**No new dependency.** CRC-32 is a 256-entry table in `crc32.ts`; the token's hash is `crypto.subtle`
+(SHA-256), its randomness `crypto.getRandomValues`, both globals in Node 22 and in the browsers;
+`URL.canParse` reads the QR's URL. WebRTC is the browser's own `RTCPeerConnection`.
+
+**Only `webrtc.ts` touches the browser.** `WebRtcTransport` uses the DOM's WebRTC types, which every
+package type-checks against (`tsconfig.base.json` has `lib: DOM`), and runs only in a browser: it has
+no unit test (Node has no `RTCPeerConnection`; the package's tests never import it), and the
+end-to-end suite of T4.1 covers it on Chromium's loopback interface. Everything else is pure: the
+transport and the signaling are interfaces with in-memory implementations (`MemoryTransport.pair`,
+`MemorySignalingBackend`, `MemorySignaling`), and `FakeTimers` (`testing.ts`) is the clock the tests
+drive, so that a 40 MB transfer over a simulated 200 ms link runs in about 3 s of CPU and no wall
+time. `FakeTimers.run(promise)` fires the timers one by one and lets the pending promises settle
+between them (a real `setTimeout(0)`, kept apart from any fake a test installs on the globals), until
+the promise settles.
+
+**The tests** (`npm test`, 89 in the package; `vitest run packages/rtc` for them alone): the
+protocol's encoding both ways, its leniency and its refusals; the memory transport's delay, bandwidth,
+low event, retransmissions and closing; the transfer of 40 MB over 200 ms with 1% loss within what the
+pacing allows (2.9 s against 4.7 allowed, the wire alone 2.1 s), the resume after a cut in the middle,
+the checksum refusing a corrupted chunk and the file sent again, the abort after three refusals, a
+gap, the small-message channel, an empty file, a Blob source; the clock sync over a memory pair with
+jitter (converged within a minute); the token's alphabet, normalization, hash and URL; the signaling's
+offer–answer–candidates sequence, ICE restart, closings and refusals over `MemorySignaling`. The
+clock fit's own simulations are core's (`remote-clock.test.ts`: the offset within 1 ms at round trips
+of 5–40 ms, the drift within 1 ppm over an hour, convergence declared and withdrawn). The rules of
+the signaling documents are in `firebase/rules.test.ts` (`npm run test:rules`).

@@ -1,13 +1,16 @@
 // The account's backend on the Firebase SDK (docs/ARCHITECTURE.md, "Account"): Authentication with
 // the Google provider, Firestore for users/{uid} (with the clip viewer's choices in it, T3.10), the
-// session index (T3.1), the account's cubes (T3.4) and its diagnostics events (T3.9), and the
-// upload's two callable functions (T3.3), through the modular API. This is the only
+// session index (T3.1), the account's cubes (T3.4), its diagnostics events (T3.9) and the signaling
+// of the remote cameras (T4.0: the session's pairing, the peers and their candidates, watched with
+// onSnapshot), and the upload's two callable functions (T3.3), through the modular API. This is the only
 // file that imports Firebase, and only ACCOUNT_LOADER's dynamic import loads it, so the SDK is a
 // lazy chunk of its own, firebase-sdk-<hash>.js, which the service worker caches only once it has
 // been used (ngsw-config.json): a device that never signs in never downloads it. In development builds
 // the end-to-end suite's cloud project can point it at the Firebase emulators (FirebaseEmulators).
 import {
+  CANDIDATE_COLLECTIONS,
   attemptDocumentId,
+  type CandidateSide,
   type CloudAttempt,
   type CloudAttemptFields,
   type CloudSession,
@@ -29,6 +32,7 @@ import {
   type User,
 } from 'firebase/auth';
 import {
+  addDoc,
   collection,
   connectFirestoreEmulator,
   deleteDoc,
@@ -37,14 +41,17 @@ import {
   getDocs,
   initializeFirestore,
   limit,
+  onSnapshot,
   orderBy,
   persistentLocalCache,
   persistentMultipleTabManager,
   query,
   setDoc,
+  updateDoc,
   waitForPendingWrites,
   where,
   writeBatch,
+  type CollectionReference,
   type DocumentReference,
   type DocumentSnapshot,
   type Firestore,
@@ -201,7 +208,64 @@ export function connectFirebase(emulators: FirebaseEmulators | null = null): Acc
           query(collection(firestore, 'users', uid, 'events'), orderBy('tsMs', 'desc'), limit(max)),
         ),
       ),
+    // The signaling of the remote cameras (T4.0, docs/RTC.md): the session's pairing merged into its
+    // document; a peer's document created whole, changed by fields, deleted with its candidates;
+    // the watchers are Firestore's snapshots, which also carry this device's own writes at once.
+    writePairing: (sessionId, pairing) =>
+      setDoc(doc(firestore, 'sessions', sessionId), { pairing }, { merge: true }),
+    createPeer: (sessionId, peerId, peer) => setDoc(peerRef(firestore, sessionId, peerId), peer),
+    updatePeer: (sessionId, peerId, fields) =>
+      updateDoc(peerRef(firestore, sessionId, peerId), { ...fields }),
+    deletePeer: async (sessionId, peerId) => {
+      const peer = peerRef(firestore, sessionId, peerId);
+      const batch = writeBatch(firestore);
+      for (const side of ['caller', 'callee'] as const) {
+        const candidates = await getDocs(candidatesRef(peer, side));
+        for (const candidate of candidates.docs) {
+          batch.delete(candidate.ref);
+        }
+      }
+      batch.delete(peer);
+      await batch.commit();
+    },
+    watchPeers: (sessionId, uid, next, error) =>
+      onSnapshot(
+        query(collection(firestore, 'sessions', sessionId, 'peers'), where('owner', '==', uid)),
+        (snapshot) => {
+          next(snapshot.docs.map(cloudDocument));
+        },
+        error,
+      ),
+    watchPeer: (sessionId, peerId, next, error) =>
+      onSnapshot(
+        peerRef(firestore, sessionId, peerId),
+        (snapshot) => {
+          next(snapshot.exists() ? cloudDocument(snapshot) : null);
+        },
+        error,
+      ),
+    addCandidate: async (sessionId, peerId, side, candidate) => {
+      await addDoc(candidatesRef(peerRef(firestore, sessionId, peerId), side), candidate);
+    },
+    watchCandidates: (sessionId, peerId, side, next, error) =>
+      onSnapshot(
+        query(candidatesRef(peerRef(firestore, sessionId, peerId), side), orderBy('createdMs')),
+        (snapshot) => {
+          next(snapshot.docs.map(cloudDocument));
+        },
+        error,
+      ),
   };
+}
+
+/** sessions/{id}/peers/{peerId} (T4.0). */
+function peerRef(firestore: Firestore, sessionId: string, peerId: string): DocumentReference {
+  return doc(firestore, 'sessions', sessionId, 'peers', peerId);
+}
+
+/** The candidates of one side under a peer: callerCandidates or calleeCandidates. */
+function candidatesRef(peer: DocumentReference, side: CandidateSide): CollectionReference {
+  return collection(peer, CANDIDATE_COLLECTIONS[side]);
 }
 
 /**

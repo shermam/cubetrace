@@ -1,8 +1,10 @@
 // session.json (docs/DATA-MODEL.md §6), schema version 2: the record of one session, created when it
-// starts and saved again as it goes (the summary after every attempt, the cube clock fit, later the
-// cameras and their clock sync).
+// starts and saved again as it goes (the summary after every attempt, the cube clock fit, the
+// cameras and their clock sync; since T4.0 the remote cameras, with the device each runs on and the
+// fit of its clock).
 import type { AttemptRecord, CropRect } from './attempt';
 import type { CubeClockParams } from './clock';
+import type { RemoteClockParams } from './remote-clock';
 
 /** The device that runs the session and holds the cube (`host` in session.json). */
 export interface HostInfo {
@@ -85,6 +87,17 @@ export interface MicrophoneInfo {
   channelCount: number | null;
 }
 
+/**
+ * The device a remote camera runs on (phase 4, docs/PLAN.md T4.0): `remote` of an entry of `cameras`
+ * in session.json (docs/DATA-MODEL.md §6), which a camera the host's own device runs has none of.
+ */
+export interface RemoteDevice {
+  /** The device's host label (Settings → This device on the phone; `host.label` of its own records). */
+  label: string;
+  /** Its platform, such as `Android` (`host.platform` of its own records). */
+  platform: string;
+}
+
 /** A camera of the session: an entry of `cameras` in session.json (docs/DATA-MODEL.md §6). */
 export interface CameraInfo {
   /**
@@ -93,8 +106,11 @@ export interface CameraInfo {
    * One per device: a second camera of the laptop in the session is `laptop-2` ({@link labelFor}).
    */
   label: string;
-  /** The host's own camera; phase 2 has no other. */
-  local: true;
+  /**
+   * The host's own camera (true), or a remote camera (false, since T4.0: a phone paired over WebRTC,
+   * whose device is `remote`); phase 2 had only the former.
+   */
+  local: boolean;
   /** Which way the camera faces, when the browser says (`facingMode`). */
   facing: 'user' | 'environment' | 'unknown';
   /** The camera's name as the browser gives it (`MediaDeviceInfo.label`). */
@@ -115,6 +131,11 @@ export interface CameraInfo {
    * written before it existed have none); `parseSession` reads a missing one as null.
    */
   microphone: MicrophoneInfo | null;
+  /**
+   * The device a remote camera runs on (T4.0): there exactly when `local` is false. Absent for the
+   * host's own cameras, and from every file written before phase 4.
+   */
+  remote?: RemoteDevice;
 }
 
 /**
@@ -152,9 +173,9 @@ export interface CameraClock {
    * are left out). A clip's `syncResidualMs` is this value when it was recorded.
    */
   offsetMs: number;
-  /** The round-trip time of a remote camera's clock sync (phase 4); 0 for a local camera. */
+  /** The least round trip of a remote camera's clock sync, in ms (`remote.rttMs`); 0 for a local camera. */
   rttMs: number;
-  /** The drift of a remote camera's clock against the host's, in ppm (phase 4); 0 for a local one. */
+  /** The drift of a remote camera's clock against the host's, in ppm (`remote.driftPpm`); 0 for a local one. */
   driftPpm: number;
   /**
    * The spread of the clapperboard's offsets: since T2.11 the range of those of the turns kept (until
@@ -165,6 +186,13 @@ export interface CameraClock {
   clapperboardSamples: number;
   /** The pairs of the turns kept, when the record keeps them. */
   samples?: ClapperboardSample[];
+  /**
+   * The clock sync of a remote camera (T4.0, `RemoteClockFit.params`): the offset and the drift of
+   * the phone's clock against the host's, from the data channel's pings, as they were when the record
+   * was written; `rttMs` and `driftPpm` above repeat its round trip and drift. Absent for the host's
+   * own cameras.
+   */
+  remote?: RemoteClockParams;
 }
 
 /** session.json, schema version 2 (docs/DATA-MODEL.md §6). */

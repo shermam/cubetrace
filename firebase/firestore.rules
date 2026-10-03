@@ -2,7 +2,8 @@ rules_version = '2';
 
 // Who may read and write what in cubetrace's Firestore (docs/DATA-MODEL.md §10). A signed-in account
 // reads and writes its own users/{uid} with its cubes and its diagnostics events, and the sessions it
-// owns with their attempts; nothing is public, and everything not matched here is denied. Tested against the emulator by
+// owns with their attempts and, since T4.0, the signaling documents of their remote cameras; nothing
+// is public, and everything not matched here is denied. Tested against the emulator by
 // firebase/rules.test.ts (`npm run test:rules`); deployed by .github/workflows/firebase.yml.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -182,11 +183,24 @@ service cloud.firestore {
         && (!('productDate' in cube) || cube.productDate == null || cube.productDate is string);
     }
 
+    // The pairing of a remote camera (T4.0, docs/RTC.md): the host writes the SHA-256 of the one-time
+    // token of its QR code into the session's document, with when it expires; null once it closes
+    // the pairing. The token itself is never stored.
+    function validPairing(pairing) {
+      return pairing is map
+        && pairing.keys().hasOnly(['tokenHash', 'expiresMs'])
+        && pairing.keys().hasAll(['tokenHash', 'expiresMs'])
+        && pairing.tokenHash is string
+        && pairing.tokenHash.matches('[0-9a-f]{64}')
+        && pairing.expiresMs is number;
+    }
+
     function validSession(data, sessionId) {
       return data.schema is int
         && data.id == sessionId
         && (!('cube' in data) || validCubeInfo(data.cube))
-        && (!('battery' in data) || data.battery is list);
+        && (!('battery' in data) || data.battery is list)
+        && (!('pairing' in data) || data.pairing == null || validPairing(data.pairing));
     }
 
     function validAttempt(data, sessionId, index) {
@@ -221,6 +235,83 @@ service cloud.firestore {
             == request.auth.uid;
         allow update: if ownsExisting() && keepsOwner() && keepsUpload()
           && validAttempt(request.resource.data, sessionId, index);
+      }
+
+      // sessions/{id}/peers/{peerId} (T4.0, docs/RTC.md, docs/DATA-MODEL.md §10): the signaling of a
+      // remote camera, the FirebaseRTC pattern. The phone (the caller) creates the document with its
+      // offer and the hash of the pairing token it presents; the host (the callee) writes its answer;
+      // each side adds its ICE candidates to its own subcollection and reads the other's; the host
+      // deletes everything once the peer is gone. Both devices are the session's owner, signed in to
+      // one account, and nobody else reads or writes any of it: the peer documents carry `owner` as
+      // the attempts do, so that a query must ask for the account's own, and the candidates, which
+      // carry none, are read, written and deleted only by the owner of the session they are under
+      // (one `get` of the session's document per request). The shapes are checked after every
+      // write: an SDP is text of at most 20,000 characters, a candidate of at most 1,000; a
+      // candidate, once written, is never changed.
+      function peerFields() {
+        return ['schema', 'owner', 'role', 'createdMs', 'tokenHash', 'offer', 'answer', 'state'];
+      }
+
+      function validDescription(description, kind) {
+        return description is map
+          && description.keys().hasOnly(['type', 'sdp'])
+          && description.keys().hasAll(['type', 'sdp'])
+          && description.type == kind
+          && description.sdp is string
+          && description.sdp.size() <= 20000;
+      }
+
+      function validPeer(peer) {
+        return peer.keys().hasAll(peerFields())
+          && peer.keys().hasOnly(peerFields())
+          && peer.schema == 1
+          && peer.role == 'camera'
+          && peer.createdMs is number
+          && peer.tokenHash is string
+          && peer.tokenHash.matches('[0-9a-f]{64}')
+          && (peer.offer == null || validDescription(peer.offer, 'offer'))
+          && (peer.answer == null || validDescription(peer.answer, 'answer'))
+          && peer.state in ['offered', 'answered', 'closed'];
+      }
+
+      function ownsSession() {
+        return signedIn()
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.owner
+            == request.auth.uid;
+      }
+
+      function validCandidate(candidate) {
+        return candidate.keys().hasAll(['candidate', 'sdpMid', 'sdpMLineIndex', 'createdMs'])
+          && candidate.keys().hasOnly(['candidate', 'sdpMid', 'sdpMLineIndex', 'createdMs'])
+          && candidate.candidate is string
+          && candidate.candidate.size() <= 1000
+          && (candidate.sdpMid == null
+            || (candidate.sdpMid is string && candidate.sdpMid.size() <= 100))
+          && (candidate.sdpMLineIndex == null
+            || (candidate.sdpMLineIndex is int && candidate.sdpMLineIndex >= 0))
+          && candidate.createdMs is number;
+      }
+
+      match /peers/{peerId} {
+        // The phone watches its peer document until the host deletes it: a get of a document that
+        // is gone (or not there yet) is the session's owner's too, so that the watcher hears the
+        // deletion rather than a refusal; a list must still ask for the account's own.
+        allow get: if (resource != null && ownsExisting()) || (resource == null && ownsSession());
+        allow list, delete: if ownsExisting();
+        allow create: if ownsNew()
+          && validPeer(request.resource.data)
+          && getAfter(/databases/$(database)/documents/sessions/$(sessionId)).data.owner
+            == request.auth.uid;
+        allow update: if ownsExisting() && keepsOwner() && validPeer(request.resource.data);
+
+        match /{side}/{candidateId} {
+          allow read, delete: if side in ['callerCandidates', 'calleeCandidates'] && ownsSession();
+          allow create: if side in ['callerCandidates', 'calleeCandidates']
+            && ownsSession()
+            && exists(/databases/$(database)/documents/sessions/$(sessionId)/peers/$(peerId))
+            && validCandidate(request.resource.data);
+          allow update: if false;
+        }
       }
     }
 

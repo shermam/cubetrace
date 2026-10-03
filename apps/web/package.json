@@ -28,6 +28,7 @@
     "@cubetrace/capture": "*",
     "@cubetrace/core": "*",
     "@cubetrace/gan": "*",
+    "@cubetrace/rtc": "*",
     "@cubetrace/storage": "*",
     "@cubetrace/upload": "*",
     "cubing": "^0.63.7",

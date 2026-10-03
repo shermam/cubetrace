@@ -1,17 +1,24 @@
 // A fake of the account's backend for the unit tests (provide `loader` as ACCOUNT_LOADER): the
-// Firebase calls of AccountBackend over an in-memory account and Firestore, without Firebase. Nothing
-// in the app imports this file, so it is not in the bundle.
+// Firebase calls of AccountBackend over an in-memory account and Firestore, without Firebase. The
+// signaling of the remote cameras (T4.0) is @cubetrace/rtc's in-memory backend, so that a test can
+// pair this fake's host with a camera device over the same `signaling`. Nothing in the app imports
+// this file, so it is not in the bundle.
 import {
   attemptDocumentId,
+  type CandidateSide,
   type CloudAttempt,
   type CloudAttemptFields,
+  type CloudCandidate,
   type CloudCube,
   type CloudEventWrite,
+  type CloudPeer,
   type CloudSession,
   type CloudUpload,
+  type SessionPairing,
   type UserRecord,
   type ViewerChoices,
 } from '@cubetrace/core';
+import { MemorySignalingBackend, type SignalingDocument } from '@cubetrace/rtc';
 import type { ConfirmRequest, ConfirmResult, SignRequest, SignedFile } from '@cubetrace/upload';
 
 import type {
@@ -481,6 +488,78 @@ export class FakeAccountBackend implements AccountBackend {
     return this.events
       .filter((entry) => uid === undefined || entry.uid === uid)
       .map((entry) => entry.write.event.kind);
+  }
+
+  // ---- The signaling of the remote cameras (T4.0): the pairing, the peers, the candidates ----
+
+  /**
+   * The signaling documents, in @cubetrace/rtc's in-memory backend (its `writes` list them; two
+   * backends given the same one are two devices of one account). The pairing goes into the session's
+   * document of the index above, which the rtc backend reads for `checkPairing`.
+   */
+  signaling = new MemorySignalingBackend();
+
+  writePairing(sessionId: string, pairing: SessionPairing | null): Promise<void> {
+    return this.write(
+      () => this.index.get(sessionId)?.session !== null,
+      () => {
+        const entry = this.entry(sessionId);
+        if (entry.session !== null) {
+          entry.session = { ...entry.session, pairing: pairing === null ? null : { ...pairing } };
+        }
+        this.indexWrites.push(`sessions/${sessionId} pairing`);
+        this.markUnsent(`sessions/${sessionId}`);
+      },
+    );
+  }
+
+  createPeer(sessionId: string, peerId: string, peer: CloudPeer): Promise<void> {
+    return this.signaling.createPeer(sessionId, peerId, peer);
+  }
+
+  updatePeer(sessionId: string, peerId: string, fields: Partial<CloudPeer>): Promise<void> {
+    return this.signaling.updatePeer(sessionId, peerId, fields);
+  }
+
+  deletePeer(sessionId: string, peerId: string): Promise<void> {
+    return this.signaling.deletePeer(sessionId, peerId);
+  }
+
+  watchPeers(
+    sessionId: string,
+    uid: string,
+    next: (peers: readonly SignalingDocument[]) => void,
+    error: (error: unknown) => void,
+  ): () => void {
+    return this.signaling.watchPeers(sessionId, uid, next, error);
+  }
+
+  watchPeer(
+    sessionId: string,
+    peerId: string,
+    next: (peer: SignalingDocument | null) => void,
+    error: (error: unknown) => void,
+  ): () => void {
+    return this.signaling.watchPeer(sessionId, peerId, next, error);
+  }
+
+  addCandidate(
+    sessionId: string,
+    peerId: string,
+    side: CandidateSide,
+    candidate: CloudCandidate,
+  ): Promise<void> {
+    return this.signaling.addCandidate(sessionId, peerId, side, candidate);
+  }
+
+  watchCandidates(
+    sessionId: string,
+    peerId: string,
+    side: CandidateSide,
+    next: (candidates: readonly SignalingDocument[]) => void,
+    error: (error: unknown) => void,
+  ): () => void {
+    return this.signaling.watchCandidates(sessionId, peerId, side, next, error);
   }
 
   /** A write of the cubes, as `write` makes one of the index, refused with `cubeError` alone. */
