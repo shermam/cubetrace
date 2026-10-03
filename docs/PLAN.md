@@ -2068,7 +2068,7 @@ wire 2.1 s, the three retransmissions 1.8 s; at most 262,242 bytes queued: the t
 chunk), the resume after a cut sending only the bytes left, a flipped bit caught and the file sent
 again. `CameraInfo.local` is a boolean now (a remote camera's `remote` required exactly when it is
 false, in the schema by `if`/`then` and in the readers); `parseCameraInfo` reads a camera alone, for
-the phone's `hello`. The rules' tests grew from 139 to 180; the bundle's initial size is 264.57 kB
+the phone's `hello`. The rules' tests grew from 135 to 180; the bundle's initial size is 264.57 kB
 raw, as on `main`.
 
 ### T4.1 — the Camera page and the host's Cameras panel
