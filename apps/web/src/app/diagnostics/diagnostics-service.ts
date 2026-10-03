@@ -113,16 +113,17 @@ export class DiagnosticsService {
 
   constructor() {
     const destroyRef = inject(DestroyRef);
-    // The page is hidden or going away: what is queued goes now rather than in a moment.
+    // The page is hidden or going away: the setting takes effect, and what is queued goes now rather
+    // than in a moment.
     const page = this.globals.document;
     const onVisibilityChange = (): void => {
       if (page?.visibilityState === 'hidden') {
-        this.flush();
+        this.settle();
       }
     };
     page?.addEventListener('visibilitychange', onVisibilityChange);
     const onPageHide = (): void => {
-      this.flush();
+      this.settle();
     };
     this.globals.addEventListener?.('pagehide', onPageHide);
     const onOnline = (): void => {
@@ -147,9 +148,10 @@ export class DiagnosticsService {
       this.globals.removeEventListener?.('online', onOnline);
       this.globals.removeEventListener?.('offline', onOffline);
       navigation?.unsubscribe();
-      this.flush();
+      this.settle();
     });
-    // The setting: off writes one last event and stops; on starts again.
+    // The setting: off writes one last event and stops; on starts again. In the tick after the
+    // toggle, or sooner by `settle` when the page is hidden or goes away first.
     effect(() => {
       const on = this.settings.diagnostics();
       untracked(() => {
@@ -368,6 +370,17 @@ export class DiagnosticsService {
     } else {
       this.record('page.viewed', { page, demo });
     }
+  }
+
+  /**
+   * The setting as it is now takes effect, then what is queued is written, in one batch: for the page
+   * hidden or going away. The effect that follows the setting runs in the tick after the toggle,
+   * which a page unloaded right after it never has, and the next page load starts with the setting
+   * as stored; without this, the switch's last `settings.changed` would be lost.
+   */
+  private settle(): void {
+    this.onSetting(this.settings.diagnostics());
+    this.flush();
   }
 
   private onSetting(on: boolean): void {

@@ -66,7 +66,9 @@ recorded without a scope of its own.
   nothing goes under the next account.
 - **The setting.** Settings → Account → Diagnostics, on by default: off, the app records one last
   `settings.changed` (`diagnostics` false), writes it, and keeps nothing more, not even the ring;
-  on again, it records `settings.changed` (`diagnostics` true) and goes on.
+  on again, it records `settings.changed` (`diagnostics` true) and goes on. When the page is hidden
+  or goes away, the switch's new value takes effect before what is queued is written, so its event
+  goes with that batch even when the page is left right after the toggle.
 - **The daily cap.** A device writes at most 2,000 events a local day, counted in `localStorage`
   (`cubetrace.diagnostics`, with the build last seen, for `app.start`); past it, only the `error.*`
   kinds go until the next day. An attempt with the camera on costs 3 events (`attempt.done`, two

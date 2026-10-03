@@ -17,7 +17,7 @@ import {
   settle,
 } from '../device/fake-browser';
 import { WakeLockService } from '../device/wake-lock-service';
-import { SettingsService } from '../settings/settings-service';
+import { SETTINGS_STORAGE_KEY, SettingsService } from '../settings/settings-service';
 import {
   DAILY_CAP,
   DIAGNOSTICS_STORAGE_KEY,
@@ -285,6 +285,71 @@ describe('DiagnosticsService', () => {
     await settle();
     expect(events().at(-1)?.data).toEqual({ key: 'diagnostics', value: true });
     expect(written()).toHaveLength(3);
+  });
+
+  it('writes the last settings.changed of the switch turned off when the page goes away before the change took effect, once', async () => {
+    const diagnostics = load();
+    await settle();
+    signIn(diagnostics);
+    // Unchecked, and the page goes at once (a navigation): the effect that follows the setting runs
+    // in the next tick, which an unload does not wait for. What the page wrote as it went, at once,
+    // is all it writes.
+    TestBed.inject(SettingsService).setDiagnostics(false);
+    fire('pagehide');
+    expect(backend.eventBatches).toBe(1);
+    expect(written()).toEqual(['app.start', 'settings.changed']);
+    expect(events().at(-1)?.data).toEqual({ key: 'diagnostics', value: false });
+    // The page comes back (the back/forward cache), and the tick with it: nothing twice, nothing more.
+    await settle();
+    TestBed.tick();
+    await settle();
+    diagnostics.record('page.viewed', { page: 'sessions' });
+    diagnostics.flush();
+    timers.advance(FLUSH_DELAY_MS);
+    await settle();
+    expect(written()).toEqual(['app.start', 'settings.changed']);
+    expect(backend.eventBatches).toBe(1);
+    expect(diagnostics.counts()).toMatchObject({ queued: 0, ringed: 0 });
+  });
+
+  it('settles the switch the same way turned on, when the page is hidden, and as the app is torn down', async () => {
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ diagnostics: false }));
+    const diagnostics = load();
+    await settle();
+    signIn(diagnostics);
+    const settings = TestBed.inject(SettingsService);
+    // Checked, and the page goes at once: its event is in that last batch.
+    settings.setDiagnostics(true);
+    fire('pagehide');
+    expect(written()).toEqual(['settings.changed']);
+    expect(events().at(-1)?.data).toEqual({ key: 'diagnostics', value: true });
+    // The tick after all: nothing twice, and what is recorded from then on goes.
+    await settle();
+    TestBed.tick();
+    diagnostics.record('page.viewed', { page: 'timer' });
+    diagnostics.flush();
+    await settle();
+    expect(written()).toEqual(['settings.changed', 'page.viewed']);
+    // Unchecked, and the page is hidden at once (another tab in front): the last event goes then.
+    settings.setDiagnostics(false);
+    page.setVisibility('hidden');
+    expect(events().at(-1)?.data).toEqual({ key: 'diagnostics', value: false });
+    await settle();
+    TestBed.tick();
+    diagnostics.record('page.viewed', { page: 'timer' });
+    diagnostics.flush();
+    // Checked again, and the app is torn down before its tick.
+    settings.setDiagnostics(true);
+    TestBed.resetTestingModule();
+    await settle();
+    expect(written()).toEqual([
+      'settings.changed',
+      'page.viewed',
+      'settings.changed',
+      'settings.changed',
+    ]);
+    expect(events().at(-1)?.data).toEqual({ key: 'diagnostics', value: true });
+    expect(backend.eventBatches).toBe(4);
   });
 
   it(`writes at most ${String(DAILY_CAP)} events a day, then the errors alone, and counts the day in localStorage`, async () => {
