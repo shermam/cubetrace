@@ -1982,8 +1982,8 @@ phase 3 (T2.0–T2.14, T3.0–T3.10).
 
 | Id | Task | Depends on | Status |
 |---|---|---|---|
-| T4.0 | `rtc`: the data-channel protocol, chunked transfer with backpressure and resume, the clock sync maths, Firestore signaling with rules and the pairing token, in-memory fakes | T3.5 | ⬜ |
-| T4.1 | `web`: the Camera page (join by QR or token, preview, framing, sharpness, state) and the host's Cameras panel (Add camera, the list, thumbnails); the connection's lifecycle; the clock sync running; the camera registered in the session | T4.0 | ⬜ |
+| T4.0 | `rtc`: the data-channel protocol, chunked transfer with backpressure and resume, the clock sync maths, Firestore signaling with rules and the pairing token, in-memory fakes | T3.5 | ✅ #58 (2026-10-03) |
+| T4.1 | `web`: the Camera page (join by QR or token, preview, framing, sharpness, state) and the host's Cameras panel (Add camera, the list, thumbnails); the connection's lifecycle; the clock sync running; the camera registered in the session | T4.0 | 🔄 in progress (2026-10-03) |
 | T4.2 | `web`, `capture`, `upload`: remote cuts and clip transfer into the attempt's folder and record; the upload of remote clips, late clips as additions; diagnostics events | T4.1 | ⬜ |
 | T4.3 | `web`, `capture`: the sync check on a remote camera; frame times converted with the drift fit; the live preview track; measurements in `docs/DEVICES.md` | T4.2 | ⬜ |
 | T4.4 | the desk rig: docs, "After T4" items, the round report's checklist, `0.4.0` | T4.3 | ⬜ |
