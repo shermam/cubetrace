@@ -57,7 +57,8 @@ gaps of up to 165 ms; over an attempt's window (the scramble, the inspection and
 12.6–13 reports a second on the laptop and on the phone alike (`gyro.rateHz`, the QA view's Gyro
 column), far under the 50–100 Hz the buffer was sized for, which therefore holds its 10 minutes with
 room. The angular velocity is non-zero in two thirds of the samples of a solve, with components up to
-5 of the 7 the packets allow. The GAN 356 i3 has not recorded a gyro file yet.
+5 of the 7 the packets allow. The GAN 356 i3 has not recorded a gyro file yet. Both are Gen2 cubes,
+which say no production date.
 
 What the exports show about the cube's clock (a fit of host time on cube time, per attempt and per
 session, over all 1,802 moves; `fixtures/hardware/README.md`):
