@@ -30,6 +30,9 @@ apps/web (Angular, PWA)
                    CubeSyncService: Settings' cube MAC addresses merged with the account's (T3.4) ·
                    ViewerSyncService: the clip viewer's view and mirror per camera merged with the account's (T3.10) ·
                    DiagnosticsService: the app's own log of its use, in the account (T3.9)
+  remote cameras (phase 4): on the host, the Cameras section of Camera settings (a lazy chunk with
+                   packages/rtc) and the phones' tiles and sync checks on the Timer page; on the phone,
+                   the Camera page (/camera); "Remote cameras" below
   ──uses──▶ packages/core      cube simulator (Kociemba facelets) · notation · scramble target ·
                                attempt state machine · CFOP phase detector · clock fits · data model · fake cube
   ──uses──▶ packages/gan       GAN driver wrapper (Web Bluetooth) → typed CubeEvent stream; MAC provider
@@ -86,10 +89,12 @@ per attempt (docs/DEVICES.md). Remote phones (phase 4) are mapped by a data-chan
 (`docs/RTC.md` §4: the host pings every 500 ms until the sync converges, then every 2 s, the offset
 from the samples of least round trip of the last two minutes, at least ten of them, a drift fit once
 they span a minute, `RemoteClockFit` in core; the fit's record in `session.json` as
-`clock.cameras[label].remote`); video frames carry their own timestamps and their arrival time in
-the capture worker; a "clapperboard", one face flicked and flicked back five times at session start,
-measures each camera's constant latency. See the private design for the measurements and the
-reasoning.
+`clock.cameras[label].remote`), a phone's clip converted with the estimate the host froze when it
+cut the clip, at the clip's own first frame (`RemoteClockLine`, T4.3); video frames carry their own
+timestamps and their arrival time in the capture worker; a "clapperboard", one face flicked and
+flicked back five times at session start (a phone's when the owner starts it), measures each
+camera's constant latency, a phone's on top of its clock sync. See the private design for the
+measurements and the reasoning.
 
 ## Capture (phase 2)
 
@@ -490,7 +495,11 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
   SyncService: sync.check                                cache ─▶ the server (a refusal: said once, dropped)
   UploadService: upload.state / paused / resumed, storage.deleted     at most 5,000 a local day per device
   CubeSyncService: cubes.synced (a count)                             (localStorage), then error.* alone
-  AuthService: account.signin / signout; the pages: clips.viewed, download; every console `cubetrace:` warning: error.app
+  AuthService: account.signin / signout; the pages: clips.viewed, files.downloaded; every console `cubetrace:` warning: error.app
+  the remote cameras (T4.1–T4.3), on the host: RemoteCamerasService: rtc.paired / connected / disconnected /
+    clock / failed; RemoteCutsService: remote.cut, remote.clip, remote.clip.late / missing; on the phone:
+    CameraDeviceService: rtc.paired / connected / disconnected / failed; CameraDeviceCapture: recording.*;
+    CameraDeviceClips: remote.cut (failed); CameraDevicePreview: preview.started / stopped
 the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the
   router), settings.changed (the settings the checklists name), wake.lock, storage.persistence, network.changed
 ```
@@ -570,21 +579,23 @@ the store's writes (SessionChanges) ──▶ UploadQueue ◀── the recordin
 start: the Web Lock (one tab uploads) ─▶ uploads.json ─▶ the device's sessions, the oldest first
         (a session of a real cube; never a demo session's)
 per attempt, once its record is final (solved or DNF, its clips saved or known absent):
-  attempt.json (the record without local) · each clip's MP4 and frames file · session.json, riding along
+  attempt.json (the record without local) · each clip's MP4 and frames file · gyro.json · session.json, riding along
   ─▶ wait for the index's writes (the session index's queue, then waitForPendingWrites)
   ─▶ signUpload: the attempt's files still to send, in one call, right before they go
   ─▶ PUT, two at a time, each as a Blob with exactly the headers signed ─▶ confirmUpload ─▶ done
   ─▶ uploads.json (100 ms after a change, at once on pagehide)
 ```
 
-- **What goes.** Per attempt its `attempt.json` (the record as the store writes it, without the clips'
-  `local`), each clip's MP4 and frames file, its `gyro.json` when it has one (T3.7, after the clips:
-  the sixth file with one camera), and the session's `session.json`, which rides with the
-  newest of its attempts still to send, again whenever it changed since it was last confirmed, once
-  it has stayed the same for two minutes: every attempt changes its summary, so a session being
-  recorded sends it in its pauses and at its end rather than with every attempt (each upload of it is a
-  file of the day's quota). An attempt waits until its record is final: the recording says which
-  attempts still have a clip, or a gyro file, to come (`ClipsInFlight`). Never a demo session (a
+- **What goes.** Per attempt its `attempt.json` (the record as the store writes it, without the
+  clips' `local`), each clip's MP4 and frames file, a paired phone's too (T4.2), its `gyro.json`
+  when it has one (T3.7, after the clips: the sixth file with one camera, the tenth with a phone),
+  and the session's `session.json`, which rides with the newest of its attempts still to send, again
+  whenever it changed since it was last confirmed, once it has stayed the same for two minutes:
+  every attempt changes its summary, so a session being recorded sends it in its pauses and at its
+  end rather than with every attempt (each upload of it is a file of the day's quota). An attempt
+  waits until its record is final: the recording says which attempts still have a clip, or a gyro
+  file, to come (`ClipsInFlight`), a phone's clip 120 s at most after the attempt's end, a later one
+  then going as an addition, signed alone with `attempt.json` (T4.2). Never a demo session (a
   simulated cube), never anything signed out, and nothing but the records, the clips and the gyro
   files: no cube MAC address, no setting.
 - **Order and throttling.** The oldest session first, its attempts by index, an attempt's files in
@@ -640,8 +651,14 @@ npm run e2e:cloud ─▶ the functions built ─▶ firebase emulators:exec, off
 the page ─▶ Sign in: signInWithCredential, a Google ID token of unsigned claims (the emulator's)
          ─▶ the index's writes, through the rules ─▶ signUpload ─▶ URLs on the sink ─▶ PUT
          ─▶ confirmUpload: HEAD on the sink ─▶ the attempt's upload done
+two pages of one account ─▶ a phone paired through Firestore's signaling, under the rules (T4.1)
 the test ─▶ the emulators' REST APIs (the Auth accounts; the documents, past the rules) and the sink
 ```
+
+The fast suite pairs its two pages through a `BroadcastChannel` signaling instead
+(`apps/web/e2e/helpers/signaling.ts`, "Remote cameras" above); the cloud project's pairing
+(`remote-camera.cloud.spec.ts`) checks the pairing in the session's document and the peer document
+with its offer, answer and candidates, deleted at Leave.
 
 - **Development builds only.** `ACCOUNT_LOADER` reads `window.cubetraceE2eEmulators` only when
   `isDevMode()`, as it reads the fake's loader; `connectFirebase` then starts the app under the
