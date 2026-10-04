@@ -134,9 +134,9 @@ async function pill(phone: Page): Promise<string> {
  * (a cut's estimate: before the fit keeps three samples, the offset of the trip of least round trip,
  * which on loopback places the clock within a few ms), and the phone recording for longer than the
  * next attempt's lead and margin (connected for 6 s); otherwise the lines that say what is missing.
- * Not a number of samples kept: between two pages of one browser that both encode, most round trips
- * are over the keep rule's band (1.5 times the least, or 3 ms over it), and the fit can keep one or
- * two samples for half a minute while every ping is answered.
+ * Not convergence, nor a number of samples kept: a cut waits for neither (T4.2), and between two
+ * pages of one browser that both encode, most round trips are far over the least (a median of 17 to
+ * 18 ms against 2 to 3 on CI), so convergence can take a while there.
  */
 async function readiness(phone: Page, row: Locator): Promise<string> {
   const state = await pill(phone);

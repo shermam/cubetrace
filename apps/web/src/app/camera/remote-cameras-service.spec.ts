@@ -63,11 +63,16 @@ class Phone {
   peerId = '';
   private readonly signaling: FirestoreSignaling;
 
+  /** How many pings it answered. */
+  private answers = 0;
+
   constructor(
     private readonly r: Rig,
     readonly label = 'ThinkPhone',
     /** The phone's clock minus the host's. */
     private readonly offsetMs = 1234.5,
+    /** Its clock jumps back and forth by this much from one answer to the next (a broken clock). */
+    private readonly wobbleMs = 0,
   ) {
     this.signaling = new FirestoreSignaling(r.backend, {
       sessionId: r.s.service.session()?.id ?? '',
@@ -92,7 +97,11 @@ class Phone {
     link.onMessage((message) => {
       this.received.push(message);
     });
-    answerPings(link, () => this.r.s.perf.hostMs + this.offsetMs);
+    answerPings(
+      link,
+      () =>
+        this.r.s.perf.hostMs + this.offsetMs + (Math.floor(this.answers++ / 2) % 2) * this.wobbleMs,
+    );
     link.send({
       type: 'hello',
       v: PROTOCOL_VERSION,
@@ -362,12 +371,12 @@ describe('RemoteCamerasService', () => {
     expect(await stray).toMatch(/^failed: .*the signaling closed: the documents are gone/);
   });
 
-  it('pings every 2 s, tells the phone the clock sync, and once it converges records it in the session and the diagnostics, and once a minute after', async () => {
+  it('pings every 500 ms until the fit converges and every 2 s after, tells the phone the clock sync, and once it converges records it in the session and the diagnostics, and once a minute after', async () => {
     const phone = await paired();
     await pass(r.s, 4000);
     const pings = phone.of('ping').length;
-    expect(pings).toBeGreaterThanOrEqual(2);
-    expect(pings).toBeLessThanOrEqual(4);
+    expect(pings).toBeGreaterThanOrEqual(8);
+    expect(pings).toBeLessThanOrEqual(10);
     // One clock per answer taken (the last answer may still be on its way).
     let clocks = phone.of('clock');
     expect(clocks.length).toBeGreaterThanOrEqual(pings - 1);
@@ -393,24 +402,55 @@ describe('RemoteCamerasService', () => {
     expect(clock?.remote?.samples).toBeLessThanOrEqual(sync?.samples ?? 0);
     expect(Math.abs((clock?.remote?.offsetMs ?? 0) - 1234.5)).toBeLessThan(1);
 
+    // Converged, it pings every 2 s.
+    const before = phone.of('ping').length;
+    await pass(r.s, 10_000);
+    expect(phone.of('ping').length - before).toBe(5);
+
     let all = await events();
     const recorded = all.filter((e) => e.kind === 'rtc.clock');
     expect(recorded).toHaveLength(1);
+    // The window's round trips with it: the memory link takes 4 ms each way, every trip kept.
     expect(recorded[0].data).toMatchObject({
       why: 'converged',
       converged: true,
       camera: 'phone-rear',
+      keptShare: 1,
+      rttP50Ms: 8,
+      rttP95Ms: 8,
     });
+    expect(recorded[0].data['windowSamples']).toBe(recorded[0].data['samples']);
 
-    // A minute later, again, with the samples of the minute.
+    // A minute into the connection, again, with the samples of the window.
     await pass(r.s, CLOCK_RECORD_MS);
     all = await events();
     const again = all.filter((e) => e.kind === 'rtc.clock');
     expect(again).toHaveLength(2);
-    expect(again[1].data).toMatchObject({ why: 'minute', converged: true });
+    expect(again[1].data).toMatchObject({ why: 'minute', converged: true, keptShare: 1 });
     const minute = r.s.service.session()?.clock.cameras['phone-rear'].remote;
     expect(minute?.samples).toBeGreaterThanOrEqual(30);
     expect(minute?.samples).toBe(again[1].data['samples']);
+  });
+
+  it('says once a minute how the clock sync goes while it does not converge, and records nothing in the session', async () => {
+    // A phone whose clock jumps 30 ms back and forth every two answers: never converged.
+    const phone = new Phone(r, 'ThinkPhone', 1234.5, 30);
+    await paired(phone);
+    await pass(r.s, CLOCK_RECORD_MS + 1000);
+    expect(r.service.cameras()[0].sync?.converged).toBe(false);
+    const all = await events();
+    const clocks = all.filter((e) => e.kind === 'rtc.clock');
+    expect(clocks.map((e) => e.data['why'])).toEqual(['syncing']);
+    expect(clocks[0].data).toMatchObject({
+      converged: false,
+      camera: 'phone-rear',
+      rttP50Ms: 8,
+      rttP95Ms: 8,
+    });
+    // A minute of pings at 500 ms: all of them in the window, every trip kept (all 8 ms).
+    expect(clocks[0].data['windowSamples']).toBeGreaterThanOrEqual(115);
+    expect(clocks[0].data['keptShare']).toBe(1);
+    expect(r.s.service.session()?.clock.cameras['phone-rear']).toBeUndefined();
   });
 
   it('keeps the phone’s state and its latest thumbnail', async () => {
@@ -475,13 +515,17 @@ describe('RemoteCamerasService', () => {
     expect(r.service.cameras()[0].sync?.samples).toBeGreaterThan(samples);
     expect(r.service.cameras()).toHaveLength(1);
     let all = await events();
+    // The fit, kept across the reconnection, converges meanwhile: its samples span ten seconds.
     expect(kinds(all)).toEqual([
       'rtc.paired',
       'rtc.connected',
       'rtc.disconnected',
       'rtc.connected',
+      'rtc.clock',
     ]);
-    expect(all.at(-1)?.data).toMatchObject({ reconnection: true });
+    expect(all.filter((e) => e.kind === 'rtc.connected').at(-1)?.data).toMatchObject({
+      reconnection: true,
+    });
 
     // Dropped again and not back within five minutes: removed.
     back.drop();

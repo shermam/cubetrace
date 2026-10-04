@@ -40,7 +40,7 @@ file name without a path).
 | Message | From | Fields | When |
 |---|---|---|---|
 | `hello` | both | `v` (1), `role` (`host`, `camera`), `device: {label, platform}`, `app: {version, commit}`, `camera` (the phone's camera as its own session.json would describe it: a `CameraInfo`, read by core's `parseCameraInfo`; null from the host) | once the channel opens; the phone again when its camera changes |
-| `ping` | host | `t1`, the host clock | every 2 s (`PING_INTERVAL_MS`) |
+| `ping` | host | `t1`, the host clock | every 500 ms until the clock sync converges, for a minute at most, then every 2 s (`PING_INTERVAL_MS`, §4) |
 | `pong` | phone | `t1` back, `t2` (when the ping came) and `t3` (when the answer goes), on the phone's clock | at once, for each ping |
 | `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
 | `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
@@ -152,40 +152,77 @@ offset = ((t2 − t1) + (t3 − t4)) / 2      the phone's clock minus the host's
 rtt    = (t4 − t1) − (t3 − t2)            the round trip, without the phone's time to answer
 ```
 
-`RemoteClockFit` keeps the last 60 samples (`REMOTE_CLOCK_WINDOW`). Of them, the samples whose round
-trip is within 1.5× the least of the window (`REMOTE_CLOCK_RTT_FACTOR`), or 3 ms over it when that
-is more (`REMOTE_CLOCK_RTT_ALLOWANCE_MS`, T4.1), are the estimate's: a longer trip had more room
-for an asymmetry between the two legs, which the offset cannot see. The allowance is for the links
-whose least trip is a millisecond (two pages of one browser, an Ethernet cable): 1.5× it would keep
-only the samples that met no work at all on either main thread (4 of 31 in a minute, measured in
-the end-to-end suite between two pages encoding video), while a trip 3 ms over the least is off by
-1.5 ms at most, under what the factor already admits from a 6 ms trip up; on a Wi-Fi of 5 ms and
-more nothing changes. The offset is
-the median of their offsets. Once the kept samples span more than 60 s (`REMOTE_CLOCK_DRIFT_SPAN_MS`),
-a least-squares line `offset(t) = a + b·(t − t₀)` through them (host times counted from their mean,
-so that wall-clock values lose no precision) gives the drift, `driftPpm = b · 10⁶` (50 ppm is 3 ms a
+**The samples kept** (T4.2b). `RemoteClockFit` looks at the samples of the last two minutes
+(`REMOTE_CLOCK_WINDOW_MS`, at most 240 of them, `REMOTE_CLOCK_WINDOW`: two minutes of the first
+pings at 500 ms; the last 60 samples before T4.2b, the same at the steady 2 s). A sample's offset is
+off the truth by half the difference between its two legs, so by at most half its round trip, and a
+short trip had little room for an asymmetry; so the estimate stands on the samples of least round
+trip, as a clock filter takes them: those within a band of the window's least trip, 1.5 times it
+(`REMOTE_CLOCK_RTT_FACTOR`) or 3 ms over it when that is more (`REMOTE_CLOCK_RTT_ALLOWANCE_MS`,
+T4.1: a loopback's or an Ethernet cable's least trip is a millisecond), and at least the 10 of least
+round trip, however jittery the link (`REMOTE_CLOCK_MIN_KEPT`; the lower half of the window while it
+holds fewer than 20, so that the trip of a burst never decides a median of two). The offset is the
+median of their offsets. Once the kept samples span more than 60 s (`REMOTE_CLOCK_DRIFT_SPAN_MS`), a
+least-squares line `offset(t) = a + b·(t − t₀)` through them (host times counted from their mean, so
+that wall-clock values lose no precision) gives the drift, `driftPpm = b · 10⁶` (50 ppm is 3 ms a
 minute). `toHostMs(remoteMs)` and `toRemoteMs(hostMs)` use the line when there is one and the median
-before; they are exact inverses. `converged` (`REMOTE_CLOCK_CONVERGED`) is true when at least 10 kept
-samples span 10 s or more and their residuals from the estimate spread by less than 3 ms between the
-10th and the 90th percentile; it is withdrawn when the window's samples no longer agree (the network
-got busy, the phone slept and its clock stopped) and comes back once the window has turned over. The
-record for `clock.cameras[label].remote` (`params`) is `{offsetMs, driftPpm, rttMs (the least round
-trip), samples (the kept ones), residualP95Ms, since (the host time of the oldest kept sample)}`.
+before; they are exact inverses.
 
-The simulations in `remote-clock.test.ts` (a phone clock with an offset and a drift; a network with a
-base round trip and an exponential jitter on each leg, as queues give): the offset within 1 ms of the
-truth at round trips of 5, 20 and 40 ms with 1, 2 and 3 ms of jitter, converged; a drift of 37, −80
-and 0 ppm fitted to 0.8 ppm over a simulated hour, with the conversions within 1 ms thirty seconds
-before and after the newest sample; on a busy network (40 ms, 30 ms of jitter) the offset stays within
-2 ms but the sync is not called converged. The convergence rule wants the kept trips to agree within
-about 3 ms, which a phone awake on a quiet Wi-Fi gives and a phone in Wi-Fi power saving (round trips
-of 100 ms and more between bursts) does not: T4.3 measures this on the ThinkPhone.
+**Why at least ten.** The band alone is a share of the least trip, and a link whose trips jitter by
+more than that share keeps a handful of them. The owner's home Wi-Fi on 2026-10-04 (the ThinkPhone
+paired to the MacBook for 20.7 minutes, 18 attempts, read from the diagnostics events): the least
+round trip 5.4 to 8.5 ms, the phone's clock 238 to 245 ms behind the laptop's (moving by about 7 ms
+in 20 minutes, a few ppm); the band kept 2 to 14 samples of the 60 at the 36 cuts (7 at the median),
+and those agreed (their residuals' 95th percentile 0.7 to 1.7 ms), but their count flapped around the
+ten that convergence asked for: the fit converged twice and was withdrawn twice, and 10 of the 36 cuts
+went with it converged; the day before, two pairings of 12 and 4 minutes never converged (issue #61).
+Two pages of one browser that both encode video (the end-to-end pair on CI, T4.2's probe): every ping
+answered, the least trip 2 to 3 ms, the median 17 to 18, the band keeping 1 to 4 of 16. A count rather
+than a share of the window, so that the faster pings of the start keep better trips, not more of them.
 
-`ClockPinger` (the host) pings every 2 s and adds each answer to the fit, ignoring an answer to a ping
-it did not send (an old one after a reconnection) and a sample whose clocks ran backwards;
-`answerPings` (the phone) answers. T4.1's `RemoteCamerasService` owns one pinger per phone, keeps the
-fit across the phone's reconnections, sends `clock` back after each answer, and writes the fit's
-record into the session when it converges and every minute after (§8).
+**Converged** (`REMOTE_CLOCK_CONVERGED`) when at least 10 kept samples span 10 s or more, their
+residuals from the estimate spread by less than 5 ms between the 10th and the 90th percentile, and no
+sample of the window is farther from the estimate than half its round trip and those 5 ms: such a
+sample says that a clock moved (the phone slept, and its clock stopped), and the sync is withdrawn at
+that sample, rather than once enough such samples are kept for the spread to show it. The spread
+allowed was 3 ms until T4.2b: the ten trips of least round trip of a jittery Wi-Fi reach about 4 ms
+over the least, so their offsets spread by 2.5 to 3.5 ms, and 3 ms flapped as the band's count did;
+5 ms is a sixth of a frame at 30 fps, and still refuses a busy network (10 ms and more). `converged`
+is withdrawn when the window's samples no longer agree (the network got busy, a clock moved) and
+comes back once the window has turned over (two minutes). The record for `clock.cameras[label].remote`
+(`params`) is `{offsetMs, driftPpm, rttMs (the least round trip), samples (the kept ones),
+residualP95Ms, since (the host time of the oldest kept sample)}`; `window` gives the diagnostics the
+window's round trips, kept or not (their median and 95th percentile, how many, how many kept).
+
+**The simulations** in `remote-clock.test.ts` (a phone clock with an offset and a drift; a network of
+two legs, each a base and an exponential wait, as queues give). Those of T4.0 give the numbers they
+gave, the band keeping all or nearly all of their samples: the offset within 1 ms at round trips of 5,
+20 and 40 ms with 1, 2 and 3 ms of jitter, converged; a drift of 37, −80 and 0 ppm fitted to 0.8 ppm
+over an hour; on a busy network (40 ms, 30 ms of jitter) the offset within 0.3 ms, never converged.
+Pinged as `ClockPinger` pings (below), the first three converge after 10 s rather than 18 to 20 s at
+2 s, and are never withdrawn (at 40 ms, the band's rule was withdrawn up to four times in two
+minutes). The two of T4.2b, against the band alone (the rule of T4.0 to T4.2, kept in the test for
+comparison) pinged every 2 s as it was, three pairings each:
+
+| Simulation | The band alone, pinged every 2 s | T4.2b |
+|---|---|---|
+| The home Wi-Fi: each leg 2.8 ms and a wait of 5 ms on average, one ping in 20 held 100 to 300 ms on its way to the phone (Wi-Fi power saving), so the least trip about 6 ms and the median 14; the phone 240 ms behind, drifting by 5 ppm; 20 minutes | kept 3 to 26 of 60 (10 to 12 at the median); converged after 98 to 104 s, withdrawn 13 to 15 times | converged after 10.5 to 12 s, never withdrawn; the offset within 1.1 to 1.5 ms of the truth at the 99th percentile of the samples while converged, 0.7 ms at the end (2.3 ms at worst, for 4 s of one pairing: a drift fitted through ten samples at 50 ppm for a while) |
+| Two loaded pages of one browser: each leg 1 ms and a wait of 9 ms on average, so the least trip 2 to 3 ms and the median 16 to 19; 5 minutes | kept 1 to 10 of 60; converged after 130 s in one pairing, never in the two others | converged after 13.5 to 22 s, withdrawn 1 to 5 times; the offset within 1.9 ms while converged |
+
+The drift fitted through the ten or so samples a jittery Wi-Fi keeps in two minutes is good to about
+15 ppm (the home Wi-Fi's: 3 to 16 ppm for a true 5), a millisecond a minute: the conversions of T4.2
+are within that, and T4.3's drift applied at a clip's time may want a longer history.
+
+**The pings** (`clock-sync.ts`). `ClockPinger` (the host) pings every 500 ms (`FAST_PING_INTERVAL_MS`)
+until an answer leaves the fit converged, or for the first minute at most (`FAST_PINGS_MS`), then
+every 2 s (`PING_INTERVAL_MS`): a new connection's fit has its ten samples over ten seconds in about
+ten seconds, and a fit kept across a reconnection, converged still, is back at the steady rate at its
+first answer. It adds each answer to the fit, ignoring an answer to a ping it did not send (an old one
+after a reconnection) and a sample whose clocks ran backwards; `answerPings` (the phone) answers.
+T4.1's `RemoteCamerasService` owns one pinger per phone, keeps the fit across the phone's
+reconnections, sends `clock` back after each answer, writes the fit's record into the session when it
+converges and every minute after (§8), and says how the sync goes in the diagnostics every minute of
+the connection, converged or not (`rtc.clock`, `docs/DIAGNOSTICS.md`).
 
 ## 5. The signaling and the pairing token (`signaling.ts`, `pairing.ts`)
 
@@ -268,7 +305,7 @@ keeps the phone's first frame time as `t0RemoteMs` and the estimate that convert
 | The clock sync never converges (Wi-Fi power saving, a busy network) | the cuts and the conversions go with the estimate there is (§9), the window widened by its margin; the records say `converged` false | nothing to do |
 | The host page reloads, or another host page pairs the phone | the clips expected are not given up (no note): the attempt is uploaded without them; the phone, paired again with a new code, offers them first, and the host takes those of attempts it has, as additions | the staged clips are kept, and offered to the next connection to the same session; another session's join deletes them |
 | The receiver cannot store a file (no room) | `file-abort` with the reason; the failure reported | the send rejects with `aborted`; the clip stays on the phone |
-| The clocks disagree (the phone slept, its clock stopped) | the new samples disagree with the window's: `converged` is withdrawn, the state says syncing, and comes back once the window turned over (two minutes at 2 s) | nothing to do; the host converts with the fit it has |
+| The clocks disagree (the phone slept, its clock stopped) | the first sample after is farther from the estimate than its round trip allows: `converged` is withdrawn at once, the state says syncing, and comes back once the window turned over (two minutes) | nothing to do; the host converts with the fit it has |
 | A busy network (round trips of tens of ms, scattered) | the offset stays within a few ms, the sync is not called converged; T4.1 shows the round trip and the spread | nothing to do |
 | A frame that is not a message (a bug, another app on the channel) | `MessageLink.onError` reports it; the frame is dropped, the connection kept | the same |
 | The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time: the camera goes from the list at once (its entry stays in the session), the transport closed and the peer document deleted with its candidates; the clips it has not sent are given up at once (the notes say they are missing), and still taken if it pairs again and offers them | Leave sends `leave` and closes the connection 250 ms later, once the word is out; a page that goes (`pagehide`) sends it and leaves the connection to the browser |
@@ -300,18 +337,19 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    stale token) has its documents deleted, which ends the phone's call at once rather than after 30 s.
    The host sends its `hello` as the channel opens and waits 10 s for the phone's: another protocol
    version, or no hello, is sent away (`leave` with the reason, `rtc.failed`).
-4. **Connected.** The host puts the camera into the session (`SessionService.putCamera`: `local:
-   false`, `remote: {label, platform}` from the phone's hello, the label the session gives the device,
-   `phone-rear` or `phone-rear-2`, two phones told apart by their host labels), pings every 2 s
-   (`ClockPinger`, one `RemoteClockFit` per phone, kept across its reconnections) and sends `clock`
-   after each answer; when the fit converges, and every minute after, the fit's record goes into
-   `clock.cameras[label].remote` (the clapperboard fields stay at 0 until T4.3 measures the lag) and
-   into the diagnostics (`rtc.clock`). The phone answers the pings, sends `state` and a `thumbnail`
-   (a JPEG of at most 320 px from its preview) every 2 s, and `hello` again when its camera changes
-   (another camera, the framing). The host's list shows the name, the label, the state, the sync, the
-   latest report and the picture; the phone shows the host, the state, the clock as reported, the
-   battery and a thermal hint (the frame rate under 80% of the camera's nominal), and holds the wake
-   lock.
+4. **Connected.** The host puts the camera into the session (`SessionService.putCamera`:
+   `local: false`, `remote: {label, platform}` from the phone's hello, the label the session gives
+   the device, `phone-rear` or `phone-rear-2`, two phones told apart by their host labels), pings
+   (`ClockPinger`, one `RemoteClockFit` per phone, kept across its reconnections: every 500 ms until
+   the fit converges, then every 2 s, §4) and sends `clock` after each answer; when the fit
+   converges, and every minute after, the fit's record goes into `clock.cameras[label].remote` (the
+   clapperboard fields stay at 0 until T4.3 measures the lag), and every minute of the connection,
+   converged or not, the sync goes into the diagnostics (`rtc.clock`, with the window's round trips
+   since T4.2b). The phone answers the pings, sends `state` and a `thumbnail` (a JPEG of at most 320
+   px from its preview) every 2 s, and `hello` again when its camera changes (another camera, the
+   framing). The host's list shows the name, the label, the state, the sync, the latest report and
+   the picture; the phone shows the host, the state, the clock as reported, the battery and a
+   thermal hint (the frame rate under 80% of the camera's nominal), and holds the wake lock.
 5. **A drop.** The transport restarts ICE by itself (§2). Once it ends without a `leave`, the host
    lists the camera as reconnecting for five minutes and answers a call that presents its token again
    (only while reconnecting: a second phone shown the same code cannot take a connected camera's

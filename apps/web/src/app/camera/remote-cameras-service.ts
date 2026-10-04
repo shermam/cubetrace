@@ -120,7 +120,11 @@ export const HELLO_TIMEOUT_MS = 10_000;
 /** How long a camera that lost its connection stays listed as reconnecting before it is removed. */
 export const RECONNECT_WINDOW_MS = 5 * 60_000;
 
-/** How often the fit's record goes into the session and the diagnostics while it is converged. */
+/**
+ * How often the clock sync goes into the diagnostics while the camera is connected (`rtc.clock`,
+ * `minute` while converged, with the fit's record into the session too; `syncing` before, T4.2b,
+ * so that a link that never converges still says how it behaves).
+ */
 export const CLOCK_RECORD_MS = 60_000;
 
 /**
@@ -143,7 +147,7 @@ interface Peer {
   offs: (() => void)[];
   /** Each connection of the peer has a number: an older one's end is not the newer one's. */
   generation: number;
-  /** Set once the fit converged, for the convergence event and the record once a minute. */
+  /** Whether the fit had converged at its last answer, for the convergence and withdrawal events. */
   converged: boolean;
   removalTimer: unknown;
   recordTimer: unknown;
@@ -156,11 +160,13 @@ interface Peer {
  * offer; the first peer that presents the token is answered (`TRANSPORT_CONNECTOR`, the real
  * `WebRtcTransport` or the tests' memory pairs) and the pairing closed, so that the token is taken
  * once. Over the channel the host sends its `hello`, takes the phone's (its device, its build and
- * its camera), pings every 2 s (`ClockPinger`, one `RemoteClockFit` per phone) and tells the phone
- * what it measures (`clock`), and keeps the phone's `state` and `thumbnail` for the list. The camera
- * goes into the session's `cameras[]` with `local: false` and `remote` naming the device, under the
- * label the session gives it (`SessionService.putCamera`), and its clock fit into
- * `clock.cameras[label].remote` when the fit converges and every minute after. A phone whose
+ * its camera), pings (`ClockPinger`, one `RemoteClockFit` per phone: every 500 ms until the fit
+ * converges, then every 2 s) and tells the phone what it measures (`clock`), and keeps the phone's
+ * `state` and `thumbnail` for the list. The camera goes into the session's `cameras[]` with
+ * `local: false` and `remote` naming the device, under the label the session gives it
+ * (`SessionService.putCamera`), and its clock fit into `clock.cameras[label].remote` when the fit
+ * converges and every minute after (the diagnostics' `rtc.clock` every minute of the connection,
+ * converged or not). A phone whose
  * connection ends without a `leave` is listed as reconnecting for five minutes, during which its
  * call with the same token is answered again; then it is removed; a phone that leaves, or a camera
  * the host removes (`leave` sent, the peer document deleted), goes at once. Its entry stays in the
@@ -544,6 +550,7 @@ export class RemoteCamerasService {
       }),
     );
     pinger.start();
+    this.scheduleRecord(peer);
     // The clips (T4.2): the cuts it has not answered go now, its offers and files are taken.
     const camera: CutCamera = {
       id: peer.camera.id,
@@ -744,7 +751,10 @@ export class RemoteCamerasService {
 
   // ---- The clock sync ----
 
-  /** An answer came: the sync shown and sent back; the record at convergence and once a minute. */
+  /**
+   * An answer came: the sync shown and sent back; the event and the record at convergence, the event
+   * at a withdrawal (the minute's are {@link scheduleRecord}'s).
+   */
   private sampled(peer: Peer, fit: RemoteClockFit): void {
     const params = fit.params;
     const converged = fit.converged;
@@ -768,24 +778,31 @@ export class RemoteCamerasService {
       peer.converged = true;
       this.recordClock(peer, params, 'converged');
       this.putClock(peer, { ...params, converged: true });
-      this.scheduleRecord(peer);
     } else if (!converged && peer.converged) {
       peer.converged = false;
       this.recordClock(peer, params, 'withdrawn');
-      this.clearRecord(peer);
     }
   }
 
+  /**
+   * Once a minute while the camera is connected: `rtc.clock` with the sync as it is (`minute`, and the
+   * fit's record into the session, while converged; `syncing` before, once the fit has an answer).
+   */
   private scheduleRecord(peer: Peer): void {
     this.clearRecord(peer);
     peer.recordTimer = this.timers.setTimeout(() => {
       peer.recordTimer = null;
-      if (peer.converged && peer.camera.state === 'connected') {
-        const params = peer.fit.params;
-        this.recordClock(peer, params, 'minute');
-        this.putClock(peer, { ...params, converged: true });
-        this.scheduleRecord(peer);
+      if (peer.camera.state !== 'connected') {
+        return;
       }
+      if (peer.fit.samples > 0) {
+        const params = peer.fit.params;
+        this.recordClock(peer, params, peer.converged ? 'minute' : 'syncing');
+        if (peer.converged) {
+          this.putClock(peer, { ...params, converged: true });
+        }
+      }
+      this.scheduleRecord(peer);
     }, CLOCK_RECORD_MS);
   }
 
@@ -803,7 +820,13 @@ export class RemoteCamerasService {
     }
   }
 
+  /**
+   * The `rtc.clock` event: the fit's record, and the window's round trips (T4.2b: their median and
+   * 95th percentile, how many it holds and the share kept), which say how the link behaves whether
+   * the fit converged or not.
+   */
   private recordClock(peer: Peer, params: RemoteClockParams, why: string): void {
+    const window = peer.fit.window;
     this.diagnostics.record('rtc.clock', {
       peer: peer.camera.device.label,
       camera: peer.camera.label,
@@ -814,6 +837,10 @@ export class RemoteCamerasService {
       driftPpm: params.driftPpm,
       samples: params.samples,
       residualP95Ms: params.residualP95Ms,
+      windowSamples: window.samples,
+      keptShare: window.samples === 0 ? null : round2(window.kept / window.samples),
+      rttP50Ms: round1(window.rttP50Ms),
+      rttP95Ms: round1(window.rttP95Ms),
     });
   }
 
@@ -916,4 +943,14 @@ export class RemoteCamerasService {
       );
     });
   }
+}
+
+/** `value` to a tenth. */
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/** `value` to a hundredth. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
