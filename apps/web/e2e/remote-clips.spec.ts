@@ -66,7 +66,11 @@ async function bend(page: Page, settings: Record<string, number | boolean>): Pro
   );
 }
 
-/** The files of attempt `index`'s folder, with their sizes, read in the page. */
+/**
+ * The files of attempt `index`'s folder, with their sizes, read in the page. The app replaces a
+ * file by moving a new one over it (`writeTextFile`), and a read at that instant finds no file:
+ * the folder is read again then, a few times, as {@link fileText} does.
+ */
 async function attemptFiles(
   page: Page,
   sessionId: string,
@@ -74,31 +78,54 @@ async function attemptFiles(
 ): Promise<Record<string, number>> {
   return page.evaluate(
     async ({ sessionId, folder }) => {
-      let dir = await navigator.storage.getDirectory();
-      for (const name of ['sessions', sessionId, 'attempts', folder]) {
-        dir = await dir.getDirectoryHandle(name);
-      }
-      const files: Record<string, number> = {};
-      for await (const [name, handle] of dir.entries()) {
-        if (handle.kind === 'file' && !name.endsWith('.tmp')) {
-          files[name] = (await handle.getFile()).size;
+      for (let tries = 1; ; tries++) {
+        try {
+          let dir = await navigator.storage.getDirectory();
+          for (const name of ['sessions', sessionId, 'attempts', folder]) {
+            dir = await dir.getDirectoryHandle(name);
+          }
+          const files: Record<string, number> = {};
+          for await (const [name, handle] of dir.entries()) {
+            if (handle.kind === 'file' && !name.endsWith('.tmp')) {
+              files[name] = (await handle.getFile()).size;
+            }
+          }
+          return files;
+        } catch (error: unknown) {
+          if (!(error instanceof DOMException) || error.name !== 'NotFoundError' || tries === 5) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
       }
-      return files;
     },
     { sessionId, folder: String(index).padStart(4, '0') },
   );
 }
 
-/** A file of the session's folder, as text: `session.json`, or `attempts/0001/<name>`. */
+/**
+ * A file of the session's folder, as text: `session.json`, or `attempts/0001/<name>`. The app
+ * replaces a file by moving a new one over it (`writeTextFile`), and a read at that instant finds
+ * no file (a `NotFoundError`, which failed a poll of the record once in T4.2b's runs): it is read
+ * again then, a few times, 100 ms apart.
+ */
 async function fileText(page: Page, sessionId: string, path: string[]): Promise<string> {
   return page.evaluate(
     async ({ sessionId, path }) => {
-      let dir = await navigator.storage.getDirectory();
-      for (const name of ['sessions', sessionId, ...path.slice(0, -1)]) {
-        dir = await dir.getDirectoryHandle(name);
+      for (let tries = 1; ; tries++) {
+        try {
+          let dir = await navigator.storage.getDirectory();
+          for (const name of ['sessions', sessionId, ...path.slice(0, -1)]) {
+            dir = await dir.getDirectoryHandle(name);
+          }
+          return await (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
+        } catch (error: unknown) {
+          if (!(error instanceof DOMException) || error.name !== 'NotFoundError' || tries === 5) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
       }
-      return (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
     },
     { sessionId, path },
   );
