@@ -1980,7 +1980,8 @@ phase 3 (T2.0–T2.14, T3.0–T3.10).
   not, and the office rig stays the laptop's own webcam (design §4). Signaling is the FirebaseRTC
   pattern on the modular SDK: `sessions/{id}/peers/{peerId}` holds the offer and the answer, with
   `callerCandidates` and `calleeCandidates` under it; owner-only rules with shape checks; the host
-  deletes a peer's documents when it leaves or after an hour. The QR the host shows is the app's URL
+  deletes a peer's documents when its connection ends or its call is refused (the hour's cleanup of
+this design was not built: follow-up (p)). The QR the host shows is the app's URL
   with the session id and a one-time pairing token (`/camera?session=<id>&token=<t>`; the token is
   also typed by hand); the host accepts the first peer that presents it and refuses the token again.
 - **Time.** The dataset stays on the host clock. The phone keeps its own (`performance.timeOrigin +
