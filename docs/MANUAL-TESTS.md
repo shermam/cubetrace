@@ -208,9 +208,9 @@ cubetrace:cubetrace-data/users/` totals them, and `rclone copy cubetrace:cubetra
 - An attempt uploads once its clips are saved, a second or two after it ends; `session.json` goes
   again about two minutes after the session's last change, not with every attempt.
 - The day's quota, per account and UTC day: 15 GB and 3,000 files signed (6 GB and 1,200 before 2026-10-03), every signature counted. An
-  attempt with its clips and its gyro file is six files (T3.7), so at most 200 attempts a day upload
-  (fewer with `session.json`); past it, the uploads wait until 00:00 UTC (21:00 in Brasília), and the
-  panel says until when.
+  attempt with its clips and its gyro file is six files (T3.7), so at most 500 attempts a day upload
+  (300 with a paired phone's clips too, ten files each; fewer with `session.json`); past it, the
+  uploads wait until 00:00 UTC (21:00 in Brasília), and the panel says until when.
 - Only one tab uploads at a time (a Web Lock); another tab's attempts go at the queue's next look at
   the device's sessions, within 10 minutes, or at the next start.
 - The QA view's "last synced" is this device's; another device's is not stored.
@@ -994,3 +994,63 @@ device and what happened.
   for 20 minutes on the home Wi-Fi), every solve has the phone's two clips, and the tile keeps moving.
   At the end, write the phone's temperature by hand and its battery level, and whether its Camera page
   ever said throttled.
+
+## After T4 — the desk rig
+
+The whole rig once, for 0.4.0 (`docs/PLAN.md` T4.4), as `README.md`, "The desk rig", sets it up: on
+https://shermam.github.io/cubetrace/ once its footer reads `cubetrace 0.4.0 · <commit>`, the MacBook
+as the host (its FaceTime camera on, the GAN 12 ui, signed in, Upload sessions on) and the ThinkPhone
+as its camera (the same account, Chrome or the installed app, on its stand and plugged in), both on
+the home Wi-Fi, "Record remote cameras" and "Live preview from phones" on (Camera settings → Cameras,
+both on by default), the lamp on; a second phone for the last item, if one is at hand. Go through the
+items in this order; the "After T4.1" to "After T4.3" items above are the detail of each part, and
+the known limitations in `README.md` are expected. The events say most of it (`docs/DIAGNOSTICS.md`,
+"After T4"); write down what they cannot show, next to the item, with the device and what happened.
+The coordinator then reads the round with `npm run round-report` and fills `docs/DEVICES.md`'s Remote
+cameras rows and the live preview's cost from the events.
+
+- [ ] The rig paired: the ThinkPhone on its stand at another angle than the MacBook's camera (from
+  above, or from the side at about 45°), the lamp on, each device's framing rectangle around the cube
+  and the hands (the phone's on its Camera page: Camera settings → Edit the framing). On the MacBook,
+  Camera settings → Cameras → Add camera, and the QR code scanned with the phone's camera app: the
+  phone says "Connected · <the MacBook's name>", the MacBook lists the phone with its picture every
+  2 s and then "synced · round trip … · offset … · drift … ppm" within seconds, and the phone's tile
+  is in the top right corner of the MacBook's preview on the Timer page. Write the time from the scan
+  to "Connected", and whether both pictures keep the cube sharp and inside their rectangles while
+  you scramble and solve.
+- [ ] The sync checks: the MacBook's own, due by itself before the first scramble ("Camera lags the
+  cube by X ms (±Y)"), then the phone's, from its line under the MacBook's preview ("Sync: phone-rear
+  has no check in this session", then Sync check: "phone-rear lags the cube by X ms (±Y)"). Write
+  both results, and what the phone's Clock line said during its check.
+- [ ] Three solves: after each, the phone's Clips line says a clip waits for the host for a few
+  seconds, then "each attempt’s clips go to the host as they are cut" again, and the solve's badge
+  says four clips. Once the Sessions page says the attempts are uploaded, each attempt's folder in
+  the bucket has ten files: `attempt.json`, the four clips with their frames files and `gyro.json`.
+  Write how long the phone's line took to go back after each solve.
+- [ ] The viewer: the badge of one of the three opens the clip viewer with four buttons ("Scramble ·
+  laptop" to "Solve · phone-rear"); the phone's solve plays from its angle, its moves and the 3D cube
+  under it in step with its picture, and the MacBook's again when chosen. Download says "all 4 clips,
+  their frame times, the gyroscope and attempt.json" and gives ten files. Write whether the phone's
+  moves look early or late against its picture, and by how much.
+- [ ] The live preview off and on: "Live preview from phones" off for a minute: the tile shows the
+  phone's picture every 2 s; on again: live again within seconds.
+- [ ] Twenty minutes of solves on the rig, the preview on: the MacBook's Cameras list says synced
+  throughout (issue #61), every solve's badge says four clips, and the tile keeps moving. At the end,
+  write the phone's temperature by hand, its battery, and whether its Camera page said the frame rate
+  dropped (the phone may be hot).
+- [ ] A walk out of the Wi-Fi's reach: right after a solve, while the phone's Clips line says a clip
+  waits, walk away with the phone for a minute and come back: both say reconnecting, then connected
+  again without a new code, and the clip comes. Write how long each took.
+- [ ] The phone's Wi-Fi off for three minutes right after a solve: two minutes after the solve the
+  attempt is uploaded without the phone's clip and the session's notes say `remote clip missing:
+  solve of attempt <n> from phone-rear: …`; Wi-Fi on: the phone connects again, its clip comes, the
+  notes say `remote clip late: …`, and the bucket gets the phone's two files of it.
+- [ ] New session right after a solve: the MacBook lists the phone as "waiting for the phone's last
+  clips (n)" for a few seconds, the solve's badge then says four clips, and the phone says the host
+  let it go ("… the session ended."). Then Add camera again on the MacBook, and Join again on the
+  phone with the new code (or scan the new QR code): the phone is connected to the new session.
+- [ ] The second phone, if one is at hand: a name of its own in its Settings → This device (another
+  than the ThinkPhone's; every phone's default is "Android phone"), signed in to the same account,
+  paired with a second Add camera while the ThinkPhone is connected: listed as `phone-rear-2`, a
+  second tile over the preview, and its own sync check from its own line. Two solves: each badge says
+  six clips, and each attempt's folder in the bucket has fourteen files.
