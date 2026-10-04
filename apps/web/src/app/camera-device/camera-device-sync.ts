@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, effect, inject, signal, untracked } from '@angular/core';
 import type { MotionMeterInfo, MotionSample } from '@cubetrace/capture';
 import {
   MAX_MOTION_FRAMES,
@@ -43,8 +43,9 @@ interface Run {
  * (`sync-meter`), until `sync-stop`, the connection's end or {@link SYNC_MAX_MS}. The host places the
  * times on its own clock with the clock sync and matches the motion against the cube's turns: the
  * analysis is the host's, the phone only measures. A phone that cannot measure (not recording, its
- * frames unreadable) says so (`sync-error`), which ends the host's check. `active` says a check is
- * under way, for the Camera page.
+ * frames unreadable) says so (`sync-error`), which ends the host's check, and so does a recording
+ * that stops during a check (the camera off or changed: its frames are another camera's, or none).
+ * `active` says a check is under way, for the Camera page.
  */
 @Injectable({ providedIn: 'root' })
 export class CameraDeviceSync {
@@ -59,6 +60,25 @@ export class CameraDeviceSync {
   readonly active = this.activeSignal.asReadonly();
 
   private run: Run | null = null;
+
+  constructor() {
+    // The recording stops during a check: the pipeline's watch ends without a word, so the host is
+    // told here, at once, rather than seeing its frames stop.
+    effect(() => {
+      const recording = this.capture.status() === 'recording';
+      untracked(() => {
+        const run = this.run;
+        if (!recording && run !== null) {
+          this.stop();
+          run.link.trySend({
+            type: 'sync-error',
+            id: run.id,
+            message: 'the phone stopped recording',
+          });
+        }
+      });
+    });
+  }
 
   /** A connection with the host is open: its checks are measured. Returns what stops listening. */
   attach(link: MessageLink): () => void {

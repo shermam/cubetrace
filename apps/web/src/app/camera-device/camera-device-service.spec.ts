@@ -708,7 +708,7 @@ describe('CameraDeviceService', () => {
     expect(sync.active()).toBe(false);
   });
 
-  it("says so when it cannot measure: not recording, or its frames' pixels unreadable (T4.3)", async () => {
+  it("says so when it cannot measure: not recording, its frames' pixels unreadable, the recording stopped (T4.3)", async () => {
     const host = await joined();
     host.link?.send({ type: 'sync-start', id: 1 });
     await pump(10);
@@ -730,13 +730,33 @@ describe('CameraDeviceService', () => {
     });
     expect(TestBed.inject(CameraDeviceSync).active()).toBe(false);
 
-    // A check under way stops with the connection.
+    // The recording stops during a check (the camera off): the host is told at once.
     host.link?.send({ type: 'sync-start', id: 3 });
     await pump(10);
-    expect(r.starter.last.watches[1].stopped).toBe(false);
+    const stopped = r.starter.last;
+    expect(stopped.watches[1].stopped).toBe(false);
+    TestBed.inject(CameraDeviceCapture).setWanted(false);
+    await pump(10);
+    expect(host.of('sync-error').at(-1)).toEqual({
+      type: 'sync-error',
+      id: 3,
+      message: 'the phone stopped recording',
+    });
+    expect(stopped.watches[1].stopped).toBe(true);
+    expect(TestBed.inject(CameraDeviceSync).active()).toBe(false);
+
+    // A check under way stops with the connection.
+    TestBed.inject(CameraDeviceCapture).setWanted(true);
+    await pump(10);
+    r.starter.last.emitStats(statsOf(3));
+    host.link?.send({ type: 'sync-start', id: 4 });
+    await pump(10);
+    const watch = r.starter.last.watches.at(-1);
+    expect(watch?.stopped).toBe(false);
     host.drop();
     await pump(10);
-    expect(r.starter.last.watches[1].stopped).toBe(true);
+    expect(watch?.stopped).toBe(true);
+    expect(host.of('sync-error')).toHaveLength(3);
   });
 
   it('sends its camera as the live preview while the host asks for it, and says what it cost (T4.3)', async () => {
