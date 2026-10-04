@@ -247,7 +247,7 @@ camera, the rear one, and the microphone, and connects: its line says "Connected
 name> (macOS)", and its Clock line "syncing · …", then "synced · round trip … · offset …". Without
 the camera app, open https://shermam.github.io/cubetrace/camera on the phone and type the code (in
 any case, with or without the space). The MacBook lists the phone with its name, `phone-rear`,
-"connected for …", its picture every 2 s, what it reports ("recording · 30 fps · sharpness … ·
+"connected for …", its picture every 2 s, what it reports ("recording · 29.9 fps · sharpness … ·
 framing … · battery …") and the clock sync, "syncing · n samples · round trip …" until "synced ·
 round trip … · offset … · drift … ppm": within seconds on a quiet Wi-Fi (10.5 to 12 s in a simulation
 of the owner's, `docs/RTC.md` §4). On a busy Wi-Fi, or with the phone saving power on it, the sync
