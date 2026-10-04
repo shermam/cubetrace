@@ -942,6 +942,22 @@ describe('ClipViewer', () => {
     expect(element.querySelector('[data-testid="clip-facts"]')?.textContent.trim()).toMatch(
       /^phone-rear\.solve\.mp4: /,
     );
+    // Download says how many clips it gives (T4.4: it said "both clips" of four).
+    expect(element.querySelector('.actions .muted')?.textContent.trim()).toBe(
+      'all 4 clips, their frame times and attempt.json',
+    );
+    fixture.componentRef.setInput('attempt', {
+      ...ATTEMPT,
+      video: [
+        ...ATTEMPT.video.map((c) => ({ ...c, local: false })),
+        phone('scramble', -2100),
+        phone('solve', -1100),
+      ],
+    });
+    await update();
+    expect(element.querySelector('.actions .muted')?.textContent.trim()).toBe(
+      'the 2 clips on this device, the frame times and attempt.json',
+    );
   });
 
   it('downloads both clips, their frame times and attempt.json, named after the attempt', async () => {

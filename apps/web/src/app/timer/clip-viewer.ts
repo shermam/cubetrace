@@ -701,20 +701,25 @@ export class ClipViewer {
   protected readonly downloadError = signal<string | null>(null);
   /**
    * What Download gives: the clips still on this device (T3.3), their frame times, the gyroscope
-   * file when the attempt has one (T3.7) and the record.
+   * file when the attempt has one (T3.7) and the record. An attempt with a phone's clips (T4.2) has
+   * four or more: "all 4 clips".
    */
   protected readonly downloadText = computed(() => {
     const { video, gyro } = this.attempt();
     const rest = gyro === null ? ' and attempt.json' : ', the gyroscope and attempt.json';
     const here = video.filter((clip) => clip.local !== false).length;
     if (here === video.length) {
-      return video.length === 1
-        ? `the clip, its frame times${rest}`
-        : `both clips, their frame times${rest}`;
+      if (video.length === 1) {
+        return `the clip, its frame times${rest}`;
+      }
+      const every = video.length === 2 ? 'both clips' : `all ${String(video.length)} clips`;
+      return `${every}, their frame times${rest}`;
     }
-    return here === 0
-      ? `the frame times${rest} (the clips are in the cloud)`
-      : `the clip on this device, the frame times${rest}`;
+    if (here === 0) {
+      return `the frame times${rest} (the clips are in the cloud)`;
+    }
+    const onDevice = here === 1 ? 'the clip' : `the ${String(here)} clips`;
+    return `${onDevice} on this device, the frame times${rest}`;
   });
   /** Incremented by every clip read: a slower, older read then knows it lost. */
   private reads = 0;
@@ -1021,7 +1026,7 @@ export class ClipViewer {
     }
   }
 
-  /** Downloads both clips' MP4s and frames files, the gyro file when there is one, and attempt.json. */
+  /** Downloads the clips' MP4s and frames files, the gyro file when there is one, and attempt.json. */
   protected async download(): Promise<void> {
     const record = this.attempt();
     this.downloading.set(true);
