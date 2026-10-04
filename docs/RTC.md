@@ -458,7 +458,7 @@ clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the
    the window's least-round-trip sample before; a cut waits for the clock sync's first answer (at
    most 10 s: a phone paired again starts a new fit), never for convergence, which a busy Wi-Fi may
    never give (the first pairing on real hardware never converged on the owner's home Wi-Fi, and
-   T4.3 revisits the criterion). The window is widened on each side by the estimate's margin, the
+   T4.2b revisited the criterion, §4). The window is widened on each side by the estimate's margin, the
    95th percentile of the kept round trips plus that of the residuals, and 500 ms at least
    (`CUT_MARGIN_MS`: half a round trip is the most a symmetric path's offset is off by, and the
    Wi-Fi's power-saving bursts of 100 to 300 ms are covered several times over, for about a second

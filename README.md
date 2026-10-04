@@ -216,8 +216,16 @@ An attempt filmed by the laptop and a phone has four clips (`laptop.solve.mp4`,
 `phone-rear.solve.mp4`, …), all uploaded with it; it waits up to two minutes after its end for the
 phone's, then goes without them and the session's notes say which are missing (a clip that comes
 later is added and uploaded then). Camera settings → Cameras → "Record remote cameras" (on by
-default) turns this off. The clip viewer names each clip's camera. The phone's sync check (its
-camera's lag) and a live preview come with T4.3.
+default) turns this off. The clip viewer names each clip's camera.
+
+Each phone has a sync check of its own (T4.3): its line under the Timer page's preview runs the
+laptop's check on the phone's camera (draw the phone's framing rectangle around the cube first, on
+its Camera page), and its lag goes into the session for its later clips, as the laptop's does. And
+each phone sends a small live picture of its camera (a fifth of its resolution, at most 300 kbps;
+its recording is not touched), shown as a tile in the top right corner of the Timer page's preview:
+tap it to make it the main picture, and the laptop's tile to swap back; without the laptop's camera
+the phone's picture is the main one. Camera settings → Cameras → "Live preview from phones" (on by
+default) turns it off.
 
 ## Cloud
 
