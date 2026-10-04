@@ -120,10 +120,42 @@ async function events(page: Page): Promise<{ kind: string; data: Record<string, 
 }
 
 /**
+ * The phone's pill as a failure should read it: its state, and the problem line when it has one (why
+ * a join was refused, why the host is gone).
+ */
+async function pill(phone: Page): Promise<string> {
+  const state = (await phone.getByTestId('device-state').getAttribute('data-state')) ?? '';
+  const problem = (await phone.getByTestId('device-problem').allTextContents()).join(' ').trim();
+  return problem === '' ? state : `${state}: ${problem}`;
+}
+
+/**
+ * `ready` once the pair can record an attempt: the phone connected, the clock sync with an answer
+ * (a cut's estimate: before the fit keeps three samples, the offset of the trip of least round trip,
+ * which on loopback places the clock within a few ms), and the phone recording for longer than the
+ * next attempt's lead and margin (connected for 6 s); otherwise the lines that say what is missing.
+ * Not a number of samples kept: between two pages of one browser that both encode, most round trips
+ * are over the keep rule's band (1.5 times the least, or 3 ms over it), and the fit can keep one or
+ * two samples for half a minute while every ping is answered.
+ */
+async function readiness(phone: Page, row: Locator): Promise<string> {
+  const state = await pill(phone);
+  const host = (await row.getByTestId('remote-camera-state').allTextContents()).join(' ').trim();
+  const sync = (await row.getByTestId('remote-camera-sync').allTextContents()).join(' ').trim();
+  // "connected for 35 s", "connected for 1 min 05 s".
+  const minutes = Number(/(\d+) min/u.exec(host)?.[1] ?? 0);
+  const seconds = Number(/(\d+) s$/u.exec(host)?.[1] ?? 0);
+  const connectedFor = host.startsWith('connected for ') ? minutes * 60 + seconds : -1;
+  return state === 'connected' && sync.includes('round trip') && connectedFor >= 6
+    ? 'ready'
+    : `phone: ${state}; host: ${host}; sync: ${sync}`;
+}
+
+/**
  * The host's page signed in on the demo, its first attempt (recorded before any camera) deleted,
  * its camera on and recording; then a phone (`bent` as the suite asks) paired through the QR's URL,
- * listed as `laptop-2` (the same fake camera on "another device"), recording, and with a few
- * answers of the clock sync, by which time its buffer holds the next attempt's margins.
+ * listed as `laptop-2` (the same fake camera on "another device"), recording, and ready for an
+ * attempt ({@link readiness}). A precondition that fails says why, in the lines the pages show.
  */
 async function pairedPhone(
   context: BrowserContext,
@@ -163,9 +195,8 @@ async function pairedPhone(
   await fakeAccount(phone);
   await fakeSignaling(phone);
   await phone.goto(`${url.pathname}${url.search}`);
-  await expect(phone.getByTestId('device-state')).toHaveAttribute('data-state', 'connected', {
-    timeout: 45_000,
-  });
+  // Connected; a join refused fails with its reason (the pill's problem line).
+  await expect.poll(() => pill(phone), { timeout: 45_000 }).toBe('connected');
   await expect(phone.getByTestId('device-picture-line')).toContainText('recording', {
     timeout: 15_000,
   });
@@ -174,17 +205,7 @@ async function pairedPhone(
   await expect(row.getByTestId('remote-camera-report')).toContainText('recording', {
     timeout: 15_000,
   });
-  // Four answers of the clock sync (a ping every 2 s): the fit's own estimate from then on, and the
-  // phone has recorded for longer than the next attempt's lead and margin.
-  await expect
-    .poll(
-      async () => {
-        const sync = (await row.getByTestId('remote-camera-sync').textContent()) ?? '';
-        return sync.startsWith('synced') ? 99 : Number(/(\d+) samples?/u.exec(sync)?.[1] ?? 0);
-      },
-      { timeout: 30_000 },
-    )
-    .toBeGreaterThanOrEqual(4);
+  await expect.poll(() => readiness(phone, row), { timeout: 30_000 }).toBe('ready');
   return { phone, sessionId, bucket };
 }
 

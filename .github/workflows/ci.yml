@@ -50,6 +50,13 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
+      # The report cannot be fetched from everywhere the failures are read: each failed test's
+      # context (the page as it was) goes into the log too.
+      - name: Print the failed tests' contexts
+        if: failure()
+        run: >-
+          [ ! -d apps/web/e2e/test-results ] ||
+          find apps/web/e2e/test-results -name error-context.md -exec sh -c 'echo "== $1"; cat "$1"' _ {} \;
       # The cloud project: the app's own Firebase SDK against the Auth, Firestore and Functions
       # emulators, its uploads into a sink on the runner (BUCKET_PROVIDER=local). The Firestore
       # emulator's jar comes from the cache above; the other two are part of the CLI. Its report, on a

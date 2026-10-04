@@ -2230,6 +2230,24 @@ pairing; a phone adds about six events per attempt on the host, so a day with a 
 diagnostics' daily cap of 2,000 at about 155 attempts; the convergence criterion itself is T4.3's. PR
 #62.
 
+**After CI's runs of the PR** (each of its two runs failed one test of `remote-clips.spec.ts` in the
+pair's fixture, never in the clips): the fixture waited for 4 samples on the host's sync line, which
+counts the trips the clock fit keeps (`params.samples`: those within the band, 1.5 times the least
+round trip or 3 ms over it), not the pings answered. Between two pages of one browser that both
+encode, every ping is answered (16 of 16 in 30 s in a probe, and still with both pages' CPU
+throttled 4, 12 and 25 times) but the fit's round trips have medians of 17 to 18 ms against a least
+of 2 to 3 ms, so the band keeps 1 to 4: the e2e pair's kept count is low under load because of the
+band, not because pings go unanswered (the fit's retuning is its own task, with issue #61's Wi-Fi).
+The fixture now waits for what the tests need (the phone connected, an answer of the clock sync, whose
+least-round-trip estimate places the clock within a few ms on loopback, and 6 s connected, for the
+next attempt's lead and margin in the phone's buffer), a failed precondition prints the phone's pill
+and problem line and the host's state and sync lines, and CI prints every failed test's
+`error-context.md`. The first run's refusal (the phone joining for about 11 s, then refused) did not
+reproduce here, even at 25 times; its timing is one of the two 10 s hello waits, the only deadlines of
+that length on the path (the phone's first call does not retry, and the host's wait closes the
+signaling under a phone still connecting), which a starved runner can miss, and the clock bend
+touches neither; the next failure prints its reason.
+
 ### T4.3 — the sync check on a remote camera, the drift fit applied, the live preview
 
 **Goal.** A remote clip's `syncResidualMs` means the same as a local one's, and the host frames the
