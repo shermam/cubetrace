@@ -742,7 +742,14 @@ clips come (T4.2 notes them missing): the host should hold its `leave` at the se
 are unanswered, for a bounded time (10–15 s). (m) ~~A paired phone adds about six diagnostics events per
 attempt on the host, so the daily cap of 2,000 (`DAILY_CAP`, T3.9) is reached at about 155 attempts a
 day with the owner's cadence of 130–170: raise it (Firestore's cost is nothing at that scale)~~, done by
-T4.2a (#63): the cap is 5,000.
+T4.2a (#63): the cap is 5,000. (n) "attempt N could not be indexed: Missing or insufficient permissions" on the
+phone (3 times on 2026-10-03/04): a record re-saved in a later page load rewrote its index document with
+`upload` reset to pending, which the rules refuse (`keepsUpload`); #63 removed the main trigger (the re-save
+when clips are deleted by policy); a late re-save of an older attempt (a remote clip after a host reload)
+still hits the index's per-page-load `created` and the refused `upload`. (o) When core's reader gains a
+defaulted field, every older record reads back as a new text and the queue signs its `attempt.json` once
+more at the next reload of its session (T3.7 did this once for all earlier records): hash the file as
+written, or leave the reader's defaults out of the hash.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -2003,6 +2010,7 @@ phase 3 (T2.0–T2.14, T3.0–T3.10).
 | T4.0 | `rtc`: the data-channel protocol, chunked transfer with backpressure and resume, the clock sync maths, Firestore signaling with rules and the pairing token, in-memory fakes | T3.5 | ✅ #58 (2026-10-03) |
 | T4.1 | `web`: the Camera page (join by QR or token, preview, framing, sharpness, state) and the host's Cameras panel (Add camera, the list, thumbnails); the connection's lifecycle; the clock sync running; the camera registered in the session | T4.0 | ✅ #59 (2026-10-03) |
 | T4.2 | `web`, `capture`, `upload`: remote cuts and clip transfer into the attempt's folder and record; the upload of remote clips, late clips as additions; diagnostics events | T4.1 | ✅ #62 (2026-10-04) |
+| T4.2a | `upload`, `web`: deleting an uploaded clip leaves its record as uploaded (no `attempt.json` re-signed; `local` from the folder); the diagnostics daily cap 5,000; the clock record's effect on `session.json` measured | T4.2 | ✅ #63 (2026-10-04) |
 | T4.3 | `web`, `capture`: the sync check on a remote camera; frame times converted with the drift fit; the live preview track; measurements in `docs/DEVICES.md` | T4.2 | ⬜ |
 | T4.4 | the desk rig: docs, "After T4" items, the round report's checklist, `0.4.0` | T4.3 | ⬜ |
 
