@@ -721,11 +721,13 @@ result, and earlier clips then point at the wrong device; a second device under 
 Found after phase 3 (2026-10-03), also unscheduled: (f) the clip viewer's drag turns cubing.js's camera
 orbit, whose latitude stops at the poles and which has no roll, so some orientations of the cube in the
 picture cannot be reached by dragging (issue #57; the fix rotates the puzzle itself with a view
-quaternion in place of the orbit); (g) after the phone deleted uploaded clips by policy, the queue
+quaternion in place of the orbit); (g) ~~after the phone deleted uploaded clips by policy, the queue
 re-uploaded `attempt.json` for some 35 old attempts at once (14 KB each, harmless, but every file
 counts against the day's quota): the record's re-saves that change nothing the dataset holds should
-not re-sign the file; (h) a diagnostics batch flushed as the page unloads can be lost (T3.9): a
-`keepalive` REST write would close it; (i) the other `settings.changed` events, `wake.lock` and
+not re-sign the file~~, done by T4.2a (#63): the deletion saves nothing, the device keeping which
+clips it holds in `uploads.json` and the attempts' folders; (h) a diagnostics batch flushed as the
+page unloads can be lost (T3.9): a `keepalive` REST write would close it; (i) the other
+`settings.changed` events, `wake.lock` and
 `storage.persistence` are recorded in effects (T3.9), so a change followed at once by an unload loses
 its event (the Diagnostics switch itself settles before the page goes since #59), and a switch toggled
 before `AuthService` attaches the account goes to the ring, which a toggle off then clears. (j) The remote camera's picture on the host (T4.1) is the thumbnail at the bottom of the Camera
@@ -737,9 +739,10 @@ pairing (two connections of 12 and 4 minutes on the home Wi-Fi, no `rtc.clock` e
 `converged` (the current estimate, a padded window, the numbers in the record); T4.3 measures the real
 round trips and tunes the criterion. (l) New session right after a solve lets the paired phone go before its last
 clips come (T4.2 notes them missing): the host should hold its `leave` at the session's end while cuts
-are unanswered, for a bounded time (10–15 s). (m) A paired phone adds about six diagnostics events per
+are unanswered, for a bounded time (10–15 s). (m) ~~A paired phone adds about six diagnostics events per
 attempt on the host, so the daily cap of 2,000 (`DAILY_CAP`, T3.9) is reached at about 155 attempts a
-day with the owner's cadence of 130–170: raise it (Firestore's cost is nothing at that scale).
+day with the owner's cadence of 130–170: raise it (Firestore's cost is nothing at that scale)~~, done by
+T4.2a (#63): the cap is 5,000.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -1696,7 +1699,8 @@ the client in batches, never updated or deleted (rules, tests, a JSON Schema and
 (2) a `DiagnosticsService` with `record(kind, data, scope?)`, cheap, never throwing, batching every
 5 s, at 20, and when the page hides or goes away, Firestore's cache carrying the batch offline; only
 signed in and with the setting on, the events raised signed out kept in a ring of the last 500 and
-written at a sign-in during the page's life; a cap of 2,000 a local day, then `error.*` alone;
+written at a sign-in during the page's life; a cap of 2,000 a local day (5,000 since T4.2a), then
+`error.*` alone;
 Settings → Account → Diagnostics, on by default, off after one last `settings.changed`; (3) a
 catalogue derived from the checklists, each item mapped to the kinds that are its evidence, in
 `docs/DIAGNOSTICS.md`; (4) a Diagnostics section of the QA view over the last 500 events; (5)
@@ -2238,7 +2242,8 @@ back within 20 ms; a transfer cut past 100 kB and resumed); the cloud suite 4. *
 session right after a solve lets the phone go before its last clips come (they are noted missing); a
 host page that reloads in the middle of a transfer starts that file again from 0 with the next
 pairing; a phone adds about six events per attempt on the host, so a day with a phone reaches the
-diagnostics' daily cap of 2,000 at about 155 attempts; the convergence criterion itself is T4.3's. PR
+diagnostics' daily cap of 2,000 at about 155 attempts (5,000 since T4.2a); the convergence criterion
+itself is T4.3's. PR
 #62.
 
 **After CI's runs of the PR** (each of its two runs failed one test of `remote-clips.spec.ts` in the
@@ -2258,6 +2263,49 @@ reproduce here, even at 25 times; its timing is one of the two 10 s hello waits,
 that length on the path (the phone's first call does not retry, and the host's wait closes the
 signaling under a phone still connecting), which a starved runner can miss, and the clock bend
 touches neither; the next failure prints its reason.
+
+### T4.2a — the record unchanged when its clips leave the device; the diagnostics' daily cap
+
+**Goal.** Follow-ups (g) and (m), from the owner's account on 2026-10-03 (1,199 files signed against
+the cap of 1,200, 228 of them `attempt.json` alone, in bursts after `storage.deleted`): deleting
+uploaded clips by policy signs nothing again, and a day of solves with a paired phone stays within
+the diagnostics' daily cap. Also: what the remote clock fit's record, written into `session.json`
+every minute (T4.1), does to the queue.
+
+**What changed.** (g) The deletion saved the whole record again only to set `video[].local` false
+(`SessionService.markClipsGone`), and the save reached the queue as any other. The queue's hash leaves
+`local` out, so a save from the timer's own copy signed nothing; but for any session but the current
+one the record was read back through core's reader, which writes the defaults of the fields added
+since the file was written (`truncatedStart`, `gyro`, `resyncs`), and any copy not byte for byte the
+uploaded one is a new text to the queue: `attempt.json` again, alone. The re-save also rewrote the
+attempt's index document, which, in a later page load than the one that created it, carries `upload`
+all pending, which the rules refuse (`keepsUpload`): a note in the session, and its `session.json`
+again. Now `releaseClips` (was `markClipsGone`) checks that the attempt is still there and has the
+timer's copy of the current session say the clips are gone, in memory, and saves nothing;
+`uploads.json` keeps `local` false; the queue keeps an MP4 missing from its folder done when
+`uploads.json` (or the index, when that is lost) has it done; `clipsOnDevice`, around
+`SessionService`'s store, sets `local` false on read from the attempts' folders (`AttemptFiles.list`)
+and saves attempts without it, so that neither the record nor its index document holds device state.
+Records written before keep their `local`, read as before. (m) `DAILY_CAP` is 5,000 (2,000 before).
+
+**Outcome (2026-10-04).** As above. Measured: a record the store reads back otherwise than it was
+uploaded, deleted by policy, is signed twice with the earlier release and once now (`queue.test.ts`,
+and a check against the earlier hook by hand); the end-to-end flow (one page, records this build
+wrote) signed `attempt.json` once before the change too, while its deletion wrote the attempt's index
+document again (2 writes of it against 1, its `upload` reset to pending in the fake index) and the
+device's `attempt.json` changed; now the file is unchanged byte for byte, the document not written,
+and `attempt.json` signed once by the end of the test. Not changed: a reader that gains a defaulted
+field gives every older record a new text, which the queue signs once more the next time it reads
+that record's session from the device (at a start, or its 10-minute look at a session not settled):
+by the code, T3.7's reader did so once for every record written before it. **The clock fit's record
+every minute** (item 3): each write restarts the queue's two minutes of quiet for `session.json`
+(`SESSION_QUIET_MS`), so it is not signed at all while a converged phone stays connected: in a
+two-hour simulation (171 attempts, 1,026 files, a 10-minute pause), `session.json` is signed twice
+without a phone (in the pause, and 1.7 min after the last attempt), never with the phone connected
+throughout, and once, 2.1 min after its last record, when the phone leaves at 120 min; a host page
+closed meanwhile sends it at its next start. Acceptable, and unchanged: it costs no quota and loses
+nothing (the index has the session's document as it changes); writing the fit every 10 minutes
+instead would let `session.json` go after each quiet window, up to six times an hour. PR #63.
 
 ### T4.3 — the sync check on a remote camera, the drift fit applied, the live preview
 
