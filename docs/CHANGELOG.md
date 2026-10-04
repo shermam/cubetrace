@@ -7,6 +7,31 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A paired phone's sync check, and its live picture over the host's preview (T4.3, phase 4;
+  `docs/RTC.md` §10; issue #60). Under the Timer page's preview each phone has a line of its own
+  ("Sync: phone-rear has no check in this session"), whose Sync check runs the laptop's check on the
+  phone's camera: the phone measures the motion inside its own framing rectangle and sends it, the
+  laptop matches it against the cube's turns through the clock sync, and the panel says
+  `phone-rear lags the cube by N ms (±S)`. The lag is kept in `clock.cameras[<label>]` beside the
+  clock sync, and the phone's later clips take it as their `syncResidualMs`, as the laptop's do
+  (`docs/DATA-MODEL.md` §6 says what a remote camera's lag is). Each phone also sends a small live
+  picture of its camera (a fifth of its resolution, at most 300 kbps and 15 frames a second; its
+  recording untouched): a tile in the top right corner of the host's preview on the Timer page, its
+  live video while it comes and its latest thumbnail otherwise, with the phone's framing rectangle;
+  a tap swaps it with the main picture, and with the host's camera off the first phone's picture is
+  the main one. Camera settings → Cameras → "Live preview from phones" (on by default). Diagnostics:
+  `sync.check` says `remote` and the clock sync that placed the phone's frames, `remote.clip` the lag
+  its clip took, `preview.started` and `preview.stopped` what the preview cost the phone's recording;
+  the round report's "After T4.3" items.
+- Development (T4.3): the protocol's `sync-start`, `sync-stop`, `sync-motion`, `sync-meter`,
+  `sync-error` and `preview` (additive within version 1); rtc's `PREVIEW_ENCODING`,
+  `PreviewChannel`, `previewStats` and `WebRtcTransport`'s `preview` option (a send-only video
+  transceiver in the first offer, no renegotiation), `Transport.preview`; core's `RemoteClockLine` and
+  `RemoteClockFit.line()`; the app's `RemoteCameraRegistry`, `CameraDeviceSync`, `CameraDevicePreview`
+  and `RemotePreviews`; the end-to-end suite's synthetic camera and the demo cube's turns at given
+  times (`apps/web/e2e/helpers/remote.ts`); the remote specs wait for six seconds of the phone's
+  recording before an attempt (their "recording" matched "not recording"), and their reads of the
+  origin private file system, `uploads.spec.ts`'s too, try again while the app replaces a file.
 - Remote cameras' clips (T4.2, phase 4; `docs/RTC.md` §9): a phone paired as a camera now records
   each attempt. The host asks it for the scramble's and the solve's clips at the moments it cuts its
   own, the window in the phone's clock through the clock sync's estimate, converged or not (the first
@@ -163,6 +188,12 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A phone's clip is placed on the host clock with the clock estimate of its cut, at the clip's own
+  time (T4.3, `docs/RTC.md` §4): T4.2 converted it with the estimate of the moment its files came,
+  which a phone that slept meanwhile (its clock stopped) moved, five minutes off after a five-minute
+  sleep in the simulation; the frames file's `remote.offsetMs` is now the offset applied at the clip's
+  first frame (`docs/DATA-MODEL.md` §9). A clip 10 minutes into a session with 50 ppm of drift is
+  placed within 1 ms.
 - The clock sync of a paired phone converges on a Wi-Fi whose round trips jitter (T4.2b,
   `docs/RTC.md` §4; issue #61): the estimate stands on the samples within a band of the least round
   trip and on at least the 10 of least round trip of the last two minutes (the band alone kept 2 to
