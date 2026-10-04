@@ -15,7 +15,11 @@
       "$ref": "#/$defs/app"
     },
     "t0HostMs": {
-      "description": "The host time of the clip's first frame, from the arrival fit.",
+      "description": "The host time of the clip's first frame, from the arrival fit; for a remote camera's clip, t0RemoteMs converted to the host clock through remote (T4.2).",
+      "type": "number"
+    },
+    "t0RemoteMs": {
+      "description": "A remote camera's clip (T4.2): its first frame's time on the phone's own clock, as the phone's capture placed it. Absent from the clips of the host's own cameras and from the files written before T4.2; there exactly when remote is.",
       "type": "number"
     },
     "dtMs": {
@@ -32,13 +36,13 @@
       "items": { "type": "integer", "minimum": 0 }
     },
     "arrival": {
-      "description": "The fit of the frames' arrival host times on their own timestamps that gives t0HostMs.",
+      "description": "The fit of the frames' arrival times on their own timestamps that gives t0HostMs (for a remote camera's clip, t0RemoteMs: the arrivals are on the phone's clock).",
       "type": "object",
       "additionalProperties": false,
       "required": ["offsetMs", "residualP95Ms"],
       "properties": {
         "offsetMs": {
-          "description": "The median of arrival host time minus the frame's timestamp, in ms.",
+          "description": "The median of arrival time minus the frame's timestamp, in ms.",
           "type": "number"
         },
         "residualP95Ms": {
@@ -47,7 +51,63 @@
           "minimum": 0
         }
       }
+    },
+    "remote": {
+      "description": "The clock sync a remote camera's clip was converted with (T4.2): the fit's record as session.json keeps it in clock.cameras[label].remote, when the host took it, whether it had converged then, and when that was. There exactly when t0RemoteMs is.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "offsetMs",
+        "driftPpm",
+        "rttMs",
+        "samples",
+        "residualP95Ms",
+        "since",
+        "converged",
+        "takenMs"
+      ],
+      "properties": {
+        "offsetMs": {
+          "description": "The phone's clock minus the host's, in ms, at the time of the fit's newest sample.",
+          "type": "number"
+        },
+        "driftPpm": {
+          "description": "How fast that offset grows, in parts per million; 0 before the samples spanned a minute.",
+          "type": "number"
+        },
+        "rttMs": {
+          "description": "The least round trip of the samples the estimate stands on, in ms.",
+          "type": "number",
+          "minimum": 0
+        },
+        "samples": {
+          "description": "How many samples the estimate stands on.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "residualP95Ms": {
+          "description": "The 95th percentile of the absolute residuals of their offsets from the estimate, in ms.",
+          "type": "number",
+          "minimum": 0
+        },
+        "since": {
+          "description": "The host time of the oldest of those samples.",
+          "type": "number"
+        },
+        "converged": {
+          "description": "Whether the fit had converged when the host took it.",
+          "type": "boolean"
+        },
+        "takenMs": {
+          "description": "The host time when the host took the fit to convert the clip's times.",
+          "type": "number"
+        }
+      }
     }
+  },
+  "dependentRequired": {
+    "t0RemoteMs": ["remote"],
+    "remote": ["t0RemoteMs"]
   },
   "$defs": {
     "cameraLabel": {

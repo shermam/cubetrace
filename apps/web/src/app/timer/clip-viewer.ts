@@ -131,9 +131,10 @@ export const CUBE_ASPECT_DEFAULT = 3.556;
  * The clips of an attempt (docs/PLAN.md, T2.4), in a modal dialog the solve list's clip badge opens:
  * the video of one (the solve's first), read from the origin private file system behind an object
  * URL that goes when it closes, next to the attempt's moves of that segment by their time into the
- * clip, the one the video shows highlighted (a click on a move goes to it); "Download" gives both
- * clips' MP4s and frames files, the attempt's gyro file when it has one (T3.7) and the attempt's
- * record, attempt.json. A clip deleted from the
+ * clip, the one the video shows highlighted (a click on a move goes to it); a button per clip, which
+ * names its camera's label too when the attempt has several cameras' clips (T4.2: a phone paired as
+ * a camera); "Download" gives the clips' MP4s and frames files, the attempt's gyro file when it has
+ * one (T3.7) and the attempt's record, attempt.json. A clip deleted from the
  * device once uploaded (`local` false, T3.3) says it is in the cloud in place of its video, and its
  * MP4 is not among the files downloaded.
  *
@@ -185,10 +186,14 @@ export const CUBE_ASPECT_DEFAULT = 3.556;
             type="button"
             data-testid="clip-segment"
             [attr.data-segment]="clip.segment"
+            [attr.data-camera]="clip.camera"
             [attr.aria-pressed]="clip.file === selected()?.file"
             (click)="choose(clip)"
           >
             {{ clip.segment === 'solve' ? 'Solve' : 'Scramble' }}
+            @if (severalCameras()) {
+              <span data-testid="clip-segment-camera">· {{ clip.camera }}</span>
+            }
             @if (clip.truncatedStart) {
               <span class="late" data-testid="clip-segment-late">· late</span>
             }
@@ -601,6 +606,10 @@ export class ClipViewer {
       null
     );
   });
+  /** The attempt has clips of several cameras (T4.2): each button names its camera. */
+  protected readonly severalCameras = computed(
+    () => new Set(this.attempt().video.map((clip) => clip.camera)).size > 1,
+  );
   /** The chosen clip's MP4 behind an object URL. */
   protected readonly url = signal<string | null>(null);
   protected readonly readError = signal<string | null>(null);

@@ -9,12 +9,14 @@ import { describe, expect, it } from 'vitest';
 import {
   ATTEMPT_SCHEMA,
   ATTEMPT_SCHEMA_V1,
+  FRAMES_SCHEMA,
   GYRO_SCHEMA,
   RecordError,
   SESSION_SCHEMA,
   SESSION_SCHEMA_V1,
   parseAttempt,
   parseCameraInfo,
+  parseFrames,
   parseGyro,
   parseSession,
   type AttemptRecord,
@@ -27,7 +29,9 @@ import {
   asVersion1Session,
   attemptWithVideo,
   dnfAttempt,
+  framesJson,
   gyroJson,
+  remoteFramesJson,
   sessionRecord,
   sessionWithCamera,
   solvedAttempt,
@@ -35,15 +39,22 @@ import {
 } from './test-records';
 
 const ajv = new Ajv2020({ allowUnionTypes: true, allErrors: true });
-// A gyro file has one version, 1: its schema stands for both entries, so that a file that says 2 is
-// refused by it as by the reader.
+// A gyro file has one version, 1, and a frames file one, 2: each one's schema stands for both
+// entries, so that a file that says another version is refused by it as by the reader.
 const isGyro = ajv.compile(GYRO_SCHEMA);
+const isFrames = ajv.compile(FRAMES_SCHEMA);
 const VALIDATE = {
   attempt: { 1: ajv.compile(ATTEMPT_SCHEMA_V1), 2: ajv.compile(ATTEMPT_SCHEMA) },
   session: { 1: ajv.compile(SESSION_SCHEMA_V1), 2: ajv.compile(SESSION_SCHEMA) },
   gyro: { 1: isGyro, 2: isGyro },
+  frames: { 1: isFrames, 2: isFrames },
 };
-const PARSE = { attempt: parseAttempt, session: parseSession, gyro: parseGyro };
+const PARSE = {
+  attempt: parseAttempt,
+  session: parseSession,
+  gyro: parseGyro,
+  frames: parseFrames,
+};
 type Kind = keyof typeof PARSE;
 
 /**
@@ -188,6 +199,11 @@ const CORPUS: [Kind, string, unknown][] = [
   ['attempt', 'the first attempt of the i3, with its clips', hardware('gan356i3').attempts[0]],
   ['session', 'a session with cameras', sessionWithCamera()],
   ['session', 'a new session', sessionRecord()],
+  [
+    'session',
+    "a session whose remote camera's clock was recorded for a cut before the fit converged (T4.2)",
+    changed(sessionWithCamera(), ['clock', 'cameras', 'phone-rear', 'remote', 'converged'], false),
+  ],
   ['session', 'a session of version 1', asVersion1Session(sessionRecord())],
   ['session', 'the session on the phone', hardware('thinkphone').session],
   ['session', 'the session of the i3, with its camera', hardware('gan356i3').session],
@@ -197,6 +213,8 @@ const CORPUS: [Kind, string, unknown][] = [
     'a gyro file of a cube without velocities, truncated',
     { ...gyroJson(), v: null, truncatedStart: true },
   ],
+  ['frames', 'the frames file of a clip of the host', framesJson()],
+  ['frames', "the frames file of a remote camera's clip (T4.2)", remoteFramesJson()],
 ];
 
 describe('parseAttempt and parseSession', () => {
@@ -287,6 +305,26 @@ describe('parseAttempt and parseSession', () => {
     expect(readSession.cube.productDate).toBeNull();
     expect(Object.keys(readSession).at(-1)).toBe('battery');
     expect(parseSession(session)).toEqual(session);
+  });
+
+  it("read a frames file as a new object, a remote camera's with its sync, and refuse a keyframe named twice or a remote field alone (T4.2)", () => {
+    for (const file of [framesJson(), remoteFramesJson()]) {
+      const read = parseFrames(structuredClone(file));
+      expect(read).toEqual(file);
+      expect(Object.keys(read)).toEqual(Object.keys(file));
+      expect(read.dtMs).not.toBe(file.dtMs);
+    }
+    expect(() => parseFrames({ ...framesJson(), keyframes: [0, 3, 3] })).toThrow(
+      'frames.json (schema 2): keyframes must name each frame once.',
+    );
+    const { remote, ...alone } = remoteFramesJson();
+    expect(remote).toBeDefined();
+    expect(() => parseFrames(alone)).toThrow(
+      "frames.json (schema 2): remote is missing: a remote camera's clip has both t0RemoteMs and remote.",
+    );
+    expect(() => parseFrames({ ...framesJson(), schema: 1 })).toThrow(
+      'frames.json: schema must be 2, got 1.',
+    );
   });
 
   it('read a gyro file, and refuse one whose arrays do not fit its samples (beyond the schema)', () => {

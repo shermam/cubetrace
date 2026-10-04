@@ -448,6 +448,7 @@ cube.
 | First render (T2.6) | `timer-render.spec.ts` | On the production build under `/cubetrace/`, after a demo solve (a session with a stored solve), the first animation frame that shows the clock comes within 2 s of `DOMContentLoaded`, with the camera setting off and on; with the camera (`getUserMedia`) and the storage (`navigator.storage.getDirectory`) each held back 3 s, the clock still comes within 2 s, and the solve list and the camera's preview after them. Recording is off in the file (no `MediaStreamTrackProcessor`), as in `timer-layout.spec.ts`. It prints the times: over three runs, the clock 44 to 83 ms after `DOMContentLoaded` with the camera off or on, the solve list 104 to 177 ms and the preview 137 to 194 ms; held back, the clock 39 to 104 ms, the list 3,056 to 3,121 ms and the preview 3,139 to 3,237 ms. |
 | Microphone (T2.12) | `microphone.spec.ts` | Chrome's fake camera at 30 fps and its microphone: Settings → Camera → Microphone says Raw, with its line of help; after demo solve 0 at speed 20, the Timer page without the demo cube (the session resumed, so no attempt and no sync check begins), the camera on: the codecs line ends with "opus, mic raw" and no notice shows; the export's `cameras[0].microphone` says `processing: 'raw'` with the four processing settings false, as the fake microphone reports them raw, and a sample rate and channels; Voice in Camera settings starts the recording again, which says "mic voice", and the export then says echo cancellation, noise suppression and gain control on; after a reload, Voice in Camera settings and in Settings, and "mic voice". It prints both records. |
 | Remote camera (T4.1) | `remote-camera.spec.ts` | Chrome's fake camera at 30 fps and the demo cube, signed in to the fake account: Add camera in Camera settings shows the QR code (its path begins with the finder pattern's first module), the token and the URL; a second page of the same browser context (the account and the settings are the context's) opens the URL as the camera device and pairs through the `BroadcastChannel` signaling (`helpers/signaling.ts`) and the real `RTCPeerConnection` on the machine's own interface: the phone's pill says connected, the host lists it with a thumbnail (`blob:`) within 5 s, as `laptop-2` (the same fake camera on "another device", the host's own being `laptop`), with its report; the sync converges within a minute (both pages read one browser's clock: the offset under 20 ms), `session.json` has the camera with `remote` and `clock.cameras["laptop-2"].remote` with at least 10 samples; Leave empties the list at once and the entry stays; a second pairing by the link pasted into the code field (after a text that is not a code is refused), then Remove on the host, which the phone reports; the events of both pages (`rtc.paired`, `rtc.connected`, `rtc.clock`, `rtc.disconnected`) in the account. In the encoding project (both pages encode). About 70 s. |
+| Remote clips (T4.2) | `remote-clips.spec.ts` | Chrome's fake camera at 30 fps and the demo cube, signed in to the fake account, the host and a second page paired as in `remote-camera.spec.ts`; the phone's page bent by `window.cubetraceE2eRemote` (development builds only): its connection's clock 5 s ahead of the page's, its connection cut once at the first chunk of a file past 100 kB. The first demo solve deleted, the camera on, the phone paired as `laptop-2` and ready (connected, an answer of the clock sync, 6 s connected: a failed precondition prints the phone's pill and problem line and the host's state and sync lines), then a demo attempt: its record lists four clips (`laptop` and `laptop-2`, scramble and solve) and its folder holds them with their frames files; the phone's frames files validate, keep `t0RemoteMs` 5 s (within 20 ms) after `t0HostMs`, the clip's `firstFrameHostMs`, with `remote` (the estimate, its offset within 20 ms of 5 s); the phone's solve clip covers the host's window and the 500 ms margin on both sides; `remote.clip` twice, one with `resumedBytes` above 0, after an `rtc.connected` reconnection; every cut sent with a margin of 500 ms or more; the phone's Clips line back to 0; the badge says 4 clips and the viewer names the cameras and plays the phone's solve; marked as a real cube's session and loaded again, the nine files and `session.json` in the fake bucket, with the device's sizes. A second test: a phone that ignores the cuts and a host whose wait is 10 s: the session's notes say `remote clip missing: scramble of attempt 1 from laptop-2: no clip within 10 s of the attempt's end` (and the solve's), `remote.clip.missing` twice for the wait, `attempt.done` with two clips, settled, 10 s after the end, and the upload has the laptop's five files and `session.json`. In the encoding project (both pages encode). |
 | Camera labels (T2.14) | `camera-labels.spec.ts` | Three of Chrome's fake cameras (`--use-fake-device-for-media-stream=device-count=3,fps=30`) and its microphone, demo solve 0 at speed 20: the solve that starts with the page deleted (Delete last); a solve recorded with `fake_device_0`, one with `fake_device_2`, chosen in Camera settings (the sync check is due for it, a camera without a check in the session: Later sets it aside), and one with `fake_device_0` again (no check is due: the session has its label, whose check was set aside); the export validates, with the entries `laptop` (`fake_device_0`) and `laptop-2` (`fake_device_2`) and no `clock.cameras` (the fake camera gives no check), each attempt's two clips named after its camera's label, in its folder in OPFS beside `attempt.json` alone, and the session's page says "laptop (fake_device_0), laptop-2 (fake_device_2)". `fake_device_1` is left out: it sends 16-bit depth frames (Y16, a `VideoFrame` whose `format` is null), which Chromium's VP9 encoder refuses ("OperationError: Encoding error"), as a probe of the three cameras found on 2026-10-02 (the other two send I420). About 32 s. |
 
 `timer.spec.ts`'s first test is T1.6b's flow (demo solve 0, the Sessions page after a page load, the
@@ -1819,3 +1820,50 @@ answers a message needs a step of its own) and settle the promises between them.
 right before it is never heard: both services close the connection 250 ms after the word
 (`LEAVE_GRACE_MS`); on `pagehide` they send it and leave the connection to the browser (the host
 deletes the peer documents too), since a timer may not run.
+
+## Remote clips in the app (T4.2)
+
+Added by T4.2 on 2026-10-03 (`docs/RTC.md` §9, `docs/ARCHITECTURE.md` "Remote cameras"):
+
+**The chunks.** `RemoteCutsService` is a root service that only `RemoteCamerasService` injects, so it
+ships in the Cameras section's lazy chunk with the clock estimate, and `CameraDeviceClips` with the
+staging in the Camera page's; nothing of either reaches the initial bundle. `ng build` on
+2026-10-03, raw: the initial bundle 264.96 kB, as on `main`; the Cameras section's chunk 40.45 kB
+against 26.72 kB, the Camera page's 41.74 kB against 31.97 kB, the chunk of `@cubetrace/rtc` both
+share 24.30 kB against 17.19 kB (the file transfer, which no page used before), core's shared chunk
+79.62 kB against 77.85 kB (`parseFrames`, `remoteFrames`), the QA page 17.83 kB against 16.21 kB,
+the clip viewer 24.03 kB against 23.73 kB, the clip worker 127.81 kB against 127.59 kB (the staging
+folder).
+
+**The fakes of the unit tests.** The host's spec (`remote-cuts-service.spec.ts`) pairs a phone over
+`MemoryConnector` that answers the pings 1,234.5 ms ahead and each cut with its files through the
+protocol's `FileSender` (at 1 MB/s for the test that drops the connection in the middle of a file),
+on a real `SessionService` whose attempts the session harness turns; the attempt's folder is a fake
+of `ATTEMPT_FILES` that keeps the writes. The phone's spec (`camera-device-clips.spec.ts`) answers
+the capture's saves itself, after planting the files the clip worker would have written in a
+`FakeDirectoryHandle` of `@cubetrace/storage`, and plays the host as the other end of a
+`MemoryTransport` pair whose store keeps a file's bytes across connections. It moves the clock in
+steps of 10 ms with two turns of the event loop each: a chunk is read from a `Blob`, which takes a
+turn, and coarser steps stall the transfer.
+
+**The end-to-end hooks.** `window.cubetraceE2eRemote` (`apps/web/src/app/rtc/e2e-remote.ts`, read in
+development builds only, as `cubetraceE2eSignaling` is): `clockOffsetMs` moves a page's
+`RTC_TIMERS` clock (the camera device's pongs, its cuts' times, its staging dates), since two pages
+of one browser share a clock and the conversion of a clip's times needs one that is off; the phone's
+capture keeps the page's clock, so the camera device moves a cut's window back onto it and the frames
+file's first frame time onto the connection's. `closeAfterBytes` closes the connection once, when
+the sender reads the first chunk of a file at or past the number, after the chunks before it have
+left (the channel's queue empty) and had half a second to arrive: `RTCPeerConnection.close` drops
+what the channel still holds, so a close at a count of bytes sent could leave the host holding
+nothing, and the resumption would not show. `ignoreCuts` plays a phone that never answers;
+`clipWaitMs` shortens the host's wait.
+
+**The pair's preconditions.** The fixture waits for what a test needs, never for a number of
+samples the clock fit keeps: the host's "n samples" counts the trips within the keep rule's band
+(1.5 times the least round trip, or 3 ms over it), and between two pages of one browser that both
+encode every ping is answered but most trips are not short. A probe on 2026-10-04 (both pages
+encoding, 30 s connected) counted 16 pings and 16 pongs, fit round trips of 2 to 72 ms with medians
+of 17 and 18 ms, and 1 to 4 kept; with both pages' CPU throttled 4, 12 and 25 times through CDP
+(`Emulation.setCPUThrottlingRate`), still every ping answered, medians of 22 to 24, 73 to 168 and
+529 to 586 ms, and 1 to 5 kept, the pairing itself done in 0.2 to 4.9 s. The old wait for 4 kept
+samples within 30 s failed 3 of 6 runs here and once in CI.

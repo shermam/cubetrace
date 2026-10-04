@@ -30,6 +30,7 @@ import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { watchBattery, type BatteryState } from './battery';
 import { CameraDeviceCapture } from './camera-device-capture';
+import { CameraDeviceClips } from './camera-device-clips';
 import { THUMBNAIL_GRABBER } from './thumbnail-grabber';
 
 /**
@@ -114,13 +115,16 @@ export const REFUSAL_TEXT: Readonly<Record<Exclude<PairingCheck, 'ok'>, string>>
  * answers a camera it lists as reconnecting), then says the host is gone. Leave sends `leave`,
  * closes the connection once the word is out, and lets the wake lock go; the page going (`pagehide`)
  * says `leave` as far as there is time. It never shows the timer and never starts
- * a session of its own.
+ * a session of its own. The host's cuts and the clips they make go through `CameraDeviceClips`
+ * (T4.2), which each connection is handed to: the clips staged for the session are offered first.
  */
 @Injectable({ providedIn: 'root' })
 export class CameraDeviceService {
   private readonly auth = inject(AuthService);
   private readonly camera = inject(CameraService);
   private readonly capture = inject(CameraDeviceCapture);
+  /** The host's cuts and the clips sent (T4.2). */
+  private readonly clips = inject(CameraDeviceClips);
   private readonly settings = inject(SettingsService);
   private readonly wakeLock = inject(WakeLockService);
   private readonly diagnostics = inject(DiagnosticsService);
@@ -163,6 +167,8 @@ export class CameraDeviceService {
   readonly reports = this.reportsSignal.asReadonly();
   /** The phone's battery, when the browser says. */
   readonly battery = this.batterySignal.asReadonly();
+  /** The clips cut for the host that it has not answered for (T4.2), staged on this phone. */
+  readonly pendingClips = computed(() => this.clips.pending());
   /** The thermal hint of the next `state`: throttled when the frame rate dropped under 80% of the nominal. */
   readonly thermal = computed<ThermalHint>(() => {
     const fps = this.camera.measuredFps();
@@ -190,6 +196,8 @@ export class CameraDeviceService {
   private pending: Promise<unknown> = Promise.resolve();
 
   constructor() {
+    // The clips staged more than a day ago go (T4.2).
+    this.clips.start();
     // Signed in with a code waiting: the join goes on.
     effect(() => {
       const account = this.auth.cloud();
@@ -327,6 +335,8 @@ export class CameraDeviceService {
       return;
     }
     this.joinedSignal.set({ sessionId, token: input.token });
+    // The clips staged for this session are offered first over each connection; others' go.
+    this.clips.join(sessionId);
     this.hold();
     this.setState('joining', null);
     await this.call(signaling, await hashToken(input.token), generation, false);
@@ -447,6 +457,8 @@ export class CameraDeviceService {
           this.disconnected(signaling, tokenHash, generation, reason ?? state);
         }
       }),
+      // The host's cuts, and the clips staged: offered first (T4.2).
+      this.clips.attach(link),
     );
     this.startReporting();
     const facts = {
@@ -663,7 +675,7 @@ export class CameraDeviceService {
       sharpness: this.camera.sharpness(),
       battery: this.batterySignal(),
       thermal: this.thermal(),
-      pendingClips: 0,
+      pendingClips: this.clips.pending(),
     });
     if (sent) {
       this.reportsSignal.update((count) => count + 1);

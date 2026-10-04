@@ -11,6 +11,7 @@
 // worker's global scope.
 import type { OpfsDirectoryHandle } from '@cubetrace/storage';
 
+import { SESSIONS_FOLDER } from './clip-files';
 import { deleteClipIf, writeClip } from './clip-writer';
 import { muxClip } from './mux';
 import {
@@ -63,10 +64,10 @@ export class ClipWorker {
   }
 
   async #save(job: ClipJob): Promise<void> {
-    const { id, sessionId, index, camera, segment, fpsNominal, app } = job.request;
+    const { id, sessionId, index, camera, segment, fpsNominal, app, staging } = job.request;
     try {
       const { mp4, frames, info } = await muxClip(job.cut, { camera, segment, audio: job.audio });
-      const root = await this.#env.opfsRoot();
+      const root = await stagingRoot(await this.#env.opfsRoot(), staging, sessionId);
       const clip = await writeClip(root, sessionId, index, camera, segment, mp4, frames, {
         codec: info.codec,
         audio: info.audio,
@@ -116,6 +117,25 @@ export class ClipWorker {
       });
     }
   }
+}
+
+/**
+ * Where a clip's `sessions/<sessionId>/…` goes: the file system's root, or a staging folder at the
+ * root with the session's folder made in it (T4.2, `SaveClipParams.staging`), so that `writeClip`,
+ * which wants the session's folder there, writes a camera device's clips as the host's.
+ */
+async function stagingRoot(
+  root: OpfsDirectoryHandle,
+  staging: string | undefined,
+  sessionId: string,
+): Promise<OpfsDirectoryHandle> {
+  if (staging === undefined) {
+    return root;
+  }
+  const folder = await root.getDirectoryHandle(staging, { create: true });
+  const sessions = await folder.getDirectoryHandle(SESSIONS_FOLDER, { create: true });
+  await sessions.getDirectoryHandle(sessionId, { create: true });
+  return folder;
 }
 
 /** The worker's global scope, as far as this file uses it. */

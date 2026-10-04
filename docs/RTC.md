@@ -7,8 +7,8 @@ T4.0 built it in `packages/rtc` (the code), `packages/core` (the clock maths, th
 the documents' shapes) and `firebase/firestore.rules` (the signaling's rules): the messages of the
 data channel, the file transfer, the clock sync, the signaling and the pairing token, and what each
 side does when something fails. The pages that use it came with T4.1 (§8 below: the lifecycle as the host's Cameras section and
-the phone's Camera page run it); the cuts and the transfer come with T4.2, the sync check and the
-live preview with T4.3. `docs/ARCHITECTURE.md` ("Remote cameras") places it in the app.
+the phone's Camera page run it), the cuts and the clips' transfer with T4.2 (§9); the sync check and
+the live preview come with T4.3. `docs/ARCHITECTURE.md` ("Remote cameras") places it in the app.
 
 **Stream for control, record locally for data.** One `RTCPeerConnection` between the two devices,
 made with Google's public STUN server (`stun:stun.l.google.com:19302`) and no TURN relay: on one Wi-Fi
@@ -45,9 +45,10 @@ file name without a path).
 | `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
 | `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
 | `thumbnail` | phone | `remoteMs`, `width`, `height`, `jpeg` (a JPEG of at most 320 px on its longer side) | every 2 s (binary) |
-| `cut` | host | `attempt`, `segment` (`scramble`, `solve`), `fromRemoteMs`, `toRemoteMs` (the window, in the phone's clock, converted by the host with the clock fit), `reason` (the timer's milestone: `armed`, `ended`) | when the host cuts its own camera |
-| `cut-done` | phone | `attempt`, `segment`, `files: [{name, bytes, kind}]` | the segment's files are muxed and staged |
-| `cut-failed` | phone | `attempt`, `segment`, `reason` | the window was older than the buffer, an encoder error |
+| `cut` | host | `attempt`, `scrambleShown` (the attempt's, on the host clock: an attempt begun again with the same index has another), `segment` (`scramble`, `solve`), `fromRemoteMs`, `toRemoteMs` (the window in the phone's clock, through the host's clock estimate and widened by its margin on each side, §9), `reason` (the timer's milestone: `armed`, `ended`), `camera` (the label the session gives the phone's camera: its files' first name) | when the host cuts its own camera; sent again as it was over a new connection while unanswered |
+| `cut-done` | phone | `attempt`, `scrambleShown`, `segment`, `files: [{name, bytes, kind}]` (the frames file first), `clip` (what the capture said of it: `codec`, `audio`, `width`, `height`, `fpsNominal`, `frames`, `crop`, `truncatedStart`, `lateMs`, `bufferSeconds`, `audioMissing`) | the clip is muxed and staged; offered again over each connection until the host's `clip-ack` |
+| `cut-failed` | phone | `attempt`, `scrambleShown`, `segment`, `reason` | the capture could not cut it: the phone not recording, an encoder error, no room |
+| `clip-ack` | host | `attempt`, `scrambleShown`, `segment`, `stored` (the clip is in the attempt's folder and record), `reason` (why not) | the clip is stored, or will not be taken (its attempt gone, its frames file unreadable): the phone deletes its copy either way |
 | `file-begin` | sender | `id` (this connection's number for the file), `name`, `bytes`, `kind` (`mp4`, `frames`), `attempt`, `segment` (null for a file of neither) | a file starts, or starts again after a reconnection |
 | `file-resume` | receiver | `id`, `offset` | the answer to `file-begin` (the bytes it already holds: 0 for a new file), and to a `file-done` whose checksum did not match (0: again from the start) |
 | `file-chunk` | sender | `id`, `offset`, `bytes` (binary: a 13-byte header, the kind `0x01`, the id as 4 bytes, the offset as 8 bytes, big-endian, then the bytes) | every chunk |
@@ -60,7 +61,8 @@ The thumbnail's binary frame is a 13-byte header too: the kind `0x02`, the time 
 width and the height as 2 bytes each, then the JPEG. `MessageLink` wraps a transport, decodes each
 frame and hands the message to the handlers of its type (`link.on('pong', …)`), reports a frame that
 is not a message (`onError`) and drops it, and sends messages encoded (`link.send`, or `trySend`,
-which does nothing on a closed transport).
+which does nothing on a closed transport). The fields of the cuts and `clip-ack` came with T4.2,
+additive within version 1: no build before T4.2 cuts.
 
 ## 2. The transport (`transport.ts`, `webrtc.ts`)
 
@@ -98,7 +100,7 @@ promises settle between them, until the promise settles.
 ## 3. The file transfer (`transfer.ts`)
 
 Each clip's MP4 and frames file goes from the phone to the host over the data channel, in order,
-the frames file first (T4.2 decides the order; the transfer takes any). The numbers: chunks of 64 KB
+the frames file first (§9; the transfer takes any order). The numbers: chunks of 64 KB
 (`CHUNK_BYTES`), or 16 KB (`SMALL_CHUNK_BYTES`) when the channel says its `maxMessageSize` is under
 64 KB; the channel's low threshold set to 256 KB (`BUFFERED_AMOUNT_LOW_THRESHOLD`); an
 acknowledgement every 1 MB (`ACK_EVERY_BYTES`).
@@ -116,7 +118,9 @@ in 2.9 s (14.5 MB/s), the wire alone taking 2.1 s and the three retransmissions 
 pacing is idle time.
 
 **Receiving.** `FileReceiver` listens on a link and puts the files into an `IncomingFiles` store
-(`MemoryIncomingFiles` in the tests; T4.2's keeps them in the origin private file system): on
+(`MemoryIncomingFiles` in the tests; the host's keeps them in the page's memory until the clip's
+record is written, §9: a clip is a few megabytes, and the page that holds the bytes is the one the
+next connection resumes into): on
 `file-begin` it opens the file in the store, which gives what it already holds of a file of that name
 and size (nothing for a new one), and answers `file-resume` with that offset; it appends each chunk in
 order (a chunk that repeats bytes already held is skipped; one that leaves a gap, or goes past the
@@ -133,7 +137,8 @@ the next connection it sends the file again (`file-begin`, the same name and siz
 answers with the bytes it holds, and the sender goes on from there, reading the bytes before the
 offset once more for the checksum, which covers the whole file. A file the receiver already completed
 goes again from 0 if it is sent again (the store opens a fresh file): the phone deletes its copy once
-acknowledged, so this happens only when the acknowledgement itself was lost with the connection.
+the host's `clip-ack` says what became of the clip, so this happens only when that word was lost
+with the connection (and the host, which has the clip, answers the file's offer at once).
 
 ## 4. The clock sync (`packages/core/src/remote-clock.ts`, `packages/rtc/src/clock-sync.ts`)
 
@@ -245,7 +250,10 @@ gives a remote camera its label with `labelFor`, as any camera (`phone-rear`, a 
 session's document gains `pairing`, the peer documents and their candidates get schemas of their own
 (`cloud-peer.schema.json`, `cloud-candidate.schema.json`) and readers (`parseCloudPeer`,
 `parseCloudCandidate`, `parseSessionPairing`), and the rules open all of it to the session's owner
-alone.
+alone. Since T4.2 the `remote` record of a camera clock may say `converged`: false for the estimate
+a first cut relied on before the fit converged (§9), true once it did; a remote camera's frames file
+keeps the phone's first frame time as `t0RemoteMs` and the estimate that converted it as `remote`
+(`docs/DATA-MODEL.md` §9).
 
 ## 7. Failure modes
 
@@ -254,14 +262,17 @@ alone.
 | The token is wrong, expired or already taken | `watchOffers` gives a peer whose `tokenHash` is not the pairing's (nor a reconnecting camera's): the host deletes its documents and shows nothing | `checkPairing` said so before any document was written; the page says to ask for a new code; a call the host never answers fails after 30 s |
 | Another version of the app on the phone | `hello.v` differs: `leave` with the reason, the connection closed, the camera not registered | the same; the page says to update |
 | The peer connection fails (the Wi-Fi dropped, the phone changed networks) | the transport reports `failed` or `closed`; the camera's entry says reconnecting for five minutes, during which a call with its token is answered again; then it goes; the clips in flight wait in the store | `restartIce()` then a new offer through the same peer document; once the transport ends, a new peer document (a new `call`) with the same token hash every few seconds for five minutes (the host answers a camera it lists as reconnecting), then the page says the host is gone |
-| The channel closes in the middle of a file | the receiver keeps the bytes held in its store; the attempt waits (`ClipsInFlight`, 120 s) | the sender's promise rejects with `closed`; the file is kept and sent again over the next connection, from the receiver's offset |
-| A chunk is corrupted (a bit flipped, a misplaced chunk) | the checksum at `file-done` does not match: `file-resume` from 0 | the file goes again, twice at most, then `file-abort`: the clip stays on the phone, the attempt's notes say it is missing |
+| The channel closes in the middle of a file | the receiver keeps the bytes held in the page's memory; the attempt waits for the clip (`ClipsInFlight`) until 120 s after its end | the sender's promise rejects with `closed`; the clip stays staged and is offered again, first thing, over the next connection: the file goes on from the receiver's offset |
+| A chunk is corrupted (a bit flipped, a misplaced chunk) | the checksum at `file-done` does not match: `file-resume` from 0 | the file goes again, twice at most, then `file-abort`: the clip stays on the phone and is offered again over the next connection; past the wait, the attempt's notes say it is missing |
+| The phone never answers a cut (asleep, its page frozen, its capture stopped) | 120 s after the attempt's end, the attempt goes to the upload queue without the clip and the session's notes say `remote clip missing: … from <label>: …` (`remote.clip.missing`); a clip that comes later is attached, noted late and uploaded as an addition | a cut it could not save is answered `cut-failed`, which the host gives up at once |
+| The clock sync never converges (Wi-Fi power saving, a busy network) | the cuts and the conversions go with the estimate there is (§9), the window widened by its margin; the records say `converged` false | nothing to do |
+| The host page reloads, or another host page pairs the phone | the clips expected are not given up (no note): the attempt is uploaded without them; the phone, paired again with a new code, offers them first, and the host takes those of attempts it has, as additions | the staged clips are kept, and offered to the next connection to the same session; another session's join deletes them |
 | The receiver cannot store a file (no room) | `file-abort` with the reason; the failure reported | the send rejects with `aborted`; the clip stays on the phone |
 | The clocks disagree (the phone slept, its clock stopped) | the new samples disagree with the window's: `converged` is withdrawn, the state says syncing, and comes back once the window turned over (two minutes at 2 s) | nothing to do; the host converts with the fit it has |
 | A busy network (round trips of tens of ms, scattered) | the offset stays within a few ms, the sync is not called converged; T4.1 shows the round trip and the spread | nothing to do |
 | A frame that is not a message (a bug, another app on the channel) | `MessageLink.onError` reports it; the frame is dropped, the connection kept | the same |
-| The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time: the camera goes from the list at once (its entry stays in the session), the transport closed and the peer document deleted with its candidates; the pending clips of the attempt are missing | Leave sends `leave` and closes the connection 250 ms later, once the word is out; a page that goes (`pagehide`) sends it and leaves the connection to the browser |
-| The host removes the camera or ends the session | `leave`, the connection closed 250 ms later, the peer document deleted with its candidates; a host page that goes (`pagehide`) sends `leave` and deletes the documents, as far as there is time | the page says the host let it go, with the reason; without the word (the host's page died), `onClosed('the documents are gone')` ends the transport and the phone calls again for five minutes, then says the host is gone |
+| The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time: the camera goes from the list at once (its entry stays in the session), the transport closed and the peer document deleted with its candidates; the clips it has not sent are given up at once (the notes say they are missing), and still taken if it pairs again and offers them | Leave sends `leave` and closes the connection 250 ms later, once the word is out; a page that goes (`pagehide`) sends it and leaves the connection to the browser |
+| The host removes the camera or ends the session | `leave`, the connection closed 250 ms later, the peer document deleted with its candidates; the clips the phone has not sent are given up (the notes say so); a host page that goes (`pagehide`) sends `leave` and deletes the documents, as far as there is time | the page says the host let it go, with the reason; without the word (the host's page died), `onClosed('the documents are gone')` ends the transport and the phone calls again for five minutes, then says the host is gone |
 
 ## 8. The lifecycle (T4.1)
 
@@ -315,3 +326,67 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    the connection to the browser (the host deletes the documents too, as far as there is time).
 7. **Diagnostics** (`docs/DIAGNOSTICS.md`): `rtc.paired`, `rtc.connected`, `rtc.disconnected`,
    `rtc.clock` and `rtc.failed`, on both devices.
+
+## 9. The clips (T4.2)
+
+How the host's `RemoteCutsService` (`apps/web/src/app/camera/remote-cuts-service.ts`) and the phone's
+`CameraDeviceClips` (`apps/web/src/app/camera-device/camera-device-clips.ts`) bring each attempt's
+clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the contract):
+
+1. **The cut.** The host cuts its own camera at the attempt's milestones (`RecordingService`): the
+   scramble's clip once the attempt is armed, the solve's once it ended, nothing of an attempt that
+   went without a record. At the same moments, with the same windows (`clip-windows.ts`), it asks each
+   camera of the Cameras section for its clip (`cut`, once per label: the label is the files' first
+   name), and holds the attempt back from the upload queue for each clip expected (`ClipsInFlight`).
+   A camera reconnecting gets its cuts when it is back. With "Record remote cameras" off (Camera
+   settings → Cameras; on by default) nothing is asked.
+2. **The window in the phone's clock.** The host converts the window with the camera's clock
+   estimate (`remote-estimate.ts`), converged or not: the fit's own (the kept samples' median offset,
+   and the drift once they span a minute) from 3 kept samples (`ESTIMATE_MIN_SAMPLES`), the offset of
+   the window's least-round-trip sample before; a cut waits for the clock sync's first answer (at
+   most 10 s: a phone paired again starts a new fit), never for convergence, which a busy Wi-Fi may
+   never give (the first pairing on real hardware never converged on the owner's home Wi-Fi, and
+   T4.3 revisits the criterion). The window is widened on each side by the estimate's margin, the
+   95th percentile of the kept round trips plus that of the residuals, and 500 ms at least
+   (`CUT_MARGIN_MS`: half a round trip is the most a symmetric path's offset is off by, and the
+   Wi-Fi's power-saving bursts of 100 to 300 ms are covered several times over, for about a second
+   more video per clip, half a megabyte at 4 Mbps); the host trims nothing. The first cut of a camera
+   writes the estimate it relied on into `clock.cameras[label].remote` with `converged: false` when
+   there is no record there yet; the fit's convergence overwrites it as T4.1 writes it. A cut sent
+   is sent again as it was (the same window) over a new connection while the phone has not answered.
+3. **The phone's clip.** The phone cuts once the window's end is in its buffer, and the encoder had
+   its 250 ms, through the capture's clip worker, into `camera-clips/sessions/<sessionId>/attempts/<index>/`
+   of its origin private file system, apart from its own sessions (`SaveClipParams.staging`): the
+   MP4 and the frames file (`phone-rear.solve.mp4`, `phone-rear.solve.frames.json`, its times on the
+   phone's clock), with `camera-clips/index.json`, the clips staged, written whole in one step as the
+   records are. A cut asked again is cut once; one of the same attempt and segment with another
+   `scrambleShown` (the attempt begun again) replaces the older clip. A cut the capture cannot save
+   is answered `cut-failed`, and the host gives the clip up at once.
+4. **The files.** The phone offers each staged clip (`cut-done`, with what the capture said of it)
+   and sends its frames file, then its MP4 (`FileSender`). The host takes them into memory
+   (`FileReceiver`; a file cut in the middle goes on from the bytes held over the next connection of
+   the same page), checks the frames file (`parseFrames`) and writes it into the attempt's folder with
+   its times on the host clock (`remoteFrames`: `t0RemoteMs` the phone's first frame time, `t0HostMs`
+   that time through the estimate of the moment, the estimate itself in `remote`, with `converged`
+   and when it was taken), then the MP4; the clip goes into the attempt's record (`attachClip`:
+   `firstFrameHostMs` the converted time; no `syncResidualMs` until T4.3's sync check measures the
+   camera's lag) and the host says so (`clip-ack`, `stored`). A clip the host does not take (its
+   attempt deleted or dropped, its frames file unreadable) is answered `stored: false` with why;
+   either way the phone deletes its copy.
+5. **The wait.** The host waits for an attempt's remote clips until 120 s after its end
+   (`REMOTE_CLIP_WAIT_MS`): then the attempt goes to the upload queue without them, and the session's
+   notes name the camera (`remote clip missing: solve of attempt 7 from phone-rear: no clip within
+   120 s of the attempt's end`). A clip the phone could not cut, or of a phone that left or was let
+   go (Leave, Remove, five minutes away, the session's end), is given up at once. A clip given up that
+   comes later is still attached and noted (`remote clip late: …`), and uploaded as an addition: the
+   upload queue signs only the files not uploaded yet, with `attempt.json` again.
+6. **Kept until the host's word.** The phone keeps a staged clip until its `clip-ack`, and offers the
+   clips staged for the session first, the oldest first, over each connection: a reconnection, the
+   Camera page loaded again, the phone paired again with a new code (a host page loaded again takes
+   the clips of attempts it has, as additions). When the phone joins a session, the clips staged for
+   other sessions are deleted, and when the Camera page opens, those staged more than a day ago
+   (`STAGED_MAX_AGE_MS`): a phone keeps no clip that no host will ask for. The page says how many
+   clips wait, and `state.pendingClips` tells the host.
+7. **Diagnostics** (`docs/DIAGNOSTICS.md`): `remote.cut` (sent, done, failed), `remote.clip` (the
+   bytes, the transfer's time and throughput, the bytes resumed), `remote.clip.late`,
+   `remote.clip.missing`; the QA view counts the clips by camera label.

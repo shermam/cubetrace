@@ -189,6 +189,14 @@ export interface SaveClipParams {
    * writes names the build that wrote it); absent, the frames file names none.
    */
   readonly app?: AppBuild;
+  /**
+   * A folder at the root of the origin private file system under which the clip's
+   * `sessions/<sessionId>/attempts/<index>/` is made, the session's folder included, instead of the
+   * root's own `sessions` (T4.2: a camera device stages the clips it cuts for the host in
+   * `camera-clips`, apart from its own sessions); absent, the clip goes into the session store's
+   * folders, whose session folder must exist.
+   */
+  readonly staging?: string;
 }
 
 /**

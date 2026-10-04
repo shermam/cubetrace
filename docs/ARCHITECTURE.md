@@ -130,8 +130,9 @@ read with `VideoFrame.copyTo`, that changed by more than 12 levels), the clapper
 middle of each single cube turn's motion in the frames around it, against the picture just before it,
 and the median lag of the turns kept (the fifth farthest from the median left out of the spread)
 becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
-Idle time is never stored. Remote cameras (phase 4) will cut the same way and ship their clips over
-the WebRTC data channel; phase 3 uploads them.
+Idle time is never stored. Remote cameras (phase 4, below) cut the same way on the phone and ship
+their clips over the WebRTC data channel into the attempt's folder (T4.2); the uploads take them
+with the rest.
 
 ## Remote cameras (phase 4)
 
@@ -139,7 +140,8 @@ A phone joins a session as a camera (`docs/PLAN.md`, the phase 4 board; the cont
 `docs/RTC.md`): the same app on a page of its own, the capture pipeline above running on the phone,
 and one `RTCPeerConnection` to the host with a reliable ordered data channel, made with Google's
 public STUN server and no TURN (the two devices on one Wi-Fi). T4.0 built what needs no page,
-`packages/rtc`; the pages, the services and the cuts come with T4.1–T4.3:
+`packages/rtc`; T4.1 the pages and the connection's services, T4.2 the cuts and the clips, and the
+sync check and the preview come with T4.3:
 
 ```
 host (the session's device)                                                 phone (the camera device)
@@ -155,9 +157,9 @@ the attempt's folder: <label>.<segment>.mp4 + frames.json (times converted to th
 ```
 
 The host decides everything the dataset needs: the cuts' windows (converted into the phone's clock
-with the fit, and back when the frames file comes), the labels (`labelFor`, as for any camera, with
-`remote` naming the device), the records, the upload. The phone only films, cuts, stages and sends;
-what it misses is a missing clip, never a lost attempt. Everything of `packages/rtc` but
+with the clock estimate, and back when the frames file comes), the labels (`labelFor`, as for any
+camera, with `remote` naming the device), the records, the upload. The phone only films, cuts,
+stages and sends; what it misses is a missing clip, never a lost attempt. Everything of `packages/rtc` but
 `WebRtcTransport` is plain TypeScript tested in Node: the transport and the signaling are interfaces
 with in-memory fakes (`MemoryTransport.pair` with a delay, a bandwidth and losses; `MemorySignaling`
 over `MemorySignalingBackend`), so that the services are unit-tested without WebRTC and the fast
@@ -194,12 +196,41 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   the `SharpnessMeter` and the `CameraControls` of Camera settings, and never shows the timer; leaving
   it leaves the session and puts the camera back as it was.
 
+**The clips (T4.2; `docs/RTC.md` §9 has the flow step by step).**
+
+- The host: `RemoteCutsService` (`apps/web/src/app/camera/remote-cuts-service.ts`), beside
+  `RecordingService` and on the same milestones (`SessionService.milestones$`) and windows
+  (`clip-windows.ts`, which both use), asks each camera listed for each attempt's clips, the window
+  in the phone's clock through `clockEstimate` (`remote-estimate.ts`: the fit's estimate converged or
+  not, its least-round-trip sample before it keeps three, and the margin the window is widened by),
+  and holds the attempt back from the upload queue meanwhile (`ClipsInFlight`, one entry per clip
+  expected, until it is stored or given up 120 s after the attempt's end). It takes the phone's files
+  into memory (`FileReceiver`), writes the frames file converted (`remoteFrames` of core) and the MP4
+  into the attempt's folder (`ATTEMPT_FILES`, whose `write` takes bytes in parts), attaches the clip
+  (`attachClip`) and answers `clip-ack`; the notes and the diagnostics say what is missing or late.
+  `RemoteCamerasService` hands it each connection (`connected`, with the camera's fit, its label and
+  how to record the clock's estimate) and tells it when a camera goes (`gone`). It is a root service
+  that only the Cameras section's chunk injects: nothing of it is in the initial bundle. "Record
+  remote cameras" (`SettingsService.recordRemoteCameras`, on by default) is a switch of the Cameras
+  section.
+- The phone: `CameraDeviceClips` (`apps/web/src/app/camera-device/camera-device-clips.ts`), which
+  `CameraDeviceService` hands each connection, takes the cuts, saves each clip through
+  `CameraDeviceCapture.saveClip` into the staging folder (`SaveClipParams.staging`: the capture's clip
+  worker writes `camera-clips/sessions/…` as it writes the host's own clips), keeps the index of the
+  clips staged (`clip-staging.ts`'s `OpfsClipStaging`, behind `CLIP_STAGING`), offers and sends them
+  (`FileSender` over `blobSource`), and deletes each on the host's `clip-ack`; the page and the `state`
+  it sends say how many wait.
+- The end-to-end suite bends both sides in development builds through `window.cubetraceE2eRemote`
+  (`e2e-remote.ts`): a camera device's clock moved by an offset (`RTC_TIMERS`), its connection cut
+  once in the middle of a file, its cuts ignored, the host's wait shortened.
+
 ## The clip viewer
 
 The solve lists' clip badges open the viewer (`apps/web/src/app/timer/clip-viewer.ts`, a modal
 dialog on the Timer and the session pages): it reads the clip's MP4 from the attempt's folder
 (`ATTEMPT_FILES`, behind an object URL let go when the dialog closes) and lists the segment's moves
-by their time into the clip, the one on screen highlighted. Since T3.8 a 3D cube follows the video,
+by their time into the clip, the one on screen highlighted; a button per clip of the attempt chooses
+the one shown, naming its camera when the attempt has several cameras' clips (T4.2). Since T3.8 a 3D cube follows the video,
 under it since T3.10 (as wide as the video and about half as tall; on a phone the video, the cube,
 then the moves):
 

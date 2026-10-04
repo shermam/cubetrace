@@ -140,6 +140,11 @@ describe('QaPage', () => {
       '5.3 MB',
       '0',
     ]);
+    // The clips by camera (T4.2): the laptop's own, here alone.
+    const cameras = Array.from(element.querySelectorAll('[data-testid="qa-camera"]'));
+    expect(cameras.map((row) => [row.getAttribute('data-label'), ...cells(row)])).toEqual([
+      ['laptop', 'laptop', '2', '4', '10.6 MB'],
+    ]);
     const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
     expect(text(element, 'qa-read')).toBe(
       `Read from your cloud index at ${time.format(clock.hostMs)} (2 sessions).`,

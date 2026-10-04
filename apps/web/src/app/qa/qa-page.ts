@@ -51,8 +51,9 @@ interface QaRead {
 /**
  * `/qa` (docs/PLAN.md T3.1), linked from the Sessions page signed in: the attempts of the account's
  * cloud index (its {@link QA_SESSIONS} newest sessions), every device's, by day and device, with their
- * clips, the bytes the clips take, and the bytes of their files uploaded and pending; when this device
- * last synced (the last write of the index the server confirmed) and what still waits to be sent.
+ * clips, the bytes the clips take, and the bytes of their files uploaded and pending, and the clips
+ * by camera label (T4.2: the host's own camera and each phone's); when this device last synced (the
+ * last write of the index the server confirmed) and what still waits to be sent.
  * Then the diagnostics (T3.9, docs/DIAGNOSTICS.md): the account's last {@link QA_EVENTS} events,
  * aggregated here: per device its last start and build, the counts by kind over the last days, and
  * the failures. Plain tables, read once, and again with Refresh.
@@ -73,6 +74,7 @@ interface QaRead {
         {{ sessionsCounted }} newest sessions. Recorded: what the clips take. Uploaded and pending:
         the files of the attempts (their records, clips, frame times and gyroscope files), uploaded
         or not yet. Gyro: the attempts with a gyroscope file, and the median rate of those files.
+        Then the clips by camera: this device's own camera and each phone paired as a camera.
       </p>
       <p data-testid="qa-sync">{{ syncText() }}</p>
       <div class="read">
@@ -144,6 +146,37 @@ interface QaRead {
               </tfoot>
             </table>
           </div>
+          @if (read.summary.cameras.length > 0) {
+            <div class="table cameras">
+              <table data-testid="qa-cameras">
+                <caption>
+                  Clips by camera
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Camera</th>
+                    <th scope="col">Attempts</th>
+                    <th scope="col">Clips</th>
+                    <th scope="col">Recorded</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (camera of read.summary.cameras; track camera.label) {
+                    <tr data-testid="qa-camera" [attr.data-label]="camera.label">
+                      <td>{{ camera.label }}</td>
+                      <td class="number" data-testid="qa-camera-attempts">
+                        {{ camera.attempts }}
+                      </td>
+                      <td class="number" data-testid="qa-camera-clips">{{ camera.clips }}</td>
+                      <td class="number" data-testid="qa-camera-recorded">
+                        {{ bytes(camera.recordedBytes) }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
         }
         @if (read.unreadable.length > 0) {
           <p class="warning" data-testid="qa-unreadable">
@@ -329,6 +362,10 @@ interface QaRead {
 
     tfoot {
       font-weight: 600;
+    }
+
+    .cameras {
+      margin-top: var(--space-4);
     }
 
     h2 {

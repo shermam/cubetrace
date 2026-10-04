@@ -6,8 +6,9 @@
 // schemas with ajv, field by field. Since T3.1 they also read the documents of the session index in
 // Firestore (docs/DATA-MODEL.md §10), which are of version 2 only (cloud.test.ts holds them to theirs),
 // and since T3.4 the account's cubes there, of version 1 (cloud-cube.test.ts), since T3.9 the
-// diagnostics events, of version 1 (cloud-event.test.ts), and since T4.0 the signaling documents of
-// the remote cameras (cloud-peer.test.ts).
+// diagnostics events, of version 1 (cloud-event.test.ts), since T4.0 the signaling documents of
+// the remote cameras (cloud-peer.test.ts), and since T4.2 the frames files of the clips, of version 2,
+// which the host reads as a remote camera sends them.
 import type {
   AttemptEvents,
   AttemptMove,
@@ -16,6 +17,8 @@ import type {
   AttemptResult,
   AttemptResync,
   CropRect,
+  FramesJson,
+  FramesRemote,
   VideoClip,
 } from './attempt';
 import type { CubeClockParams } from './clock';
@@ -40,7 +43,7 @@ import type { PhaseName } from './phases';
 import { PHASE_NAMES } from './phases';
 import type { EdgePos } from './pieces';
 import { EDGE_FACELETS } from './pieces';
-import type { RemoteClockParams } from './remote-clock';
+import type { RemoteClockRecord } from './remote-clock';
 import type {
   AppBuild,
   BatteryReading,
@@ -65,6 +68,7 @@ import { UUID_V4 } from './session';
 export type RecordFile =
   | 'session.json'
   | 'attempt.json'
+  | 'frames.json'
   | 'gyro.json'
   | 'sessions/{id}'
   | 'sessions/{id}/attempts/{index}'
@@ -234,6 +238,17 @@ export function parseCloudCandidate(json: unknown): CloudCandidate {
     }
     throw error;
   }
+}
+
+/**
+ * `<camera>.<segment>.frames.json` of a clip (docs/DATA-MODEL.md §9), schema version 2, the only
+ * one: the host reads it as a remote camera sends it (T4.2), before it converts its times. Beyond
+ * the schema's types, its keyframes are each named once and `t0RemoteMs` and `remote` come together,
+ * as the schema's `uniqueItems` and `dependentRequired` say. Throws a {@link RecordError} naming the
+ * field on anything else.
+ */
+export function parseFrames(json: unknown): FramesJson {
+  return parseDocument('frames.json', json, FRAMES, 2);
 }
 
 /**
@@ -875,14 +890,18 @@ const camera: Reader<CameraInfo> = {
   },
 };
 
-/** The clock sync of a remote camera (T4.0), as `RemoteClockFit.params` gives it. */
-const remoteClock = object<RemoteClockParams>({
+/**
+ * The clock sync of a remote camera (T4.0), as `RemoteClockFit.params` gives it, and since T4.2
+ * whether it had converged (absent from the records written before).
+ */
+const remoteClock = object<RemoteClockRecord>({
   offsetMs: num(),
   driftPpm: num(),
   rttMs: num({ min: 0 }),
   samples: int(0),
   residualP95Ms: num({ min: 0 }),
   since: num(),
+  converged: optional(bool),
 });
 
 const cameraClock = object<CameraClock>({
@@ -1065,6 +1084,51 @@ const GYRO: Reader<GyroJson> = {
       fail(
         join(at, 'v'),
         `must have three integers per sample (${String(samples * 3)}), got ${String(file.v.length)}`,
+      );
+    }
+    return file;
+  },
+};
+
+// ---- frames.json (docs/DATA-MODEL.md §9) ----
+
+/** The clock sync a remote camera's clip was converted with (T4.2). */
+const framesRemote = object<FramesRemote>({
+  offsetMs: num(),
+  driftPpm: num(),
+  rttMs: num({ min: 0 }),
+  samples: int(0),
+  residualP95Ms: num({ min: 0 }),
+  since: num(),
+  converged: bool,
+  takenMs: num(),
+});
+
+const framesFields = object<FramesJson>({
+  schema: oneOf(2),
+  camera: label,
+  segment: oneOf('scramble', 'solve'),
+  app: optional(app),
+  t0HostMs: num(),
+  t0RemoteMs: optional(num()),
+  dtMs: list(num({ min: 0 }), { min: 1 }),
+  keyframes: list(int(0), { min: 1 }),
+  arrival: object<FramesJson['arrival']>({ offsetMs: num(), residualP95Ms: num({ min: 0 }) }),
+  remote: optional(framesRemote),
+});
+
+/** A frames file, whose keyframes are each named once and whose remote fields come together. */
+const FRAMES: Reader<FramesJson> = {
+  what: 'an object',
+  read: (value, at) => {
+    const file = framesFields.read(value, at);
+    if (new Set(file.keyframes).size !== file.keyframes.length) {
+      fail(join(at, 'keyframes'), 'must name each frame once');
+    }
+    if ((file.t0RemoteMs === undefined) !== (file.remote === undefined)) {
+      fail(
+        join(at, file.t0RemoteMs === undefined ? 't0RemoteMs' : 'remote'),
+        "is missing: a remote camera's clip has both t0RemoteMs and remote",
       );
     }
     return file;

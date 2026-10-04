@@ -56,8 +56,9 @@ export interface DiagnosticsSummary {
 
 /**
  * Whether `event` says something failed: an `error.*` event, a clip that could not be saved, a sync
- * check that failed, an attempt whose upload failed, or a cube that could not be connected for a
- * reason other than the user's (the picker closed, no address given). The round report marks these ❗.
+ * check that failed, an attempt whose upload failed, a cube that could not be connected for a
+ * reason other than the user's (the picker closed, no address given), a remote camera's cut that
+ * failed, or a remote clip an attempt went without (T4.2). The round report marks these ❗.
  */
 export function isFailure(event: CloudEvent): boolean {
   const { kind, data } = event;
@@ -73,7 +74,11 @@ export function isFailure(event: CloudEvent): boolean {
   if (kind === 'cube.failed') {
     return data['reason'] !== 'cancelled' && data['reason'] !== 'no-mac';
   }
-  return false;
+  // T4.2: a remote camera's clip the phone could not cut, or that the attempt went without.
+  if (kind === 'remote.cut') {
+    return data['outcome'] === 'failed';
+  }
+  return kind === 'remote.clip.missing';
 }
 
 /** What a failure's facts say went wrong, as text. */
@@ -92,6 +97,12 @@ export function failureMessage(event: CloudEvent): string {
       return text('error') ?? text('failedFile') ?? '';
     case 'cube.failed':
       return text('reason') ?? '';
+    case 'remote.cut':
+    case 'remote.clip.missing': {
+      const clip = [text('camera'), text('segment')].filter((part) => part !== null).join(' ');
+      const why = text('message') ?? text('reason') ?? '';
+      return clip === '' ? why : `${clip}: ${why}`;
+    }
     default:
       return [text('where'), text('message')].filter((part) => part !== null).join(': ');
   }

@@ -908,6 +908,42 @@ describe('ClipViewer', () => {
     );
   });
 
+  it('names the camera on each clip’s button when the attempt has a phone’s clips too, and plays the one chosen (T4.2)', async () => {
+    const element = await render();
+    const phone = (segment: 'scramble' | 'solve', firstFrameHostMs: number): VideoClip => ({
+      ...clip(segment, firstFrameHostMs, null, 'phone-rear'),
+      file: `phone-rear.${segment}.mp4`,
+      framesFile: `phone-rear.${segment}.frames.json`,
+    });
+    fixture.componentRef.setInput('attempt', {
+      ...ATTEMPT,
+      video: [...ATTEMPT.video, phone('scramble', -2100), phone('solve', -1100)],
+    });
+    await update();
+
+    const buttons = Array.from(element.querySelectorAll('[data-testid="clip-segment"]'));
+    expect(
+      buttons.map((button) => [
+        button.getAttribute('data-camera'),
+        button.textContent.replace(/\s+/g, ' ').trim(),
+      ]),
+    ).toEqual([
+      ['laptop', 'Scramble · laptop'],
+      ['laptop', 'Solve · laptop'],
+      ['phone-rear', 'Scramble · phone-rear'],
+      ['phone-rear', 'Solve · phone-rear'],
+    ]);
+    element
+      .querySelector<HTMLButtonElement>('[data-camera="phone-rear"][data-segment="solve"]')
+      ?.click();
+    await update();
+    expect(reads.at(-1)).toBe(`${SESSION_A}/3/phone-rear.solve.mp4`);
+    expect(buttons[3].getAttribute('aria-pressed')).toBe('true');
+    expect(element.querySelector('[data-testid="clip-facts"]')?.textContent.trim()).toMatch(
+      /^phone-rear\.solve\.mp4: /,
+    );
+  });
+
   it('downloads both clips, their frame times and attempt.json, named after the attempt', async () => {
     const element = await render();
     const names: string[] = [];

@@ -236,13 +236,17 @@ interface Current {
 /**
  * `clip` with its camera's lag behind the cube in `session` as its `syncResidualMs` (T2.5: the
  * `offsetMs` of the camera's sync check, `clock.cameras`), unless it has one; null before a check.
+ * A remote camera's entry before its check (T4.1 writes its clock sync there, the clapperboard's
+ * fields at 0 until T4.3 measures them) is no check: its clips keep null.
  */
 function withSyncResidual(clip: VideoClip, session: SessionRecord | null): VideoClip {
   if (clip.syncResidualMs !== null || session === null) {
     return clip;
   }
   const sync = session.clock.cameras[clip.camera] as CameraClock | undefined;
-  return sync === undefined ? clip : { ...clip, syncResidualMs: sync.offsetMs };
+  return sync === undefined || sync.clapperboardSamples === 0
+    ? clip
+    : { ...clip, syncResidualMs: sync.offsetMs };
 }
 
 /** `clips` with `clip`, which replaces the clip of the same camera and segment. */

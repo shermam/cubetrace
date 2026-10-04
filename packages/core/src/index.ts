@@ -56,6 +56,7 @@ export type {
   CropRect,
   CubeMoveInput,
   FramesJson,
+  FramesRemote,
   MovePhase,
   VideoClip,
   VideoSegment,
@@ -81,7 +82,12 @@ export { createSession, labelFor, sameCamera, summarize, withBattery } from './s
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './clock';
 // T4.0 — the clock sync of a remote camera: the offset and the drift of the phone's clock from pings
-export type { RemoteClockParams, RemoteClockSample } from './remote-clock';
+export type {
+  RemoteClockLeast,
+  RemoteClockParams,
+  RemoteClockRecord,
+  RemoteClockSample,
+} from './remote-clock';
 export {
   REMOTE_CLOCK_CONVERGED,
   REMOTE_CLOCK_DRIFT_SPAN_MS,
@@ -90,6 +96,9 @@ export {
   REMOTE_CLOCK_WINDOW,
   RemoteClockFit,
 } from './remote-clock';
+// T4.2 — a remote camera's clip: its frames file's times placed on the host clock through the fit
+export type { RemoteClockSnapshot } from './remote-frames';
+export { remoteFrames } from './remote-frames';
 export type { PhaseAverage } from './stats';
 export { DNF, aoN, attemptTimes, best, mean, phaseAverages } from './stats';
 export type { SessionStore } from './store';
@@ -122,6 +131,7 @@ export {
   parseCloudEvent,
   parseCloudPeer,
   parseCloudSession,
+  parseFrames,
   parseGyro,
   parseSession,
   parseSessionPairing,

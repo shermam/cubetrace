@@ -167,6 +167,23 @@ describe('ClipWorker', () => {
     ).toMatchObject({ camera: 'laptop', segment: 'solve', dtMs: sample.frames.dtMs });
   });
 
+  it("stages a camera device's clip under its staging folder, the session's folder made there (T4.2)", async () => {
+    const { worker, posted, root } = await clipWorker();
+    const other = '0b7c6d5e-4f3a-4b2c-9d1e-8f7a6b5c4d3e';
+    await worker.handle(job(1, { sessionId: other, camera: 'laptop-2', staging: 'camera-clips' }));
+    const clip = clipOf(posted.at(-1));
+    expect(clip).toMatchObject({ camera: 'laptop-2', file: 'laptop-2.solve.mp4' });
+    const staged = `camera-clips/sessions/${other}/attempts/0003`;
+    expect(root.files().get(`${staged}/laptop-2.solve.mp4`)?.bytes.length).toBe(clip.bytes);
+    expect(
+      JSON.parse(root.files().get(`${staged}/laptop-2.solve.frames.json`)?.text ?? ''),
+    ).toMatchObject({ camera: 'laptop-2', segment: 'solve' });
+    // Nothing of it in the session store's own folders.
+    expect([...root.files().keys()].filter((path) => path.startsWith(`sessions/${other}`))).toEqual(
+      [],
+    );
+  });
+
   it("writes the build of the request into the clip's frames file (T3.7)", async () => {
     const { worker, posted, root } = await clipWorker();
     const app = { version: '0.4.0', commit: 'abc1234' };

@@ -4,7 +4,7 @@
 // fit of its clock).
 import type { AttemptRecord, CropRect } from './attempt';
 import type { CubeClockParams } from './clock';
-import type { RemoteClockParams } from './remote-clock';
+import type { RemoteClockRecord } from './remote-clock';
 
 /** The device that runs the session and holds the cube (`host` in session.json). */
 export interface HostInfo {
@@ -189,10 +189,10 @@ export interface CameraClock {
   /**
    * The clock sync of a remote camera (T4.0, `RemoteClockFit.params`): the offset and the drift of
    * the phone's clock against the host's, from the data channel's pings, as they were when the record
-   * was written; `rttMs` and `driftPpm` above repeat its round trip and drift. Absent for the host's
-   * own cameras.
+   * was written, and since T4.2 whether the fit had converged then; `rttMs` and `driftPpm` above
+   * repeat its round trip and drift. Absent for the host's own cameras.
    */
-  remote?: RemoteClockParams;
+  remote?: RemoteClockRecord;
 }
 
 /** session.json, schema version 2 (docs/DATA-MODEL.md §6). */

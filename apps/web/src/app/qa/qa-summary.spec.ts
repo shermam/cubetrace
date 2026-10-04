@@ -1,6 +1,6 @@
 import type { CloudAttempt } from '@cubetrace/core';
 
-import { attemptDocument, attemptWithClips, realSession } from '../cloud/cloud-testing';
+import { attemptDocument, attemptWithClips, clipOf, realSession } from '../cloud/cloud-testing';
 import type { CloudEntry } from '../cloud/session-index';
 import { SESSION_A, SESSION_B, testAttempt } from '../session/session-testing';
 import { localDay, qaSummary } from './qa-summary';
@@ -153,8 +153,37 @@ describe('qaSummary', () => {
     });
   });
 
+  it('counts the clips by camera label: the host’s own and each phone’s (T4.2)', () => {
+    const phoneClip = (segment: 'scramble' | 'solve', bytes: number) => ({
+      ...clipOf(segment, bytes),
+      camera: 'phone-rear',
+      file: `phone-rear.${segment}.mp4`,
+      framesFile: `phone-rear.${segment}.frames.json`,
+    });
+    // Attempt 1 with the phone's two clips beside the laptop's; attempt 2 without the phone's
+    // scramble clip; attempt 3 from the laptop alone.
+    const one = { ...attemptWithClips(1) };
+    one.video = [...one.video, phoneClip('scramble', 700_000), phoneClip('solve', 2_000_000)];
+    const two = { ...attemptWithClips(2) };
+    two.video = [...two.video, phoneClip('solve', 1_800_000)];
+    const summary = qaSummary(
+      [
+        at(1_000, attemptDocument(one, laptop, OWNER)),
+        at(2_000, attemptDocument(two, laptop, OWNER)),
+        at(3_000, attemptDocument(attemptWithClips(3), laptop, OWNER)),
+      ],
+      dayOf,
+    );
+    expect(summary.cameras).toEqual([
+      { label: 'laptop', attempts: 3, clips: 6, recordedBytes: 15_900_000 },
+      { label: 'phone-rear', attempts: 2, clips: 3, recordedBytes: 4_500_000 },
+    ]);
+    expect(summary.total).toMatchObject({ attempts: 3, clips: 9, recordedBytes: 20_400_000 });
+  });
+
   it('says nothing without an attempt', () => {
     expect(qaSummary([])).toEqual({
+      cameras: [],
       rows: [],
       total: {
         attempts: 0,

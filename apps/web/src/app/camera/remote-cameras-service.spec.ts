@@ -528,8 +528,11 @@ describe('RemoteCamerasService', () => {
     await pump(r.s, 20);
     expect(r.service.cameras()).toEqual([]);
     expect(r.service.pairing()).toBeNull();
+    // The attempt's two clips were asked for (T4.2); this phone does not answer them.
     expect(phone.received.map((m) => m.type).filter((t) => t !== 'ping' && t !== 'clock')).toEqual([
       'hello',
+      'cut',
+      'cut',
       'leave',
     ]);
     await pump(r.s, LEAVE_GRACE_MS);

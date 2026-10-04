@@ -5,9 +5,11 @@
 // The data channel's protocol: the messages and their wire form.
 export type {
   CameraState,
+  ClipAck,
   Clock,
   ControlMessage,
   Cut,
+  CutClip,
   CutDone,
   CutFailed,
   DeviceInfo,

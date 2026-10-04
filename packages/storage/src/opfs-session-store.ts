@@ -436,6 +436,12 @@ export function isTemporaryOf(entry: string, name: string): boolean {
 }
 
 /**
+ * What {@link writeTextFile} and {@link writeAttemptFile} write: text, as UTF-8, or bytes, in one
+ * piece or in several written one after the other (T4.2: a remote camera's MP4 as its chunks came).
+ */
+export type FileContent = string | Uint8Array<ArrayBuffer> | readonly Uint8Array<ArrayBuffer>[];
+
+/**
  * Writes `text` as the whole content of the file `name` in `dir`, in one step: to a temporary file
  * next to it, which is closed and then moved over `name` (`FileSystemFileHandle.move`, Chrome 111
  * and later), so that `name` holds its previous content until the move. A page that goes away
@@ -443,11 +449,12 @@ export function isTemporaryOf(entry: string, name: string): boolean {
  * that fails removes it. Where the handle has no `move()`, the file is written in place, as before
  * T1.11: Chrome swaps a stream's content in on `close()`, but a file made for the write stays
  * empty if the page goes away first. The upload queue writes its `uploads.json` with it (T3.3).
+ * `text` may be bytes too ({@link FileContent}).
  */
 export async function writeTextFile(
   dir: OpfsDirectoryHandle,
   name: string,
-  text: string,
+  text: FileContent,
 ): Promise<void> {
   const temporary = temporaryName(name);
   const file = await dir.getFileHandle(temporary, { create: true });
@@ -469,17 +476,18 @@ export async function writeTextFile(
  * Writes `text` as the whole content of the file `name` in the folder of attempt `index` of
  * session `sessionId` (docs/DATA-MODEL.md §5), in one step as {@link writeTextFile} writes: the gyro
  * file of an attempt (T3.7), which the app writes beside the record once the attempt's window is
- * over, as the capture's clip worker writes the clips. The attempt's folders are made if needed;
- * the session's must exist (its `session.json` was written first), else this rejects with
- * "No session <id>: its folder is missing.". Rejects with a RangeError for an index that is not a
- * positive integer, or a session id that cannot name a folder.
+ * over, as the capture's clip worker writes the clips, and a remote camera's clip, its MP4 as bytes
+ * and its frames file (T4.2). The attempt's folders are made if needed; the session's must exist
+ * (its `session.json` was written first), else this rejects with "No session <id>: its folder is
+ * missing.". Rejects with a RangeError for an index that is not a positive integer, or a session id
+ * that cannot name a folder.
  */
 export async function writeAttemptFile(
   root: OpfsDirectoryHandle,
   sessionId: string,
   index: number,
   name: string,
-  text: string,
+  text: FileContent,
 ): Promise<void> {
   const folder = attemptFolder(index);
   if (sessionFolder(sessionId) === null) {
@@ -495,11 +503,13 @@ export async function writeAttemptFile(
   await writeTextFile(attempt, name, text);
 }
 
-/** Replaces the content of `file` with `text` through a writable stream. */
-async function writeText(file: OpfsFileHandle, text: string): Promise<void> {
+/** Replaces the content of `file` with `text` through a writable stream, part after part. */
+async function writeText(file: OpfsFileHandle, text: FileContent): Promise<void> {
   const writable = await file.createWritable();
   try {
-    await writable.write(text);
+    for (const part of typeof text === 'string' || !Array.isArray(text) ? [text] : text) {
+      await writable.write(part as string | Uint8Array<ArrayBuffer>);
+    }
   } catch (error: unknown) {
     await writable.abort(error).catch(() => undefined);
     throw error;

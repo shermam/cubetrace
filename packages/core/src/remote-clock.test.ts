@@ -169,6 +169,26 @@ describe('RemoteClockFit', () => {
     expect(REMOTE_CLOCK_RTT_FACTOR).toBe(1.5);
   });
 
+  it('tells the sample of least round trip and the 95th percentile of the kept trips (T4.2), none with no sample', () => {
+    const fit = new RemoteClockFit();
+    expect(fit.least).toBeNull();
+    expect(fit.rttP95Ms).toBe(0);
+    fit.addSample(...trip(0, 95, 30));
+    expect(fit.least).toEqual({ offsetMs: 95, rttMs: 30, hostMs: 15 });
+    expect(fit.rttP95Ms).toBe(30);
+    // A shorter trip, 3 ms late on the way there: the least now, its offset off by 1.5 ms.
+    fit.addSample(...trip(2000, 95, 20, 3));
+    expect(fit.least).toEqual({ offsetMs: 96.5, rttMs: 20, hostMs: 2010 });
+    // Kept: those within 1.5 × 20 = 30 ms; a trip of 31 ms is left out of the percentile too.
+    fit.addSample(...trip(4000, 95, 26));
+    fit.addSample(...trip(6000, 95, 31));
+    expect(fit.params.samples).toBe(3);
+    expect(fit.rttP95Ms).toBe(30);
+    // Not converged with four samples: the estimate is there all the same (T4.2 cuts on it).
+    expect(fit.converged).toBe(false);
+    expect(fit.toRemoteMs(1000)).toBeCloseTo(1095, 6);
+  });
+
   it('keeps the trips up to 3 ms over the least when that is more than 1.5× it: a loopback or an Ethernet link', () => {
     const fit = new RemoteClockFit();
     // Trips of 1.2 ms at the least, as two pages of one browser give, and the main threads' work

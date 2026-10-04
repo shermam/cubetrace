@@ -11,6 +11,7 @@ import { formatMove, formatMoves, parseMoves, quarterTurns } from './notation';
 import type { PhaseRecord, TimedMove } from './phases';
 import { detectPhases } from './phases';
 import type { GyroSummary } from './gyro';
+import type { RemoteClockParams } from './remote-clock';
 import type { ScrambleProgress } from './scramble';
 import { ScrambleTracker, scrambleTarget } from './scramble';
 import type { AppBuild } from './session';
@@ -192,8 +193,18 @@ export interface FramesJson {
   segment: VideoSegment;
   /** The build of the app that wrote the file (T3.7); absent from the files written before. */
   app?: AppBuild;
-  /** The host time of the first frame, from the arrival fit. */
+  /**
+   * The host time of the first frame, from the arrival fit; for a remote camera's clip, the phone's
+   * time of it (`t0RemoteMs`) converted to the host clock (T4.2).
+   */
   t0HostMs: number;
+  /**
+   * A remote camera's clip (T4.2): its first frame's time on the phone's own clock, as the phone's
+   * capture placed it; `t0HostMs` is then that time on the host clock, converted through the clock
+   * sync in `remote`. Absent from the clips of the host's own cameras and from the files written
+   * before T4.2; there exactly when `remote` is.
+   */
+  t0RemoteMs?: number;
   /**
    * Per frame, the time since the previous frame, from the frames' own timestamps, in steps of
    * 0.1 ms (the differences of the frame times rounded to 0.1 ms, so that the sums do not drift);
@@ -202,13 +213,30 @@ export interface FramesJson {
   dtMs: number[];
   /** The indices of the keyframes, increasing, starting with 0. */
   keyframes: number[];
-  /** The fit of the frames' arrival host times on their own timestamps that gives `t0HostMs`. */
+  /**
+   * The fit of the frames' arrival times on their own timestamps that gives `t0HostMs` (for a remote
+   * camera's clip, `t0RemoteMs`: the arrivals are on the phone's clock).
+   */
   arrival: {
-    /** The median of arrival host time minus the frame's timestamp, in ms. */
+    /** The median of arrival time minus the frame's timestamp, in ms. */
     offsetMs: number;
     /** The 95th percentile of the absolute residuals: the jitter of the arrivals. */
     residualP95Ms: number;
   };
+  /** The clock sync a remote camera's clip was converted with (T4.2); there with `t0RemoteMs`. */
+  remote?: FramesRemote;
+}
+
+/**
+ * The clock sync that placed a remote camera's clip on the host clock (docs/DATA-MODEL.md §9, T4.2):
+ * the fit's record as session.json keeps it (`RemoteClockParams`, at the time the host took it),
+ * whether it had converged then, and when that was.
+ */
+export interface FramesRemote extends RemoteClockParams {
+  /** Whether the fit had converged (`RemoteClockFit.converged`) when the host took it. */
+  converged: boolean;
+  /** The host time when the host took the fit to convert the clip's times (its frames file came). */
+  takenMs: number;
 }
 
 /** attempt.json, schema version 2 (docs/DATA-MODEL.md §7). */

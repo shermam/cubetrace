@@ -2192,6 +2192,69 @@ cut by closing the channel mid-file resumes after the reconnection; a phone that
 leaves a note and an attempt uploaded on time. Unit tests of the wait, the late addition and the
 conversion.
 
+**Outcome (2026-10-03).** As contracted, with these choices. **The clock estimate, a decision taken
+on the coordinator's instruction:** the first real hardware test found that the remote clock fit
+never converged on the home Wi-Fi, so nothing of T4.2 depends on `RemoteClockFit.converged`. The
+cuts and the conversions use `clockEstimate` (`apps/web/src/app/camera/remote-estimate.ts`): the
+fit's own estimate from 3 kept samples, before that the offset of the window's least-round-trip
+sample (core's fit gained `least` and `rttP95Ms`); a cut waits only for the sync's first answer (10 s
+at most). The window is widened on each side by the kept trips' 95th percentile plus the residuals',
+and by 500 ms at least (`CUT_MARGIN_MS`: half a round trip is a symmetric path's worst error, Wi-Fi
+power saving's 100–300 ms bursts are covered several times over, for about a second more video per
+clip); the host trims nothing. The records say what each relied on: the frames file's `remote`
+(`converged`, `samples`, `rttMs`, `residualP95Ms`, `offsetMs`, `driftPpm`, `since`, `takenMs`), each
+`remote.cut` event (`converged`, `marginMs`), and a first cut writes the estimate into
+`clock.cameras[label].remote` with `converged: false` when there is none (convergence overwrites it,
+with `converged: true`). `REMOTE_CLOCK_CONVERGED` and the keep rule are unchanged. **The host.**
+`RemoteCutsService` beside `RecordingService`, on the same milestones and windows (`clip-windows.ts`,
+taken out of `RecordingService`); one `ClipsInFlight` entry per clip expected, released when it is
+stored or given up 120 s after the attempt's end (`REMOTE_CLIP_WAIT_MS`); the files into the page's
+memory, not OPFS (a clip is a few MB, and the page that holds the bytes is the one a reconnection
+resumes into); the frames file converted by core's new `remoteFrames` (read by the new `parseFrames`)
+and written before the MP4, the clip attached, then the new `clip-ack`. A clip given up is still
+taken when it comes, noted late and uploaded as an addition; a phone that left (or was let go) gives
+its clips up at once, a host page that goes gives up nothing. **The phone.** `CameraDeviceClips`
+saves each cut through the capture's clip worker into `camera-clips/` (`SaveClipParams.staging`),
+with an index (`clip-staging.ts`), offers its staged clips first over every connection to the session
+until the host's `clip-ack`, stored or not, and deletes other sessions' clips when it joins one and
+those older than a day when the Camera page opens. **The protocol** stays at version 1: `cut` gained
+`camera` and `scrambleShown`, `cut-done` the capture's facts (`clip`) and `scrambleShown`,
+`cut-failed` `scrambleShown`, and `clip-ack` is new, all additive (no build before cuts). **The
+records:** `frames.json` keeps schema 2 with `t0RemoteMs` and `remote`, each requiring the other; the
+remote clock record may say `converged`; a remote camera's clock entry before its sync check gives its
+clips no `syncResidualMs`. The upload queue needed no change (a test shows an attempt held for a
+remote clip, sent without it once released, and the late clip signed alone with `attempt.json`). The
+QA view counts clips per camera label, the viewer names each clip's camera, "Record remote cameras" is
+on by default in the Cameras section, and the round report has six "After T4.2" items. **Measured:**
+the initial bundle 264.96 kB raw as on `main`; the Cameras section's chunk 40.45 kB against 26.72 kB,
+the Camera page's 41.74 kB against 31.97 kB, the shared `@cubetrace/rtc` chunk 24.30 kB against
+17.19 kB (the file transfer). `npm test` 1,349 package tests and 810 app tests; the end-to-end suite 79
+in 7.9 min, the two tests of `remote-clips.spec.ts` 36 s and 40 s (a phone's clock 5 s ahead, read
+back within 20 ms; a transfer cut past 100 kB and resumed); the cloud suite 4. **Left for later:** New
+session right after a solve lets the phone go before its last clips come (they are noted missing); a
+host page that reloads in the middle of a transfer starts that file again from 0 with the next
+pairing; a phone adds about six events per attempt on the host, so a day with a phone reaches the
+diagnostics' daily cap of 2,000 at about 155 attempts; the convergence criterion itself is T4.3's. PR
+#62.
+
+**After CI's runs of the PR** (each of its two runs failed one test of `remote-clips.spec.ts` in the
+pair's fixture, never in the clips): the fixture waited for 4 samples on the host's sync line, which
+counts the trips the clock fit keeps (`params.samples`: those within the band, 1.5 times the least
+round trip or 3 ms over it), not the pings answered. Between two pages of one browser that both
+encode, every ping is answered (16 of 16 in 30 s in a probe, and still with both pages' CPU
+throttled 4, 12 and 25 times) but the fit's round trips have medians of 17 to 18 ms against a least
+of 2 to 3 ms, so the band keeps 1 to 4: the e2e pair's kept count is low under load because of the
+band, not because pings go unanswered (the fit's retuning is its own task, with issue #61's Wi-Fi).
+The fixture now waits for what the tests need (the phone connected, an answer of the clock sync, whose
+least-round-trip estimate places the clock within a few ms on loopback, and 6 s connected, for the
+next attempt's lead and margin in the phone's buffer), a failed precondition prints the phone's pill
+and problem line and the host's state and sync lines, and CI prints every failed test's
+`error-context.md`. The first run's refusal (the phone joining for about 11 s, then refused) did not
+reproduce here, even at 25 times; its timing is one of the two 10 s hello waits, the only deadlines of
+that length on the path (the phone's first call does not retry, and the host's wait closes the
+signaling under a phone still connecting), which a starved runner can miss, and the clock bend
+touches neither; the next failure prints its reason.
+
 ### T4.3 — the sync check on a remote camera, the drift fit applied, the live preview
 
 **Goal.** A remote clip's `syncResidualMs` means the same as a local one's, and the host frames the

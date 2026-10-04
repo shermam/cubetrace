@@ -4,6 +4,8 @@ import {
   type CaptureHandle,
   type CaptureStats,
   type CaptureSupport,
+  type SaveClipParams,
+  type SavedClip,
   type VideoQuality,
 } from '@cubetrace/capture';
 import type { MicrophoneInfo, MicrophoneProcessing } from '@cubetrace/core';
@@ -33,7 +35,8 @@ interface Target {
  * wants it (`setWanted`), so that the ring buffer fills from the moment the phone is a camera and
  * the first cut of T4.2 has its margin. It starts again when the stream changes (another camera,
  * another resolution) or one of those settings does, and stops when the camera goes off, the page
- * lets it go, or storage is {@link STORAGE_STOP_PERCENT}% full. No session, no clips yet: the
+ * lets it go, or storage is {@link STORAGE_STOP_PERCENT}% full. No session of its own: the host's
+ * cuts come through `CameraDeviceClips` (T4.2), which saves them with {@link saveClip}; the
  * `RecordingService` of the host is not used here, since it follows the host's session and cube and
  * would bring the timer's code onto the phone's page.
  */
@@ -102,6 +105,19 @@ export class CameraDeviceCapture {
   /** Resolves once the starts and stops asked for so far are done (for tests). */
   settled(): Promise<void> {
     return this.queue;
+  }
+
+  /**
+   * Saves a clip from the pipeline's buffer (`CaptureHandle.saveClip`: cut, muxed and written by the
+   * clip worker), for the host's cuts (T4.2, `CameraDeviceClips`). Rejects while the pipeline does
+   * not run.
+   */
+  saveClip(params: SaveClipParams): Promise<SavedClip> {
+    const handle = this.handle;
+    if (handle === null) {
+      return Promise.reject(new Error('the phone is not recording'));
+    }
+    return handle.saveClip(params);
   }
 
   private reconcile(

@@ -14,6 +14,7 @@ import {
   type CameraClock,
   type CameraInfo,
   type RemoteClockParams,
+  type RemoteClockRecord,
 } from '@cubetrace/core';
 import {
   ClockPinger,
@@ -43,6 +44,7 @@ import { SessionService } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import type { PairingBlock } from './pairing-block';
+import { RemoteCutsService, type CutCamera } from './remote-cuts-service';
 
 /**
  * Where a remote camera is: `connecting` (its offer is answered, the channel not open yet),
@@ -165,7 +167,9 @@ interface Peer {
  * session: the session records what filmed it. Everything ends when the session does, or the page
  * goes (`pagehide`, best effort). The pairing's documents are the account's own: Add camera needs
  * the account signed in, and a session under way (its document in the index: `indexForPairing`, a
- * demo session's too).
+ * demo session's too). Each connection is handed to `RemoteCutsService` (T4.2), which asks the phone
+ * for each attempt's clips and takes them into the attempt's folder; a camera taken off the list
+ * gives up its clips still to come.
  */
 @Injectable({ providedIn: 'root' })
 export class RemoteCamerasService {
@@ -179,6 +183,8 @@ export class RemoteCamerasService {
   private readonly timers = inject(RTC_TIMERS);
   private readonly makeSignaling = inject(SESSION_SIGNALING);
   private readonly connect = inject(TRANSPORT_CONNECTOR);
+  /** The cuts and the clips of the cameras (T4.2), which follow the connections made here. */
+  private readonly cuts = inject(RemoteCutsService);
 
   private readonly pairingSignal = signal<Pairing | null>(null);
   private readonly pairingErrorSignal = signal<string | null>(null);
@@ -226,14 +232,15 @@ export class RemoteCamerasService {
       });
     });
     // The page goes: the phones are told and the documents deleted, as far as there is time; the
-    // browser closes the connections itself (closing them here would drop the word).
+    // browser closes the connections itself (closing them here would drop the word). The clips still
+    // to come are not given up: the phones keep them, and offer them to the page that pairs them next.
     const onPageHide = (): void => {
-      this.endAll('the host page closed', 0, false);
+      this.endAll('the host page closed', 0, false, false);
     };
     this.globals.addEventListener?.('pagehide', onPageHide);
     inject(DestroyRef).onDestroy(() => {
       this.globals.removeEventListener?.('pagehide', onPageHide);
-      this.endAll('the host page closed', 0);
+      this.endAll('the host page closed', 0, true, false);
     });
   }
 
@@ -452,7 +459,7 @@ export class RemoteCamerasService {
     } catch (error: unknown) {
       this.failed(peer, 'connect', errorMessage(error));
       if (!again) {
-        this.drop(peer);
+        this.drop(peer, 'the connection could not be made');
       }
       return;
     }
@@ -475,7 +482,7 @@ export class RemoteCamerasService {
       this.failed(peer, 'hello', errorMessage(error));
       transport.close('no hello');
       if (!again) {
-        this.drop(peer);
+        this.drop(peer, 'the phone sent no hello');
       }
       return;
     }
@@ -490,7 +497,7 @@ export class RemoteCamerasService {
       link.trySend({ type: 'leave', reason });
       this.failed(peer, 'version', reason);
       this.closeAfter(transport, 'version', LEAVE_GRACE_MS);
-      this.drop(peer);
+      this.drop(peer, reason);
       return;
     }
     const now = this.timers.now();
@@ -537,6 +544,25 @@ export class RemoteCamerasService {
       }),
     );
     pinger.start();
+    // The clips (T4.2): the cuts it has not answered go now, its offers and files are taken.
+    const camera: CutCamera = {
+      id: peer.camera.id,
+      label: () => peer.camera.label,
+      peer: () => peer.camera.device.label,
+      fit: peer.fit,
+      onSample: (next) =>
+        pinger.onSample(() => {
+          next();
+        }),
+      recordClock: (record) => {
+        const label = peer.camera.label;
+        const known = label === null ? undefined : this.session.session()?.clock.cameras[label];
+        if (known?.remote === undefined) {
+          this.putClock(peer, record);
+        }
+      },
+    };
+    peer.offs.push(this.cuts.connected(camera, link));
     const facts = {
       peer: hello.device.label,
       platform: hello.device.platform,
@@ -578,7 +604,7 @@ export class RemoteCamerasService {
     });
     peer.generation++;
     this.detach(peer, 'the phone left');
-    this.drop(peer);
+    this.drop(peer, `it left: ${reason}`);
   }
 
   /** The connection ended without a `leave`: the camera waits for the phone to call again. */
@@ -607,7 +633,7 @@ export class RemoteCamerasService {
           durationMs: RECONNECT_WINDOW_MS,
           connectedMs: Math.round(this.timers.now() - peer.camera.pairedMs),
         });
-        this.drop(peer);
+        this.drop(peer, 'it did not come back within five minutes');
       }, RECONNECT_WINDOW_MS);
     }
   }
@@ -616,8 +642,16 @@ export class RemoteCamerasService {
    * Ends the peer on the host's initiative: `leave`, the connection closed once the word is out
    * (`graceMs`), the camera gone from the list. When the page is going (`close` false), the
    * connection is left to the browser and the documents deleted at once, as far as there is time.
+   * `giveUp` false keeps its clips still to come from being given up (the page goes).
    */
-  private end(peer: Peer, why: string, message: string, graceMs: number, close = true): void {
+  private end(
+    peer: Peer,
+    why: string,
+    message: string,
+    graceMs: number,
+    close = true,
+    giveUp = true,
+  ): void {
     const now = this.timers.now();
     peer.link?.trySend({ type: 'leave', reason: message });
     this.diagnostics.record('rtc.disconnected', {
@@ -639,7 +673,7 @@ export class RemoteCamerasService {
         void signaling?.close().catch(() => undefined);
       }
     }
-    this.drop(peer);
+    this.drop(peer, why, giveUp);
   }
 
   /** Closes `transport` after `graceMs`, so that a `leave` just sent goes out first. */
@@ -669,8 +703,12 @@ export class RemoteCamerasService {
     this.clearRecord(peer);
   }
 
-  /** Takes the camera off the list; its session entry stays. */
-  private drop(peer: Peer): void {
+  /**
+   * Takes the camera off the list; its session entry stays. Its clips still to come are given up
+   * (`RemoteCutsService.gone`), with `reason`, unless `giveUp` is false.
+   */
+  private drop(peer: Peer, reason: string, giveUp = true): void {
+    this.cuts.gone(peer.camera.id, reason, giveUp);
     this.clearRemoval(peer);
     this.clearRecord(peer);
     const url = peer.camera.thumbnail?.url;
@@ -683,9 +721,9 @@ export class RemoteCamerasService {
     );
   }
 
-  private endAll(reason: string, graceMs = LEAVE_GRACE_MS, close = true): void {
+  private endAll(reason: string, graceMs = LEAVE_GRACE_MS, close = true, giveUp = true): void {
     for (const peer of [...this.peers.values()]) {
-      this.end(peer, reason, `The host let the camera go: ${reason}.`, graceMs, close);
+      this.end(peer, reason, `The host let the camera go: ${reason}.`, graceMs, close, giveUp);
     }
     this.clearExpiry();
     if (this.pairingSignal() !== null) {
@@ -729,7 +767,7 @@ export class RemoteCamerasService {
     if (converged && !peer.converged) {
       peer.converged = true;
       this.recordClock(peer, params, 'converged');
-      this.putClock(peer, params);
+      this.putClock(peer, { ...params, converged: true });
       this.scheduleRecord(peer);
     } else if (!converged && peer.converged) {
       peer.converged = false;
@@ -745,7 +783,7 @@ export class RemoteCamerasService {
       if (peer.converged && peer.camera.state === 'connected') {
         const params = peer.fit.params;
         this.recordClock(peer, params, 'minute');
-        this.putClock(peer, params);
+        this.putClock(peer, { ...params, converged: true });
         this.scheduleRecord(peer);
       }
     }, CLOCK_RECORD_MS);
@@ -781,9 +819,11 @@ export class RemoteCamerasService {
 
   /**
    * The fit's record into the session's `clock.cameras[label].remote`, beside a clapperboard
-   * result there may be (none yet in T4.1: the lag stays 0 until T4.3 measures it).
+   * result there may be (none yet in T4.1: the lag stays 0 until T4.3 measures it): at convergence
+   * and every minute after (`converged` true), and, before that, the estimate a first cut relied on
+   * (T4.2, `converged` false, through `RemoteCutsService`).
    */
-  private putClock(peer: Peer, params: RemoteClockParams): void {
+  private putClock(peer: Peer, params: RemoteClockRecord): void {
     const label = peer.camera.label;
     const session = this.session.session();
     if (label === null || session === null) {
