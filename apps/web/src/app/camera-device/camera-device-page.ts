@@ -26,7 +26,9 @@ import { durationText, msText } from '../rtc/device-info';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
 import { SettingsService } from '../settings/settings-service';
 import { CameraDeviceCapture } from './camera-device-capture';
+import { CameraDevicePreview } from './camera-device-preview';
 import { CameraDeviceService, type CameraDeviceState } from './camera-device-service';
+import { CameraDeviceSync } from './camera-device-sync';
 
 /** The connection's state in a word, for the pill. */
 export const STATE_TEXT: Readonly<Record<CameraDeviceState, string>> = {
@@ -48,7 +50,8 @@ export const STATE_TEXT: Readonly<Record<CameraDeviceState, string>> = {
  * controls of Camera settings here too), runs the capture pipeline from the start
  * (`CameraDeviceCapture`), shows the preview with the framing rectangle and the sharpness meter, the
  * host's name, the connection's state, the clock sync as the host measures it, the battery and a
- * thermal hint, the clips cut for the host and not yet in its hands (T4.2), and Leave; it holds the
+ * thermal hint, the clips cut for the host and not yet in its hands (T4.2), whether it sends the host
+ * its live picture and whether the host's sync check measures it (T4.3), and Leave; it holds the
  * wake lock while joined and asks to keep the screen on and the phone plugged in
  * (`CameraDeviceService`). It never shows the timer and never starts a session
  * of its own; leaving the page leaves the session, and the camera goes back to what it was.
@@ -63,6 +66,9 @@ export class CameraDevicePage {
   protected readonly service = inject(CameraDeviceService);
   protected readonly camera = inject(CameraService);
   protected readonly capture = inject(CameraDeviceCapture);
+  /** The host's sync check of this camera, and the live preview (T4.3). */
+  protected readonly syncCheck = inject(CameraDeviceSync);
+  protected readonly livePreview = inject(CameraDevicePreview);
   protected readonly auth = inject(AuthService);
   protected readonly wakeLock = inject(WakeLockService);
   private readonly settings = inject(SettingsService);
@@ -106,6 +112,15 @@ export class CameraDevicePage {
       : null,
   );
   protected readonly wakeLockText = computed(() => WAKE_LOCK_TEXT[this.wakeLock.status()]);
+  /** The live picture the host gets (T4.3): sent, or not asked for. */
+  protected readonly previewText = computed(() => {
+    if (this.livePreview.sending()) {
+      return 'a live picture goes to the host (a fifth of the resolution, at most 300 kbps)';
+    }
+    return this.livePreview.wanted()
+      ? 'asked for by the host; it goes once the camera is on'
+      : 'none: the host does not ask for it (Live preview from phones, on the host)';
+  });
   /** The clips cut for the host and not yet in its hands (T4.2). */
   protected readonly clipsText = computed(() => {
     const pending = this.service.pendingClips();

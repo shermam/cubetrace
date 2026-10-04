@@ -64,6 +64,7 @@ describe('SettingsService', () => {
     expect(settings.keepLocalCopies()).toBe(true);
     expect(settings.diagnostics()).toBe(true);
     expect(settings.recordRemoteCameras()).toBe(true);
+    expect(settings.livePreviewFromPhones()).toBe(true);
     expect(settings.networkTypeKnown).toBe(false);
     expect(settings.wifiOnly()).toBe(false);
     expect(settings.saveError()).toBeNull();
@@ -137,6 +138,7 @@ describe('SettingsService', () => {
     settings.setDiagnostics(false);
     settings.setViewerChoice('laptop', { latitude: 90, longitude: 180, mirror: 'left-right' });
     settings.setRecordRemoteCameras(false);
+    settings.setLivePreviewFromPhones(false);
 
     expect(stored()).toEqual({
       version: 2,
@@ -173,11 +175,13 @@ describe('SettingsService', () => {
       diagnostics: false,
       viewer: { laptop: { latitude: 90, longitude: 180, mirror: 'left-right' } },
       recordRemoteCameras: false,
+      livePreviewFromPhones: false,
     });
     const reloaded = load();
     expect(reloaded.uploadSessions()).toBe(false);
     expect(reloaded.diagnostics()).toBe(false);
     expect(reloaded.recordRemoteCameras()).toBe(false);
+    expect(reloaded.livePreviewFromPhones()).toBe(false);
     expect(reloaded.wifiOnlySetting()).toBe(true);
     // A laptop's browser does not say the network's type: it uploads on any network.
     expect(reloaded.wifiOnly()).toBe(false);
@@ -488,6 +492,25 @@ describe('SettingsService', () => {
 
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ recordRemoteCameras: 'no' }));
     expect(load().recordRemoteCameras()).toBe(true);
+  });
+
+  it('reads the settings stored before Live preview from phones existed as on, and a value that is not a switch as on (T4.3)', () => {
+    // What T4.2 stored: Record remote cameras, no live preview switch.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ version: 2, cameraOn: true, recordRemoteCameras: false }),
+    );
+    const settings = load();
+
+    expect(settings.livePreviewFromPhones()).toBe(true);
+    expect(settings.recordRemoteCameras()).toBe(false);
+
+    settings.setLivePreviewFromPhones(false);
+    expect(stored()).toMatchObject({ livePreviewFromPhones: false, recordRemoteCameras: false });
+    expect(load().livePreviewFromPhones()).toBe(false);
+
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ livePreviewFromPhones: 'yes' }));
+    expect(load().livePreviewFromPhones()).toBe(true);
   });
 
   it('reads the settings stored before the microphone setting existed as Raw, the rest as stored', () => {

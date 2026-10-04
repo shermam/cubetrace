@@ -15,6 +15,8 @@ import { SettingsService } from '../settings/settings-service';
 import { fpsText, sharpnessText } from './camera-format';
 import { CameraService } from './camera-service';
 import { RecordingService } from './recording-service';
+import { RemoteCameraRegistry } from './remote-camera-registry';
+import { RemotePreviews } from './remote-previews';
 import { SyncCheck } from './sync-check';
 import { showStream } from './video';
 
@@ -35,11 +37,15 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
  * (`overlay`, T2.13), the Timer page pins it at the top of the window: the picture fills the width
  * it is given at the frames' proportions, up to 42% of the window's height, its line sits over its
  * top left corner, and the sync check is the Timer page's to show, under the time, out of the
- * pinned part.
+ * pinned part. Since T4.3 the phones paired as remote cameras show over it, a small tile each of
+ * their live pictures in the top right corner, which a tap swaps with the main picture
+ * (`RemotePreviews`, issue #60: the thumbnail at the bottom of Camera settings was too far from the
+ * preview to keep the cube in a phone's frame); their code loads only once a phone is paired, and
+ * without this device's camera the first phone's picture is the main one.
  */
 @Component({
   selector: 'app-camera-preview',
-  imports: [SyncCheck],
+  imports: [RemotePreviews, SyncCheck],
   host: { '[class.shown]': 'shown()', '[class.overlay]': 'overlay()' },
   template: `
     @if (shown()) {
@@ -72,8 +78,17 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
           </div>
         } @else if (camera.status() === 'starting') {
           <p class="message">Opening the camera…</p>
-        } @else {
+        } @else if (camera.status() === 'error') {
           <p class="message">The camera is not working: Camera settings says why.</p>
+        }
+        @defer (when remotes()) {
+          @if (remotes()) {
+            <app-remote-previews
+              [local]="camera.stream()"
+              [mirrored]="camera.mirrored()"
+              [localAspect]="aspect()"
+            />
+          }
         }
       </div>
       @if (camera.stream()) {
@@ -127,6 +142,7 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
     /* A fixed box of 16:9; the frames keep their proportions inside it (the framing rectangle is
        drawn in percent of them). */
     .box {
+      position: relative;
       display: grid;
       place-items: center;
       width: 100%;
@@ -264,8 +280,14 @@ export class CameraPreview {
   private readonly prefs = inject(SettingsService);
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
 
-  /** While the camera is wanted: on, opening, or not working. */
-  protected readonly shown = computed(() => this.camera.status() !== 'off');
+  private readonly registry = inject(RemoteCameraRegistry);
+
+  /** A phone paired as a remote camera has a camera (T4.3): its tile shows over the picture. */
+  protected readonly remotes = computed(() =>
+    this.registry.cameras().some((camera) => camera.label !== null),
+  );
+  /** While the camera is wanted (on, opening, or not working), or a phone's picture is there. */
+  protected readonly shown = computed(() => this.camera.status() !== 'off' || this.remotes());
   /** The sharpness meter waits while the time of a move is the solve's. */
   private readonly held = computed(() => {
     const phase = this.session.phase();

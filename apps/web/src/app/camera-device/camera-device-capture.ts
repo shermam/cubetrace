@@ -4,6 +4,9 @@ import {
   type CaptureHandle,
   type CaptureStats,
   type CaptureSupport,
+  type FramingRect,
+  type MotionMeterInfo,
+  type MotionSample,
   type SaveClipParams,
   type SavedClip,
   type VideoQuality,
@@ -118,6 +121,22 @@ export class CameraDeviceCapture {
       return Promise.reject(new Error('the phone is not recording'));
     }
     return handle.saveClip(params);
+  }
+
+  /**
+   * Measures the motion of each frame inside `rect` (frame pixels; null for the whole frame) for the
+   * host's sync check of this camera (T4.3, `CameraDeviceSync`), as the host's recording does for its
+   * own check (`CaptureHandle.watchMotion`), until the returned function is called; null while the
+   * pipeline does not run.
+   */
+  watchMotion(
+    rect: FramingRect | null,
+    onSample: (sample: MotionSample) => void,
+    onError: (message: string) => void,
+    onMeter: (meter: MotionMeterInfo) => void,
+  ): (() => void) | null {
+    const handle = this.handle;
+    return handle === null ? null : handle.watchMotion(rect, onSample, onError, onMeter);
   }
 
   private reconcile(

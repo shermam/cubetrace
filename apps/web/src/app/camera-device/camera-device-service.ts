@@ -33,6 +33,8 @@ import { errorMessage } from '../shared/error-message';
 import { watchBattery, type BatteryState } from './battery';
 import { CameraDeviceCapture } from './camera-device-capture';
 import { CameraDeviceClips } from './camera-device-clips';
+import { CameraDevicePreview } from './camera-device-preview';
+import { CameraDeviceSync } from './camera-device-sync';
 import { THUMBNAIL_GRABBER } from './thumbnail-grabber';
 
 /**
@@ -129,7 +131,9 @@ export const REFUSAL_TEXT: Readonly<Record<Exclude<PairingCheck, 'ok'>, string>>
  * the word is out, and lets the wake lock go; the page going (`pagehide`) says `leave` as far as
  * there is time. It never shows the timer and never starts a session of its own. The host's cuts
  * and the clips they make go through `CameraDeviceClips` (T4.2), which each connection is handed
- * to: the clips staged for the session are offered first.
+ * to: the clips staged for the session are offered first; and so do the host's sync check of this
+ * camera (`CameraDeviceSync`, T4.3: the frames' motion measured and sent) and the live preview
+ * (`CameraDevicePreview`, T4.3: the camera's track over the connection while the host asks for it).
  */
 @Injectable({ providedIn: 'root' })
 export class CameraDeviceService {
@@ -138,6 +142,9 @@ export class CameraDeviceService {
   private readonly capture = inject(CameraDeviceCapture);
   /** The host's cuts and the clips sent (T4.2). */
   private readonly clips = inject(CameraDeviceClips);
+  /** The host's sync check of this camera, and the live preview (T4.3). */
+  private readonly syncCheck = inject(CameraDeviceSync);
+  private readonly livePreview = inject(CameraDevicePreview);
   private readonly settings = inject(SettingsService);
   private readonly wakeLock = inject(WakeLockService);
   private readonly diagnostics = inject(DiagnosticsService);
@@ -481,6 +488,9 @@ export class CameraDeviceService {
       }),
       // The host's cuts, and the clips staged: offered first (T4.2).
       this.clips.attach(link),
+      // The host's sync check of this camera, and the live preview when the host asks for it (T4.3).
+      this.syncCheck.attach(link),
+      this.livePreview.attach(link, transport),
     );
     this.startReporting();
     const facts = {

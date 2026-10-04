@@ -32,6 +32,8 @@ export interface BrowserGlobals {
   readonly cancelAnimationFrame?: (handle: number) => void;
   /** Object URLs, for the files the app hands the user (a session export). */
   readonly URL?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>;
+  /** Streams of tracks, for a remote camera's live preview (T4.3). */
+  readonly MediaStream?: typeof MediaStream;
   /** Whether the tab is visible, for the cube connection (`document`). */
   readonly document?: PageVisibility;
   /** Timers on the host clock, such as the cube's idle disconnection; the unit tests fake them. */

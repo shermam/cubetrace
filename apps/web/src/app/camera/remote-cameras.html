@@ -34,6 +34,23 @@
     this device's; the attempt waits up to two minutes for them before it is uploaded. Off, the
     phones stay connected and record nothing for the session.
   </p>
+  <label class="switch">
+    <input
+      #previewBox
+      type="checkbox"
+      data-testid="live-preview-from-phones"
+      aria-describedby="live-preview-from-phones-hint"
+      [checked]="settings.livePreviewFromPhones()"
+      (change)="settings.setLivePreviewFromPhones(previewBox.checked)"
+    />
+    Live preview from phones
+  </label>
+  <p class="hint" id="live-preview-from-phones-hint">
+    Each phone sends a small live picture of its camera (a fifth of its resolution, at most 300 kbps
+    and 15 frames a second), shown over this device's preview on the Timer page: tap it to swap it
+    with the main picture. Its recording is not touched. Off, the phones send none, and the picture
+    below comes every 2 s.
+  </p>
   @if (service.pairingError(); as error) {
     <p class="error" role="alert" data-testid="pairing-error">{{ error }}</p>
   }

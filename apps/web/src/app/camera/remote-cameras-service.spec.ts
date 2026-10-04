@@ -16,7 +16,9 @@ import { ACCOUNT_STORAGE_KEY, AuthService } from '../auth/auth-service';
 import { ADA, FakeAccountBackend } from '../auth/fake-account';
 import { bluetoothNavigator } from '../cube/cube-testing';
 import { FakeLocalStorage, settle } from '../device/fake-browser';
-import { MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
+import type { ClapperboardFrame, MotionMeterInfo } from '@cubetrace/capture';
+
+import { FakePreview, MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
 import {
@@ -27,6 +29,7 @@ import {
   RECONNECT_WINDOW_MS,
   RemoteCamerasService,
 } from './remote-cameras-service';
+import { RemoteCameraRegistry } from './remote-camera-registry';
 
 /** The phone's rear camera, as its own session.json would describe it. */
 const PHONE_CAMERA: CameraInfo = {
@@ -585,8 +588,10 @@ describe('RemoteCamerasService', () => {
     await pump(r.s, 20);
     expect(r.service.cameras()).toEqual([]);
     expect(r.service.pairing()).toBeNull();
+    // The hello, the live preview asked for (T4.3), the leave.
     expect(phone.received.map((m) => m.type).filter((t) => t !== 'ping' && t !== 'clock')).toEqual([
       'hello',
+      'preview',
       'leave',
     ]);
     expect(phone.of('leave')[0].reason).toBe('The host let the camera go: the session ended.');
@@ -800,5 +805,143 @@ describe('RemoteCamerasService', () => {
     expect(phone.received[0]).toMatchObject({ type: 'hello', role: 'host' });
     const all = await events();
     expect(kinds(all)).toEqual(['rtc.paired', 'rtc.connected']);
+  });
+
+  // ---- T4.3: the live preview, the cameras for the Timer page, the sync check's motion ----
+
+  it('asks the phone for its live preview as Live preview from phones says, and gives the Timer page each camera with its track (T4.3)', async () => {
+    r.connector.previews = true;
+    const phone = await paired();
+    phone.sendState();
+    await pump(r.s, 10);
+    // On by default: the phone is asked for it once the hellos are exchanged.
+    expect(phone.of('preview')).toEqual([{ type: 'preview', on: true }]);
+    const registry = TestBed.inject(RemoteCameraRegistry);
+    const track = (r.connector.last('callee').transport.preview as FakePreview).track;
+    expect(track).not.toBeNull();
+    expect(registry.cameras()).toEqual([
+      {
+        id: r.service.cameras()[0].id,
+        name: 'ThinkPhone',
+        label: 'phone-rear',
+        session: r.s.service.session()?.id,
+        state: 'connected',
+        synced: true,
+        converged: false,
+        recording: true,
+        framing: { x: 100, y: 200, w: 800, h: 600 },
+        frame: { width: 1080, height: 1920 },
+        deviceLabel: 'camera 0, facing back',
+        preview: track,
+        thumbnail: null,
+      },
+    ]);
+    expect(r.service.cameras()[0].preview).toBe(track);
+
+    // Off, then on again: each phone connected is told.
+    r.s.settings.setLivePreviewFromPhones(false);
+    await pump(r.s, 10);
+    r.s.settings.setLivePreviewFromPhones(true);
+    await pump(r.s, 10);
+    expect(phone.of('preview').map((m) => m.on)).toEqual([true, false, true]);
+
+    // The connection drops: no track until the phone is back.
+    phone.drop();
+    await pump(r.s, 10);
+    expect(registry.cameras()[0]).toMatchObject({ state: 'reconnecting', preview: null });
+    // Off before the phone pairs: it is asked for none.
+    r.s.settings.setLivePreviewFromPhones(false);
+    const second = await paired(new Phone(r, 'Pixel'));
+    await pump(r.s, 10);
+    expect(second.of('preview')).toEqual([{ type: 'preview', on: false }]);
+  });
+
+  it("measures a phone's frames for a sync check: sync-start, each frame of its motion on the host clock, its meter, its error, sync-stop (T4.3)", async () => {
+    const phone = await paired();
+    await pass(r.s, 3000);
+    const registry = TestBed.inject(RemoteCameraRegistry);
+    const id = r.service.cameras()[0].id;
+    const samples: ClapperboardFrame[] = [];
+    const errors: string[] = [];
+    const meters: MotionMeterInfo[] = [];
+    const watch = (): (() => void) | null =>
+      registry.watchMotion(
+        id,
+        (sample) => samples.push(sample),
+        (message) => errors.push(message),
+        (meter) => meters.push(meter),
+      );
+    const stop = watch();
+    expect(stop).not.toBeNull();
+    await pump(r.s, 10);
+    const check = phone.of('sync-start')[0].id;
+    // The phone's clock is 1234.5 ms ahead: its arrivals, as the phone says them.
+    const arrival = r.s.perf.hostMs + 1234.5 - 40;
+    phone.link?.send({
+      type: 'sync-motion',
+      id: check,
+      frames: [
+        {
+          timestampUs: 5_000_000_000,
+          arrivalMs: arrival,
+          receivedMs: arrival + 3,
+          mean: 2,
+          changed: 0.3,
+          costMs: 1,
+        },
+      ],
+    });
+    phone.link?.send({
+      type: 'sync-meter',
+      id: check,
+      meter: {
+        format: 'NV12',
+        path: 'copy',
+        frameWidth: 1080,
+        frameHeight: 1920,
+        region: { x: 100, y: 200, w: 800, h: 600 },
+        planeWidth: 160,
+        planeHeight: 120,
+        changeLevels: 12,
+      },
+    });
+    // Another check's frames are not this one's.
+    phone.link?.send({ type: 'sync-motion', id: check + 1, frames: [] });
+    await pump(r.s, 10);
+    expect(samples).toHaveLength(1);
+    expect(samples[0].arrivalHostMs).toBeCloseTo(arrival - 1234.5, 1);
+    expect(samples[0].receivedHostMs).toBeCloseTo(arrival - 1234.5 + 3, 1);
+    expect(samples[0]).toMatchObject({ timestampUs: 5_000_000_000, changed: 0.3, costMs: 1 });
+    expect(meters).toEqual([expect.objectContaining({ format: 'NV12', planeWidth: 160 })]);
+    expect(registry.clockRecord(id)?.samples).toBeGreaterThan(0);
+    expect(registry.clockRecord(id)?.offsetMs).toBeCloseTo(1234.5, 1);
+
+    stop?.();
+    await pump(r.s, 10);
+    expect(phone.of('sync-stop')).toEqual([{ type: 'sync-stop', id: check }]);
+
+    // The phone cannot measure.
+    watch();
+    await pump(r.s, 10);
+    const second = phone.of('sync-start')[1].id;
+    phone.link?.send({ type: 'sync-error', id: second, message: 'the phone is not recording' });
+    await pump(r.s, 10);
+    expect(errors).toEqual(['the phone: the phone is not recording']);
+
+    // The connection ends under a check: it ends too; the camera is not connected any more.
+    watch();
+    await pump(r.s, 10);
+    phone.drop();
+    await pump(r.s, 10);
+    expect(errors.at(-1)).toBe("the phone's connection ended");
+    expect(watch()).toBeNull();
+    expect(
+      registry.watchMotion(
+        'nobody',
+        () => undefined,
+        () => undefined,
+        () => undefined,
+      ),
+    ).toBe(null);
   });
 });

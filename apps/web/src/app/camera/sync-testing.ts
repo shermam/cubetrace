@@ -2,8 +2,10 @@
 // (session-harness.ts), a fake camera and a fake pipeline (recording-testing.ts), and a camera
 // whose frames' motion and the cube's turns the test films. Nothing in the app imports this file,
 // so it is not in the bundle.
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import type { MotionSample } from '@cubetrace/capture';
+import type { ClapperboardFrame, MotionMeterInfo, MotionSample } from '@cubetrace/capture';
+import type { RemoteClockRecord } from '@cubetrace/core';
 import type { FakeCube } from '@cubetrace/gan';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
@@ -12,6 +14,7 @@ import { ready, setup, turn, type Setup } from '../session/session-harness';
 import { CameraService } from './camera-service';
 import { CAPTURE_STARTER, RecordingService } from './recording-service';
 import { FakeCaptureStarter, statsOf, type FakeCapture } from './recording-testing';
+import type { RemoteCameraEntry, RemoteCameraSource } from './remote-camera-registry';
 import { SyncService } from './sync-service';
 
 /** The camera's frames: 30 per second, their timestamps this far behind their arrival (ms). */
@@ -95,6 +98,31 @@ export async function film(
   energy: (hostMs: number) => number,
   turns: readonly number[] = [],
 ): Promise<void> {
+  await filmTo(
+    r,
+    (sample) => {
+      capture.watches.at(-1)?.onSample(sample);
+    },
+    fake,
+    ms,
+    energy,
+    turns,
+  );
+}
+
+/**
+ * {@link film} into `sink`: a remote camera's watch (T4.3), whose frames come with when the phone's
+ * page received them (`receivedHostMs`, 2 ms after their arrival, on the host clock).
+ */
+export async function filmTo(
+  r: Rig,
+  sink: (sample: ClapperboardFrame) => void,
+  fake: FakeCube,
+  ms: number,
+  energy: (hostMs: number) => number,
+  turns: readonly number[] = [],
+  received = false,
+): Promise<void> {
   const start = r.s.perf.hostMs;
   const end = start + ms;
   // The turns of this stretch of time: those before it were filmed already.
@@ -119,7 +147,7 @@ export async function film(
       changed,
       costMs: 0.9,
     };
-    capture.watches.at(-1)?.onSample(sample);
+    sink(received ? { ...sample, receivedHostMs: next + 2 } : sample);
     frame += 1;
   }
   r.s.timers.advance(end - r.s.perf.hostMs);
@@ -148,4 +176,87 @@ export function clapperboard(start: number, lags: readonly number[], everyMs = F
     return STILL();
   };
   return { turns, energy, events };
+}
+
+// ---- A remote camera (T4.3) ----
+
+/** The phone's clock sync, as RemoteCamerasService records it before any check. */
+export const REMOTE_CLOCK: RemoteClockRecord = {
+  offsetMs: -2400.5,
+  driftPpm: 3.1,
+  rttMs: 7.5,
+  samples: 12,
+  residualP95Ms: 1.2,
+  since: 1_790_000_000_000,
+  converged: true,
+};
+
+/** A watch of a phone's motion: its handlers, and whether it was stopped. */
+export interface RemoteWatch {
+  readonly id: string;
+  readonly onSample: (sample: ClapperboardFrame) => void;
+  readonly onError: (message: string) => void;
+  readonly onMeter: (meter: MotionMeterInfo) => void;
+  stopped: boolean;
+}
+
+/** The Cameras section's side of the registry, as the test drives it. */
+export class FakeRemoteSource implements RemoteCameraSource {
+  readonly cameras = signal<readonly RemoteCameraEntry[]>([]);
+  readonly watches: RemoteWatch[] = [];
+  clock: RemoteClockRecord | null = { ...REMOTE_CLOCK, offsetMs: -2401, converged: false };
+
+  watchMotion(
+    id: string,
+    onSample: (sample: ClapperboardFrame) => void,
+    onError: (message: string) => void,
+    onMeter: (meter: MotionMeterInfo) => void,
+  ): (() => void) | null {
+    const camera = this.cameras().find((c) => c.id === id);
+    if (camera?.state !== 'connected') {
+      return null;
+    }
+    const watch: RemoteWatch = { id, onSample, onError, onMeter, stopped: false };
+    this.watches.push(watch);
+    return () => {
+      watch.stopped = true;
+    };
+  }
+
+  clockRecord(): RemoteClockRecord | null {
+    return this.clock;
+  }
+
+  /** The frames of the check under way go to its watch. */
+  readonly sink = (sample: ClapperboardFrame): void => {
+    this.watches.at(-1)?.onSample(sample);
+  };
+
+  /** Changes the phone's entry. */
+  change(changes: Partial<RemoteCameraEntry>): void {
+    this.cameras.update((cameras) => cameras.map((camera) => ({ ...camera, ...changes })));
+  }
+}
+
+/** The phone, connected to `session` (the one under way), its framing around the cube. */
+export function remotePhone(
+  session: string,
+  changes: Partial<RemoteCameraEntry> = {},
+): RemoteCameraEntry {
+  return {
+    id: 'peer-1',
+    name: 'ThinkPhone',
+    label: 'phone-rear',
+    session,
+    state: 'connected',
+    synced: true,
+    converged: false,
+    recording: true,
+    framing: { x: 140, y: 610, w: 800, h: 700 },
+    frame: { width: 1080, height: 1920 },
+    deviceLabel: 'camera 0, facing back',
+    preview: null,
+    thumbnail: null,
+    ...changes,
+  };
 }

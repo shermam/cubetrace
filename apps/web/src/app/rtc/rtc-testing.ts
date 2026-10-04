@@ -1,12 +1,14 @@
 // Fakes of the connection for the unit tests of the remote cameras' services (T4.1): a connector
 // that joins the host's and the phone's `connect` in memory after a stand-in for the SDP dance over
-// the signaling, and the timers of the tests as @cubetrace/rtc's `Timers`. Nothing in the app
-// imports this file, so it is not in the bundle.
+// the signaling, and the timers of the tests as @cubetrace/rtc's `Timers`; and the live preview's
+// channel in memory (T4.3). Nothing in the app imports this file, so it is not in the bundle.
 import {
   CONNECT_TIMEOUT_MS,
   MemoryTransport,
   REAL_TIMERS,
   type MemoryLinkOptions,
+  type PreviewChannel,
+  type PreviewStats,
   type Signaling,
   type Timers,
 } from '@cubetrace/rtc';
@@ -23,6 +25,75 @@ export function rtcTimers(perf: FakePerformance, timers: FakeTimers): Timers {
       timers.clearTimeout(handle as number);
     },
   };
+}
+
+/**
+ * A video track as a remote camera's live preview brings it to the host (T4.3): muted until the
+ * test says it flows (`flow`), as Chrome's track of a receiver is while no frame comes.
+ */
+export class FakePreviewTrack extends EventTarget {
+  readonly kind = 'video';
+  readonly id: string;
+  muted = true;
+  readyState: MediaStreamTrackState = 'live';
+
+  constructor(id = 'preview') {
+    super();
+    this.id = id;
+  }
+
+  /** Frames come (`unmute`), or stop coming (`mute`). */
+  flow(on: boolean): void {
+    if (this.muted === on) {
+      this.muted = !on;
+      this.dispatchEvent(new Event(on ? 'unmute' : 'mute'));
+    }
+  }
+
+  get track(): MediaStreamTrack {
+    return this as unknown as MediaStreamTrack;
+  }
+}
+
+/**
+ * The live preview's channel of one end, in memory (T4.3): the phone's `send`s are kept in order
+ * (null: it stopped), the host's track is the one the test gives (`deliver`, as an offer brings
+ * one), and the statistics are what the test sets.
+ */
+export class FakePreview implements PreviewChannel {
+  /** What the phone sent, in order: a track, or null when it stopped. */
+  readonly sent: (MediaStreamTrack | null)[] = [];
+  track: MediaStreamTrack | null = null;
+  /** What `stats()` gives. */
+  statistics: PreviewStats | null = null;
+  private readonly handlers = new Set<(track: MediaStreamTrack) => void>();
+
+  send(track: MediaStreamTrack | null): Promise<void> {
+    this.sent.push(track);
+    return Promise.resolve();
+  }
+
+  onTrack(next: (track: MediaStreamTrack) => void): () => void {
+    this.handlers.add(next);
+    if (this.track !== null) {
+      next(this.track);
+    }
+    return () => {
+      this.handlers.delete(next);
+    };
+  }
+
+  stats(): Promise<PreviewStats | null> {
+    return Promise.resolve(this.statistics);
+  }
+
+  /** The host: a track comes, as the phone's offer brings one. */
+  deliver(track: MediaStreamTrack): void {
+    this.track = track;
+    for (const handler of [...this.handlers]) {
+      handler(track);
+    }
+  }
 }
 
 /** A connection made through {@link MemoryConnector}: which peer, which role, its end. */
@@ -42,6 +113,11 @@ export interface MemoryConnection {
  */
 export class MemoryConnector {
   readonly connections: MemoryConnection[] = [];
+  /**
+   * Each end gets a {@link FakePreview} (T4.3), the host's with a {@link FakePreviewTrack} delivered
+   * as the connection is made, as the phone's offer brings the live preview's track.
+   */
+  previews = false;
   /** The next `connect` rejects with this, once. */
   failNext: Error | null = null;
   /** Only the next `connect` of this role rejects with {@link failNext}; null: whichever comes. */
@@ -85,6 +161,13 @@ export class MemoryConnector {
       settled();
     }
     const transport = this.end(signaling.peerId);
+    if (this.previews) {
+      const preview = new FakePreview();
+      if (signaling.role === 'callee') {
+        preview.deliver(new FakePreviewTrack(`preview of ${signaling.peerId}`).track);
+      }
+      transport.preview = preview;
+    }
     const connection = { peerId: signaling.peerId, role: signaling.role, transport };
     this.connections.push(connection);
     // The transport closes its signaling when it ends, as WebRtcTransport does.
