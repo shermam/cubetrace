@@ -277,6 +277,94 @@ export interface Leave {
   reason: string;
 }
 
+/**
+ * The host's sync check of the phone's camera (T4.3): from now until `sync-stop` with the same `id`
+ * (or the connection's end), the phone measures the motion of each of its frames inside its framing
+ * rectangle, as the host's capture worker measures its own camera's for its check, and sends it
+ * (`sync-motion`); the host matches it against the cube's turns. A new `sync-start` ends the one
+ * before.
+ */
+export interface SyncStart {
+  type: 'sync-start';
+  id: number;
+}
+
+/** The host's check `id` ended: the phone stops measuring. */
+export interface SyncStop {
+  type: 'sync-stop';
+  id: number;
+}
+
+/**
+ * One frame's motion during the host's sync check (T4.3), as the phone's capture worker measured it
+ * (`MotionSample` of @cubetrace/capture), its times on the phone's clock: the host places them on its
+ * own with the clock sync.
+ */
+export interface MotionReport {
+  /** The frame's own `VideoFrame.timestamp`, in µs. */
+  timestampUs: number;
+  /** When the frame reached the phone's capture worker, on the phone's clock, in ms. */
+  arrivalMs: number;
+  /** When its motion reached the phone's page, on the same clock, in ms. */
+  receivedMs: number;
+  /** The mean absolute difference of its luma from the frame before's, in luma levels. */
+  mean: number;
+  /** The share of the region's pixels whose luma changed by more than 12 levels, 0 to 1. */
+  changed: number;
+  /** The capture worker's time on it, in ms. */
+  costMs: number;
+}
+
+/** The motion of the frames measured since the last `sync-motion` of the check `id`, in order. */
+export interface SyncMotion {
+  type: 'sync-motion';
+  id: number;
+  frames: MotionReport[];
+}
+
+/**
+ * How the phone's capture worker reads the frames of the check `id` (`MotionMeterInfo` of
+ * @cubetrace/capture): sent first, and when it changes.
+ */
+export interface SyncMeter {
+  type: 'sync-meter';
+  id: number;
+  meter: {
+    /** The frames' pixel format (`NV12`); null when the browser gives none. */
+    format: string | null;
+    /** Read out of the frame's planes (`copy`) or drawn into a canvas (`draw`). */
+    path: 'copy' | 'draw';
+    frameWidth: number;
+    frameHeight: number;
+    /** The region measured, in frame pixels: the framing rectangle clamped to the frame. */
+    region: CropRect;
+    planeWidth: number;
+    planeHeight: number;
+    changeLevels: number;
+  };
+}
+
+/**
+ * The phone cannot measure the frames of the check `id` (it does not record, their pixels cannot be
+ * read): the host's check ends as failed, with `message`.
+ */
+export interface SyncError {
+  type: 'sync-error';
+  id: number;
+  message: string;
+}
+
+/**
+ * Whether the host wants the live preview (T4.3): a small video track of the phone's camera over the
+ * same connection, for the host to frame by (Camera settings → Cameras → "Live preview from phones").
+ * Sent once the hellos are exchanged and whenever the setting changes; the phone sends no picture
+ * before it.
+ */
+export interface Preview {
+  type: 'preview';
+  on: boolean;
+}
+
 /** Every message of the protocol. */
 export type Message =
   | Hello
@@ -295,7 +383,13 @@ export type Message =
   | FileDone
   | FileResume
   | FileAbort
-  | Leave;
+  | Leave
+  | SyncStart
+  | SyncStop
+  | SyncMotion
+  | SyncMeter
+  | SyncError
+  | Preview;
 
 /** The messages that go as JSON text. */
 export type ControlMessage = Exclude<Message, FileChunk | Thumbnail>;
@@ -321,6 +415,12 @@ const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/u;
 
 /** A camera's label (docs/DATA-MODEL.md §5): lowercase letters and digits in words joined by hyphens. */
 const CAMERA_LABEL = /^[a-z0-9]+(-[a-z0-9]+)*$/u;
+
+/**
+ * The most frames one `sync-motion` carries: the phone sends a batch about four times a second, so
+ * a few dozen at 60 fps; more is not a batch of this protocol.
+ */
+export const MAX_MOTION_FRAMES = 240;
 
 /** What {@link decode} throws for a frame that is not a message of this protocol. */
 export class ProtocolError extends Error {
@@ -505,6 +605,24 @@ function decodeControl(text: string): ControlMessage {
       return { type, id: int(json, 'id', 0), reason: text_(json, 'reason') };
     case 'leave':
       return { type, reason: text_(json, 'reason') };
+    case 'sync-start':
+    case 'sync-stop':
+      return { type, id: int(json, 'id', 0) };
+    case 'sync-motion': {
+      const frames = list(json, 'frames');
+      if (frames.length > MAX_MOTION_FRAMES) {
+        throw new ProtocolError(
+          `frames must hold at most ${String(MAX_MOTION_FRAMES)} frames, got ${String(frames.length)}.`,
+        );
+      }
+      return { type, id: int(json, 'id', 0), frames: frames.map(motionReport) };
+    }
+    case 'sync-meter':
+      return { type, id: int(json, 'id', 0), meter: motionMeter(field(json, 'meter')) };
+    case 'sync-error':
+      return { type, id: int(json, 'id', 0), message: text_(json, 'message') };
+    case 'preview':
+      return { type, on: bool(json, 'on') };
     case 'file-chunk':
     case 'thumbnail':
       throw new ProtocolError(`A ${type} message as text: it goes as a binary frame.`);
@@ -615,6 +733,41 @@ function cutClip(json: Json): CutClip {
     lateMs: num(json, 'lateMs', 0),
     bufferSeconds: num(json, 'bufferSeconds', 0),
     audioMissing: nullable(json, 'audioMissing', text_),
+  };
+}
+
+/** One frame's motion of `sync-motion`, checked. */
+function motionReport(value: unknown): MotionReport {
+  if (!isObject(value)) {
+    throw new ProtocolError(`A frame of sync-motion that is not an object: ${show(value)}.`);
+  }
+  return {
+    timestampUs: num(value, 'timestampUs'),
+    arrivalMs: num(value, 'arrivalMs'),
+    receivedMs: num(value, 'receivedMs'),
+    mean: num(value, 'mean', 0, 255),
+    changed: num(value, 'changed', 0, 1),
+    costMs: num(value, 'costMs', 0),
+  };
+}
+
+/** How the phone's capture worker reads the frames (`sync-meter`'s `meter`), checked. */
+function motionMeter(json: Json): SyncMeter['meter'] {
+  const region = field(json, 'region');
+  return {
+    format: nullable(json, 'format', text_),
+    path: oneOf(json, 'path', ['copy', 'draw']),
+    frameWidth: int(json, 'frameWidth', 1),
+    frameHeight: int(json, 'frameHeight', 1),
+    region: {
+      x: int(region, 'x', 0),
+      y: int(region, 'y', 0),
+      w: int(region, 'w', 1),
+      h: int(region, 'h', 1),
+    },
+    planeWidth: int(json, 'planeWidth', 1),
+    planeHeight: int(json, 'planeHeight', 1),
+    changeLevels: num(json, 'changeLevels', 0),
   };
 }
 

@@ -180,6 +180,62 @@ const MESSAGES: Message[] = [
   { type: 'file-resume', id: 3, offset: 12_582_912 },
   { type: 'file-abort', id: 3, reason: 'the checksum did not match 3 times' },
   { type: 'leave', reason: 'Leave pressed' },
+  { type: 'sync-start', id: 3 },
+  { type: 'sync-stop', id: 3 },
+  {
+    type: 'sync-motion',
+    id: 3,
+    frames: [
+      {
+        timestampUs: 5_305_665_091,
+        arrivalMs: 1_790_000_003_000.25,
+        receivedMs: 1_790_000_003_002.5,
+        mean: 1.7,
+        changed: 0.0071,
+        costMs: 0.9,
+      },
+      {
+        timestampUs: 5_305_698_424,
+        arrivalMs: 1_790_000_003_033.5,
+        receivedMs: 1_790_000_003_035,
+        mean: 21.25,
+        changed: 0.31,
+        costMs: 1.1,
+      },
+    ],
+  },
+  { type: 'sync-motion', id: 4, frames: [] },
+  {
+    type: 'sync-meter',
+    id: 3,
+    meter: {
+      format: 'NV12',
+      path: 'copy',
+      frameWidth: 1080,
+      frameHeight: 1920,
+      region: { x: 120, y: 480, w: 840, h: 960 },
+      planeWidth: 160,
+      planeHeight: 183,
+      changeLevels: 12,
+    },
+  },
+  {
+    type: 'sync-meter',
+    id: 4,
+    meter: {
+      format: null,
+      path: 'draw',
+      frameWidth: 640,
+      frameHeight: 360,
+      region: { x: 0, y: 0, w: 640, h: 360 },
+      planeWidth: 320,
+      planeHeight: 180,
+      changeLevels: 12,
+    },
+  },
+  { type: 'sync-error', id: 3, message: 'the phone is not recording' },
+  { type: 'preview', on: true },
+  { type: 'preview', on: false },
 ];
 
 describe('the protocol', () => {
@@ -471,6 +527,75 @@ describe('the protocol', () => {
       }),
       /h must be an integer ≥ 1/,
     ],
+    ['a sync-start without an id', '{"type": "sync-start"}', /id must be an integer ≥ 0/],
+    [
+      'a sync-motion whose frames are not a list',
+      '{"type": "sync-motion", "id": 1, "frames": {}}',
+      /frames must be an array/,
+    ],
+    [
+      'a sync-motion with a frame that is text',
+      '{"type": "sync-motion", "id": 1, "frames": ["x"]}',
+      /A frame of sync-motion that is not an object/,
+    ],
+    [
+      'a sync-motion whose changed area is over the whole region',
+      JSON.stringify({
+        type: 'sync-motion',
+        id: 1,
+        frames: [{ timestampUs: 1, arrivalMs: 2, receivedMs: 3, mean: 4, changed: 1.5, costMs: 0 }],
+      }),
+      /changed must be a number/,
+    ],
+    [
+      'a sync-motion of a frame without a time',
+      JSON.stringify({
+        type: 'sync-motion',
+        id: 1,
+        frames: [{ timestampUs: 1, receivedMs: 3, mean: 4, changed: 0.5, costMs: 0 }],
+      }),
+      /arrivalMs must be a number/,
+    ],
+    [
+      'a sync-motion of too many frames',
+      JSON.stringify({
+        type: 'sync-motion',
+        id: 1,
+        frames: Array.from({ length: 241 }, () => ({
+          timestampUs: 1,
+          arrivalMs: 2,
+          receivedMs: 3,
+          mean: 0,
+          changed: 0,
+          costMs: 0,
+        })),
+      }),
+      /frames must hold at most 240 frames, got 241/,
+    ],
+    [
+      'a sync-meter of another path',
+      JSON.stringify({
+        type: 'sync-meter',
+        id: 1,
+        meter: {
+          format: null,
+          path: 'guess',
+          frameWidth: 1,
+          frameHeight: 1,
+          region: { x: 0, y: 0, w: 1, h: 1 },
+          planeWidth: 1,
+          planeHeight: 1,
+          changeLevels: 12,
+        },
+      }),
+      /path must be one of copy, draw/,
+    ],
+    [
+      'a sync-meter without a region',
+      '{"type": "sync-meter", "id": 1, "meter": {"format": null, "path": "copy"}}',
+      /region must be an object/,
+    ],
+    ['a preview whose on is text', '{"type": "preview", "on": "yes"}', /on must be true or false/],
   ])('refuses %s', (_, text, message) => {
     expect(() => decode(text)).toThrow(ProtocolError);
     expect(() => decode(text)).toThrow(message);

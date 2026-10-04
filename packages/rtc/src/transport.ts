@@ -5,6 +5,7 @@
 // one-way delay, a bandwidth, and a share of frames "lost" and retransmitted late, as a reliable
 // channel over a lossy network behaves: a frame is never dropped, but it, and every frame after it,
 // arrives later. Plain TypeScript: no browser API.
+import type { PreviewChannel } from './preview';
 import type { WireFrame } from './protocol';
 
 /**
@@ -35,6 +36,11 @@ export interface Transport {
   onStateChange(next: (state: TransportState, reason: string | null) => void): () => void;
   /** Closes the channel; frames not yet sent are dropped. */
   close(reason?: string): void;
+  /**
+   * The live preview's video over the same connection (T4.3, preview.ts): the phone's to send, the
+   * host's to receive; absent from a transport that carries no media (the pair in memory).
+   */
+  readonly preview?: PreviewChannel;
 }
 
 /** The clock and the timers a transport, a pinger or a test runs on (the real ones by default). */
@@ -104,6 +110,11 @@ export class MemoryTransport implements Transport {
   transform: ((frame: WireFrame) => WireFrame | null) | null = null;
   readonly stats: MemoryTransportStats = { frames: 0, bytes: 0, retransmitted: 0, maxBuffered: 0 };
   bufferedAmountLowThreshold = 0;
+  /**
+   * The pair carries no media: no preview, unless a test gives its ends a fake one (the app's unit
+   * tests of the live preview, T4.3).
+   */
+  preview: PreviewChannel | undefined = undefined;
 
   #state: TransportState = 'open';
   #peer: MemoryTransport | null = null;

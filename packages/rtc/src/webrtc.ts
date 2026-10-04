@@ -3,11 +3,15 @@
 // ordered data channel, and the offer, the answer and the candidates exchanged through a Signaling.
 // Either role: the caller (the phone) makes the channel and the offer; the callee (the host) takes
 // the offer, answers, and receives the channel. When the connection fails, the caller restarts ICE,
-// which brings a new offer through the same signaling, and the callee answers it. This file alone in
-// the package touches the browser's WebRTC API: the unit tests never load it (the end-to-end suite
-// of T4.1 covers it), and the fakes stand in for it everywhere else.
+// which brings a new offer through the same signaling, and the callee answers it. Since T4.3 the
+// caller may also add a send-only video transceiver for the live preview before its first offer
+// (preview.ts), so that the picture turns on and off with no new offer, and the callee takes the
+// track it brings. This file alone in the package touches the browser's WebRTC API: the unit tests
+// never load it (the end-to-end suite of T4.1 covers it), and the fakes stand in for it everywhere
+// else.
 import type { SessionDescription } from '@cubetrace/core';
 
+import { PREVIEW_ENCODING, previewStats, type PreviewChannel, type PreviewStats } from './preview';
 import type { WireFrame } from './protocol';
 import type { Signaling } from './signaling';
 import { REAL_TIMERS, type Timers, type Transport, type TransportState } from './transport';
@@ -29,6 +33,12 @@ export interface WebRtcTransportOptions {
   createPeerConnection?: (configuration: RTCConfiguration) => RTCPeerConnection;
   timers?: Timers;
   timeoutMs?: number;
+  /**
+   * The caller adds a send-only video transceiver for the live preview (T4.3) before its first offer,
+   * capped by `PREVIEW_ENCODING`, inactive and without a track until its `preview.send`. The callee
+   * takes the track of any offer that brings one, whatever this says.
+   */
+  preview?: boolean;
 }
 
 /**
@@ -39,6 +49,7 @@ export class WebRtcTransport implements Transport {
   readonly #pc: RTCPeerConnection;
   readonly #signaling: Signaling;
   readonly #timers: Timers;
+  readonly #wantsPreview: boolean;
   #channel: RTCDataChannel | null = null;
   #state: TransportState = 'connecting';
   #reason: string | null = null;
@@ -52,6 +63,8 @@ export class WebRtcTransport implements Transport {
   /** Settles `connect`. */
   #opened: (() => void) | null = null;
   #failed: ((error: Error) => void) | null = null;
+  /** The live preview (T4.3): the caller's sender, or the callee's receiver. */
+  #preview: SentPreview | ReceivedPreview | undefined = undefined;
 
   private constructor(options: WebRtcTransportOptions) {
     const configuration = options.configuration ?? {
@@ -60,6 +73,7 @@ export class WebRtcTransport implements Transport {
     this.#pc = (options.createPeerConnection ?? ((c) => new RTCPeerConnection(c)))(configuration);
     this.#signaling = options.signaling;
     this.#timers = options.timers ?? REAL_TIMERS;
+    this.#wantsPreview = options.preview === true;
   }
 
   /**
@@ -75,9 +89,17 @@ export class WebRtcTransport implements Transport {
     return this.#state;
   }
 
-  /** The peer connection, for the preview track of T4.3 and the diagnostics. */
+  /** The peer connection, for the diagnostics. */
   get peerConnection(): RTCPeerConnection {
     return this.#pc;
+  }
+
+  /**
+   * The live preview (T4.3): the caller's when it asked for one (`preview`), the callee's always;
+   * undefined for a caller without one.
+   */
+  get preview(): PreviewChannel | undefined {
+    return this.#preview;
   }
 
   get bufferedAmount(): number {
@@ -176,13 +198,28 @@ export class WebRtcTransport implements Transport {
       }
     };
     if (signaling.role === 'caller') {
+      if (this.#wantsPreview) {
+        // Before the channel, in the first offer: the picture then turns on and off without one.
+        const transceiver = pc.addTransceiver('video', {
+          direction: 'sendonly',
+          sendEncodings: [{ active: false, ...PREVIEW_ENCODING }],
+        });
+        this.#preview = new SentPreview(transceiver.sender, () => this.#live());
+      }
       this.#attach(pc.createDataChannel(DATA_CHANNEL_LABEL, { ordered: true }));
       pc.onnegotiationneeded = () => {
         void this.#offer();
       };
     } else {
+      const received = new ReceivedPreview(() => this.#live());
+      this.#preview = received;
       pc.ondatachannel = (event) => {
         this.#attach(event.channel);
+      };
+      pc.ontrack = (event) => {
+        if (event.track.kind === 'video') {
+          received.take(event.track, event.receiver);
+        }
       };
     }
     this.#off.push(
@@ -245,6 +282,11 @@ export class WebRtcTransport implements Transport {
     } catch {
       // A candidate of an older session description after an ICE restart: harmless.
     }
+  }
+
+  /** Whether the connection is still up: no preview is sent or read once it ended. */
+  #live(): boolean {
+    return this.#state !== 'closed' && this.#state !== 'failed';
   }
 
   #attach(channel: RTCDataChannel): void {
@@ -310,5 +352,97 @@ export class WebRtcTransport implements Transport {
   /** Why the transport closed or failed; null while it has not. */
   get reason(): string | null {
     return this.#reason;
+  }
+}
+
+/** The caller's preview (T4.3): its camera's track sent, capped, or nothing. */
+class SentPreview implements PreviewChannel {
+  readonly track = null;
+
+  constructor(
+    private readonly sender: RTCRtpSender,
+    private readonly live: () => boolean,
+  ) {}
+
+  async send(track: MediaStreamTrack | null): Promise<void> {
+    if (!this.live()) {
+      return;
+    }
+    // The track first when it turns on, the encoding first when it turns off: never an active
+    // encoding without a track, nor a track sent uncapped.
+    if (track !== null) {
+      await this.sender.replaceTrack(track);
+    }
+    const parameters = this.sender.getParameters();
+    for (const encoding of parameters.encodings) {
+      Object.assign(encoding, PREVIEW_ENCODING, { active: track !== null });
+    }
+    await this.sender.setParameters(parameters);
+    if (track === null) {
+      await this.sender.replaceTrack(null);
+    }
+  }
+
+  onTrack(): () => void {
+    return () => undefined;
+  }
+
+  stats(): Promise<PreviewStats | null> {
+    return readStats(this.live() ? this.sender : null, 'outbound');
+  }
+}
+
+/** The callee's preview (T4.3): the track an offer brought, and its statistics. */
+class ReceivedPreview implements PreviewChannel {
+  #track: MediaStreamTrack | null = null;
+  #receiver: RTCRtpReceiver | null = null;
+  readonly #handlers = new Set<(track: MediaStreamTrack) => void>();
+
+  constructor(private readonly live: () => boolean) {}
+
+  get track(): MediaStreamTrack | null {
+    return this.#track;
+  }
+
+  /** An offer brought `track` (`ontrack`). */
+  take(track: MediaStreamTrack, receiver: RTCRtpReceiver): void {
+    this.#track = track;
+    this.#receiver = receiver;
+    for (const handler of [...this.#handlers]) {
+      handler(track);
+    }
+  }
+
+  send(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  onTrack(next: (track: MediaStreamTrack) => void): () => void {
+    this.#handlers.add(next);
+    if (this.#track !== null) {
+      next(this.#track);
+    }
+    return () => {
+      this.#handlers.delete(next);
+    };
+  }
+
+  stats(): Promise<PreviewStats | null> {
+    return readStats(this.live() ? this.#receiver : null, 'inbound');
+  }
+}
+
+/** The preview's statistics of a sender or a receiver; null without one, or when they fail. */
+async function readStats(
+  source: RTCRtpSender | RTCRtpReceiver | null,
+  direction: 'outbound' | 'inbound',
+): Promise<PreviewStats | null> {
+  if (source === null) {
+    return null;
+  }
+  try {
+    return previewStats((await source.getStats()).values(), direction);
+  } catch {
+    return null;
   }
 }
