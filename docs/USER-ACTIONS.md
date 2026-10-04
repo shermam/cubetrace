@@ -160,7 +160,7 @@ adds items; the owner ticks them when done (date and any detail that others need
 
 - [ ] **The `v0.4.0` release**, once T4.4's pull request is merged, from the GitHub UI (the
   coordinator's session cannot push tags): Releases → Draft a new release → Choose a tag: type
-  `v0.4.0` and choose "Create new tag on publish", Target: the merge commit of PR #66 (the
+  `v0.4.0` and choose "Create new tag on publish", Target: 16ad587 (the merge commit of PR #66) (the
   coordinator writes it here once merged; under Target → Recent commits, or `main` while nothing has
   been merged after it), title `cubetrace 0.4.0`, as 0.3.0's, the notes from the 0.4.0 section of
   `docs/CHANGELOG.md` → Publish release.

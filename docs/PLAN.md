@@ -16,7 +16,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | **1. The timer, on any device** | cube connection, scrambles, state tracking, mis-scramble guidance, timer, colour-neutral CFOP breakdown validated against the Cubeast fixtures, session records staged in OPFS, PWA, probe page, fake cube, e2e suite, GitHub Pages deploy. Replaces Cubeast for daily practice. | ✅ v0.1.0 (2026-09-27) |
 | **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ✅ 0.2.0 (2026-10-01: the fixes from the owner's first recordings, T2.8–T2.13, merged; the full round 2 skipped by the owner's decision; the tag from the GitHub UI pending) |
 | 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ✅ 0.3.0 (2026-10-02: T3.0–T3.6 merged and deployed; the tag from the GitHub UI on 2896591 or later). Follow-ups T3.6–T3.9 merged the same day (the installed app's sign-in, the cube's whole record, the 3D cube in the clip viewer, the diagnostics events), for 0.4.0 |
-| 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | 🔄 board written 2026-10-03 (T4.0–T4.4), for 0.4.0 |
+| 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ✅ 0.4.0 (2026-10-04: T4.0–T4.4, T4.2a and T4.2b merged and deployed; the tag from the GitHub UI on 16ad587). Open: #61 closes when a pairing stays converged for 20 minutes; the measured cells of `docs/DEVICES.md` |
 | 5. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
 ## Phase 1 task board
@@ -755,7 +755,12 @@ when clips are deleted by policy); a late re-save of an older attempt (a remote 
 still hits the index's per-page-load `created` and the refused `upload`. (o) When core's reader gains a
 defaulted field, every older record reads back as a new text and the queue signs its `attempt.json` once
 more at the next reload of its session (T3.7 did this once for all earlier records): hash the file as
-written, or leave the reader's defaults out of the hash.
+written, or leave the reader's defaults out of the hash. (p) The peer documents of a call no host page ever took
+(`sessions/{id}/peers/{peerId}` with their candidates) are never deleted: the host deletes them when a
+connection ends or a call is refused, and the hour's cleanup of the phase 4 design was not built; harmless
+at one solver, a Cloud Function or a startup sweep later. (q) The phone's goodbye reads twice ("The host let
+this camera go: The host let the camera go: the session ended."); a unit spec asserts the text, so both
+change together.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -1996,7 +2001,7 @@ phase 3 (T2.0–T2.14, T3.0–T3.10).
   (`attachClip`), and the upload queue sends them with the attempt (`ClipsInFlight` holds the attempt
   until the remote clips are in, up to a limit; a clip that comes later is uploaded as an addition).
 - **Labels and records.** A remote camera is a camera of the session like any other
-  (`session.cameras[]`, `labelFor`: `phone-rear`, `phone-front`, a second phone `phone-2-rear`), with
+  (`session.cameras[]`, `labelFor`: `phone-rear`, `phone-front`, a second phone `phone-rear-2`), with
   a `remote` field naming the device (its host label and platform); its clips are `video[]` entries
   with the same fields, their `camera` the label; a sync check's result is `clock.cameras[label]` as
   today. Schemas stay at version 2 with the new fields optional, like T3.7's.
@@ -2019,7 +2024,7 @@ phase 3 (T2.0–T2.14, T3.0–T3.10).
 | T4.2a | `upload`, `web`: deleting an uploaded clip leaves its record as uploaded (no `attempt.json` re-signed; `local` from the folder); the diagnostics daily cap 5,000; the clock record's effect on `session.json` measured | T4.2 | ✅ #63 (2026-10-04) |
 | T4.2b | `core`, `rtc`, `web`: the clock fit keeps its ten least round trips (two-minute window, 5 ms spread, a clock-jump check), 500 ms pings until converged, `rtc.clock` with the link's distribution; the first call retries, the host's hello second (a lost-hello bug); the leave at New session held for the last clips (15 s) | T4.2a | ✅ #64 (2026-10-04) |
 | T4.3 | `web`, `capture`: the sync check on a remote camera; frame times converted with the drift fit; the live preview track; measurements in `docs/DEVICES.md` | T4.2 | ✅ #65 (2026-10-04) |
-| T4.4 | the desk rig: docs, "After T4" items, the round report's checklist, `0.4.0` | T4.3 | ⬜ |
+| T4.4 | the desk rig: docs, "After T4" items, the round report's checklist, `0.4.0` | T4.3 | ✅ #66 (2026-10-04) |
 
 Waves: T4.0 → T4.1 → T4.2 → T4.3 → T4.4, one agent at a time.
 
@@ -2510,7 +2515,7 @@ least round trips since T4.2b, not "within 1.5× the least"; nothing deletes the
 "after an hour"; the example of a session with a phone's camera; ten files with a phone's clips),
 `docs/ARCHITECTURE.md` (phase 4's events in the diagnostics' diagram, `files.downloaded`, the clip
 converted at its cut, the uploads with a phone's clips, the cloud project's pairing), `docs/RTC.md`
-(a second phone is `phone-rear-2`; the decisions above still say `phone-2-rear` and "after an
+(a second phone is `phone-rear-2`; the decisions above still say `phone-rear-2` and "after an
 hour") and the quota of before 2026-10-03 in the README and round 3. `docs/MANUAL-TESTS.md` "After
 T4" (ten items, a second phone if at hand) with items 4.4.1–4.4.10 in the round report and
 `docs/DIAGNOSTICS.md`; the CHANGELOG's 0.4.0 (T3.6 was in 0.3.0); versions 0.4.0 and the lockfile;
