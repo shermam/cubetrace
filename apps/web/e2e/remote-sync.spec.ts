@@ -238,6 +238,16 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
     expect(clip.syncResidualMs, clip.file).toBe(clock.offsetMs);
     expect([clip.width, clip.height]).toEqual([SYNTHETIC_CAMERA.width, SYNTHETIC_CAMERA.height]);
   }
+  // Their events say the lag they took, for the round report.
+  await expect
+    .poll(
+      async () =>
+        (await events(page))
+          .filter((e) => e.kind === 'remote.clip')
+          .map((e) => e.data['syncResidualMs']),
+      { timeout: 20_000 },
+    )
+    .toEqual([Math.round(clock.offsetMs * 10) / 10, Math.round(clock.offsetMs * 10) / 10]);
 
   // "Live preview from phones" off: the phone stops sending, the thumbnail is the picture again.
   await page.getByTestId('live-preview-from-phones').uncheck();

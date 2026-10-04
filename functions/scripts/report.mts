@@ -390,6 +390,8 @@ const T41 = 'After T4.1';
 const RTC = 'T4.1 — remote cameras';
 const T42 = 'After T4.2';
 const REMOTE_CLIPS = 'T4.2 — remote clips';
+const T43 = 'After T4.3';
+const REMOTE_SYNC = 'T4.3 — remote sync check and live preview';
 
 /** A median of `values` in ms as seconds, to one decimal, or `?` without one. */
 function seconds(values: readonly number[]): string {
@@ -399,7 +401,8 @@ function seconds(values: readonly number[]): string {
 
 /**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
- * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3 and the items after T3.7, T4.1 and T4.2.
+ * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3 and the items after T3.7, T4.1, T4.2 and
+ * T4.3.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -2789,6 +2792,156 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         `${count(off, 'switch')} off, ${count(back, 'switch')} on followed by a cut within the hour`,
         off.length > 0 ? 'switched off, but no cut after it was on again' : 'never switched off',
       );
+    },
+  },
+  // ---- After T4.3 ----
+  {
+    id: '4.3.1',
+    round: T43,
+    section: REMOTE_SYNC,
+    title:
+      "A sync check on the paired phone: its rectangle drawn around the cube on the phone, Sync check on its line under the MacBook's preview, five flicks: the phone's lag and its spread",
+    kinds: ['sync.check'],
+    eyes: "the panel naming the phone; the lag beside the MacBook's own camera's",
+    check: (q) => {
+      const checks = q.onLaptop('sync.check', (e) => flag(e, 'remote') === true);
+      const passed = checks.filter((e) => text(e, 'outcome') === 'ok');
+      const failures = checks.filter(isFailure);
+      const own = q.onLaptop(
+        'sync.check',
+        (e) => flag(e, 'remote') !== true && text(e, 'outcome') === 'ok',
+      );
+      const middle = (events: readonly ReportEvent[], key: string): string =>
+        String(median(events.map((e) => num(e, key) ?? 0)) ?? '?');
+      const cameras = [...new Set(passed.map((e) => text(e, 'camera')))].join(', ');
+      const facts = `${count(passed, 'check')} of a phone's camera passed (${cameras || 'none'}): lag ${middle(passed, 'offsetMs')} ms, spread ${middle(passed, 'spreadMs')} ms, ${String(passed.filter((e) => flag(e, 'clockConverged') === true).length)} with the clock sync converged, its round trip ${middle(passed, 'clockRttMs')} ms (medians); the MacBook's own camera ${middle(own, 'offsetMs')} ms${failures.length === 0 ? '' : `; ${count(failures, 'failed check')}: ${failures.map(failureMessage).slice(-3).join('; ')}`}`;
+      if (passed.length === 0) {
+        return failures.length > 0 ? failed(facts) : none("no sync check of a phone's camera");
+      }
+      return ok(facts);
+    },
+  },
+  {
+    id: '4.3.2',
+    round: T43,
+    section: REMOTE_SYNC,
+    title:
+      "The phone's later clips take its lag: the solves after the check have the phone's clips with its lag as their syncResidualMs, the moves in step with its picture in the clip viewer",
+    kinds: ['remote.clip'],
+    eyes: "the moves against the phone's picture in the clip viewer",
+    check: (q) => {
+      const clips = q.onLaptop('remote.clip');
+      const taken = clips.filter((e) => num(e, 'syncResidualMs') !== null);
+      const lags = [...new Set(taken.map((e) => num(e, 'syncResidualMs') ?? 0))];
+      return found(
+        taken,
+        `${count(taken, 'remote clip')} of ${String(clips.length)} with the lag of a check (${lags
+          .slice(-4)
+          .map((lag) => `${round(lag)} ms`)
+          .join(', ')})`,
+        clips.length > 0 ? 'remote clips, none with the lag of a check' : 'no remote clip',
+      );
+    },
+  },
+  {
+    id: '4.3.3',
+    round: T43,
+    section: REMOTE_SYNC,
+    title:
+      "The live preview: the phone's picture in a tile over the MacBook's preview within seconds of the pairing, moving with the phone's camera; a tap swaps it with the main picture, and back",
+    kinds: ['preview.started'],
+    eyes: "the tile's picture moving, its framing rectangle, the swap at a tap",
+    check: (q) => {
+      const started = q.onPhone('preview.started');
+      const sizes = [
+        ...new Set(
+          started.map(
+            (e) =>
+              `${String(num(e, 'width') ?? '?')}×${String(num(e, 'height') ?? '?')} / ${String(num(e, 'scale') ?? '?')}`,
+          ),
+        ),
+      ];
+      const caps = [
+        ...new Set(
+          started.map(
+            (e) =>
+              `${String(num(e, 'maxKbps') ?? '?')} kbps and ${String(num(e, 'maxFps') ?? '?')} fps`,
+          ),
+        ),
+      ];
+      return found(
+        started,
+        `${count(started, 'preview')} sent (${sizes.join(', ')}; at most ${caps.join(', ')})`,
+        'no live preview sent by a phone',
+      );
+    },
+  },
+  {
+    id: '4.3.4',
+    round: T43,
+    section: REMOTE_SYNC,
+    title:
+      '"Live preview from phones" off and on in turns, a few minutes each, while the phone records: the recording\'s frame rate with and without the preview, and the encoder\'s time per frame',
+    kinds: ['settings.changed', 'preview.stopped', 'preview.started'],
+    eyes: "the phone's temperature, and the Camera page's frame rate",
+    check: (q) => {
+      const off = q.where(
+        'settings.changed',
+        (e) => text(e, 'key') === 'livePreviewFromPhones' && flag(e, 'value') === false,
+      );
+      // A span with the preview: its stop by the switch; one without it: the start that ended it.
+      const withIt = q.onPhone(
+        'preview.stopped',
+        (e) => text(e, 'why') === 'off' && (num(e, 'recordingSeconds') ?? 0) > 0,
+      );
+      const without = q.onPhone(
+        'preview.started',
+        (e) =>
+          (num(e, 'recordingSeconds') ?? 0) > 0 &&
+          q.previous(e, 'preview.stopped', HOUR, (p) => text(p, 'why') === 'off') !== null,
+      );
+      const middle = (events: readonly ReportEvent[], key: string): string =>
+        String(median(events.map((e) => num(e, key) ?? 0)) ?? '?');
+      const encoders = [...new Set(withIt.map((e) => text(e, 'encoder') ?? '?'))].join(', ');
+      return found(
+        off.length > 0 && withIt.length > 0 && without.length > 0 ? withIt : [],
+        `the recording at ${middle(withIt, 'recordingFps')} fps with the preview (least ${middle(withIt, 'recordingFpsMin')}, ${middle(withIt, 'recordingDropped')} frames dropped), ${middle(without, 'recordingFps')} fps without (least ${middle(without, 'recordingFpsMin')}, ${middle(without, 'recordingDropped')} dropped), over ${String(withIt.length)} and ${String(without.length)} spans; the preview ${middle(withIt, 'fps')} fps at ${middle(withIt, 'kbps')} kbps, ${middle(withIt, 'encodeMsPerFrame')} ms a frame (${encoders}), the CPU holding it back ${middle(withIt, 'cpuLimitedShare')} of the time (medians)`,
+        off.length === 0
+          ? 'the live preview never switched off'
+          : 'switched off, but no span with and without the preview on a phone',
+      );
+    },
+  },
+  {
+    id: '4.3.5',
+    round: T43,
+    section: REMOTE_SYNC,
+    title:
+      "Twenty minutes of solves on the rig, the phone paired and its preview on: the clock sync stays converged for 20 minutes (issue #61), every attempt has the phone's clips",
+    kinds: ['rtc.clock', 'remote.clip'],
+    eyes: "the phone's temperature after 20 minutes (by hand), and the rig",
+    check: (q) => {
+      // The longest stretch of each camera's records converged: from a convergence (or a minute's
+      // record) to the last minute's record before a withdrawal, a record not converged or the end.
+      let longest = 0;
+      let withdrawn = 0;
+      const since = new Map<string, number>();
+      for (const e of q.onLaptop('rtc.clock')) {
+        const camera = `${e.device.label}/${text(e, 'camera') ?? '?'}`;
+        if (flag(e, 'converged') === true) {
+          const start = since.get(camera) ?? e.tsMs;
+          since.set(camera, start);
+          longest = Math.max(longest, e.tsMs - start);
+        } else {
+          if (text(e, 'why') === 'withdrawn') {
+            withdrawn++;
+          }
+          since.delete(camera);
+        }
+      }
+      const clips = q.onLaptop('remote.clip', (e) => flag(e, 'late') !== true);
+      const facts = `the clock sync converged for ${round(longest / MINUTE, 1)} minutes at the longest, ${String(withdrawn)} ${withdrawn === 1 ? 'withdrawal' : 'withdrawals'}; ${count(clips, 'remote clip')}`;
+      return longest >= 20 * MINUTE ? ok(facts) : none(facts);
     },
   },
 ];

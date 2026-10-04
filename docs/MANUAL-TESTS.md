@@ -956,3 +956,41 @@ cannot show, next to the item, with the device and what happened.
 - [ ] "Record remote cameras" off (Camera settings → Cameras): the phone stays connected and a solve
   brings no clip from it (its Clips line does not change); on again, the next solve has the phone's
   clips.
+
+## After T4.3 — the phone's sync check and its live preview
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T4.3, the MacBook as the
+host (the GAN 12 ui, the camera on, signed in) and the ThinkPhone paired as its camera as in "After
+T4.1", "Record remote cameras" and "Live preview from phones" on (Camera settings → Cameras, both on
+by default), the rig as you mean to use it (the phone on its stand, the lamp). The events say most of
+it (`docs/DIAGNOSTICS.md`, "After T4.3"); write down what they cannot show, next to the item, with the
+device and what happened.
+
+- [ ] The live preview: within a few seconds of "Connected", the phone's picture is a small tile in
+  the top right corner of the MacBook's preview on the Timer page, moving with the phone's camera,
+  with the phone's framing rectangle over it. Tap the tile: the phone's picture fills the preview and
+  the MacBook's own goes into the tile; tap that tile: back. Write how far behind the phone's picture
+  looks (wave a hand in front of both cameras), and whether the tile ever froze.
+- [ ] The phone's sync check: on the phone's Camera page, draw its framing rectangle around the cube
+  (Camera settings → Edit the framing). Under the MacBook's preview, the phone's line says
+  `Sync: phone-rear has no check in this session`; its "Sync check" opens the panel, titled with the
+  phone's label: hold the cube still in front of the phone, flick one face and back, five times, as
+  for the MacBook's own check. It ends with `phone-rear lags the cube by N ms (±S)`, and the line
+  keeps it. Write N and S, the MacBook's own camera's lag in the same session (its own line), and
+  whether the phone's clock line said synced then. Then once more with the rectangle as it is ("Start
+  anyway" on the panel, which asks for the phone's rectangle first): write that result too.
+- [ ] Its clips take it: three solves after the check. In the clip viewer of one of them, choose
+  "Solve · phone-rear": the moves keep in step with the phone's picture, as the MacBook's own do with
+  its own (write whether they look early or late, and by how much); Download, and the phone's clips in
+  `attempt.json` have its lag as their `syncResidualMs`.
+- [ ] What the preview costs the phone: while the phone records (between solves will do), "Live
+  preview from phones" off for three minutes, on for three minutes, twice. The tile shows the phone's
+  picture every 2 s while it is off (its thumbnail), live again once it is on. The events give the
+  recording's frame rate with and without the preview, and the preview encoder's time per frame;
+  write the phone's temperature by hand (warm, hot) and the frame rate its Camera page shows in each
+  span.
+- [ ] Twenty minutes on the rig: twenty minutes of solves, the phone paired, its preview on. The
+  MacBook's Cameras list says synced throughout (issue #61 closes when one pairing stays converged
+  for 20 minutes on the home Wi-Fi), every solve has the phone's two clips, and the tile keeps moving.
+  At the end, write the phone's temperature by hand and its battery level, and whether its Camera page
+  ever said throttled.

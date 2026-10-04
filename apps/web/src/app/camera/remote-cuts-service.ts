@@ -785,6 +785,10 @@ export class RemoteCutsService {
     const scope = scopeOf(clip);
     const bytes = clip.framesBytes + mp4Bytes;
     const transferMs = clip.offeredMs === null ? null : Math.round(now - clip.offeredMs);
+    // The lag the clip took (T4.3): the camera's sync check in the session under way, as
+    // `withSyncResidual` gave it; null before one, or for a clip of a session that ended.
+    const session = this.session.session();
+    const check = session?.id === clip.ref.session ? session.clock.cameras[clip.label] : undefined;
     this.diagnostics.record(
       'remote.clip',
       {
@@ -802,6 +806,8 @@ export class RemoteCutsService {
         converged: frames.remote?.converged ?? null,
         offsetMs:
           frames.t0RemoteMs === undefined ? null : round1(frames.t0RemoteMs - frames.t0HostMs),
+        syncResidualMs:
+          check === undefined || check.clapperboardSamples === 0 ? null : round1(check.offsetMs),
         truncatedStart: clip.details?.truncatedStart ?? false,
       },
       scope,

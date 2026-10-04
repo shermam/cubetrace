@@ -239,7 +239,7 @@ interface Current {
  * `clip` with its camera's lag behind the cube in `session` as its `syncResidualMs` (T2.5: the
  * `offsetMs` of the camera's sync check, `clock.cameras`), unless it has one; null before a check.
  * A remote camera's entry before its check (T4.1 writes its clock sync there, the clapperboard's
- * fields at 0 until T4.3 measures them) is no check: its clips keep null.
+ * fields at 0 until a sync check of the camera measures them, T4.3) is no check: its clips keep null.
  */
 function withSyncResidual(clip: VideoClip, session: SessionRecord | null): VideoClip {
   if (clip.syncResidualMs !== null || session === null) {

@@ -497,6 +497,8 @@ describe('RemoteCutsService', () => {
       converged: false,
       offsetMs: OFFSET_MS,
       resumedBytes: 0,
+      // No sync check of the phone's camera in the session yet (T4.3).
+      syncResidualMs: null,
     });
   });
 

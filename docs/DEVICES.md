@@ -300,10 +300,44 @@ A phone paired to the laptop as a camera (phase 4, `docs/RTC.md`): the Wi-Fi's r
 clock sync measures them, the phone's clock against the laptop's, how the clock sync fared, and the
 transfer of the phone's clips. T4.3 adds the phone camera's lag from its sync check and the phone's
 warmth after twenty minutes of solves. From the diagnostics events (`rtc.clock`, `remote.cut`,
-`remote.clip`; `docs/DIAGNOSTICS.md`): since T4.2b, `rtc.clock` says every minute of a connection the
-median and the 95th percentile of the window's round trips and the share the fit keeps, so the next
-pairing fills the window's columns.
+`remote.clip`, `sync.check`; `docs/DIAGNOSTICS.md`): since T4.2b, `rtc.clock` says every minute of a
+connection the median and the 95th percentile of the window's round trips and the share the fit
+keeps, so the next pairing fills the window's columns. The coordinator fills a row from the owner's
+pairing (`npm run round-report`, "After T4.3", and the events themselves), each cell from these
+facts of the pairing's events, the medians over its minutes with the range or the worst beside them:
+
+- **Round trip**: `rtc.clock`'s `rttMs` (the least round trip kept) and the window's `rttP50Ms` and
+  `rttP95Ms` (T4.2b).
+- **The phone's clock**: `rtc.clock`'s `offsetMs` at the first and the last record (how far it
+  moved) and `driftPpm` (the minute records').
+- **The clock sync**: `rtc.clock`'s `windowSamples` and `keptShare` (the samples of the window and the
+  share kept), `samples` and `residualP95Ms` (the clock sync's spread), how long after `rtc.paired`
+  its `why: converged` came, how many `withdrawn`, and the longest stretch converged (the round
+  report's 4.3.5; issue #61 asks for 20 minutes); with `remote.cut`'s `converged` and `marginMs`, how
+  many cuts went before convergence and how wide.
+- **A clip's transfer**: `remote.clip`'s `transferMs` (from the phone's offer to the record: an
+  attempt's clips are two of them), `bytes` and `bytesPerSecond` (the data channel's throughput), and
+  `resumedBytes` when a transfer was cut.
+- **Camera lag**: `sync.check` with `remote: true`: `offsetMs` and `spreadMs` of each check, with
+  `clockConverged` and `clockRttMs` (the clock sync then), beside the laptop's own camera's lag of the
+  same session; and `remote.clip`'s `syncResidualMs`, the lag the later clips took.
+- **After 20 minutes**: the owner's notes (the phone's temperature by hand, its battery, whether its
+  Camera page said throttled); the `state` reports are not events.
+- **The live preview** (the table below): `preview.stopped` with `why: off` (a span with the
+  preview: `encodeMsPerFrame`, `fps`, `kbps`, `encoder`, `cpuLimitedShare`, and the recording's
+  `recordingFps`, `recordingFpsMin`, `recordingDropped`) against the `preview.started` that ends a
+  span without it (the same recording facts).
 
 | Pair, network | Date, measured by | Round trip | The phone's clock | The clock sync | A clip's transfer | Camera lag | After 20 minutes |
 |---|---|---|---|---|---|---|---|
-| ThinkPhone paired to the MacBook Pro 2021, the owner's home Wi-Fi | 2026-10-04, the coordinator from the diagnostics events (20.7 minutes paired, 18 attempts, 36 cuts) | the least of the window 5.4 to 8.5 ms; the window's median and 95th percentile not recorded before T4.2b | 238 to 245 ms behind the laptop's, moving by about 7 ms over the 20 minutes (a few ppm) | with the band of T4.0 to T4.2: 2 to 14 samples kept of 60 at the cuts (7 at the median), their residuals' 95th percentile 0.7 to 1.7 ms; converged twice and withdrawn twice, 10 of the 36 cuts converged (on 2026-10-03, two pairings of 12 and 4 minutes never converged: issue #61) | 1.8 s at the median and 8.0 s at most, for clips of 12.9 MB at the median, at 7.0 MB/s at the median | (T4.3) | (T4.3) |
+| ThinkPhone paired to the MacBook Pro 2021, the owner's home Wi-Fi | 2026-10-04, the coordinator from the diagnostics events (20.7 minutes paired, 18 attempts, 36 cuts) | the least of the window 5.4 to 8.5 ms; the window's median and 95th percentile not recorded before T4.2b | 238 to 245 ms behind the laptop's, moving by about 7 ms over the 20 minutes (a few ppm) | with the band of T4.0 to T4.2: 2 to 14 samples kept of 60 at the cuts (7 at the median), their residuals' 95th percentile 0.7 to 1.7 ms; converged twice and withdrawn twice, 10 of the 36 cuts converged (on 2026-10-03, two pairings of 12 and 4 minutes never converged: issue #61) | 1.8 s at the median and 8.0 s at most, for clips of 12.9 MB at the median, at 7.0 MB/s at the median | none: no sync check of a phone's camera before T4.3 | not noted |
+| ThinkPhone paired to the MacBook Pro 2021, the owner's home Wi-Fi, after T4.3 | (the coordinator, from the round after T4.3) | | | | | | |
+
+The live preview's cost on the phone (T4.3: a fifth of the camera's resolution, at most 300 kbps and
+15 fps, beside the recording), from the spans with and without it:
+
+| Phone, camera | Date, measured by | The recording without the preview | The recording with it | The preview's encoder |
+|---|---|---|---|---|
+| ThinkPhone, the rear camera at 1080p30 | (the coordinator, from the round after T4.3) | | | |
+| Two pages of one browser (the end-to-end pair: a still 640 × 360 canvas), for scale | 2026-10-04, T4.3's e2e | – | 30.2 fps (29 the least), none dropped | 128 × 72 at 15 fps, 4 kbps, 0.36 ms a frame (`libvpx`), never held back |
+

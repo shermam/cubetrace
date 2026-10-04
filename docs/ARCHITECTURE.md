@@ -133,7 +133,8 @@ and the median lag of the turns kept (the fifth farthest from the median left ou
 becomes the camera's `offsetMs` in `clock.cameras` and the `syncResidualMs` of its later clips.
 Idle time is never stored. Remote cameras (phase 4, below) cut the same way on the phone and ship
 their clips over the WebRTC data channel into the attempt's folder (T4.2); the uploads take them
-with the rest.
+with the rest. A remote camera's sync check (T4.3) is the same check: the phone's capture worker
+measures its frames' motion and sends it, and the host places it on its clock and matches it.
 
 ## Remote cameras (phase 4)
 
@@ -141,8 +142,8 @@ A phone joins a session as a camera (`docs/PLAN.md`, the phase 4 board; the cont
 `docs/RTC.md`): the same app on a page of its own, the capture pipeline above running on the phone,
 and one `RTCPeerConnection` to the host with a reliable ordered data channel, made with Google's
 public STUN server and no TURN (the two devices on one Wi-Fi). T4.0 built what needs no page,
-`packages/rtc`; T4.1 the pages and the connection's services, T4.2 the cuts and the clips, and the
-sync check and the preview come with T4.3:
+`packages/rtc`; T4.1 the pages and the connection's services, T4.2 the cuts and the clips, T4.3 the
+sync check of a phone's camera and the live preview:
 
 ```
 host (the session's device)                                                 phone (the camera device)
@@ -155,6 +156,9 @@ cut (the window in the phone's clock) ─▶                             the rin
 FileReceiver ◀── file-begin / chunks / file-done ◀── FileSender       64 KB chunks under a 256 KB threshold,
   ──▶ file-resume / file-ack ──▶                                        resumed by offset, CRC-32 checked
 the attempt's folder: <label>.<segment>.mp4 + frames.json (times converted to the host clock) ─▶ upload
+sync-start ─▶ ◀─ sync-motion (each frame's motion, its times       CameraDeviceSync: the capture worker's
+SyncRun: the frames placed on the host clock, matched to the turns     motion meter inside the framing
+the preview track ◀══ the same RTCPeerConnection, video ══ a fifth of the camera, 300 kbps, 15 fps
 ```
 
 The host decides everything the dataset needs: the cuts' windows (converted into the phone's clock
@@ -226,6 +230,36 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
 - The end-to-end suite bends both sides in development builds through `window.cubetraceE2eRemote`
   (`e2e-remote.ts`): a camera device's clock moved by an offset (`RTC_TIMERS`), its connection cut
   once in the middle of a file, its cuts ignored, the host's wait shortened.
+
+**The sync check and the live preview (T4.3; `docs/RTC.md` §10 has them step by step).**
+
+- `RemoteCameraRegistry` (`apps/web/src/app/camera/remote-camera-registry.ts`, a root service of a
+  few lines) is how the Timer page's preview area and `SyncService` see the phones without the
+  connection's code: `RemoteCamerasService`, in the Cameras section's lazy chunk, provides it when it
+  is made (the cameras as `RemoteCameraEntry`: names, state, whether synced and recording, framing,
+  the preview's track, the thumbnail; `watchMotion`; `clockRecord`), and until then there are none.
+- The host: `SyncService.start({remote})` runs the check of a phone's camera with the same `SyncRun`,
+  its frames from `RemoteCamerasService.watchMotion` (`sync-start`, then each `sync-motion` frame's
+  times converted with the clock estimate of its batch), and keeps the lag beside the clock sync's
+  record in `clock.cameras[label]`, which the phone's later clips take as their `syncResidualMs`;
+  `SyncCheck` gives each phone a line under the preview, and its panel names the phone. "Live
+  preview from phones" (`SettingsService.livePreviewFromPhones`, on by default) is a switch of the
+  Cameras section: `RemoteCamerasService` says `preview` to each phone after the hellos and when it
+  changes, and takes the track the phone's offer brought (`Transport.preview`) into the camera's
+  entry. `CameraPreview` loads `RemotePreviews` behind `@defer (when …)` once a phone with a camera
+  is listed: a tile per phone over the host's picture (`RemotePicture`: the live video while the
+  track flows, the thumbnail otherwise, the framing over it), a tap swapping it with the main
+  picture, the first phone's picture the main one when the host has no camera on.
+- The phone: `CameraDeviceSync` answers `sync-start` with the capture worker's motion meter
+  (`CameraDeviceCapture.watchMotion`) and sends the measures in batches; `CameraDevicePreview` sends
+  the camera's track over the transport's preview channel while the host wants it
+  (`WebRtcTransport` made with `preview: true`: a send-only video transceiver in the first offer, the
+  encoding capped and toggled with `setParameters`, no renegotiation), and records what it cost
+  (`preview.started`, `preview.stopped`). `CameraDeviceService` hands both each connection.
+- The end-to-end pair films a synthetic camera on the phone's page (`apps/web/e2e/helpers/remote.ts`:
+  the page's `getUserMedia` replaced, before the app's scripts run, by a canvas captured at 30 fps
+  whose square flips when the test says) and turns the demo cube through the dev server's `ng`
+  debugging API, so that nothing of it is in the app.
 
 ## The clip viewer
 
