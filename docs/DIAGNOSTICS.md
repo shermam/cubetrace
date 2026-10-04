@@ -147,7 +147,7 @@ know it (a camera without a frame rate, a cube without a production date).
 
 ## The checklists, read from the events
 
-The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3 and the items after T3.7, T4.1, T4.2 and T4.3), each with the kinds
+The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3, the items after T3.7, T4.1, T4.2 and T4.3, and the desk rig's after T4), each with the kinds
 whose presence, with their facts, is its evidence, and what still needs the owner's eyes. The round
 report evaluates the same table (`functions/scripts/report.mts`, `CHECKLIST`; the test holds the
 two to each other): ✅ the evidence is there, with the facts beside it; ⬜ it is not; ❗ the events
@@ -389,6 +389,24 @@ with the camera on and signed in, on both devices, is the round.
 | 4.3.3 | The live preview: the phone's picture in a tile over the MacBook's preview within seconds of the pairing, moving with the phone's camera; a tap swaps it with the main picture, and back | `preview.started` | the tile's picture moving, its framing rectangle, the swap at a tap |
 | 4.3.4 | "Live preview from phones" off and on in turns, a few minutes each, while the phone records: the recording's frame rate with and without the preview, and the encoder's time per frame | `settings.changed`, `preview.stopped`, `preview.started` | the phone's temperature, and the Camera page's frame rate |
 | 4.3.5 | Twenty minutes of solves on the rig, the phone paired and its preview on: the clock sync stays converged for 20 minutes (issue #61), every attempt has the phone's clips | `rtc.clock`, `remote.clip` | the phone's temperature after 20 minutes (by hand), and the rig |
+
+#### After T4 — T4.4 — the desk rig
+
+The whole rig once (`docs/MANUAL-TESTS.md`, "After T4"), in the order the owner goes through it; the
+second phone's item only if one is at hand.
+
+| # | Item | Evidence | Still needs eyes |
+|---|---|---|---|
+| 4.4.1 | The rig paired: the ThinkPhone on its stand at another angle than the MacBook's camera, the lamp on, the framing rectangles around the cube; Add camera, the QR scanned, "Connected", synced within seconds, the phone's tile over the MacBook's preview | `rtc.paired`, `rtc.clock`, `preview.started` | the angle, the light and both framings; the time from the scan to "Connected" |
+| 4.4.2 | The sync checks: the MacBook's own, due by itself before the first scramble, and the phone's, from its line under the preview with its rectangle drawn on the phone: both pass (spreads under 83 ms) in the session | `sync.check` | the two lags side by side, and the phone's clock line during its check |
+| 4.4.3 | Three solves on the rig: each attempt has four clips within seconds of its end, the phone's Clips line back each time, the phone's clips taking its lag; each attempt uploaded with every file (ten with gyro.json) | `attempt.done`, `remote.clip`, `upload.state` | the phone's Clips line after each solve |
+| 4.4.4 | The clip viewer of one of them: four buttons naming the cameras, the phone's solve playing with its moves and the 3D cube in step with its picture; Download gives the four clips with their frame times, gyro.json and attempt.json | `clips.viewed`, `files.downloaded` | the moves and the 3D cube against the phone's picture: early or late, by how much |
+| 4.4.5 | "Live preview from phones" off for a minute: the tile shows the phone's picture every 2 s; on again: live again within seconds | `settings.changed`, `preview.stopped`, `preview.started` | the tile, live and every 2 s |
+| 4.4.6 | Twenty minutes of solves on the rig, the preview on: the clock sync converged throughout (issue #61), every attempt in that time with the phone's clips | `rtc.clock`, `attempt.done` | the phone's temperature and battery after 20 minutes (by hand), and whether its Camera page said it may be hot |
+| 4.4.7 | Walk out of the Wi-Fi's reach with the phone right after a solve, for a minute, and back: both connect again without a new code, and the clip on its way comes, resumed where it stopped | `rtc.disconnected`, `rtc.connected`, `remote.clip` | how long each device took to say connected again |
+| 4.4.8 | The phone's Wi-Fi off for three minutes right after a solve: two minutes after the end the attempt is uploaded without the phone's clip, the notes naming the camera; Wi-Fi on: the phone back, its clip late and uploaded as an addition | `remote.clip.missing`, `rtc.connected`, `remote.clip.late` | the session's notes; the bucket's listing after the addition (the coordinator) |
+| 4.4.9 | New session right after a solve: the MacBook lists the phone as "waiting for the phone's last clips" for a few seconds, the last attempt gets them, then the phone is let go ("the session ended"); Add camera again pairs it to the new session | `session.started`, `remote.clip`, `rtc.disconnected`, `rtc.paired` | the waiting line on the MacBook, and the phone's words |
+| 4.4.10 | The second phone, if at hand (a name of its own in Settings → This device): paired while the first is connected, listed as phone-rear-2 with a tile and a sync check of its own; each attempt with six clips, uploaded with every file (fourteen with gyro.json) | `rtc.paired`, `attempt.done`, `upload.state` | the two tiles over the preview, and the second phone's check |
 
 ## The QA view
 

@@ -392,6 +392,8 @@ const T42 = 'After T4.2';
 const REMOTE_CLIPS = 'T4.2 — remote clips';
 const T43 = 'After T4.3';
 const REMOTE_SYNC = 'T4.3 — remote sync check and live preview';
+const T4 = 'After T4';
+const RIG = 'T4.4 — the desk rig';
 
 /** A median of `values` in ms as seconds, to one decimal, or `?` without one. */
 function seconds(values: readonly number[]): string {
@@ -400,9 +402,61 @@ function seconds(values: readonly number[]): string {
 }
 
 /**
+ * The longest stretch of a remote camera's clock sync converged, as the host's `rtc.clock` records
+ * say it: from a convergence (or a minute's record) to the last minute's record before a withdrawal,
+ * a record not converged or the end; with when it began and ended, and the withdrawals counted.
+ */
+function convergedStretch(q: Query): {
+  ms: number;
+  fromMs: number;
+  toMs: number;
+  withdrawn: number;
+} {
+  let best = { ms: 0, fromMs: 0, toMs: 0 };
+  let withdrawn = 0;
+  const since = new Map<string, number>();
+  for (const e of q.onLaptop('rtc.clock')) {
+    const camera = `${e.device.label}/${text(e, 'camera') ?? '?'}`;
+    if (flag(e, 'converged') === true) {
+      const start = since.get(camera) ?? e.tsMs;
+      since.set(camera, start);
+      if (e.tsMs - start > best.ms) {
+        best = { ms: e.tsMs - start, fromMs: start, toMs: e.tsMs };
+      }
+    } else {
+      if (text(e, 'why') === 'withdrawn') {
+        withdrawn++;
+      }
+      since.delete(camera);
+    }
+  }
+  return { ...best, withdrawn };
+}
+
+/**
+ * The laptops' uploads done with every file of an attempt of `clips` clips: each clip's MP4 and frames
+ * file, attempt.json, and gyro.json when the attempt's `attempt.done` says it has one (T3.7).
+ */
+function uploadsWith(q: Query, clips: number): ReportEvent[] {
+  return q.onLaptop('upload.state', (e) => {
+    if (text(e, 'state') !== 'done') {
+      return false;
+    }
+    const done = q
+      .where(
+        'attempt.done',
+        (a) => a.uid === e.uid && a.session === e.session && a.attempt === e.attempt,
+      )
+      .at(-1);
+    const gyro = done !== undefined && (num(done, 'gyroSamples') ?? 0) > 0;
+    return (num(e, 'files') ?? 0) >= 2 * clips + 1 + (gyro ? 1 : 0);
+  });
+}
+
+/**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
- * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3 and the items after T3.7, T4.1, T4.2 and
- * T4.3.
+ * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3, the items after T3.7, T4.1, T4.2 and
+ * T4.3, and the desk rig's after T4.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -2921,27 +2975,265 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     kinds: ['rtc.clock', 'remote.clip'],
     eyes: "the phone's temperature after 20 minutes (by hand), and the rig",
     check: (q) => {
-      // The longest stretch of each camera's records converged: from a convergence (or a minute's
-      // record) to the last minute's record before a withdrawal, a record not converged or the end.
-      let longest = 0;
-      let withdrawn = 0;
-      const since = new Map<string, number>();
-      for (const e of q.onLaptop('rtc.clock')) {
-        const camera = `${e.device.label}/${text(e, 'camera') ?? '?'}`;
-        if (flag(e, 'converged') === true) {
-          const start = since.get(camera) ?? e.tsMs;
-          since.set(camera, start);
-          longest = Math.max(longest, e.tsMs - start);
-        } else {
-          if (text(e, 'why') === 'withdrawn') {
-            withdrawn++;
-          }
-          since.delete(camera);
-        }
-      }
+      const stretch = convergedStretch(q);
       const clips = q.onLaptop('remote.clip', (e) => flag(e, 'late') !== true);
-      const facts = `the clock sync converged for ${round(longest / MINUTE, 1)} minutes at the longest, ${String(withdrawn)} ${withdrawn === 1 ? 'withdrawal' : 'withdrawals'}; ${count(clips, 'remote clip')}`;
-      return longest >= 20 * MINUTE ? ok(facts) : none(facts);
+      const facts = `the clock sync converged for ${round(stretch.ms / MINUTE, 1)} minutes at the longest, ${String(stretch.withdrawn)} ${stretch.withdrawn === 1 ? 'withdrawal' : 'withdrawals'}; ${count(clips, 'remote clip')}`;
+      return stretch.ms >= 20 * MINUTE ? ok(facts) : none(facts);
+    },
+  },
+  // ---- After T4: the desk rig ----
+  {
+    id: '4.4.1',
+    round: T4,
+    section: RIG,
+    title:
+      "The rig paired: the ThinkPhone on its stand at another angle than the MacBook's camera, the lamp on, the framing rectangles around the cube; Add camera, the QR scanned, \"Connected\", synced within seconds, the phone's tile over the MacBook's preview",
+    kinds: ['rtc.paired', 'rtc.clock', 'preview.started'],
+    eyes: 'the angle, the light and both framings; the time from the scan to "Connected"',
+    check: (q) => {
+      const paired = q.onLaptop('rtc.paired');
+      const synced = paired.flatMap((e) => {
+        const clock = q.next(e, 'rtc.clock', 5 * MINUTE, (c) => text(c, 'why') === 'converged');
+        return clock === null ? [] : [{ paired: e, clock }];
+      });
+      const previews = q.onPhone('preview.started');
+      const facts = `${count(paired, 'pairing')}, ${String(synced.length)} synced within five minutes, ${seconds(synced.map((p) => p.clock.tsMs - p.paired.tsMs))} s after the pairing, round trip ${String(median(synced.map((p) => num(p.clock, 'rttMs') ?? 0)) ?? '?')} ms (medians); ${count(previews, 'live preview')} sent`;
+      return synced.length > 0 && previews.length > 0
+        ? ok(facts)
+        : none(paired.length === 0 ? 'no pairing on a laptop' : facts);
+    },
+  },
+  {
+    id: '4.4.2',
+    round: T4,
+    section: RIG,
+    title:
+      "The sync checks: the MacBook's own, due by itself before the first scramble, and the phone's, from its line under the preview with its rectangle drawn on the phone: both pass (spreads under 83 ms) in the session",
+    kinds: ['sync.check'],
+    eyes: "the two lags side by side, and the phone's clock line during its check",
+    check: (q) => {
+      const passed = q.onLaptop('sync.check', (e) => text(e, 'outcome') === 'ok');
+      const sessions = new Set(
+        passed
+          .filter((e) => flag(e, 'remote') === true)
+          .filter((p) =>
+            passed.some(
+              (e) =>
+                flag(e, 'remote') !== true &&
+                e.uid === p.uid &&
+                e.device.label === p.device.label &&
+                e.session === p.session,
+            ),
+          )
+          .map((e) => e.session),
+      );
+      const inBoth = passed.filter((e) => sessions.has(e.session));
+      const lag = (events: readonly ReportEvent[]): string =>
+        `${String(median(events.map((e) => num(e, 'offsetMs') ?? 0)) ?? '?')} ms (±${String(median(events.map((e) => num(e, 'spreadMs') ?? 0)) ?? '?')})`;
+      const failures = q.onLaptop('sync.check', (e) => flag(e, 'remote') === true && isFailure(e));
+      const facts = `both passed in ${String(sessions.size)} ${sessions.size === 1 ? 'session' : 'sessions'}: the MacBook's camera lags ${lag(inBoth.filter((e) => flag(e, 'remote') !== true))}, the phone's ${lag(inBoth.filter((e) => flag(e, 'remote') === true))} (medians)${failures.length === 0 ? '' : `; ${count(failures, 'failed check')} of a phone's camera: ${failures.map(failureMessage).slice(-3).join('; ')}`}`;
+      if (sessions.size > 0) {
+        return ok(facts);
+      }
+      return failures.length > 0 ? failed(facts) : none('no session with both checks passed');
+    },
+  },
+  {
+    id: '4.4.3',
+    round: T4,
+    section: RIG,
+    title:
+      "Three solves on the rig: each attempt has four clips within seconds of its end, the phone's Clips line back each time, the phone's clips taking its lag; each attempt uploaded with every file (ten with gyro.json)",
+    kinds: ['attempt.done', 'remote.clip', 'upload.state'],
+    eyes: "the phone's Clips line after each solve",
+    check: (q) => {
+      const four = q
+        .realAttempts()
+        .filter((e) => !isPhone(e) && (num(e, 'clips') ?? 0) >= 4 && flag(e, 'settled') === true);
+      const perSession = new Map<string, number>();
+      for (const e of four) {
+        const key = `${e.uid}/${e.session ?? '?'}`;
+        perSession.set(key, (perSession.get(key) ?? 0) + 1);
+      }
+      const most = Math.max(0, ...perSession.values());
+      const lagged = q.onLaptop('remote.clip', (e) => num(e, 'syncResidualMs') !== null);
+      const whole = uploadsWith(q, 4);
+      const facts = `${String(most)} ${most === 1 ? 'attempt' : 'attempts'} in one session with four clips or more and nothing left to come (${seconds(four.map((e) => num(e, 'settledMs') ?? 0))} s after the end, median); ${count(lagged, 'remote clip')} with the phone's lag; ${count(whole, 'upload')} with every file`;
+      return most >= 3 && lagged.length > 0 && whole.length > 0 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '4.4.4',
+    round: T4,
+    section: RIG,
+    title:
+      "The clip viewer of one of them: four buttons naming the cameras, the phone's solve playing with its moves and the 3D cube in step with its picture; Download gives the four clips with their frame times, gyro.json and attempt.json",
+    kinds: ['clips.viewed', 'files.downloaded'],
+    eyes: "the moves and the 3D cube against the phone's picture: early or late, by how much",
+    check: (q) => {
+      const viewed = q.where('clips.viewed', (e) => (num(e, 'clips') ?? 0) >= 4);
+      const downloads = q.where(
+        'files.downloaded',
+        (e) => text(e, 'what') === 'clips' && (num(e, 'files') ?? 0) >= 9,
+      );
+      const sizes = [...new Set(downloads.map((e) => String(num(e, 'files'))))].join(', ');
+      return found(
+        viewed.length > 0 && downloads.length > 0 ? viewed : [],
+        `${count(viewed, 'viewing')} of four clips or more; ${count(downloads, 'download')} of nine files or more (${sizes || '–'})`,
+        viewed.length > 0
+          ? 'viewed, but no download of nine files or more'
+          : 'no viewing of four clips',
+      );
+    },
+  },
+  {
+    id: '4.4.5',
+    round: T4,
+    section: RIG,
+    title:
+      '"Live preview from phones" off for a minute: the tile shows the phone\'s picture every 2 s; on again: live again within seconds',
+    kinds: ['settings.changed', 'preview.stopped', 'preview.started'],
+    eyes: 'the tile, live and every 2 s',
+    check: (q) => {
+      const off = q.where(
+        'settings.changed',
+        (e) => text(e, 'key') === 'livePreviewFromPhones' && flag(e, 'value') === false,
+      );
+      const stopped = q.onPhone('preview.stopped', (e) => text(e, 'why') === 'off');
+      const again = q.onPhone(
+        'preview.started',
+        (e) => q.previous(e, 'preview.stopped', HOUR, (p) => text(p, 'why') === 'off') !== null,
+      );
+      return found(
+        off.length > 0 && stopped.length > 0 ? again : [],
+        `${count(off, 'switch')} off, ${count(stopped, 'preview')} stopped by it, ${count(again, 'preview')} started again after one`,
+        off.length === 0
+          ? 'the live preview never switched off'
+          : 'switched off, but no preview stopped and started again on a phone',
+      );
+    },
+  },
+  {
+    id: '4.4.6',
+    round: T4,
+    section: RIG,
+    title:
+      "Twenty minutes of solves on the rig, the preview on: the clock sync converged throughout (issue #61), every attempt in that time with the phone's clips",
+    kinds: ['rtc.clock', 'attempt.done'],
+    eyes: "the phone's temperature and battery after 20 minutes (by hand), and whether its Camera page said it may be hot",
+    check: (q) => {
+      const stretch = convergedStretch(q);
+      const within = q
+        .realAttempts()
+        .filter((e) => !isPhone(e) && e.tsMs >= stretch.fromMs && e.tsMs <= stretch.toMs);
+      const four = within.filter((e) => (num(e, 'clips') ?? 0) >= 4);
+      const facts = `the clock sync converged for ${round(stretch.ms / MINUTE, 1)} minutes at the longest, ${String(stretch.withdrawn)} ${stretch.withdrawn === 1 ? 'withdrawal' : 'withdrawals'}; ${String(four.length)} of the ${String(within.length)} attempts in that stretch with four clips or more`;
+      return stretch.ms >= 20 * MINUTE && within.length > 0 && four.length === within.length
+        ? ok(facts)
+        : none(facts);
+    },
+  },
+  {
+    id: '4.4.7',
+    round: T4,
+    section: RIG,
+    title:
+      "Walk out of the Wi-Fi's reach with the phone right after a solve, for a minute, and back: both connect again without a new code, and the clip on its way comes, resumed where it stopped",
+    kinds: ['rtc.disconnected', 'rtc.connected', 'remote.clip'],
+    eyes: 'how long each device took to say connected again',
+    check: (q) => {
+      const back = q.onLaptop('rtc.connected', (e) => flag(e, 'reconnection') === true);
+      const gaps = back.flatMap((e) => {
+        const drop = q.previous(e, 'rtc.disconnected', 5 * MINUTE);
+        return drop === null ? [] : [e.tsMs - drop.tsMs];
+      });
+      const followed = back.filter((e) => q.next(e, 'remote.clip', 2 * MINUTE) !== null);
+      const resumed = q.onLaptop('remote.clip', (e) => (num(e, 'resumedBytes') ?? 0) > 0);
+      return found(
+        followed,
+        `${count(back, 'reconnection')}, ${seconds(gaps)} s after the drop (median), ${String(followed.length)} followed by a clip within two minutes; ${count(resumed, 'clip')} resumed in the middle of a file`,
+        back.length > 0 ? 'reconnections, but no clip after them' : 'no reconnection on a laptop',
+      );
+    },
+  },
+  {
+    id: '4.4.8',
+    round: T4,
+    section: RIG,
+    title:
+      "The phone's Wi-Fi off for three minutes right after a solve: two minutes after the end the attempt is uploaded without the phone's clip, the notes naming the camera; Wi-Fi on: the phone back, its clip late and uploaded as an addition",
+    kinds: ['remote.clip.missing', 'rtc.connected', 'remote.clip.late'],
+    eyes: "the session's notes; the bucket's listing after the addition (the coordinator)",
+    check: (q) => {
+      const missing = q.onLaptop('remote.clip.missing', (e) => text(e, 'reason') === 'wait');
+      const late = q.onLaptop('remote.clip.late');
+      const afterReturn = late.filter(
+        (e) =>
+          q.previous(e, 'rtc.connected', 5 * MINUTE, (c) => flag(c, 'reconnection') === true) !==
+          null,
+      );
+      return found(
+        missing.length > 0 ? afterReturn : [],
+        `${count(missing, 'clip')} given up after the two minutes, ${count(late, 'late clip')} attached ${seconds(late.map((e) => num(e, 'afterEndMs') ?? 0))} s after the attempt's end (median), ${String(afterReturn.length)} once the phone was back`,
+        missing.length > 0
+          ? `${count(missing, 'clip')} given up after the two minutes, none late once the phone was back`
+          : 'no clip given up after the two minutes',
+      );
+    },
+  },
+  {
+    id: '4.4.9',
+    round: T4,
+    section: RIG,
+    title:
+      'New session right after a solve: the MacBook lists the phone as "waiting for the phone\'s last clips" for a few seconds, the last attempt gets them, then the phone is let go ("the session ended"); Add camera again pairs it to the new session',
+    kinds: ['session.started', 'remote.clip', 'rtc.disconnected', 'rtc.paired'],
+    eyes: "the waiting line on the MacBook, and the phone's words",
+    check: (q) => {
+      // A clip of a session that ended, stored after the next session began: the phone was held.
+      const held = q.onLaptop('remote.clip').flatMap((e) => {
+        const next = q.previous(
+          e,
+          'session.started',
+          20_000,
+          (s) => s.session !== null && s.session !== e.session,
+        );
+        return next === null ? [] : [e.tsMs - next.tsMs];
+      });
+      const letGo = q.onLaptop(
+        'rtc.disconnected',
+        (e) => text(e, 'reason') === 'the session ended',
+      );
+      const timedOut = q.onLaptop('rtc.disconnected', (e) =>
+        (text(e, 'reason') ?? '').startsWith('the session ended;'),
+      );
+      const again = letGo.filter((e) => q.next(e, 'rtc.paired', 30 * MINUTE) !== null);
+      const facts = `${String(held.length)} ${held.length === 1 ? 'clip' : 'clips'} of an ended session stored after New session, ${seconds(held)} s after it (median); ${String(letGo.length)} ${letGo.length === 1 ? 'camera' : 'cameras'} let go once the session's clips were in, ${String(timedOut.length)} after the 15 s; ${String(again.length)} paired again within half an hour`;
+      if (held.length > 0 && letGo.length > 0) {
+        return ok(facts);
+      }
+      return timedOut.length > 0 ? failed(facts) : none(facts);
+    },
+  },
+  {
+    id: '4.4.10',
+    round: T4,
+    section: RIG,
+    title:
+      'The second phone, if at hand (a name of its own in Settings → This device): paired while the first is connected, listed as phone-rear-2 with a tile and a sync check of its own; each attempt with six clips, uploaded with every file (fourteen with gyro.json)',
+    kinds: ['rtc.paired', 'attempt.done', 'upload.state'],
+    eyes: "the two tiles over the preview, and the second phone's check",
+    check: (q) => {
+      const second = q.onLaptop('rtc.paired', (e) => /-2$/u.test(text(e, 'camera') ?? ''));
+      const six = q.realAttempts().filter((e) => !isPhone(e) && (num(e, 'clips') ?? 0) >= 6);
+      const whole = uploadsWith(q, 6);
+      return found(
+        second.length > 0 && six.length > 0 ? six : [],
+        `${count(second, 'second camera')} paired (${[...new Set(second.map((e) => text(e, 'camera')))].join(', ')}); ${count(six, 'real attempt')} with six clips or more; ${count(whole, 'upload')} with every file`,
+        second.length > 0
+          ? 'a second camera paired, but no attempt with six clips'
+          : 'no second camera paired',
+      );
     },
   },
 ];
