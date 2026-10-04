@@ -8,6 +8,7 @@ import { type BrowserContext, type Locator, type Page, expect, test } from '@pla
 import { Ajv2020 } from 'ajv/dist/2020';
 
 import { ADA, type FakeBucket, fakeAccount, fakeAccountState, fakeBucket } from './helpers/account';
+import { bend, fileText, pill } from './helpers/remote';
 import { fakeSignaling } from './helpers/signaling';
 import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from './helpers/timer';
 
@@ -47,23 +48,10 @@ const SOLVE_LEAD_MS = 3000;
 const TAIL_MS = 1000;
 const MARGIN_MS = 500;
 
-/** The window property the app reads in development builds (src/app/rtc/e2e-remote.ts). */
-const E2E_REMOTE = 'cubetraceE2eRemote';
-
 const isFrames = new Ajv2020({ allowUnionTypes: true, allErrors: true }).compile(FRAMES_SCHEMA);
 
 function banner(page: Page): Locator {
   return page.getByRole('banner');
-}
-
-/** Sets what the suite bends on every load of `page` (src/app/rtc/e2e-remote.ts). */
-async function bend(page: Page, settings: Record<string, number | boolean>): Promise<void> {
-  await page.addInitScript(
-    ({ key, value }) => {
-      Reflect.set(window, key, value);
-    },
-    { key: E2E_REMOTE, value: settings },
-  );
 }
 
 /**
@@ -103,34 +91,6 @@ async function attemptFiles(
   );
 }
 
-/**
- * A file of the session's folder, as text: `session.json`, or `attempts/0001/<name>`. The app
- * replaces a file by moving a new one over it (`writeTextFile`), and a read at that instant finds
- * no file (a `NotFoundError`, which failed a poll of the record once in T4.2b's runs): it is read
- * again then, a few times, 100 ms apart.
- */
-async function fileText(page: Page, sessionId: string, path: string[]): Promise<string> {
-  return page.evaluate(
-    async ({ sessionId, path }) => {
-      for (let tries = 1; ; tries++) {
-        try {
-          let dir = await navigator.storage.getDirectory();
-          for (const name of ['sessions', sessionId, ...path.slice(0, -1)]) {
-            dir = await dir.getDirectoryHandle(name);
-          }
-          return await (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
-        } catch (error: unknown) {
-          if (!(error instanceof DOMException) || error.name !== 'NotFoundError' || tries === 5) {
-            throw error;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-      }
-    },
-    { sessionId, path },
-  );
-}
-
 async function attemptRecord(page: Page, sessionId: string): Promise<AttemptRecord> {
   return JSON.parse(
     await fileText(page, sessionId, ['attempts', '0001', 'attempt.json']),
@@ -146,16 +106,6 @@ async function events(page: Page): Promise<{ kind: string; data: Record<string, 
   return (await fakeAccountState(page)).events.map(
     (entry) => entry.event as { kind: string; data: Record<string, unknown> },
   );
-}
-
-/**
- * The phone's pill as a failure should read it: its state, and the problem line when it has one (why
- * a join was refused, why the host is gone).
- */
-async function pill(phone: Page): Promise<string> {
-  const state = (await phone.getByTestId('device-state').getAttribute('data-state')) ?? '';
-  const problem = (await phone.getByTestId('device-problem').allTextContents()).join(' ').trim();
-  return problem === '' ? state : `${state}: ${problem}`;
 }
 
 /**
