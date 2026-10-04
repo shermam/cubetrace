@@ -25,8 +25,9 @@ export async function bend(page: Page, settings: Record<string, number | boolean
 /**
  * A file of the session's folder, as text: `session.json`, or `attempts/0001/<name>`. The app
  * replaces a file by moving a new one over it (`writeTextFile`), and a read at that instant finds
- * no file (a `NotFoundError`, which failed a poll of the record once in T4.2b's runs): it is read
- * again then, a few times, 100 ms apart.
+ * no file (a `NotFoundError`, which failed a poll of the record once in T4.2b's runs), or a file
+ * that was replaced after the page took it (a `NotReadableError`, which failed T4.3's run of
+ * uploads.spec.ts on `uploads.json`): it is read again then, a few times, 100 ms apart.
  */
 export async function fileText(page: Page, sessionId: string, path: string[]): Promise<string> {
   return page.evaluate(
@@ -39,7 +40,10 @@ export async function fileText(page: Page, sessionId: string, path: string[]): P
           }
           return await (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
         } catch (error: unknown) {
-          if (!(error instanceof DOMException) || error.name !== 'NotFoundError' || tries === 5) {
+          const replaced =
+            error instanceof DOMException &&
+            (error.name === 'NotFoundError' || error.name === 'NotReadableError');
+          if (!replaced || tries === 5) {
             throw error;
           }
           await new Promise((resolve) => setTimeout(resolve, 100));

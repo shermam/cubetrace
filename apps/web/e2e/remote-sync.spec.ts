@@ -51,11 +51,17 @@ const TURN_GAP_MS = 1300;
 const FIRST_TURN_MS = 2000;
 
 /**
- * How much later than {@link LAG_MS} the check may find the camera: the frame that first shows a
- * flip is captured at the canvas's next frame (30 fps: up to 33 ms later) and reaches the capture
- * worker a few ms after that; two frame intervals and a few ms.
+ * How much later than the lag the pages made the check may find the camera: the frame that first
+ * shows a flip is captured at the canvas's next frame (30 fps: up to 33 ms later) and reaches the
+ * capture worker a few ms after that; two frame intervals and a few ms.
  */
 const LATE_MS = 75;
+
+/**
+ * How much earlier it may find it: only by what the clock estimate is off by, which on the loopback
+ * interface is a few ms.
+ */
+const EARLY_MS = 10;
 
 function banner(page: Page): Locator {
   return page.getByRole('banner');
@@ -192,8 +198,11 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
     `remote sync check: found ${String(offsetMs)} ms (±${String(spreadMs)}) for a lag of ${String(LAG_MS)} ms ` +
       `(as made: ${made.map((ms) => ms.toFixed(1)).join(', ')} ms)`,
   );
-  expect(offsetMs).toBeGreaterThanOrEqual(LAG_MS - 5);
-  expect(offsetMs).toBeLessThanOrEqual(LAG_MS + LATE_MS);
+  // Positive, and the lag the pages made (their timers' jitter aside: the median of the ten) and
+  // the camera's own delay, the capture's and the delivery's, as a phone's camera has its own.
+  const madeMs = (made[4] + made[5]) / 2;
+  expect(offsetMs).toBeGreaterThanOrEqual(madeMs - EARLY_MS);
+  expect(offsetMs).toBeLessThanOrEqual(madeMs + LATE_MS);
 
   // Kept beside the phone's clock sync, which placed its frames 5 s back on the host clock.
   const clock = (await sessionJson(page, sessionId)).clock.cameras[label];
