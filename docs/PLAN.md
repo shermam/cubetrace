@@ -735,7 +735,11 @@ Cameras list as the pairing's state. (k) The remote clock fit never converged in
 pairing (two connections of 12 and 4 minutes on the home Wi-Fi, no `rtc.clock` event; issue #61):
 `REMOTE_CLOCK_CONVERGED` was tuned on loopback and simulations; T4.2 was told not to gate the cuts on
 `converged` (the current estimate, a padded window, the numbers in the record); T4.3 measures the real
-round trips and tunes the criterion.
+round trips and tunes the criterion. (l) New session right after a solve lets the paired phone go before its last
+clips come (T4.2 notes them missing): the host should hold its `leave` at the session's end while cuts
+are unanswered, for a bounded time (10–15 s). (m) A paired phone adds about six diagnostics events per
+attempt on the host, so the daily cap of 2,000 (`DAILY_CAP`, T3.9) is reached at about 155 attempts a
+day with the owner's cadence of 130–170: raise it (Firestore's cost is nothing at that scale).
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
@@ -1994,7 +1998,7 @@ phase 3 (T2.0–T2.14, T3.0–T3.10).
 |---|---|---|---|
 | T4.0 | `rtc`: the data-channel protocol, chunked transfer with backpressure and resume, the clock sync maths, Firestore signaling with rules and the pairing token, in-memory fakes | T3.5 | ✅ #58 (2026-10-03) |
 | T4.1 | `web`: the Camera page (join by QR or token, preview, framing, sharpness, state) and the host's Cameras panel (Add camera, the list, thumbnails); the connection's lifecycle; the clock sync running; the camera registered in the session | T4.0 | ✅ #59 (2026-10-03) |
-| T4.2 | `web`, `capture`, `upload`: remote cuts and clip transfer into the attempt's folder and record; the upload of remote clips, late clips as additions; diagnostics events | T4.1 | ⬜ |
+| T4.2 | `web`, `capture`, `upload`: remote cuts and clip transfer into the attempt's folder and record; the upload of remote clips, late clips as additions; diagnostics events | T4.1 | ✅ #62 (2026-10-04) |
 | T4.3 | `web`, `capture`: the sync check on a remote camera; frame times converted with the drift fit; the live preview track; measurements in `docs/DEVICES.md` | T4.2 | ⬜ |
 | T4.4 | the desk rig: docs, "After T4" items, the round report's checklist, `0.4.0` | T4.3 | ⬜ |
 
