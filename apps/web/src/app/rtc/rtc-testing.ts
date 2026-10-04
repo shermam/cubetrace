@@ -38,19 +38,21 @@ export interface MemoryConnection {
  * takes the offer and answers, and each side resolves with its end of a `MemoryTransport` pair of the
  * peer (made by whichever side comes first); a side that waits longer than `WebRtcTransport`'s
  * timeout (30 s, on the options' timers) fails, as a connection that could not be made. `failNext`
- * makes the next `connect` reject at once.
+ * makes the next `connect` reject at once (the next of `failRole`'s, when it is set).
  */
 export class MemoryConnector {
   readonly connections: MemoryConnection[] = [];
   /** The next `connect` rejects with this, once. */
   failNext: Error | null = null;
+  /** Only the next `connect` of this role rejects with {@link failNext}; null: whichever comes. */
+  failRole: Signaling['role'] | null = null;
   private readonly pairs = new Map<string, MemoryTransport[]>();
 
   constructor(private readonly options: MemoryLinkOptions = {}) {}
 
   readonly connect: TransportConnector = async (signaling) => {
     const failure = this.failNext;
-    if (failure !== null) {
+    if (failure !== null && (this.failRole === null || this.failRole === signaling.role)) {
       this.failNext = null;
       await signaling.close();
       throw failure;

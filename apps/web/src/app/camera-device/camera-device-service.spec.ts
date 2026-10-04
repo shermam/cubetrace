@@ -84,6 +84,8 @@ class Host {
   readonly taken = new Set<string>();
   /** The connections made, in order. */
   connections = 0;
+  /** How long it waits before its hello, connection after connection (none: at once). */
+  readonly helloDelays: number[] = [];
   private unwatch: (() => void) | null = null;
 
   constructor(
@@ -130,14 +132,22 @@ class Host {
     link.onMessage((message) => {
       this.received.push(message);
     });
-    link.send({
-      type: 'hello',
-      v: PROTOCOL_VERSION,
-      role: 'host',
-      device: { label: this.label, platform: 'macOS' },
-      app: { version: '0.4.0', commit: 'abc1234' },
-      camera: null,
-    });
+    const hello = (): void => {
+      link.trySend({
+        type: 'hello',
+        v: PROTOCOL_VERSION,
+        role: 'host',
+        device: { label: this.label, platform: 'macOS' },
+        app: { version: '0.4.0', commit: 'abc1234' },
+        camera: null,
+      });
+    };
+    const delay = this.helloDelays.shift() ?? 0;
+    if (delay > 0) {
+      this.r.timers.setTimeout(hello, delay);
+    } else {
+      hello();
+    }
     const hostTimers = {
       ...rtcTimers(this.r.perf, this.r.timers),
       now: () => this.r.perf.hostMs + HOST_OFFSET_MS,
@@ -519,6 +529,81 @@ describe('CameraDeviceService', () => {
     expect(all.at(-1)?.data).toMatchObject({ reconnection: true });
   });
 
+  it('calls again when its first call fails, joining meanwhile, and pairs on the second', async () => {
+    const host = new Host(r);
+    const token = await host.publish();
+    // The first call's connection fails (ICE, say): the code was good, so the phone calls again
+    // with it a moment later instead of giving up.
+    r.connector.failNext = new Error('The connection failed: ICE failed.');
+    r.service.join({ sessionId: SESSION_A, token });
+    await pump(20);
+    expect(r.service.state()).toBe('joining');
+    expect(r.service.problem()).toMatch(
+      /^The host did not answer yet \(.*ICE failed.*\): calling again\.$/u,
+    );
+    expect(r.wakeLock.held()).toBe(1);
+    await pump(RETRY_DELAY_MS + 50);
+    await pump(20);
+    expect(r.service.state()).toBe('connected');
+    expect(r.service.problem()).toBeNull();
+    expect(host.connections).toBe(1);
+    const all = await events();
+    expect(kinds(all)).toEqual(['rtc.failed', 'rtc.paired', 'rtc.connected']);
+    expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({ step: 'connect' });
+    expect(all.find((e) => e.kind === 'rtc.connected')?.data).toMatchObject({
+      reconnection: false,
+    });
+  });
+
+  it('pairs with a hello that comes late but within the wait; one later than that is a call again', async () => {
+    expect(HELLO_TIMEOUT_MS).toBe(15_000);
+    // The host's page is busy: its hello comes 12 s after the channel opened.
+    const slow = new Host(r);
+    slow.helloDelays.push(12_000);
+    const token = await slow.publish();
+    r.service.join({ sessionId: SESSION_A, token });
+    await pass(11_000);
+    expect(r.service.state()).toBe('joining');
+    await pass(2000);
+    expect(r.service.state()).toBe('connected');
+    expect(slow.connections).toBe(1);
+
+    // Another host, whose hello comes after 16 s the first time: the phone gives that call up,
+    // calls again, and the host, which took the token for it, answers and says hello at once.
+    r.service.leave();
+    const late = new Host(r, SESSION_B, 'other-laptop');
+    late.helloDelays.push(16_000);
+    const second = await late.publish();
+    r.service.join({ sessionId: SESSION_B, token: second });
+    await pass(15_500);
+    expect(r.service.state()).toBe('joining');
+    expect(r.service.problem()).toMatch(/the host sent no hello/u);
+    await pass(RETRY_DELAY_MS + 1000);
+    expect(r.service.state()).toBe('connected');
+    expect(late.connections).toBe(2);
+    const all = await events();
+    expect(all.filter((e) => e.kind === 'rtc.failed').map((e) => e.data['step'])).toEqual([
+      'hello',
+    ]);
+  });
+
+  it('calls again for the pairing’s ten minutes when the host never answers its first call, then refuses', async () => {
+    const host = new Host(r);
+    const token = await host.publish();
+    host.gone = true;
+    r.service.join({ sessionId: SESSION_A, token });
+    await pass(9 * 60_000);
+    expect(r.service.state()).toBe('joining');
+    expect(r.service.problem()).toMatch(/did not open within 30 s\.\): calling again\.$/u);
+    await pass(60_000 + 35_000);
+    expect(r.service.state()).toBe('refused');
+    expect(r.service.problem()).toMatch(/^The host could not be reached: /u);
+    expect(r.wakeLock.held()).toBe(0);
+    // Each call waited for an answer up to the connection's timeout (30 s), then 3 s, then again;
+    // none was ever made.
+    expect(r.connector.connections).toEqual([]);
+  });
+
   it('keeps calling for five minutes when the host is gone, then says so', async () => {
     const host = await joined();
     host.gone = true;
@@ -537,6 +622,5 @@ describe('CameraDeviceService', () => {
     expect(all.filter((e) => e.kind === 'rtc.disconnected').at(-1)?.data['reason']).toMatch(
       /^gave up/,
     );
-    expect(HELLO_TIMEOUT_MS).toBe(10_000);
   });
 });

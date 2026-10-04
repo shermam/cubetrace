@@ -296,7 +296,8 @@ keeps the phone's first frame time as `t0RemoteMs` and the estimate that convert
 
 | What happens | The host | The phone |
 |---|---|---|
-| The token is wrong, expired or already taken | `watchOffers` gives a peer whose `tokenHash` is not the pairing's (nor a reconnecting camera's): the host deletes its documents and shows nothing | `checkPairing` said so before any document was written; the page says to ask for a new code; a call the host never answers fails after 30 s |
+| The token is wrong, expired or already taken | `watchOffers` gives a peer whose `tokenHash` is not the pairing's (nor a reconnecting camera's, nor one connecting that has not connected yet): the host deletes its documents and shows nothing | `checkPairing` said so before any document was written; the page says to ask for a new code; a call the host never answers fails after 30 s |
+| A first call fails (the connection not made, a hello that a busy page sent late, T4.2b) | the camera stays listed as connecting (`rtc.failed`), and a call that presents its token again is answered, until the pairing's ten minutes from the moment the token was taken are up; then it goes | the page stays joining and says why, and calls again with the same token every 3 s until the pairing's ten minutes from its check are up; then it says the host could not be reached |
 | Another version of the app on the phone | `hello.v` differs: `leave` with the reason, the connection closed, the camera not registered | the same; the page says to update |
 | The peer connection fails (the Wi-Fi dropped, the phone changed networks) | the transport reports `failed` or `closed`; the camera's entry says reconnecting for five minutes, during which a call with its token is answered again; then it goes; the clips in flight wait in the store | `restartIce()` then a new offer through the same peer document; once the transport ends, a new peer document (a new `call`) with the same token hash every few seconds for five minutes (the host answers a camera it lists as reconnecting), then the page says the host is gone |
 | The channel closes in the middle of a file | the receiver keeps the bytes held in the page's memory; the attempt waits for the clip (`ClipsInFlight`) until 120 s after its end | the sender's promise rejects with `closed`; the clip stays staged and is offered again, first thing, over the next connection: the file goes on from the receiver's offset |
@@ -333,10 +334,18 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    the pairing, calls (`call`, `WebRtcTransport.connect` as the caller) and sends `hello` with its
    camera as its own session.json would describe it (`local: true`; the host relabels it).
 3. **The answer.** The host answers the first peer whose `tokenHash` is the pairing's, before it
-   expires, and closes the pairing: the token is taken once. Anything else that offers (a wrong or a
-   stale token) has its documents deleted, which ends the phone's call at once rather than after 30 s.
-   The host sends its `hello` as the channel opens and waits 10 s for the phone's: another protocol
-   version, or no hello, is sent away (`leave` with the reason, `rtc.failed`).
+   expires, and closes the pairing: the token is taken once, and stays the phone's for the pairing's
+   ten minutes (`PAIRING_TTL_MS`, T4.2b): until it connects, the camera is listed as connecting and a
+   call that presents the token again is answered, as a reconnecting camera's is. Anything else that
+   offers (a wrong or a stale token) has its documents deleted, which ends the phone's call at once
+   rather than after 30 s. Each side sends its `hello` as its channel opens and waits 15 s for the
+   other's (10 s until T4.2b), or until the connection closes first: another protocol version is
+   sent away (`leave` with the reason, `rtc.failed`), and no hello is a failed call (`rtc.failed`).
+   A first call that fails (the connection not made, the other side's hello not come) is made again
+   by the phone, with the same token, every 3 s until the pairing's ten minutes from its check are
+   up, the page saying joining and why meanwhile (T4.2b: one missed deadline was the end of the
+   pairing before, PR #62's first CI run); a code the check refuses (wrong, expired, taken) is still
+   refused at once.
 4. **Connected.** The host puts the camera into the session (`SessionService.putCamera`:
    `local: false`, `remote: {label, platform}` from the phone's hello, the label the session gives
    the device, `phone-rear` or `phone-rear-2`, two phones told apart by their host labels), pings

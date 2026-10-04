@@ -3,6 +3,7 @@ import type { CameraInfo, CloudEvent } from '@cubetrace/core';
 import {
   FirestoreSignaling,
   MessageLink,
+  PAIRING_TTL_MS,
   PROTOCOL_VERSION,
   answerPings,
   hashToken,
@@ -73,6 +74,8 @@ class Phone {
     private readonly offsetMs = 1234.5,
     /** Its clock jumps back and forth by this much from one answer to the next (a broken clock). */
     private readonly wobbleMs = 0,
+    /** It says hello this long after its channel opened (a busy page), or never (null). */
+    private readonly helloAfterMs: number | null = 0,
   ) {
     this.signaling = new FirestoreSignaling(r.backend, {
       sessionId: r.s.service.session()?.id ?? '',
@@ -102,14 +105,21 @@ class Phone {
       () =>
         this.r.s.perf.hostMs + this.offsetMs + (Math.floor(this.answers++ / 2) % 2) * this.wobbleMs,
     );
-    link.send({
-      type: 'hello',
-      v: PROTOCOL_VERSION,
-      role: 'camera',
-      device: { label: this.label, platform: 'Android' },
-      app: { version: '0.4.0', commit: 'abc1234' },
-      camera: PHONE_CAMERA,
-    });
+    const hello = (): void => {
+      link.trySend({
+        type: 'hello',
+        v: PROTOCOL_VERSION,
+        role: 'camera',
+        device: { label: this.label, platform: 'Android' },
+        app: { version: '0.4.0', commit: 'abc1234' },
+        camera: PHONE_CAMERA,
+      });
+    };
+    if (this.helloAfterMs === 0) {
+      hello();
+    } else if (this.helloAfterMs !== null) {
+      this.r.s.timers.setTimeout(hello, this.helloAfterMs);
+    }
   }
 
   sendState(changes: { recording?: boolean; fps?: number | null } = {}): void {
@@ -615,7 +625,8 @@ describe('RemoteCamerasService', () => {
     expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({ step: 'version' });
   });
 
-  it('gives a phone up that never says hello', async () => {
+  it('closes a first connection whose phone never says hello, and waits for its call again until the pairing’s ten minutes are up', async () => {
+    expect(HELLO_TIMEOUT_MS).toBe(15_000);
     await r.service.addCamera();
     const token = r.service.pairing()?.token ?? '';
     const signaling = new FirestoreSignaling(r.backend, {
@@ -629,9 +640,87 @@ describe('RemoteCamerasService', () => {
     expect(r.service.cameras()).toHaveLength(1);
     expect(r.service.cameras()[0].state).toBe('connecting');
     await pass(r.s, HELLO_TIMEOUT_MS + 1000);
-    expect(r.service.cameras()).toEqual([]);
     expect(transport.state).toBe('closed');
+    // Still listed, connecting: the token is the phone's, which calls again (T4.2b)...
+    expect(r.service.cameras().map((c) => c.state)).toEqual(['connecting']);
+    let all = await events();
+    expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({
+      step: 'hello',
+      reason: 'the phone sent no hello',
+    });
+    // ...until the pairing's ten minutes from the moment it took the token are up.
+    await pass(r.s, PAIRING_TTL_MS - HELLO_TIMEOUT_MS - 10_000);
+    expect(r.service.cameras()).toHaveLength(1);
+    await pass(r.s, 5000);
+    expect(r.service.cameras()).toEqual([]);
+    all = await events();
+    expect(kinds(all)).toEqual(['rtc.failed']);
+  });
+
+  it('answers a phone’s call again when its first connection failed, and pairs on the second', async () => {
+    await r.service.addCamera();
+    const token = r.service.pairing()?.token ?? '';
+    // The host's side of the first call cannot be made (ICE, say): the camera stays connecting.
+    r.connector.failNext = new Error('The connection failed: ICE failed.');
+    r.connector.failRole = 'callee';
+    const first = new Phone(r);
+    const lost = first.join(token).then(
+      () => 'connected',
+      (error: unknown) => `failed: ${String(error)}`,
+    );
+    await pump(r.s, 50);
+    expect(await lost).toMatch(/^failed: .*the signaling closed/u);
+    expect(r.service.cameras().map((c) => c.state)).toEqual(['connecting']);
+    expect(r.service.pairing()).toBeNull();
+    // The phone calls again with the token it was given: answered, as a camera of the list.
+    const again = new Phone(r);
+    const joining = again.join(token);
+    await pump(r.s, 0);
+    await joining;
+    await pump(r.s, 10);
+    expect(r.service.cameras()).toHaveLength(1);
+    expect(r.service.cameras()[0]).toMatchObject({ state: 'connected', peerId: again.peerId });
+    expect(again.of('hello')).toHaveLength(1);
+
+    // A first connection whose channel closes before the phone's hello: the same, at once.
+    r = await rig();
+    await r.service.addCamera();
+    const second = r.service.pairing()?.token ?? '';
+    const silent = new Phone(r, 'ThinkPhone', 1234.5, 0, null);
+    const opening = silent.join(second);
+    await pump(r.s, 0);
+    await opening;
+    await pump(r.s, 10);
+    silent.drop();
+    await pump(r.s, 10);
+    expect(r.service.cameras().map((c) => c.state)).toEqual(['connecting']);
+    const back = new Phone(r);
+    const rejoining = back.join(second);
+    await pump(r.s, 0);
+    await rejoining;
+    await pump(r.s, 10);
+    expect(r.service.cameras()[0].state).toBe('connected');
     const all = await events();
-    expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({ step: 'hello' });
+    expect(kinds(all)).toEqual(['rtc.failed', 'rtc.paired', 'rtc.connected']);
+    expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({
+      step: 'hello',
+      reason: "the connection closed before the phone's hello",
+    });
+    expect(all.find((e) => e.kind === 'rtc.connected')?.data).toMatchObject({
+      reconnection: false,
+    });
+  });
+
+  it('pairs with a hello that comes late but within the wait', async () => {
+    // The phone's page is busy: its hello comes 12 s after the channel opened.
+    const phone = new Phone(r, 'ThinkPhone', 1234.5, 0, 12_000);
+    await paired(phone);
+    expect(r.service.cameras()[0].state).toBe('connecting');
+    await pass(r.s, 11_000);
+    expect(r.service.cameras()[0].state).toBe('connecting');
+    await pass(r.s, 2000);
+    expect(r.service.cameras()[0].state).toBe('connected');
+    const all = await events();
+    expect(kinds(all)).toEqual(['rtc.paired', 'rtc.connected']);
   });
 });

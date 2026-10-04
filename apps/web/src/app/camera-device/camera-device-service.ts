@@ -3,6 +3,7 @@ import { isFullFrame } from '@cubetrace/capture';
 import { parseSessionPairing, type CameraInfo } from '@cubetrace/core';
 import {
   MessageLink,
+  PAIRING_TTL_MS,
   PROTOCOL_VERSION,
   answerPings,
   checkPairing,
@@ -23,6 +24,7 @@ import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { WakeLockService } from '../device/wake-lock-service';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { thisDevice } from '../rtc/device-info';
+import { helloOrClose } from '../rtc/hello';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
 import { SESSION_SIGNALING, type SessionSignaling } from '../rtc/session-signaling';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
@@ -35,10 +37,11 @@ import { THUMBNAIL_GRABBER } from './thumbnail-grabber';
 
 /**
  * Where the camera device is: `idle` (no code yet), `signed-out` (a code, waiting for the account),
- * `checking` (the code against the session), `refused` (the code is not taken: `problem` says why),
- * `joining` (the connection is being made), `connected`, `reconnecting` (the connection ended; it
- * calls again for five minutes), `left` (Leave, or the host let it go: `problem` says), `host-gone`
- * (five minutes of calling with no answer).
+ * `checking` (the code against the session), `refused` (the code is not taken, or the host never
+ * answered within the pairing's ten minutes: `problem` says why), `joining` (the connection is being
+ * made; a first call that failed is made again every few seconds, `problem` saying why, T4.2b),
+ * `connected`, `reconnecting` (the connection ended; it calls again for five minutes), `left` (Leave,
+ * or the host let it go: `problem` says), `host-gone` (five minutes of calling with no answer).
  */
 export type CameraDeviceState =
   | 'idle'
@@ -72,8 +75,15 @@ export const REPORT_INTERVAL_MS = 2000;
 /** The thumbnail's longer side, in pixels (docs/RTC.md §1: at most 320). */
 export const THUMBNAIL_PX = 320;
 
-/** How long the camera device waits for the host's `hello` once the channel is open. */
-export const HELLO_TIMEOUT_MS = 10_000;
+/**
+ * How long the camera device waits for the host's `hello` once the channel is open (10 s until
+ * T4.2b). Each side sends its hello the moment its channel opens, and a build of another protocol
+ * version says hello all the same (and is refused at once), so the wait only catches a host page that
+ * says nothing, for which 5 s more change nothing; a page starved of CPU (the end-to-end pair on a
+ * busy CI runner, once in PR #62's first run) gets half as long again before its hello counts as lost
+ * (and a lost one costs a call again, T4.2b, no longer the pairing).
+ */
+export const HELLO_TIMEOUT_MS = 15_000;
 
 /** How long it keeps calling after its connection ended before it says the host is gone. */
 export const RECONNECT_WINDOW_MS = 5 * 60_000;
@@ -102,21 +112,23 @@ export const REFUSAL_TEXT: Readonly<Record<Exclude<PairingCheck, 'ok'>, string>>
 /**
  * The phone as a camera of another device's session (docs/PLAN.md T4.1, docs/RTC.md): the Camera
  * page's service. Given a code (the QR's URL, or the token typed: `join`), with the account signed
- * in (the pairing's documents are its own; signed out it waits for the sign-in and keeps the code),
- * it finds the session (named in the URL, or the newest of the account's sessions whose pairing
- * holds the token's hash), checks the pairing (`checkPairing`), calls (`call`, the connector:
- * `WebRtcTransport.connect` as the caller) and, once the channel is open, exchanges `hello` with the
- * host (its device and build, and the phone's camera as its own session.json would describe it, sent
- * again when the camera changes), answers the pings (`answerPings`), sends its `state` and a
- * `thumbnail` of the preview every 2 s, and shows what the host measures of the clock (`clock`). It
- * holds the wake lock while joined (the Camera page keeps the pipeline running, `CameraDeviceCapture`,
- * the ring buffer from the moment it opens) and reconnects by itself: the transport restarts ICE on a failure; once it
- * ends, the service calls again with the same token every few seconds for five minutes (the host
- * answers a camera it lists as reconnecting), then says the host is gone. Leave sends `leave`,
- * closes the connection once the word is out, and lets the wake lock go; the page going (`pagehide`)
- * says `leave` as far as there is time. It never shows the timer and never starts
- * a session of its own. The host's cuts and the clips they make go through `CameraDeviceClips`
- * (T4.2), which each connection is handed to: the clips staged for the session are offered first.
+ * in (the pairing's documents are its own; signed out it waits for the sign-in and keeps the
+ * code), it finds the session (named in the URL, or the newest of the account's sessions whose
+ * pairing holds the token's hash), checks the pairing (`checkPairing`), calls (`call`, the
+ * connector: `WebRtcTransport.connect` as the caller; a first call that fails is made again with
+ * the same token every few seconds for the pairing's ten minutes, T4.2b) and, once the channel is
+ * open, exchanges `hello` with the host (its device and build, and the phone's camera as its own
+ * session.json would describe it, sent again when the camera changes), answers the pings
+ * (`answerPings`), sends its `state` and a `thumbnail` of the preview every 2 s, and shows what
+ * the host measures of the clock (`clock`). It holds the wake lock while joined (the Camera page
+ * keeps the pipeline running, `CameraDeviceCapture`, the ring buffer from the moment it opens) and
+ * reconnects by itself: the transport restarts ICE on a failure; once it ends, the service calls
+ * again with the same token every few seconds for five minutes (the host answers a camera it lists
+ * as reconnecting), then says the host is gone. Leave sends `leave`, closes the connection once
+ * the word is out, and lets the wake lock go; the page going (`pagehide`) says `leave` as far as
+ * there is time. It never shows the timer and never starts a session of its own. The host's cuts
+ * and the clips they make go through `CameraDeviceClips` (T4.2), which each connection is handed
+ * to: the clips staged for the session are offered first.
  */
 @Injectable({ providedIn: 'root' })
 export class CameraDeviceService {
@@ -157,7 +169,10 @@ export class CameraDeviceService {
   readonly hostDevice = computed<DeviceInfo | null>(() => this.hostSignal()?.device ?? null);
   /** The clock sync as the host last reported it; null before the first report. */
   readonly clock = this.clockSignal.asReadonly();
-  /** Why the state is `refused`, `left` or `host-gone`; null otherwise. */
+  /**
+   * Why the state is `refused`, `left` or `host-gone`, or why the first call is made again while
+   * `joining` (T4.2b); null otherwise.
+   */
   readonly problem = this.problemSignal.asReadonly();
   /** When the current state began, on this device's clock. */
   readonly since = this.sinceSignal.asReadonly();
@@ -190,6 +205,11 @@ export class CameraDeviceService {
   private lockHeld = false;
   /** When the current connection opened, on this device's clock. */
   private connectedMs = 0;
+  /**
+   * Until when a first call that failed is made again (T4.2b): the pairing's ten minutes from the
+   * check, which the host's own wait for the camera it took the token for outlasts.
+   */
+  private joinUntilMs = 0;
   private unwatchBattery: (() => void) | null = null;
   private lastHello = '';
   /** The operations under way, for the tests to wait on. */
@@ -339,6 +359,7 @@ export class CameraDeviceService {
     this.clips.join(sessionId);
     this.hold();
     this.setState('joining', null);
+    this.joinUntilMs = this.timers.now() + PAIRING_TTL_MS;
     await this.call(signaling, await hashToken(input.token), generation, false);
   }
 
@@ -399,7 +420,7 @@ export class CameraDeviceService {
     let hello: Hello;
     try {
       hello = await this.withTimeout(
-        link.next('hello'),
+        helloOrClose(link, 'host'),
         HELLO_TIMEOUT_MS,
         'the host sent no hello',
       );
@@ -477,7 +498,13 @@ export class CameraDeviceService {
     this.diagnostics.record('rtc.connected', { ...facts, reconnection: again });
   }
 
-  /** The call failed: again in a moment while the window lasts, else the host is gone. */
+  /**
+   * The call failed: again in a moment while the window lasts, else the host is gone. A first call
+   * is made again too (T4.2b), with the same token, until the pairing's ten minutes are up: the code
+   * was good when checked, and the host, which may have taken it for this call already, answers this
+   * phone's calls until it connects; a missed deadline (a hello the other side's busy page sent
+   * late) is a call again, not a lost pairing.
+   */
   private retry(
     signaling: SessionSignaling,
     tokenHash: string,
@@ -487,10 +514,19 @@ export class CameraDeviceService {
     reason: string,
   ): void {
     if (!again) {
-      // The first call: the code was taken, but the host did not answer.
-      this.generation++;
-      this.unhold();
-      this.setState('refused', `The host could not be reached: ${reason}.`);
+      if (this.timers.now() + RETRY_DELAY_MS >= this.joinUntilMs) {
+        this.generation++;
+        this.unhold();
+        this.setState('refused', `The host could not be reached: ${reason}.`);
+        return;
+      }
+      this.problemSignal.set(`The host did not answer yet (${reason}): calling again.`);
+      this.retryTimer = this.timers.setTimeout(() => {
+        this.retryTimer = null;
+        if (generation === this.generation && this.stateSignal() === 'joining') {
+          void this.call(signaling, tokenHash, generation, false);
+        }
+      }, RETRY_DELAY_MS);
       return;
     }
     if (this.timers.now() - this.sinceSignal() >= RECONNECT_WINDOW_MS) {

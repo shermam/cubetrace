@@ -19,6 +19,7 @@ import {
 import {
   ClockPinger,
   MessageLink,
+  PAIRING_TTL_MS,
   PROTOCOL_VERSION,
   generateToken,
   pairingUrl,
@@ -37,6 +38,7 @@ import { SessionIndexService } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { thisDevice } from '../rtc/device-info';
+import { helloOrClose } from '../rtc/hello';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
 import { SESSION_SIGNALING, type SessionSignaling } from '../rtc/session-signaling';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
@@ -47,9 +49,11 @@ import type { PairingBlock } from './pairing-block';
 import { RemoteCutsService, type CutCamera } from './remote-cuts-service';
 
 /**
- * Where a remote camera is: `connecting` (its offer is answered, the channel not open yet),
- * `connected` (the channel is open and `hello` exchanged), `reconnecting` (the connection ended
- * without a `leave`: the phone calls again, the host waits {@link RECONNECT_WINDOW_MS}).
+ * Where a remote camera is: `connecting` (its offer is answered, the channel not open yet; or its
+ * first connection failed and the host waits for the phone to call again with its token, T4.2b, for
+ * the pairing's ten minutes), `connected` (the channel is open and `hello` exchanged), `reconnecting`
+ * (the connection ended without a `leave`: the phone calls again, the host waits
+ * {@link RECONNECT_WINDOW_MS}).
  */
 export type RemoteCameraState = 'connecting' | 'connected' | 'reconnecting';
 
@@ -114,8 +118,13 @@ export interface Pairing {
   readonly expiresMs: number;
 }
 
-/** How long the host waits for the phone's `hello` once the channel is open. */
-export const HELLO_TIMEOUT_MS = 10_000;
+/**
+ * How long the host waits for the phone's `hello` once the channel is open (10 s until T4.2b; the
+ * phone's wait is as long, `camera-device-service.ts` says why). A wait over, or the connection
+ * closed first, before the first hello is no longer the end of the pairing: the phone calls again
+ * with its token, which is answered while it has not connected (T4.2b).
+ */
+export const HELLO_TIMEOUT_MS = 15_000;
 
 /** How long a camera that lost its connection stays listed as reconnecting before it is removed. */
 export const RECONNECT_WINDOW_MS = 5 * 60_000;
@@ -387,17 +396,19 @@ export class RemoteCamerasService {
 
   /**
    * A phone offers: the one the pairing waits for (its token, before it expires) is answered and the
-   * pairing closed; a camera of the list calling again (its token, after its connection ended) is
-   * answered again; anything else is a stale or a wrong call, whose documents go.
+   * pairing closed; a camera of the list calling again with its token is answered again, after its
+   * connection ended (reconnecting) or before it ever had one (connecting: its first call failed,
+   * T4.2b); anything else is a stale or a wrong call, whose documents go.
    */
   private async onOffer(offer: IncomingOffer): Promise<void> {
     const now = this.timers.now();
     const back = [...this.peers.values()].find(
       (peer) =>
-        peer.camera.tokenHash === offer.peer.tokenHash && peer.camera.state === 'reconnecting',
+        peer.camera.tokenHash === offer.peer.tokenHash &&
+        (peer.camera.state === 'reconnecting' || peer.camera.state === 'connecting'),
     );
     if (back !== undefined) {
-      await this.connectPeer(back, offer, true);
+      await this.connectPeer(back, offer, back.camera.state === 'reconnecting');
       return;
     }
     const pairing = this.pairingSignal();
@@ -446,12 +457,24 @@ export class RemoteCamerasService {
     };
     this.peers.set(peer.camera.id, peer);
     this.camerasSignal.update((cameras) => [...cameras, peer.camera]);
+    // The token is the phone's for the pairing's ten minutes: its calls are answered until it
+    // connects (a first connection that failed is called again, T4.2b), then it goes.
+    peer.removalTimer = this.timers.setTimeout(() => {
+      peer.removalTimer = null;
+      if (peer.camera.state === 'connecting') {
+        this.drop(peer, 'the connection could not be made');
+      }
+    }, PAIRING_TTL_MS);
     await this.connectPeer(peer, offer, false);
   }
 
   // ---- The connection ----
 
-  /** Answers `offer` for `peer`: the channel, the hellos, the pings; a failure says why. */
+  /**
+   * Answers `offer` for `peer`: the channel, the hellos, the pings; a failure says why. A first
+   * connection that fails leaves the camera connecting, its token answered again until the pairing's
+   * ten minutes are up (T4.2b); one made again after a drop leaves it reconnecting.
+   */
   private async connectPeer(peer: Peer, offer: IncomingOffer, again: boolean): Promise<void> {
     const generation = ++peer.generation;
     // A connection still up (the phone thought it dead first) makes way for the new one.
@@ -463,9 +486,9 @@ export class RemoteCamerasService {
     try {
       transport = await this.connect(offer.signaling);
     } catch (error: unknown) {
-      this.failed(peer, 'connect', errorMessage(error));
-      if (!again) {
-        this.drop(peer, 'the connection could not be made');
+      // A call that a newer one replaced fails quietly.
+      if (generation === peer.generation) {
+        this.failed(peer, 'connect', errorMessage(error));
       }
       return;
     }
@@ -480,15 +503,19 @@ export class RemoteCamerasService {
     let hello: Hello;
     try {
       hello = await this.withTimeout(
-        link.next('hello'),
+        helloOrClose(link, 'phone'),
         HELLO_TIMEOUT_MS,
         'the phone sent no hello',
       );
     } catch (error: unknown) {
-      this.failed(peer, 'hello', errorMessage(error));
       transport.close('no hello');
-      if (!again) {
-        this.drop(peer, 'the phone sent no hello');
+      if (generation === peer.generation) {
+        this.failed(peer, 'hello', errorMessage(error));
+        if (peer.transport === transport) {
+          peer.transport = null;
+          peer.link = null;
+          link.detach();
+        }
       }
       return;
     }
