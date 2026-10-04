@@ -152,6 +152,51 @@ export const REMOTE_CLOCK_DRIFT_SPAN_MS = 60_000;
  */
 export const REMOTE_CLOCK_CONVERGED = { samples: 10, spanMs: 10_000, spreadMs: 5 } as const;
 
+/**
+ * A remote clock's estimate frozen as it stood (T4.3): the line `offset(h) = offsetMs + drift·(h −
+ * atHostMs)`, the drift `driftPpm · 10⁻⁶`, from which {@link toHostMs} and {@link toRemoteMs} are exact
+ * inverses. {@link RemoteClockFit}'s own conversions follow its window as answers come; a line taken
+ * when a remote camera's clip was cut keeps the estimate of the clip's own time, whatever the fit
+ * becomes before the clip's files come (a reconnection whose new samples fill the window, a clock
+ * that moved while the phone slept), and places the clip's first frame by the line's value there.
+ */
+export class RemoteClockLine {
+  /**
+   * @param offsetMs the remote clock minus the host clock at `atHostMs`, in ms.
+   * @param driftPpm how fast that offset grows, in parts per million (0: a constant offset).
+   * @param atHostMs the host time at which the offset is `offsetMs`.
+   */
+  constructor(
+    readonly offsetMs: number,
+    readonly driftPpm: number,
+    readonly atHostMs: number,
+  ) {
+    for (const value of [offsetMs, driftPpm, atHostMs]) {
+      if (!Number.isFinite(value)) {
+        throw new RangeError(`A clock line takes finite numbers, got ${String(value)}.`);
+      }
+    }
+  }
+
+  /** The remote clock minus the host clock at a host time. */
+  offsetAt(hostMs: number): number {
+    return this.offsetMs + this.driftPpm * 1e-6 * (hostMs - this.atHostMs);
+  }
+
+  /** The remote time of a host time. */
+  toRemoteMs(hostMs: number): number {
+    return hostMs + this.offsetAt(hostMs);
+  }
+
+  /**
+   * The host time of a remote time: `remote = host + offset(host)` solved for the host time,
+   * counted from `atHostMs`, so that wall-clock values lose no precision.
+   */
+  toHostMs(remoteMs: number): number {
+    return this.atHostMs + (remoteMs - this.offsetMs - this.atHostMs) / (1 + this.driftPpm * 1e-6);
+  }
+}
+
 /** A sample as the window keeps it. */
 interface Measured {
   /** The host time the sample stands for: the middle of the round trip. */
@@ -378,6 +423,19 @@ export class RemoteClockFit {
       (s) =>
         Math.abs(s.offsetMs - fitted(e, s.hostMs)) <= s.rttMs / 2 + REMOTE_CLOCK_CONVERGED.spreadMs,
     );
+  }
+
+  /**
+   * The estimate now, frozen (T4.3): its line (or, before the drift is fitted, the median offset
+   * with no drift) at the host time of the window's newest sample, which converts as
+   * {@link toHostMs} and {@link toRemoteMs} do now and keeps doing so whatever samples come after;
+   * the identity with no sample.
+   */
+  line(): RemoteClockLine {
+    const e = this.#current();
+    return e === null
+      ? new RemoteClockLine(0, 0, 0)
+      : new RemoteClockLine(fitted(e, e.latestMs), e.b * 1e6, e.latestMs);
   }
 
   /** The estimate, as session.json records it; the zero record with no sample. */

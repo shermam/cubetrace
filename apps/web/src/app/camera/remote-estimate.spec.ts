@@ -56,6 +56,28 @@ describe('clockEstimate', () => {
     expect(clockEstimate(fit)?.converged).toBe(true);
   });
 
+  it('is frozen when taken (T4.3): the answers after it move the fit, not the estimate', () => {
+    const fit = new RemoteClockFit();
+    for (let k = 0; k < 13; k++) {
+      trip(fit, k * 1000, 10, 10);
+    }
+    const estimate = clockEstimate(fit);
+    expect(estimate?.line.offsetMs).toBe(fit.offsetMs);
+    const before = estimate?.toHostMs(20_000 + OFFSET_MS);
+    // The phone's clock 2 s back from then on (it slept): a minute of its answers.
+    for (let k = 13; k < 73; k++) {
+      const t1 = k * 1000;
+      fit.addSample(t1, t1 + 10 + OFFSET_MS - 2000, t1 + 11 + OFFSET_MS - 2000, t1 + 21);
+    }
+    expect(fit.toHostMs(20_000 + OFFSET_MS)).toBeGreaterThan(21_000);
+    expect(estimate?.toHostMs(20_000 + OFFSET_MS)).toBe(before);
+    expect(estimate?.toRemoteMs(20_000)).toBe(20_000 + OFFSET_MS);
+    // Before three samples, the least round trip's offset, as a line without a drift.
+    const early = new RemoteClockFit();
+    trip(early, 0, 10, 10);
+    expect(clockEstimate(early)?.line).toMatchObject({ offsetMs: OFFSET_MS, driftPpm: 0 });
+  });
+
   it("widens the margin past the floor by the kept trips' 95th percentile and the residuals' on a slow network", () => {
     const fit = new RemoteClockFit();
     // Wi-Fi power saving: trips of 400 to 500 ms, all kept (within 1.5 times 400), legs uneven.

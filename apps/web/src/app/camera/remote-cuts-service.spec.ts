@@ -80,6 +80,8 @@ class Phone {
   sender: FileSender | null = null;
   token = '';
   peerId = '';
+  /** The phone's clock minus the host's; a test moves it (a phone that slept). */
+  offsetMs = OFFSET_MS;
 
   constructor(
     private readonly r: Rig,
@@ -101,7 +103,7 @@ class Phone {
     link.onMessage((message) => {
       this.received.push(message);
     });
-    answerPings(link, () => this.r.s.perf.hostMs + OFFSET_MS);
+    answerPings(link, () => this.r.s.perf.hostMs + this.offsetMs);
     link.send({
       type: 'hello',
       v: PROTOCOL_VERSION,
@@ -496,6 +498,29 @@ describe('RemoteCutsService', () => {
       offsetMs: OFFSET_MS,
       resumedBytes: 0,
     });
+  });
+
+  it("converts a clip's times with the estimate of its cut, whatever the phone's clock did before its files came (T4.3)", async () => {
+    const phone = await paired();
+    await scrambled();
+    await solved();
+    const solveCut = phone.cut('solve');
+    const cutMs = r.s.perf.hostMs;
+    // The phone slept right after cutting, its clock stopped meanwhile: 3 s behind from then on. Two
+    // minutes of answers fill the fit's window with the new clock before its files come.
+    phone.offsetMs = OFFSET_MS - 3000;
+    await pass(130_000);
+    expect(r.cameras.cameras()[0]?.sync?.offsetMs).toBeCloseTo(OFFSET_MS - 3000, 0);
+    expect(await drive(phone.deliver(solveCut))).toEqual(['frames from 0', 'mp4 from 0']);
+    await pump(r.s, 20);
+    const frames = writtenFrames('phone-rear.solve.frames.json');
+    // The clip was timed on the clock before the sleep: the estimate of its cut places it.
+    expect(frames.t0HostMs).toBeCloseTo(solveCut.fromRemoteMs + 600 - OFFSET_MS, 2);
+    expect(frames.remote?.offsetMs).toBeCloseTo(OFFSET_MS, 2);
+    expect(frames.remote?.takenMs).toBeLessThanOrEqual(cutMs);
+    expect(record().video.find((clip) => clip.segment === 'solve')?.firstFrameHostMs).toBe(
+      frames.t0HostMs,
+    );
   });
 
   it('keeps a clip that comes while its attempt is under way for the record to come', async () => {

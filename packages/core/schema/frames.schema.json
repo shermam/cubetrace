@@ -53,7 +53,7 @@
       }
     },
     "remote": {
-      "description": "The clock sync a remote camera's clip was converted with (T4.2): the fit's record as session.json keeps it in clock.cameras[label].remote, when the host took it, whether it had converged then, and when that was. There exactly when t0RemoteMs is.",
+      "description": "The clock sync a remote camera's clip was converted with (T4.2): the fit's record as session.json keeps it in clock.cameras[label].remote, whether it had converged when the host took it, and when that was; since T4.3 the estimate the host took when it cut the clip, its offset the one applied at the first frame. There exactly when t0RemoteMs is.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -68,11 +68,11 @@
       ],
       "properties": {
         "offsetMs": {
-          "description": "The phone's clock minus the host's, in ms, at the time of the fit's newest sample.",
+          "description": "The phone's clock minus the host's, in ms: since T4.3 the offset applied at the clip's first frame (t0RemoteMs − t0HostMs, the estimate's line there, to 0.01 ms); in the files written before T4.3, at the time of the fit's newest sample when the file came.",
           "type": "number"
         },
         "driftPpm": {
-          "description": "How fast that offset grows, in parts per million; 0 before the samples spanned a minute.",
+          "description": "How fast that offset grows, in parts per million (the slope of the estimate's line); 0 before the samples spanned a minute.",
           "type": "number"
         },
         "rttMs": {
@@ -99,7 +99,7 @@
           "type": "boolean"
         },
         "takenMs": {
-          "description": "The host time when the host took the fit to convert the clip's times.",
+          "description": "The host time when the host took the estimate that converted the clip's times: since T4.3 when it cut the clip (the estimate of the clip's own time), or when the file came for a clip the host had not cut (one offered after the host's page loaded again).",
           "type": "number"
         }
       }
