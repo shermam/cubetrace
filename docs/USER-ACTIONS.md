@@ -156,6 +156,26 @@ adds items; the owner ticks them when done (date and any detail that others need
   release, if still missing (round 2's item), is made the same way, on the commit the coordinator
   names.
 
+## Needed for phase 4
+
+- [ ] **The `v0.4.0` release**, once T4.4's pull request is merged, from the GitHub UI (the
+  coordinator's session cannot push tags): Releases → Draft a new release → Choose a tag: type
+  `v0.4.0` and choose "Create new tag on publish", Target: the merge commit of PR #NN (the
+  coordinator writes it here once merged; under Target → Recent commits, or `main` while nothing has
+  been merged after it), title `cubetrace 0.4.0`, as 0.3.0's, the notes from the 0.4.0 section of
+  `docs/CHANGELOG.md` → Publish release.
+- [ ] **The "After T4" round (the desk rig, 0.4.0)**, the owner's next action: on
+  https://shermam.github.io/cubetrace/ once its footer reads `cubetrace 0.4.0 · <commit>`, set the
+  rig up as `README.md`, "The desk rig", says (the MacBook with its FaceTime camera and the GAN 12
+  ui, the ThinkPhone on its stand, paired as `phone-rear`, and the lamp; a second phone if one is at
+  hand, with a name of its own in Settings → This device), signed in on both devices with Settings →
+  Account → Diagnostics on (the default), and go through "After T4" in `docs/MANUAL-TESTS.md` in its
+  order. Write down only what its items ask beside the events (the phone's temperature by hand, the
+  tile, the phone's moves against its picture, how long things took), and open an issue for anything
+  that fails. The coordinator then reads the round from the events (`npm run round-report`), fills
+  `docs/DEVICES.md`'s Remote cameras rows and the live preview's cost from them, and closes issue #61
+  if a pairing stayed converged for twenty minutes.
+
 ## Later
 
 - [ ] Phase 2 rig: tripod + phone clamp, a lamp with a diffuser for the desk; the sofa
