@@ -733,13 +733,18 @@ its event (the Diagnostics switch itself settles before the page goes since #59)
 before `AuthService` attaches the account goes to the ring, which a toggle off then clears. (j) The remote camera's picture on the host (T4.1) is the thumbnail at the bottom of the Camera
 panel, too far from the host's preview to keep the cube in the phone's frame while solving (issue #60):
 T4.3's live preview belongs next to the host's preview on the Timer page, the thumbnail staying in the
-Cameras list as the pairing's state. (k) The remote clock fit never converged in the first real
+Cameras list as the pairing's state. (k) ~~The remote clock fit never converged in the first real
 pairing (two connections of 12 and 4 minutes on the home Wi-Fi, no `rtc.clock` event; issue #61):
 `REMOTE_CLOCK_CONVERGED` was tuned on loopback and simulations; T4.2 was told not to gate the cuts on
 `converged` (the current estimate, a padded window, the numbers in the record); T4.3 measures the real
-round trips and tunes the criterion. (l) New session right after a solve lets the paired phone go before its last
-clips come (T4.2 notes them missing): the host should hold its `leave` at the session's end while cuts
-are unanswered, for a bounded time (10–15 s). (m) ~~A paired phone adds about six diagnostics events per
+round trips and tunes the criterion~~, done by T4.2b (#64): the fit keeps at least its ten samples of
+least round trip of two minutes, converges within 5 ms and is withdrawn by a sample its round trip
+cannot explain, the host pings every 500 ms until it converges, and `rtc.clock` says the window's
+round trips every minute, converged or not; T4.3 measures the Wi-Fi again. (l) ~~New session right
+after a solve lets the paired phone go before its last clips come (T4.2 notes them missing): the host
+should hold its `leave` at the session's end while cuts are unanswered, for a bounded time (10–15
+s)~~, done by T4.2b (#64): the host keeps the phone until its clips of the ended session are stored,
+refused or given up, 15 s at most. (m) ~~A paired phone adds about six diagnostics events per
 attempt on the host, so the daily cap of 2,000 (`DAILY_CAP`, T3.9) is reached at about 155 attempts a
 day with the owner's cadence of 130–170: raise it (Firestore's cost is nothing at that scale)~~, done by
 T4.2a (#63): the cap is 5,000.
@@ -2306,6 +2311,84 @@ throughout, and once, 2.1 min after its last record, when the phone leaves at 12
 closed meanwhile sends it at its next start. Acceptable, and unchanged: it costs no quota and loses
 nothing (the index has the session's document as it changes); writing the fit every 10 minutes
 instead would let `session.json` go after each quiet window, up to six times an hour. PR #63.
+
+### T4.2b — the remote clock fit retuned for real links, the pairing hardened, the leave held at New session
+
+**Goal.** Follow-ups (k) and (l), and PR #62's one refusal at pairing, before T4.3 builds on the
+clock sync: the fit converges on the owner's home Wi-Fi and between the end-to-end pair's loaded
+pages, a pairing survives a missed deadline, and New session right after a solve keeps the phone's
+last clips (issue #61, addressed; T4.3 measures the Wi-Fi again and may tune further).
+
+**What changed.** (A) The clock fit (`packages/core/src/remote-clock.ts`, `docs/RTC.md` §4): the
+band of the least round trip (1.5 times it, or 3 ms over it) kept 2 to 14 samples of 60 at the 36
+cuts of the owner's 20.7-minute pairing on 2026-10-04 (the least trip 5.4 to 8.5 ms; those kept
+agreed, their residuals' 95th percentile 0.7 to 1.7 ms), the count flapped around the ten that
+convergence asks for, and 10 of the 36 cuts went converged; between two loaded pages of one browser
+(CI) it kept 1 to 4 of 16. The estimate now stands on the band and on at least the 10 samples of
+least round trip of the window, as a clock filter takes them (`REMOTE_CLOCK_MIN_KEPT`; the lower
+half of a window of fewer than 20). The window is the last two minutes (`REMOTE_CLOCK_WINDOW_MS`; at
+most 240 samples), not the last 60, so that the drift fit has its minute whatever the pings' rate.
+Converged needs, as before, ten kept samples over ten seconds, their residuals spreading by less
+than 5 ms (3 ms before), and now also no sample of the window farther from the estimate than half
+its round trip and those 5 ms: a sample's offset is off by at most half its round trip whatever the
+network did, so one farther off says that a clock moved (a phone that slept), and the sync is
+withdrawn at that sample. `ClockPinger` pings every 500 ms until an answer leaves the fit converged,
+or for a minute at most, then every 2 s. The `rtc.clock` event goes once a minute of the connection,
+converged or not (`syncing` before convergence), with the window's round trips (`rttP50Ms`,
+`rttP95Ms`, `windowSamples`, `keptShare`). (B) The pairing: the phone makes a first call that fails
+again with the same token every 3 s until the pairing's ten minutes from its check are up (joining,
+with why), and the host keeps the camera it took the token for listed as connecting, answering its
+calls, until the pairing's ten minutes from the take are up; each side's hello wait is 15 s (10 s
+before) and ends when the connection closes first; a late failure of a call that a newer one
+replaced no longer touches the newer one; and the host says its hello once the phone's came: it
+spoke first, the moment its channel opened, and that hello now and then never reached the phone's
+page (7 of about 115 hello exchanges in the end-to-end runs while this was tested, the host's later
+frames received; it had gone out before the phone's page had its channel open, as far as the clocks
+tell), most likely what refused PR #62's first CI run rather than a starved runner. (C) At the
+session's end, a camera connected with clips of the session still to come stays, listed as "waiting
+for the phone's last clips (n)", until they are stored, refused or given up, or 15 s
+(`FINISH_WAIT_MS`), then is let go as before; each remote camera belongs to the session it was
+paired in, so that its clips go into that session's attempts and it is asked for nothing of the
+next. The end-to-end reads of an attempt's files try again when they find no file (the app moves a
+new file over the old, and a poll that hit that instant ended at once, once in the New session
+test's runs).
+
+**Decisions where the brief left room.** At least ten samples of least round trip, a count rather
+than the suggested quarter of the window: with the faster first pings a quarter of a window of 120
+samples keeps trips far over the least, and in the simulations it converged later and flapped more
+(the home Wi-Fi: 18 s and 0 to 2 withdrawals in 20 minutes with a 5 ms spread, against 12 s and
+none; two loaded pages: 2 to 15 withdrawals in 10 minutes against 1 to 3). A spread of 5 ms rather
+than one relative to the kept trips' spread: a relative one let the busy network (40 ms, 30 ms of
+jitter) converge, which must not; the check of each sample against its own round trip is what
+catches a clock that moved, at once (after a simulated sleep, the phone's clock 100 ms back, the
+band's rule claimed convergence 100 ms off for 53 samples in 11 of 20 pairings, T4.2b for 1). A
+window of two minutes in time, which is the 60 samples of before at 2 s. The host's reservation of a
+taken token lasts the pairing's ten minutes from the take, and the phone's retries the same from its
+check, which comes first, so that a retry is always answered (no API change for the pairing's
+expiry). Hello waits of 15 s. The host speaking second, rather than both sides at once with the
+retry to catch a lost hello (18 s more for such a pairing). The leave a turn after the last clip's
+acknowledgement, so that the phone hears `file-ack` before `leave`; a camera whose connection ends
+while it waits for its last clips is let go at once (no offer of its session is watched any more).
+The end-to-end test of New session lets the host wait 60 s rather than 15 (`finishWaitMs`), so that
+a slow runner's transfer is not taken for the bound, which the unit tests hold.
+
+**Outcome (2026-10-04).** As above, PR #64. Measured, the simulations (`remote-clock.test.ts`; the
+band alone pinged every 2 s, T4.2b as `ClockPinger` pings): on the home Wi-Fi's (seeds 1 to 3, 20
+minutes; least trip 5.4 to 8.5 ms, median 12 to 15) the band kept 3 to 26 of 60 (10 to 12 at the
+median), converged after 98 to 104 s and was withdrawn 13 to 15 times; T4.2b converges after 10.5 to
+12 s, is never withdrawn, its offset within 1.1 to 1.5 ms of the truth at the 99th percentile while
+converged (2.3 ms at worst, two samples of one pairing) and 0.7 ms at the end, the drift 3 to 16 ppm
+at the end for a true 5; between two loaded pages (5 minutes) the band converged after 130 s once
+and never twice, T4.2b after 13.5 to 22 s, withdrawn 1 to 5 times, within 1.9 ms; the simulations of
+T4.0 give their numbers as before; a phone's clock 100 ms back (20 pairings): the band's rule
+claimed convergence 100 ms off for 53 samples in 11 pairings, T4.2b for 1. The end-to-end pair
+(`remote-camera.spec.ts` three times each, on the development machine): converged 11.1 s after the
+phone connected, the test 21.2 to 21.4 s; with `main`, 22.3, 42.5 and 78.7 s, the test 32.6 to 89.6
+s. The host's hello was lost in 7 of about 115 exchanges of the end-to-end runs while it spoke
+first, in none of 76 since. Bundle: the initial 264.96 kB unchanged; the Cameras section's chunk
+42.91 kB (40.45 before), the Camera page's 42.07 kB (41.74), the `@cubetrace/rtc` chunk 24.88 kB
+(24.30), core's shared chunk 80.29 kB (79.62). Tests: 1,356 package and 824 app unit tests (1,351
+and 813 before), 80 end-to-end (79), 4 cloud.
 
 ### T4.3 — the sync check on a remote camera, the drift fit applied, the live preview
 

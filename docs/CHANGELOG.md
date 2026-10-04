@@ -163,6 +163,28 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The clock sync of a paired phone converges on a Wi-Fi whose round trips jitter (T4.2b,
+  `docs/RTC.md` §4; issue #61): the estimate stands on the samples within a band of the least round
+  trip and on at least the 10 of least round trip of the last two minutes (the band alone kept 2 to
+  14 of 60 on the owner's home Wi-Fi, and 10 of 36 cuts had a converged sync), it is synced once ten
+  of them over ten seconds agree within 5 ms (3 ms before), and it is withdrawn at once by a sample
+  farther from the estimate than its own round trip allows (the phone's clock stopped while it
+  slept). The host pings every 500 ms until the sync converges, for a minute at most, then every 2
+  s. On a simulation of the owner's Wi-Fi the sync converges in about 12 s and stays so for 20
+  minutes (after about 100 s, and withdrawn 13 to 15 times, before). The diagnostics' `rtc.clock`
+  goes once a minute of the connection, converged or not (`syncing` before convergence), with the
+  window's round trips (median, 95th percentile, how many, the share kept), so that a pairing says
+  how its Wi-Fi behaves.
+- Development (T4.2b): core's `REMOTE_CLOCK_WINDOW_MS` (two minutes) and `REMOTE_CLOCK_MIN_KEPT`
+  (10), `REMOTE_CLOCK_WINDOW` 240 (60 before), `RemoteClockFit`'s `windowMs` option and `window`
+  (the window's round trips), `REMOTE_CLOCK_CONVERGED.spreadMs` 5; rtc's `FAST_PING_INTERVAL_MS`
+  (500 ms) and `FAST_PINGS_MS` (a minute) with `ClockPinger`'s `fastIntervalMs`, `fastMs` and
+  `intervalMs`; the host's and the phone's `HELLO_TIMEOUT_MS` 15 s (10 s before), their hello waits
+  ended by the connection closing first (`apps/web/src/app/rtc/hello.ts`); `CutCamera.session`,
+  `RemoteCutsService.pendingOf` and `watchPending`, the host's `FINISH_WAIT_MS` and the camera state
+  `finishing`; the end-to-end suite's `cubetraceE2eRemote.finishWaitMs`, and its reads of an
+  attempt's files trying again when the app is replacing one; the unit tests'
+  `MemoryConnector.failRole`.
 - The diagnostics' daily cap is 5,000 events a device and local day (2,000 before; T4.2a): a phone
   paired as a camera adds about six events per attempt on the host (each clip's `remote.cut` sent and
   done, and its `remote.clip`), so a day of the owner's 130 to 170 attempts reached 2,000 at about
@@ -181,6 +203,20 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- New session right after a solve no longer loses the paired phone's last clips (T4.2b, follow-up
+  (l) of `docs/PLAN.md`): the session's end let the phone go at once, its clips still to come were
+  noted missing and never reached the attempt although the phone kept them. A phone with clips of the
+  ended session still to come now stays connected until they are in, 15 s at most, the Cameras list
+  saying "waiting for the phone's last clips (n)"; the clips go into the ended session's attempt, and
+  the phone is let go with "the session ended". Remove still lets it go at once.
+- A phone's first call to the host that fails (the connection not made, a hello that a busy page sent
+  late) no longer ends the pairing (T4.2b): the phone calls again with the same code every 3 s, saying
+  "Joining…" and why, until the code's ten minutes are up, and the host answers it, listing the camera
+  as connecting meanwhile; a wrong, expired or used code is still refused at once.
+- The host's hello no longer goes missing at a pairing (T4.2b): the host said it the moment its
+  channel opened, and now and then it never reached the phone's page (7 of about 115 hello exchanges
+  in the end-to-end runs; the pairing was refused before T4.2b, and took 18 s longer with its
+  retries). The host now answers the phone's hello, which the phone says once its channel is open.
 - Deleting uploaded clips by policy ("Keep local copies" off, or the storage past 70%) no longer
   uploads `attempt.json` again (T4.2a). The deletion saved the record again to say that the clips had
   left the device, and a record read back otherwise than it was uploaded (one written before a later
