@@ -147,6 +147,8 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
   await expect
     .poll(() => videoSize(video), { timeout: 10_000 })
     .toEqual([SYNTHETIC_CAMERA.width / 5, SYNTHETIC_CAMERA.height / 5]);
+  // The phone says it sends it.
+  await expect(phone.getByTestId('device-live-preview')).toHaveAttribute('data-sending', 'true');
 
   // The phone's line under the preview: no check yet; Sync check asks for the framing on the phone
   // (its rectangle is the whole frame), and Start anyway starts it.
@@ -162,6 +164,8 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
   await page.getByTestId('sync-anyway').click();
   await expect(panel).toHaveAttribute('data-state', 'running');
   await expect(page.getByTestId('timer-status')).toHaveAttribute('data-phase', 'sync-check');
+  // The phone measures, and says so.
+  await expect(phone.getByTestId('device-sync-check')).toBeVisible();
 
   // Ten turns of the demo cube, and the square's flips LAG_MS after each.
   const startMs = await page.evaluate(() => performance.timeOrigin + performance.now());
@@ -172,6 +176,7 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
   );
   await turnAt(page, times);
   await expect(panel).toHaveAttribute('data-state', 'passed', { timeout: 40_000 });
+  await expect(phone.getByTestId('device-sync-check')).toHaveCount(0);
   const turns = await turned(page);
   const flipped = await flips(phone);
   expect(turns).toHaveLength(TURNS);
@@ -251,6 +256,7 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
 
   // "Live preview from phones" off: the phone stops sending, the thumbnail is the picture again.
   await page.getByTestId('live-preview-from-phones').uncheck();
+  await expect(phone.getByTestId('device-live-preview')).toHaveAttribute('data-sending', 'false');
   await expect(picture).toHaveAttribute('data-live', 'false', { timeout: 15_000 });
   await expect(picture.getByTestId('remote-picture-thumbnail')).toHaveAttribute('src', /^blob:/, {
     timeout: 5000,
