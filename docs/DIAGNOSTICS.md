@@ -81,11 +81,12 @@ recorded without a scope of its own.
   and far under Firestore's free tier of 20,000 writes a day (the session index's writes, about
   three per attempt, come on top). A phone paired as a camera (T4.2) adds 6 events per attempt on
   the host (each clip's `remote.cut` sent and done, and its `remote.clip`) and none on the phone
-  unless a cut fails, and `rtc.clock` once a minute while its clock sync is converged (60 an hour):
-  about 2,100 a day with a phone. The cap was 2,000 until T4.2a, which a day of more than about 155
-  attempts with a phone reached mid-session, and the evidence stopped there; at 5,000 a day with a
-  phone has room for about 390 attempts, and Firestore's writes at that scale stay within a quarter
-  of its free tier (the `error.*` kinds go on past the cap all the same).
+  unless a cut fails, and `rtc.clock` once a minute while it is connected (60 an hour; while its
+  clock sync is converged only, until T4.2b): about 2,100 a day with a phone. The cap was 2,000
+  until T4.2a, which a day of more than about 155 attempts with a phone reached mid-session, and the
+  evidence stopped there; at 5,000 a day with a phone has room for about 390 attempts, and
+  Firestore's writes at that scale stay within a quarter of its free tier (the `error.*` kinds go on
+  past the cap all the same).
 - **What goes wrong stays out.** A kind that is not one, facts that cannot be made into an event, a
   batch the server refuses: said once in the console (`cubetrace: diagnostics: …`) and dropped; the
   diagnostics never record themselves.
@@ -134,7 +135,7 @@ know it (a camera without a frame rate, a cube without a production date).
 | `rtc.paired` | A remote camera paired (T4.1, `docs/RTC.md` §8): the hellos exchanged. On the host: the phone; on the phone: the host. | host: `peer` (the phone's host label), `platform`, `camera` (its label in the session), `facing`, `deviceLabel`, `version` and `commit` (the phone's build), `ms` (from the offer to the hellos); phone: `host`, `platform`, `session`, `version`, `commit`, `ms` |
 | `rtc.connected` | A connection with a remote camera opened: the first one, or one made again after a drop. | As `rtc.paired`'s device facts, and `reconnection` |
 | `rtc.disconnected` | A connection with a remote camera ended: the other side left (`left: …`, `host left: …`), the host removed the camera or the session ended (the host), the transport closed or failed (the reason), five minutes without the other side (`gave up: …`). | `reason`, `durationMs` (the connection's), `connectedMs` (host: since the pairing), `peer` / `host`, `camera` |
-| `rtc.clock` | The clock sync of a remote camera (the host): at convergence, once a minute while converged, and when convergence is withdrawn. | `camera`, `peer`, `why` (`converged`, `minute`, `withdrawn`), `converged`, `offsetMs`, `rttMs`, `driftPpm`, `samples`, `residualP95Ms` |
+| `rtc.clock` | The clock sync of a remote camera (the host): at convergence, when convergence is withdrawn, and once a minute of the connection, converged or not (T4.2b: a link that never converges still says how it behaves; before, once a minute while converged only). | `camera`, `peer`, `why` (`converged`, `withdrawn`; `minute` while converged, with the record into `session.json`; `syncing` before, the fit not converged), `converged`, the fit's record (`offsetMs`, `rttMs`: the least round trip kept, `driftPpm`, `samples`: the kept ones, `residualP95Ms`), and the window's round trips, kept or not (T4.2b): `windowSamples` (the samples of the last two minutes), `keptShare` (`samples` over `windowSamples`, to 0.01), `rttP50Ms` and `rttP95Ms` (their median and 95th percentile, to 0.1 ms) |
 | `rtc.failed` | A step of the pairing or the connection failed (either side). | `step` (host: `pairing`, `watch`, `connect`, `hello`, `version`; phone: `session`, `check`, `connect`, `hello`, `version`), `reason`, `peer` (host) |
 | `remote.cut` | A remote camera's cut (T4.2, `docs/RTC.md` §9). On the host: sent (once per clip, as soon as the camera is connected and its clock sync has an answer, converged or not), answered with the phone's offer (`done`), or not cut (`failed`, a failure); on the phone: not cut (`failed`). | `outcome` (`sent`, `done`, `failed`), `camera` (the label in the session), `peer` (the host: the phone's host label), `segment`, `reason` (sent: `armed` or `ended`; failed: the phone's words), `windowMs` (the host's window), `marginMs` (how far the window is widened on each side), `waitedMs` (from the milestone to the cut sent), `offsetMs`, `rttMs`, `samples` and `converged` (the clock estimate the cut relied on), `delayMs` (done, failed: from the window's end), `files`, `bytes`, `truncatedStart`, `lateMs` (done: what the phone's capture said) |
 | `remote.clip` | A remote camera's clip is in its attempt's folder and record (the host). | `camera`, `peer`, `segment`, `bytes` (both files), `mp4Bytes`, `transferMs` (from the phone's offer to the record), `bytesPerSecond`, `resumedBytes` (held from an earlier connection: a transfer resumed), `late` (it was given up before), `kept` (for a record still to come), `converged` (the clock estimate its times were converted with), `offsetMs` (`t0RemoteMs` minus `t0HostMs`), `truncatedStart` |

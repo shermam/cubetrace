@@ -3,6 +3,7 @@ import type { CameraInfo, CloudEvent } from '@cubetrace/core';
 import {
   FirestoreSignaling,
   MessageLink,
+  PAIRING_TTL_MS,
   PROTOCOL_VERSION,
   answerPings,
   hashToken,
@@ -20,6 +21,7 @@ import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
 import {
   CLOCK_RECORD_MS,
+  FINISH_WAIT_MS,
   HELLO_TIMEOUT_MS,
   LEAVE_GRACE_MS,
   RECONNECT_WINDOW_MS,
@@ -63,11 +65,18 @@ class Phone {
   peerId = '';
   private readonly signaling: FirestoreSignaling;
 
+  /** How many pings it answered. */
+  private answers = 0;
+
   constructor(
     private readonly r: Rig,
     readonly label = 'ThinkPhone',
     /** The phone's clock minus the host's. */
     private readonly offsetMs = 1234.5,
+    /** Its clock jumps back and forth by this much from one answer to the next (a broken clock). */
+    private readonly wobbleMs = 0,
+    /** It says hello this long after its channel opened (a busy page), or never (null). */
+    private readonly helloAfterMs: number | null = 0,
   ) {
     this.signaling = new FirestoreSignaling(r.backend, {
       sessionId: r.s.service.session()?.id ?? '',
@@ -92,15 +101,26 @@ class Phone {
     link.onMessage((message) => {
       this.received.push(message);
     });
-    answerPings(link, () => this.r.s.perf.hostMs + this.offsetMs);
-    link.send({
-      type: 'hello',
-      v: PROTOCOL_VERSION,
-      role: 'camera',
-      device: { label: this.label, platform: 'Android' },
-      app: { version: '0.4.0', commit: 'abc1234' },
-      camera: PHONE_CAMERA,
-    });
+    answerPings(
+      link,
+      () =>
+        this.r.s.perf.hostMs + this.offsetMs + (Math.floor(this.answers++ / 2) % 2) * this.wobbleMs,
+    );
+    const hello = (): void => {
+      link.trySend({
+        type: 'hello',
+        v: PROTOCOL_VERSION,
+        role: 'camera',
+        device: { label: this.label, platform: 'Android' },
+        app: { version: '0.4.0', commit: 'abc1234' },
+        camera: PHONE_CAMERA,
+      });
+    };
+    if (this.helloAfterMs === 0) {
+      hello();
+    } else if (this.helloAfterMs !== null) {
+      this.r.s.timers.setTimeout(hello, this.helloAfterMs);
+    }
   }
 
   sendState(changes: { recording?: boolean; fps?: number | null } = {}): void {
@@ -362,12 +382,12 @@ describe('RemoteCamerasService', () => {
     expect(await stray).toMatch(/^failed: .*the signaling closed: the documents are gone/);
   });
 
-  it('pings every 2 s, tells the phone the clock sync, and once it converges records it in the session and the diagnostics, and once a minute after', async () => {
+  it('pings every 500 ms until the fit converges and every 2 s after, tells the phone the clock sync, and once it converges records it in the session and the diagnostics, and once a minute after', async () => {
     const phone = await paired();
     await pass(r.s, 4000);
     const pings = phone.of('ping').length;
-    expect(pings).toBeGreaterThanOrEqual(2);
-    expect(pings).toBeLessThanOrEqual(4);
+    expect(pings).toBeGreaterThanOrEqual(8);
+    expect(pings).toBeLessThanOrEqual(10);
     // One clock per answer taken (the last answer may still be on its way).
     let clocks = phone.of('clock');
     expect(clocks.length).toBeGreaterThanOrEqual(pings - 1);
@@ -393,24 +413,55 @@ describe('RemoteCamerasService', () => {
     expect(clock?.remote?.samples).toBeLessThanOrEqual(sync?.samples ?? 0);
     expect(Math.abs((clock?.remote?.offsetMs ?? 0) - 1234.5)).toBeLessThan(1);
 
+    // Converged, it pings every 2 s.
+    const before = phone.of('ping').length;
+    await pass(r.s, 10_000);
+    expect(phone.of('ping').length - before).toBe(5);
+
     let all = await events();
     const recorded = all.filter((e) => e.kind === 'rtc.clock');
     expect(recorded).toHaveLength(1);
+    // The window's round trips with it: the memory link takes 4 ms each way, every trip kept.
     expect(recorded[0].data).toMatchObject({
       why: 'converged',
       converged: true,
       camera: 'phone-rear',
+      keptShare: 1,
+      rttP50Ms: 8,
+      rttP95Ms: 8,
     });
+    expect(recorded[0].data['windowSamples']).toBe(recorded[0].data['samples']);
 
-    // A minute later, again, with the samples of the minute.
+    // A minute into the connection, again, with the samples of the window.
     await pass(r.s, CLOCK_RECORD_MS);
     all = await events();
     const again = all.filter((e) => e.kind === 'rtc.clock');
     expect(again).toHaveLength(2);
-    expect(again[1].data).toMatchObject({ why: 'minute', converged: true });
+    expect(again[1].data).toMatchObject({ why: 'minute', converged: true, keptShare: 1 });
     const minute = r.s.service.session()?.clock.cameras['phone-rear'].remote;
     expect(minute?.samples).toBeGreaterThanOrEqual(30);
     expect(minute?.samples).toBe(again[1].data['samples']);
+  });
+
+  it('says once a minute how the clock sync goes while it does not converge, and records nothing in the session', async () => {
+    // A phone whose clock jumps 30 ms back and forth every two answers: never converged.
+    const phone = new Phone(r, 'ThinkPhone', 1234.5, 30);
+    await paired(phone);
+    await pass(r.s, CLOCK_RECORD_MS + 1000);
+    expect(r.service.cameras()[0].sync?.converged).toBe(false);
+    const all = await events();
+    const clocks = all.filter((e) => e.kind === 'rtc.clock');
+    expect(clocks.map((e) => e.data['why'])).toEqual(['syncing']);
+    expect(clocks[0].data).toMatchObject({
+      converged: false,
+      camera: 'phone-rear',
+      rttP50Ms: 8,
+      rttP95Ms: 8,
+    });
+    // A minute of pings at 500 ms: all of them in the window, every trip kept (all 8 ms).
+    expect(clocks[0].data['windowSamples']).toBeGreaterThanOrEqual(115);
+    expect(clocks[0].data['keptShare']).toBe(1);
+    expect(r.s.service.session()?.clock.cameras['phone-rear']).toBeUndefined();
   });
 
   it('keeps the phone’s state and its latest thumbnail', async () => {
@@ -475,13 +526,17 @@ describe('RemoteCamerasService', () => {
     expect(r.service.cameras()[0].sync?.samples).toBeGreaterThan(samples);
     expect(r.service.cameras()).toHaveLength(1);
     let all = await events();
+    // The fit, kept across the reconnection, converges meanwhile: its samples span ten seconds.
     expect(kinds(all)).toEqual([
       'rtc.paired',
       'rtc.connected',
       'rtc.disconnected',
       'rtc.connected',
+      'rtc.clock',
     ]);
-    expect(all.at(-1)?.data).toMatchObject({ reconnection: true });
+    expect(all.filter((e) => e.kind === 'rtc.connected').at(-1)?.data).toMatchObject({
+      reconnection: true,
+    });
 
     // Dropped again and not back within five minutes: removed.
     back.drop();
@@ -518,7 +573,9 @@ describe('RemoteCamerasService', () => {
     const phone = await paired();
     await r.service.addCamera();
     expect(r.service.pairing()).not.toBeNull();
-    // A solve, so that the session has an attempt and New session may close it.
+    // A solve, so that the session has an attempt and New session may close it; nothing asked of
+    // the phone (Record remote cameras off), so nothing of the session is still to come from it.
+    r.s.settings.setRecordRemoteCameras(false);
     turn(r.s, fake, 'R U F');
     await pump(r.s, 1000);
     turn(r.s, fake, inverse('R U F'), 500);
@@ -528,15 +585,86 @@ describe('RemoteCamerasService', () => {
     await pump(r.s, 20);
     expect(r.service.cameras()).toEqual([]);
     expect(r.service.pairing()).toBeNull();
-    // The attempt's two clips were asked for (T4.2); this phone does not answer them.
     expect(phone.received.map((m) => m.type).filter((t) => t !== 'ping' && t !== 'clock')).toEqual([
       'hello',
-      'cut',
-      'cut',
       'leave',
+    ]);
+    expect(phone.of('leave')[0].reason).toBe('The host let the camera go: the session ended.');
+    await pump(r.s, LEAVE_GRACE_MS);
+    expect(phone.link?.state).toBe('closed');
+  });
+
+  it('keeps a camera with clips of the ended session still to come, 15 s at most, then lets it go and notes them missing', async () => {
+    const fake = await ready(r.s);
+    const phone = await paired();
+    const ended = r.s.service.session()?.id ?? '';
+    turn(r.s, fake, 'R U F');
+    await pump(r.s, 1000);
+    turn(r.s, fake, inverse('R U F'), 500);
+    await pump(r.s, 1000);
+    // New session right after the solve: the attempt's two clips were asked for (T4.2), and this
+    // phone does not answer them; the camera stays, connected, and the list says what it waits for.
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(r.s.service.session()?.id).not.toBe(ended);
+    expect(r.service.cameras()).toHaveLength(1);
+    expect(r.service.cameras()[0]).toMatchObject({ state: 'finishing', clipsLeft: 2 });
+    expect(r.service.pairing()).toBeNull();
+    expect(phone.of('leave')).toEqual([]);
+    // Nothing of it goes into the new session.
+    expect(r.s.service.session()?.cameras).toEqual([]);
+    await pass(r.s, FINISH_WAIT_MS - 1000);
+    expect(phone.of('leave')).toEqual([]);
+    await pass(r.s, 2000);
+    expect(r.service.cameras()).toEqual([]);
+    expect(phone.of('leave').map((m) => m.reason)).toEqual([
+      'The host let the camera go: the session ended.',
     ]);
     await pump(r.s, LEAVE_GRACE_MS);
     expect(phone.link?.state).toBe('closed');
+    // The ended session's notes say whose clips are missing, and why.
+    const notes = (await r.s.store.exportSession(ended)).session.notes.split('\n');
+    expect(notes).toEqual(
+      ['scramble', 'solve'].map(
+        (segment) =>
+          `remote clip missing: ${segment} of attempt 1 from phone-rear: the phone left (the session ended; its last clips did not come within 15 s)`,
+      ),
+    );
+    const all = await events();
+    expect(all.filter((e) => e.kind === 'rtc.disconnected').at(-1)?.data).toMatchObject({
+      reason: 'the session ended; its last clips did not come within 15 s',
+    });
+  });
+
+  it('lets a camera waiting for its last clips go at once when it is removed, or when its connection ends', async () => {
+    const fake = await ready(r.s);
+    const phone = await paired();
+    turn(r.s, fake, 'R U F');
+    await pump(r.s, 1000);
+    turn(r.s, fake, inverse('R U F'), 500);
+    await pump(r.s, 1000);
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(r.service.cameras()[0].state).toBe('finishing');
+    r.service.remove(r.service.cameras()[0].id);
+    expect(r.service.cameras()).toEqual([]);
+    await pump(r.s, 10);
+    expect(phone.of('leave').map((m) => m.reason)).toEqual(['The host removed this camera.']);
+
+    // Another phone, another session ended: its connection drops while it waits.
+    r = await rig();
+    const again = await ready(r.s);
+    const second = await paired();
+    turn(r.s, again, 'R U F');
+    await pump(r.s, 1000);
+    turn(r.s, again, inverse('R U F'), 500);
+    await pump(r.s, 1000);
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(r.service.cameras()[0].state).toBe('finishing');
+    second.drop();
+    await pump(r.s, 10);
+    expect(r.service.cameras()).toEqual([]);
   });
 
   it('gives a phone of another protocol version up, with the reason', async () => {
@@ -571,7 +699,8 @@ describe('RemoteCamerasService', () => {
     expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({ step: 'version' });
   });
 
-  it('gives a phone up that never says hello', async () => {
+  it('closes a first connection whose phone never says hello, and waits for its call again until the pairing’s ten minutes are up', async () => {
+    expect(HELLO_TIMEOUT_MS).toBe(15_000);
     await r.service.addCamera();
     const token = r.service.pairing()?.token ?? '';
     const signaling = new FirestoreSignaling(r.backend, {
@@ -585,9 +714,91 @@ describe('RemoteCamerasService', () => {
     expect(r.service.cameras()).toHaveLength(1);
     expect(r.service.cameras()[0].state).toBe('connecting');
     await pass(r.s, HELLO_TIMEOUT_MS + 1000);
-    expect(r.service.cameras()).toEqual([]);
     expect(transport.state).toBe('closed');
+    // Still listed, connecting: the token is the phone's, which calls again (T4.2b)...
+    expect(r.service.cameras().map((c) => c.state)).toEqual(['connecting']);
+    let all = await events();
+    expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({
+      step: 'hello',
+      reason: 'the phone sent no hello',
+    });
+    // ...until the pairing's ten minutes from the moment it took the token are up.
+    await pass(r.s, PAIRING_TTL_MS - HELLO_TIMEOUT_MS - 10_000);
+    expect(r.service.cameras()).toHaveLength(1);
+    await pass(r.s, 5000);
+    expect(r.service.cameras()).toEqual([]);
+    all = await events();
+    expect(kinds(all)).toEqual(['rtc.failed']);
+  });
+
+  it('answers a phone’s call again when its first connection failed, and pairs on the second', async () => {
+    await r.service.addCamera();
+    const token = r.service.pairing()?.token ?? '';
+    // The host's side of the first call cannot be made (ICE, say): the camera stays connecting.
+    r.connector.failNext = new Error('The connection failed: ICE failed.');
+    r.connector.failRole = 'callee';
+    const first = new Phone(r);
+    const lost = first.join(token).then(
+      () => 'connected',
+      (error: unknown) => `failed: ${String(error)}`,
+    );
+    await pump(r.s, 50);
+    expect(await lost).toMatch(/^failed: .*the signaling closed/u);
+    expect(r.service.cameras().map((c) => c.state)).toEqual(['connecting']);
+    expect(r.service.pairing()).toBeNull();
+    // The phone calls again with the token it was given: answered, as a camera of the list.
+    const again = new Phone(r);
+    const joining = again.join(token);
+    await pump(r.s, 0);
+    await joining;
+    await pump(r.s, 10);
+    expect(r.service.cameras()).toHaveLength(1);
+    expect(r.service.cameras()[0]).toMatchObject({ state: 'connected', peerId: again.peerId });
+    expect(again.of('hello')).toHaveLength(1);
+
+    // A first connection whose channel closes before the phone's hello: the same, at once.
+    r = await rig();
+    await r.service.addCamera();
+    const second = r.service.pairing()?.token ?? '';
+    const silent = new Phone(r, 'ThinkPhone', 1234.5, 0, null);
+    const opening = silent.join(second);
+    await pump(r.s, 0);
+    await opening;
+    await pump(r.s, 10);
+    silent.drop();
+    await pump(r.s, 10);
+    expect(r.service.cameras().map((c) => c.state)).toEqual(['connecting']);
+    const back = new Phone(r);
+    const rejoining = back.join(second);
+    await pump(r.s, 0);
+    await rejoining;
+    await pump(r.s, 10);
+    expect(r.service.cameras()[0].state).toBe('connected');
     const all = await events();
-    expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({ step: 'hello' });
+    expect(kinds(all)).toEqual(['rtc.failed', 'rtc.paired', 'rtc.connected']);
+    expect(all.find((e) => e.kind === 'rtc.failed')?.data).toMatchObject({
+      step: 'hello',
+      reason: "the connection closed before the phone's hello",
+    });
+    expect(all.find((e) => e.kind === 'rtc.connected')?.data).toMatchObject({
+      reconnection: false,
+    });
+  });
+
+  it('pairs with a hello that comes late but within the wait, and says its own only once the phone’s came', async () => {
+    // The phone's page is busy: its hello comes 12 s after the channel opened.
+    const phone = new Phone(r, 'ThinkPhone', 1234.5, 0, 12_000);
+    await paired(phone);
+    expect(r.service.cameras()[0].state).toBe('connecting');
+    await pass(r.s, 11_000);
+    expect(r.service.cameras()[0].state).toBe('connecting');
+    // The host speaks second: nothing of it before the phone's hello (a frame sent the moment the
+    // channel opened could find the phone's page without its channel open yet, T4.2b).
+    expect(phone.received).toEqual([]);
+    await pass(r.s, 2000);
+    expect(r.service.cameras()[0].state).toBe('connected');
+    expect(phone.received[0]).toMatchObject({ type: 'hello', role: 'host' });
+    const all = await events();
+    expect(kinds(all)).toEqual(['rtc.paired', 'rtc.connected']);
   });
 });

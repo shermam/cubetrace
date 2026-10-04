@@ -83,8 +83,9 @@ suite.
 
 All timestamps are host milliseconds. Cube time is mapped by a linear fit of (cubeMs, hostMs) pairs
 per attempt (docs/DEVICES.md). Remote phones (phase 4) are mapped by a data-channel ping protocol
-(`docs/RTC.md` §4: the host pings every 2 s, the offset from the samples of least round trip, a drift
-fit once they span a minute, `RemoteClockFit` in core; the fit's record in `session.json` as
+(`docs/RTC.md` §4: the host pings every 500 ms until the sync converges, then every 2 s, the offset
+from the samples of least round trip of the last two minutes, at least ten of them, a drift fit once
+they span a minute, `RemoteClockFit` in core; the fit's record in `session.json` as
 `clock.cameras[label].remote`); video frames carry their own timestamps and their arrival time in
 the capture worker; a "clapperboard", one face flicked and flicked back five times at session start,
 measures each camera's constant latency. See the private design for the measurements and the
@@ -201,18 +202,20 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
 - The host: `RemoteCutsService` (`apps/web/src/app/camera/remote-cuts-service.ts`), beside
   `RecordingService` and on the same milestones (`SessionService.milestones$`) and windows
   (`clip-windows.ts`, which both use), asks each camera listed for each attempt's clips, the window
-  in the phone's clock through `clockEstimate` (`remote-estimate.ts`: the fit's estimate converged or
-  not, its least-round-trip sample before it keeps three, and the margin the window is widened by),
-  and holds the attempt back from the upload queue meanwhile (`ClipsInFlight`, one entry per clip
-  expected, until it is stored or given up 120 s after the attempt's end). It takes the phone's files
-  into memory (`FileReceiver`), writes the frames file converted (`remoteFrames` of core) and the MP4
-  into the attempt's folder (`ATTEMPT_FILES`, whose `write` takes bytes in parts), attaches the clip
-  (`attachClip`) and answers `clip-ack`; the notes and the diagnostics say what is missing or late.
-  `RemoteCamerasService` hands it each connection (`connected`, with the camera's fit, its label and
-  how to record the clock's estimate) and tells it when a camera goes (`gone`). It is a root service
-  that only the Cameras section's chunk injects: nothing of it is in the initial bundle. "Record
-  remote cameras" (`SettingsService.recordRemoteCameras`, on by default) is a switch of the Cameras
-  section.
+  in the phone's clock through `clockEstimate` (`remote-estimate.ts`: the fit's estimate converged
+  or not, its least-round-trip sample before it keeps three, and the margin the window is widened
+  by), and holds the attempt back from the upload queue meanwhile (`ClipsInFlight`, one entry per
+  clip expected, until it is stored or given up 120 s after the attempt's end). It takes the phone's
+  files into memory (`FileReceiver`), writes the frames file converted (`remoteFrames` of core) and
+  the MP4 into the attempt's folder (`ATTEMPT_FILES`, whose `write` takes bytes in parts), attaches
+  the clip (`attachClip`) and answers `clip-ack`; the notes and the diagnostics say what is missing
+  or late. `RemoteCamerasService` hands it each connection (`connected`, with the camera's fit, its
+  label, its session and how to record the clock's estimate) and tells it when a camera goes
+  (`gone`); at a session's end it asks it which cameras still have clips of the session to come
+  (`pendingOf`, `watchPending`) and keeps those connected until the clips are in, 15 s at most
+  (T4.2b), their clips going into the ended session's attempts. It is a root service that only the
+  Cameras section's chunk injects: nothing of it is in the initial bundle. "Record remote cameras"
+  (`SettingsService.recordRemoteCameras`, on by default) is a switch of the Cameras section.
 - The phone: `CameraDeviceClips` (`apps/web/src/app/camera-device/camera-device-clips.ts`), which
   `CameraDeviceService` hands each connection, takes the cuts, saves each clip through
   `CameraDeviceCapture.saveClip` into the staging folder (`SaveClipParams.staging`: the capture's clip

@@ -293,3 +293,17 @@ time to confirm (the latest `upload.files[…].doneMs` of the attempt's document
 | MacBook Pro 2021, Wi-Fi | | | | |
 | ThinkPhone, Wi-Fi | | | | |
 | ThinkPhone, mobile data (Wi-Fi only off) | | | | |
+
+## Remote cameras
+
+A phone paired to the laptop as a camera (phase 4, `docs/RTC.md`): the Wi-Fi's round trips as the
+clock sync measures them, the phone's clock against the laptop's, how the clock sync fared, and the
+transfer of the phone's clips. T4.3 adds the phone camera's lag from its sync check and the phone's
+warmth after twenty minutes of solves. From the diagnostics events (`rtc.clock`, `remote.cut`,
+`remote.clip`; `docs/DIAGNOSTICS.md`): since T4.2b, `rtc.clock` says every minute of a connection the
+median and the 95th percentile of the window's round trips and the share the fit keeps, so the next
+pairing fills the window's columns.
+
+| Pair, network | Date, measured by | Round trip | The phone's clock | The clock sync | A clip's transfer | Camera lag | After 20 minutes |
+|---|---|---|---|---|---|---|---|
+| ThinkPhone paired to the MacBook Pro 2021, the owner's home Wi-Fi | 2026-10-04, the coordinator from the diagnostics events (20.7 minutes paired, 18 attempts, 36 cuts) | the least of the window 5.4 to 8.5 ms; the window's median and 95th percentile not recorded before T4.2b | 238 to 245 ms behind the laptop's, moving by about 7 ms over the 20 minutes (a few ppm) | with the band of T4.0 to T4.2: 2 to 14 samples kept of 60 at the cuts (7 at the median), their residuals' 95th percentile 0.7 to 1.7 ms; converged twice and withdrawn twice, 10 of the 36 cuts converged (on 2026-10-03, two pairings of 12 and 4 minutes never converged: issue #61) | 1.8 s at the median and 8.0 s at most, for clips of 12.9 MB at the median, at 7.0 MB/s at the median | (T4.3) | (T4.3) |

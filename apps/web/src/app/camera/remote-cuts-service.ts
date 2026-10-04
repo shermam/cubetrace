@@ -50,6 +50,11 @@ export const SYNC_WAIT_MS = 10_000;
 export interface CutCamera {
   /** The camera's id in the Cameras list, kept across its reconnections. */
   readonly id: string;
+  /**
+   * The session the camera films, the one it was paired in: its attempts' clips are its own, also
+   * once that session has ended and the camera stays for its last clips (T4.2b).
+   */
+  readonly session: string;
   /** Its label in the session now; null before the phone has a camera. */
   label(): string | null;
   /** The phone's host label, for the events. */
@@ -136,22 +141,26 @@ interface Present {
  * listed in the Cameras section for each attempt's clips as it asks its own camera
  * (`SessionService.milestones$`, `clipWindow`: the scramble's once it is done, the solve's once the
  * attempt ended), with the window in the phone's clock through the clock estimate (`clockEstimate`:
- * the fit's, converged or not, widened by its margin on each side) and the label the session
- * gives the phone's camera (`cut`), and holds the attempt back from the upload queue meanwhile
+ * the fit's, converged or not, widened by its margin on each side) and the label the session gives
+ * the phone's camera (`cut`), and holds the attempt back from the upload queue meanwhile
  * (`ClipsInFlight`, one entry per clip expected). Nothing waits for the fit to converge: on a busy
- * Wi-Fi it may never (the first real pairing); the records say what each cut and clip relied on. A phone that is reconnecting gets its cuts when it
- * is back. The phone cuts, stages and sends each clip: `cut-done` with what its capture said of it,
- * then its frames file and its MP4 (`FileReceiver`, into memory: a transfer cut in the middle goes on
- * from the bytes held over the next connection). The host writes the frames file into the attempt's
- * folder with its times on the host clock (`remoteFrames`: the phone's first frame time kept as
- * `t0RemoteMs`, the fit beside it), then the MP4, adds the clip to the attempt's record
- * (`SessionService.attachClip`) and says so (`clip-ack`), after which the phone deletes its copy. The
- * wait has a limit, {@link REMOTE_CLIP_WAIT_MS} after the attempt's end: then the attempt goes to the
- * upload queue without the clip, and the session's notes say which camera's clip is missing; a clip
- * that comes later is still attached, and uploaded as an addition. A clip the phone could not cut,
- * or of a phone that left, is given up at once. Settings' "Record remote cameras" off, nothing is
- * asked for. The events: `remote.cut`, `remote.clip`, `remote.clip.late`, `remote.clip.missing`
- * (docs/DIAGNOSTICS.md).
+ * Wi-Fi it may never (the first real pairing); the records say what each cut and clip relied on. A
+ * phone that is reconnecting gets its cuts when it is back. The phone cuts, stages and sends each
+ * clip: `cut-done` with what its capture said of it, then its frames file and its MP4
+ * (`FileReceiver`, into memory: a transfer cut in the middle goes on from the bytes held over the
+ * next connection). The host writes the frames file into the attempt's folder with its times on the
+ * host clock (`remoteFrames`: the phone's first frame time kept as `t0RemoteMs`, the fit beside
+ * it), then the MP4, adds the clip to the attempt's record (`SessionService.attachClip`) and says
+ * so (`clip-ack`), after which the phone deletes its copy. The wait has a limit,
+ * {@link REMOTE_CLIP_WAIT_MS} after the attempt's end: then the attempt goes to the upload queue
+ * without the clip, and the session's notes say which camera's clip is missing; a clip that comes
+ * later is still attached, and uploaded as an addition. A clip the phone could not cut, or of a
+ * phone that left, is given up at once. Settings' "Record remote cameras" off, nothing is asked
+ * for. Each camera belongs to the session it was paired in: its clips are that session's, and a
+ * camera that stays connected once the session has ended, for its last clips (T4.2b:
+ * `RemoteCamerasService` asks `pendingOf` and `watchPending`), brings them into that session's
+ * attempts and is asked for nothing of the next session's. The events: `remote.cut`, `remote.clip`,
+ * `remote.clip.late`, `remote.clip.missing` (docs/DIAGNOSTICS.md).
  */
 @Injectable({ providedIn: 'root' })
 export class RemoteCutsService {
@@ -174,6 +183,8 @@ export class RemoteCutsService {
   private readonly partials = new Map<string, PartialFile>();
   /** The end of the wait of each attempt with clips to come, by {@link attemptKey}. */
   private readonly deadlines = new Map<string, unknown>();
+  /** Told after each change of a clip's state ({@link watchPending}). */
+  private readonly watchers = new Set<() => void>();
   /** The operations under way, for the tests to wait on. */
   private pending: Promise<unknown> = Promise.resolve();
 
@@ -224,7 +235,7 @@ export class RemoteCutsService {
     this.present.set(camera.id, present);
     const label = camera.label();
     for (const clip of this.clips.values()) {
-      if (clip.label === label && clip.state === 'asked') {
+      if (clip.label === label && clip.ref.session === camera.session && clip.state === 'asked') {
         this.send(clip, camera, link);
       }
     }
@@ -239,8 +250,8 @@ export class RemoteCutsService {
   /**
    * A remote camera is no longer listed (it left, the host removed it, it was away five minutes, the
    * session ended): its clips still to come are given up now, unless another entry of the same
-   * device (a phone paired again) is listed, or `giveUp` is false (the page goes: the phone keeps
-   * them, and offers them to the page that pairs it next).
+   * device in the same session (a phone paired again) is listed, or `giveUp` is false (the page
+   * goes: the phone keeps them, and offers them to the page that pairs it next).
    */
   gone(id: string, reason: string, giveUp = true): void {
     const present = this.present.get(id);
@@ -250,18 +261,63 @@ export class RemoteCutsService {
     this.stop(present);
     this.present.delete(id);
     const label = present.camera.label();
+    const session = present.camera.session;
     if (
       !giveUp ||
       label === null ||
-      [...this.present.values()].some((p) => p.camera.label() === label)
+      [...this.present.values()].some(
+        (p) => p.camera.label() === label && p.camera.session === session,
+      )
     ) {
       return;
     }
     for (const clip of [...this.clips.values()]) {
-      if (clip.label === label && (clip.state === 'asked' || clip.state === 'coming')) {
+      if (
+        clip.label === label &&
+        clip.ref.session === session &&
+        (clip.state === 'asked' || clip.state === 'coming')
+      ) {
         this.giveUp(clip, `the phone left (${reason})`, 'left');
       }
     }
+  }
+
+  /**
+   * How many clips of the camera `id` are still to come (asked for or coming, of its session and
+   * under its label): those the session's end waits for before it lets the camera go (T4.2b). 0 for
+   * a camera not listed.
+   */
+  pendingOf(id: string): number {
+    const present = this.present.get(id);
+    const label = present?.camera.label() ?? null;
+    if (present === undefined || label === null) {
+      return 0;
+    }
+    let pending = 0;
+    for (const clip of this.clips.values()) {
+      if (
+        clip.label === label &&
+        clip.ref.session === present.camera.session &&
+        (clip.state === 'asked' || clip.state === 'coming')
+      ) {
+        pending++;
+      }
+    }
+    return pending;
+  }
+
+  /**
+   * Calls `next` with {@link pendingOf} the camera `id` after each change of a clip's state (asked,
+   * stored, given up, refused), until the returned function is called.
+   */
+  watchPending(id: string, next: (pending: number) => void): () => void {
+    const watcher = (): void => {
+      next(this.pendingOf(id));
+    };
+    this.watchers.add(watcher);
+    return () => {
+      this.watchers.delete(watcher);
+    };
   }
 
   /** The state of a remote clip, for the tests; null when the host knows of none. */
@@ -303,10 +359,16 @@ export class RemoteCutsService {
     }
   }
 
-  /** Asks every camera listed, once per label, for the clip of `segment` of the attempt `ref`. */
+  /**
+   * Asks every camera of the attempt's session listed, once per label, for the clip of `segment` of
+   * the attempt `ref` (one that stays for the last clips of a session that ended is asked nothing).
+   */
   private ask(ref: AttemptRef, segment: VideoSegment, window: RemoteClip['window']): void {
     const byLabel = new Map<string, Present>();
     for (const present of this.present.values()) {
+      if (present.camera.session !== ref.session) {
+        continue;
+      }
       const label = present.camera.label();
       const known = label === null ? undefined : byLabel.get(label);
       if (
@@ -330,6 +392,7 @@ export class RemoteCutsService {
         this.send(clip, present.camera, present.link);
       }
     }
+    this.changed();
   }
 
   /**
@@ -439,20 +502,22 @@ export class RemoteCutsService {
         this.forget(clip);
       }
     }
+    this.changed();
   }
 
   // ---- The phone's answers ----
 
   /**
    * The phone offers a clip (`cut-done`): one this page asked for, or one of an attempt of the
-   * session from before the page was loaded again, taken as an addition when its attempt is there.
-   * A clip stored already, or refused, is answered at once (the word was lost with a connection).
+   * camera's session from before the page was loaded again, taken as an addition when its attempt is
+   * there. The attempt is the camera's session's, also once that session has ended (T4.2b: the
+   * camera stays for its last clips). A clip stored already, or refused, is answered at once (the
+   * word was lost with a connection).
    */
   private offered(camera: CutCamera, link: MessageLink, message: CutDone): void {
-    const session = this.session.session();
     const label = camera.label();
     const ref: AttemptRef = {
-      session: session?.id ?? '',
+      session: camera.session,
       index: message.attempt,
       scrambleShown: message.scrambleShown,
     };
@@ -466,8 +531,8 @@ export class RemoteCutsService {
         reason,
       });
     };
-    if (session === null || label === null) {
-      answer(false, 'the session is over');
+    if (label === null) {
+      answer(false, 'the camera has no label in the session');
       return;
     }
     const key = clipKey(ref, label, message.segment);
@@ -480,7 +545,7 @@ export class RemoteCutsService {
       clip = newClip(ref, label, message.segment, null, 'coming', this.timers.now());
       this.clips.set(key, clip);
     }
-    this.offers.set(offerKey(label, message.attempt, message.segment), clip);
+    this.offers.set(offerKey(camera.id, label, message.attempt, message.segment), clip);
     if (clip.state === 'stored') {
       answer(true, '');
       return;
@@ -519,13 +584,12 @@ export class RemoteCutsService {
 
   /** The phone could not cut a clip (`cut-failed`): it is given up at once. */
   private cutFailed(camera: CutCamera, message: CutFailed): void {
-    const session = this.session.session();
     const label = camera.label();
-    if (session === null || label === null) {
+    if (label === null) {
       return;
     }
     const ref: AttemptRef = {
-      session: session.id,
+      session: camera.session,
       index: message.attempt,
       scrambleShown: message.scrambleShown,
     };
@@ -561,7 +625,9 @@ export class RemoteCutsService {
     if (description.attempt === null || description.segment === null || label === null) {
       throw new Error('it belongs to no clip');
     }
-    const clip = this.offers.get(offerKey(label, description.attempt, description.segment));
+    const clip = this.offers.get(
+      offerKey(camera.id, label, description.attempt, description.segment),
+    );
     if (clip === undefined) {
       throw new Error(
         `no clip of attempt ${String(description.attempt)}'s ${description.segment} was offered`,
@@ -705,6 +771,7 @@ export class RemoteCutsService {
     this.release(clip);
     this.ack(camera, clip, true, '');
     this.forget(clip);
+    this.changed();
     const scope = scopeOf(clip);
     const bytes = clip.framesBytes + mp4Bytes;
     const transferMs = clip.offeredMs === null ? null : Math.round(now - clip.offeredMs);
@@ -774,6 +841,7 @@ export class RemoteCutsService {
     clip.missedMs = now;
     this.release(clip);
     this.missing(clip, message, reason);
+    this.changed();
   }
 
   /** The host does not take the clip: the phone told to delete it; missing if it was expected. */
@@ -788,6 +856,7 @@ export class RemoteCutsService {
     if (expected && !noted && why !== 'the attempt is gone') {
       this.missing(clip, why, 'refused');
     }
+    this.changed();
   }
 
   private missing(clip: RemoteClip, message: string, reason: string): void {
@@ -847,6 +916,13 @@ export class RemoteCutsService {
     if (clip.held) {
       clip.held = false;
       this.inFlight.end(clip.ref.session, clip.ref.index);
+    }
+  }
+
+  /** Tells the watchers of the clips still to come (`watchPending`) that a clip's state changed. */
+  private changed(): void {
+    for (const watcher of [...this.watchers]) {
+      watcher();
     }
   }
 
@@ -986,9 +1062,13 @@ function attemptKey(ref: AttemptRef): string {
   return `${ref.session}/${String(ref.index)}/${String(ref.scrambleShown)}`;
 }
 
-/** The key of a camera's latest offer for an attempt's segment, which its files belong to. */
-function offerKey(label: string, index: number, segment: VideoSegment): string {
-  return `${label}/${String(index)}/${segment}`;
+/**
+ * The key of a camera's latest offer for an attempt's segment, which its files belong to: by the
+ * camera's id too, so that a camera staying for the last clips of a session that ended and one of
+ * the next session (an attempt of the same index, a phone of the same label) never share one.
+ */
+function offerKey(id: string, label: string, index: number, segment: VideoSegment): string {
+  return `${id}/${label}/${String(index)}/${segment}`;
 }
 
 function scopeOf(clip: RemoteClip): { session: string; attempt: number } {

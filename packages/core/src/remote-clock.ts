@@ -4,10 +4,12 @@
 // host sends a `ping` at `t1`; the phone receives it at `t2` and answers at `t3`, both on its clock;
 // the host receives the `pong` at `t4`. Each round trip gives one sample of the offset (the phone's
 // clock minus the host's) and of the round-trip time; the samples with the least round trip have
-// the least room for an asymmetry between the two legs, so the offset is the median of those; and
-// once the samples span a minute, a line through them gives the drift of the phone's clock against
-// the host's. The dataset stays on the host clock: the phone's frame times are converted with
-// `toHostMs`, and the fit is recorded in session.json as `clock.cameras[label].remote`.
+// the least room for an asymmetry between the two legs, so the offset is the median of those, as a
+// clock filter takes it: those within a band of the least, and at least the ten of least round trip
+// of the window however jittery the link (T4.2b); and once they span a minute, a line through them
+// gives the drift of the phone's clock against the host's. The dataset stays on the host clock: the
+// phone's frame times are converted with `toHostMs`, and the fit is recorded in session.json as
+// `clock.cameras[label].remote`.
 
 /**
  * The fit as session.json records it (`clock.cameras[label].remote`, docs/DATA-MODEL.md §6): a
@@ -27,7 +29,10 @@ export interface RemoteClockParams {
   driftPpm: number;
   /** The least round trip of the samples the estimate stands on, in ms. */
   rttMs: number;
-  /** The samples the estimate stands on: those of the window whose round trip was short enough. */
+  /**
+   * The samples the estimate stands on (kept): those of the window whose round trip was short enough
+   * ({@link RemoteClockFit}).
+   */
   samples: number;
   /**
    * The 95th percentile (nearest rank) of the absolute residuals of those samples' offsets from the
@@ -59,6 +64,21 @@ export interface RemoteClockLeast {
   readonly hostMs: number;
 }
 
+/**
+ * The window's round trips, kept or not (T4.2b): how the link behaves, for the diagnostics (the
+ * `rtc.clock` event) rather than for the estimate.
+ */
+export interface RemoteClockWindow {
+  /** The samples the window holds. */
+  readonly samples: number;
+  /** Of them, those the estimate stands on. */
+  readonly kept: number;
+  /** The median of their round trips, in ms; 0 with no sample. */
+  readonly rttP50Ms: number;
+  /** The 95th percentile (nearest rank) of their round trips, in ms; 0 with no sample. */
+  readonly rttP95Ms: number;
+}
+
 /** One round trip: the host's `t1` and `t4`, the remote's `t2` and `t3`, all in ms. */
 export interface RemoteClockSample {
   /** When the host sent the ping, on the host clock. */
@@ -71,8 +91,19 @@ export interface RemoteClockSample {
   t4: number;
 }
 
-/** How many of the most recent samples the fit looks at, by default. */
-export const REMOTE_CLOCK_WINDOW = 60;
+/**
+ * The window the fit looks at, by default: the samples of the last two minutes (T4.2b; the last 60
+ * samples before, which is the same at the pings' steady 2 s): long enough for the drift fit's minute
+ * ({@link REMOTE_CLOCK_DRIFT_SPAN_MS}) whatever the pings' rate, short enough to forget a bad spell in
+ * two minutes.
+ */
+export const REMOTE_CLOCK_WINDOW_MS = 120_000;
+
+/**
+ * At most this many samples, by default, however fast the pings come: two minutes at the 500 ms of
+ * the first pings (`ClockPinger`, T4.2b).
+ */
+export const REMOTE_CLOCK_WINDOW = 240;
 
 /**
  * A sample enters the estimate when its round trip is at most this many times the least round trip
@@ -90,6 +121,19 @@ export const REMOTE_CLOCK_RTT_FACTOR = 1.5;
 export const REMOTE_CLOCK_RTT_ALLOWANCE_MS = 3;
 
 /**
+ * However jittery the link, the estimate stands on at least this many samples of the window, those
+ * of least round trip (T4.2b; the lower half of the window while it holds fewer than twice as many,
+ * so that a trip of a burst never decides a median of two). The band above is a share of the least
+ * trip, and on a Wi-Fi whose trips jitter by more than it, it keeps a handful: on the owner's home
+ * Wi-Fi (2026-10-04: the least trip 5.4 to 8.5 ms) it kept 2 to 14 of 60, the count flapped around
+ * the ten that convergence asks for, and only 10 of the 36 cuts went with the fit converged; between
+ * two pages of one browser that both encode (the least 2 to 3 ms, the median 17 to 18) it kept 1 to
+ * 4 of 16. Ten is the count convergence asks for; a fixed count rather than a share of the window, so
+ * that the faster pings of the start (more samples in the window) keep better trips, not more.
+ */
+export const REMOTE_CLOCK_MIN_KEPT = 10;
+
+/**
  * The drift is fitted once the samples kept span more than this, in ms: over a shorter span the
  * slope of a line through offsets that jitter by a millisecond would mostly be noise (50 ppm is
  * 3 ms over a minute).
@@ -99,9 +143,14 @@ export const REMOTE_CLOCK_DRIFT_SPAN_MS = 60_000;
 /**
  * When the sync counts as converged ({@link RemoteClockFit.converged}): at least `samples` kept,
  * spanning at least `spanMs`, whose offsets spread (90th minus 10th percentile of their residuals
- * from the estimate) by less than `spreadMs`.
+ * from the estimate) by less than `spreadMs`, and every sample of the window within half its round
+ * trip of the estimate, give or take `spreadMs` (a sample farther off than its own trip allows says
+ * that a clock moved: the phone slept, T4.2b). The spread was 3 ms until T4.2b: the ten trips of
+ * least round trip of a jittery Wi-Fi are up to about 4 ms over the least, so their offsets spread by
+ * 2.5 to 3.5 ms, and 3 ms flapped (the simulations of `remote-clock.test.ts`); 5 ms is a sixth of a
+ * frame at 30 fps, and still refuses a busy network's 10 ms and more.
  */
-export const REMOTE_CLOCK_CONVERGED = { samples: 10, spanMs: 10_000, spreadMs: 3 } as const;
+export const REMOTE_CLOCK_CONVERGED = { samples: 10, spanMs: 10_000, spreadMs: 5 } as const;
 
 /** A sample as the window keeps it. */
 interface Measured {
@@ -117,6 +166,8 @@ interface Measured {
 
 /** The estimate over the window, computed on demand after the last sample. */
 interface Estimate {
+  /** The window's samples, oldest first. */
+  samples: readonly Measured[];
   kept: Measured[];
   rttMs: number;
   /** The offset at `t0`: the median of the kept offsets, or the line's value there. */
@@ -133,10 +184,12 @@ interface Estimate {
 
 /**
  * The offset and the drift of a remote clock against the host clock, estimated online from the
- * round trips of the data channel's pings (the file comment). The last {@link REMOTE_CLOCK_WINDOW}
- * samples are kept; of them, those whose round trip is within {@link REMOTE_CLOCK_RTT_FACTOR} of
- * the least (or {@link REMOTE_CLOCK_RTT_ALLOWANCE_MS} over it, when that is more) are the
- * estimate's: the median of their offsets, and, once they span more than
+ * round trips of the data channel's pings (the file comment). The window holds the samples of the
+ * last {@link REMOTE_CLOCK_WINDOW_MS} (at most {@link REMOTE_CLOCK_WINDOW}); of them, the estimate
+ * stands on (keeps) those whose round trip is within {@link REMOTE_CLOCK_RTT_FACTOR} of the least
+ * (or {@link REMOTE_CLOCK_RTT_ALLOWANCE_MS} over it, when that is more), and on at least the
+ * {@link REMOTE_CLOCK_MIN_KEPT} of least round trip (the lower half of the window while it holds
+ * fewer than twice as many): the median of their offsets, and, once they span more than
  * {@link REMOTE_CLOCK_DRIFT_SPAN_MS}, a least-squares line `offset(t) = a + b·(t − t0)` through them
  * for the drift. {@link toHostMs} and {@link toRemoteMs} use the line when there is one and the
  * median before; with no sample at all they are the identity. Pure and synchronous, like the rest of
@@ -147,20 +200,28 @@ interface Estimate {
  */
 export class RemoteClockFit {
   readonly #window: number;
-  /** The last `window` samples, oldest first. */
+  readonly #windowMs: number;
+  /** The window's samples, oldest first. */
   readonly #samples: Measured[] = [];
   #estimate: Estimate | null = null;
 
   /**
-   * @param opts.window how many of the most recent samples the estimate looks at (default
+   * @param opts.window at most how many of the most recent samples the estimate looks at (default
    *   {@link REMOTE_CLOCK_WINDOW}).
+   * @param opts.windowMs how far back from the newest sample it looks, in ms (default
+   *   {@link REMOTE_CLOCK_WINDOW_MS}): a sample received that long before the newest leaves.
    */
-  constructor(opts: { window?: number } = {}) {
+  constructor(opts: { window?: number; windowMs?: number } = {}) {
     const window = opts.window ?? REMOTE_CLOCK_WINDOW;
+    const windowMs = opts.windowMs ?? REMOTE_CLOCK_WINDOW_MS;
     if (!Number.isInteger(window) || window < 1) {
       throw new RangeError(`The window must be a positive integer, got ${String(window)}.`);
     }
+    if (!(windowMs > 0)) {
+      throw new RangeError(`The window must last some time, got ${String(windowMs)} ms.`);
+    }
     this.#window = window;
+    this.#windowMs = windowMs;
   }
 
   /**
@@ -184,9 +245,14 @@ export class RemoteClockFit {
       offsetMs: (t2 - t1 + (t3 - t4)) / 2,
       rttMs: t4 - t1 - (t3 - t2),
     });
-    if (this.#samples.length > this.#window) {
-      this.#samples.shift();
+    // The samples received `windowMs` or more before the newest one leave, and the oldest beyond
+    // `window`. The answers come in the order of their t4, which is the host's clock.
+    const since = t4 - this.#windowMs;
+    let gone = Math.max(0, this.#samples.length - this.#window);
+    while (gone < this.#samples.length - 1 && this.#samples[gone].t4 <= since) {
+      gone++;
     }
+    this.#samples.splice(0, gone);
     this.#estimate = null;
   }
 
@@ -248,6 +314,24 @@ export class RemoteClockFit {
   }
 
   /**
+   * The window's round trips, kept or not (T4.2b): their median and 95th percentile, and the share
+   * the estimate keeps, for the `rtc.clock` event; zeros with no sample.
+   */
+  get window(): RemoteClockWindow {
+    const e = this.#current();
+    if (e === null) {
+      return { samples: 0, kept: 0, rttP50Ms: 0, rttP95Ms: 0 };
+    }
+    const trips = e.samples.map((s) => s.rttMs).sort((p, q) => p - q);
+    return {
+      samples: e.samples.length,
+      kept: e.kept.length,
+      rttP50Ms: percentile(trips, 0.5),
+      rttP95Ms: percentile(trips, 0.95),
+    };
+  }
+
+  /**
    * The 95th percentile (nearest rank) of the round trips of the samples the estimate stands on, in
    * ms (T4.2: the margin of a cut's window); 0 with no sample.
    */
@@ -269,8 +353,10 @@ export class RemoteClockFit {
 
   /**
    * Whether the estimate is good enough to use ({@link REMOTE_CLOCK_CONVERGED}): enough samples
-   * kept over enough time, whose offsets agree with the estimate to within a few milliseconds. It is
-   * withdrawn when the window's samples no longer do (the network got busy, the phone slept).
+   * kept over enough time, whose offsets agree with the estimate to within a few milliseconds, and
+   * no sample of the window farther from it than its own round trip allows. It is withdrawn when the
+   * window's samples no longer agree (the network got busy) and at the first sample that cannot be
+   * (a clock moved: the phone slept), and comes back once the window has turned over.
    */
   get converged(): boolean {
     const e = this.#current();
@@ -282,7 +368,16 @@ export class RemoteClockFit {
       return false;
     }
     const signed = [...e.residuals].sort((p, q) => p - q);
-    return percentile(signed, 0.9) - percentile(signed, 0.1) < REMOTE_CLOCK_CONVERGED.spreadMs;
+    if (percentile(signed, 0.9) - percentile(signed, 0.1) >= REMOTE_CLOCK_CONVERGED.spreadMs) {
+      return false;
+    }
+    // A sample's offset is off the truth by half the difference of its two legs, so by at most half
+    // its round trip, whatever the network did: one farther from the estimate than that, and than
+    // the estimate's own error, says that one of the clocks moved since the others.
+    return e.samples.every(
+      (s) =>
+        Math.abs(s.offsetMs - fitted(e, s.hostMs)) <= s.rttMs / 2 + REMOTE_CLOCK_CONVERGED.spreadMs,
+    );
   }
 
   /** The estimate, as session.json records it; the zero record with no sample. */
@@ -313,8 +408,16 @@ export class RemoteClockFit {
 
 /** The estimate over the window's samples (at least one). */
 function estimate(samples: readonly Measured[]): Estimate {
-  const rttMs = Math.min(...samples.map((s) => s.rttMs));
-  const limit = Math.max(REMOTE_CLOCK_RTT_FACTOR * rttMs, rttMs + REMOTE_CLOCK_RTT_ALLOWANCE_MS);
+  const trips = samples.map((s) => s.rttMs).sort((p, q) => p - q);
+  const rttMs = trips[0];
+  // The band of the least trip, or the trip of the REMOTE_CLOCK_MIN_KEPT-th least when that is
+  // longer (the lower half of a window of fewer than twice as many).
+  const least = Math.min(REMOTE_CLOCK_MIN_KEPT, Math.max(1, Math.floor(samples.length / 2)));
+  const limit = Math.max(
+    REMOTE_CLOCK_RTT_FACTOR * rttMs,
+    rttMs + REMOTE_CLOCK_RTT_ALLOWANCE_MS,
+    trips[least - 1],
+  );
   const kept = samples.filter((s) => s.rttMs <= limit);
   const t0 = kept.reduce((sum, s) => sum + s.hostMs, 0) / kept.length;
   const span = kept[kept.length - 1].hostMs - kept[0].hostMs;
@@ -342,6 +445,7 @@ function estimate(samples: readonly Measured[]): Estimate {
     }
   }
   const e: Estimate = {
+    samples,
     kept,
     rttMs,
     a,

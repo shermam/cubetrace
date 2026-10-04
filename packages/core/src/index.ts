@@ -87,13 +87,16 @@ export type {
   RemoteClockParams,
   RemoteClockRecord,
   RemoteClockSample,
+  RemoteClockWindow,
 } from './remote-clock';
 export {
   REMOTE_CLOCK_CONVERGED,
   REMOTE_CLOCK_DRIFT_SPAN_MS,
+  REMOTE_CLOCK_MIN_KEPT,
   REMOTE_CLOCK_RTT_ALLOWANCE_MS,
   REMOTE_CLOCK_RTT_FACTOR,
   REMOTE_CLOCK_WINDOW,
+  REMOTE_CLOCK_WINDOW_MS,
   RemoteClockFit,
 } from './remote-clock';
 // T4.2 — a remote camera's clip: its frames file's times placed on the host clock through the fit

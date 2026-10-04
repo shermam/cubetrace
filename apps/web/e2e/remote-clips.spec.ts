@@ -20,8 +20,10 @@ import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from 
 // conversion of its frame times shows, and cuts its connection once in the middle of a file, which
 // the reconnection resumes; marked as a real cube's session, the attempt's nine files go to the fake
 // bucket. A second phone never answers: the attempt waits for it, a shortened wait, then goes
-// without its clips, and the session's notes say whose are missing. Launch options force a browser
-// of their own for this file (the encoding project, one at a time: both pages encode).
+// without its clips, and the session's notes say whose are missing. A third pairing presses New
+// session right after the solve: the host keeps the phone until its clips are in, in the ended
+// session's attempt, then lets it go (T4.2b). Launch options force a browser of their own for this
+// file (the encoding project, one at a time: both pages encode).
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],
@@ -64,7 +66,11 @@ async function bend(page: Page, settings: Record<string, number | boolean>): Pro
   );
 }
 
-/** The files of attempt `index`'s folder, with their sizes, read in the page. */
+/**
+ * The files of attempt `index`'s folder, with their sizes, read in the page. The app replaces a
+ * file by moving a new one over it (`writeTextFile`), and a read at that instant finds no file:
+ * the folder is read again then, a few times, as {@link fileText} does.
+ */
 async function attemptFiles(
   page: Page,
   sessionId: string,
@@ -72,31 +78,54 @@ async function attemptFiles(
 ): Promise<Record<string, number>> {
   return page.evaluate(
     async ({ sessionId, folder }) => {
-      let dir = await navigator.storage.getDirectory();
-      for (const name of ['sessions', sessionId, 'attempts', folder]) {
-        dir = await dir.getDirectoryHandle(name);
-      }
-      const files: Record<string, number> = {};
-      for await (const [name, handle] of dir.entries()) {
-        if (handle.kind === 'file' && !name.endsWith('.tmp')) {
-          files[name] = (await handle.getFile()).size;
+      for (let tries = 1; ; tries++) {
+        try {
+          let dir = await navigator.storage.getDirectory();
+          for (const name of ['sessions', sessionId, 'attempts', folder]) {
+            dir = await dir.getDirectoryHandle(name);
+          }
+          const files: Record<string, number> = {};
+          for await (const [name, handle] of dir.entries()) {
+            if (handle.kind === 'file' && !name.endsWith('.tmp')) {
+              files[name] = (await handle.getFile()).size;
+            }
+          }
+          return files;
+        } catch (error: unknown) {
+          if (!(error instanceof DOMException) || error.name !== 'NotFoundError' || tries === 5) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
       }
-      return files;
     },
     { sessionId, folder: String(index).padStart(4, '0') },
   );
 }
 
-/** A file of the session's folder, as text: `session.json`, or `attempts/0001/<name>`. */
+/**
+ * A file of the session's folder, as text: `session.json`, or `attempts/0001/<name>`. The app
+ * replaces a file by moving a new one over it (`writeTextFile`), and a read at that instant finds
+ * no file (a `NotFoundError`, which failed a poll of the record once in T4.2b's runs): it is read
+ * again then, a few times, 100 ms apart.
+ */
 async function fileText(page: Page, sessionId: string, path: string[]): Promise<string> {
   return page.evaluate(
     async ({ sessionId, path }) => {
-      let dir = await navigator.storage.getDirectory();
-      for (const name of ['sessions', sessionId, ...path.slice(0, -1)]) {
-        dir = await dir.getDirectoryHandle(name);
+      for (let tries = 1; ; tries++) {
+        try {
+          let dir = await navigator.storage.getDirectory();
+          for (const name of ['sessions', sessionId, ...path.slice(0, -1)]) {
+            dir = await dir.getDirectoryHandle(name);
+          }
+          return await (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
+        } catch (error: unknown) {
+          if (!(error instanceof DOMException) || error.name !== 'NotFoundError' || tries === 5) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
       }
-      return (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
     },
     { sessionId, path },
   );
@@ -134,9 +163,9 @@ async function pill(phone: Page): Promise<string> {
  * (a cut's estimate: before the fit keeps three samples, the offset of the trip of least round trip,
  * which on loopback places the clock within a few ms), and the phone recording for longer than the
  * next attempt's lead and margin (connected for 6 s); otherwise the lines that say what is missing.
- * Not a number of samples kept: between two pages of one browser that both encode, most round trips
- * are over the keep rule's band (1.5 times the least, or 3 ms over it), and the fit can keep one or
- * two samples for half a minute while every ping is answered.
+ * Not convergence, nor a number of samples kept: a cut waits for neither (T4.2), and between two
+ * pages of one browser that both encode, most round trips are far over the least (a median of 17 to
+ * 18 ms against 2 to 3 on CI), so convergence can take a while there.
  */
 async function readiness(phone: Page, row: Locator): Promise<string> {
   const state = await pill(phone);
@@ -418,4 +447,64 @@ test('a phone that never answers: the attempt waits for it, then goes without it
       .concat(`${prefix}/session.json`)
       .sort(),
   );
+});
+
+test("New session right after a solve: the host keeps the phone until its clips are in the ended session's attempt, four clips and no note, then lets it go", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(240_000);
+  // The host waits for the phone's last clips up to 15 s; longer here, so that a slow runner's
+  // transfer is not mistaken for the wait's bound, which the unit tests hold.
+  await bend(page, { finishWaitMs: 60_000 });
+  const { phone, sessionId } = await pairedPhone(context, page, {});
+
+  await replayDemo(page);
+  await expectSolves(page, 1);
+  // At once: the phone cuts the solve clip a second and a half after the solve's end at the
+  // earliest, then sends it, so its clips are still to come.
+  await page.getByTestId('new-session').click();
+  const row = page.getByTestId('remote-camera');
+  await expect(row).toHaveAttribute('data-state', 'finishing');
+  await expect(row.getByTestId('remote-camera-state')).toHaveText(
+    /^waiting for the phone's last clips \([12]\)$/u,
+  );
+  await expect.poll(() => currentSessionId(page)).not.toBe(sessionId);
+
+  // The clips come into the ended session's attempt: four clips, each with its frames file.
+  await expect
+    .poll(async () => (await attemptRecord(page, sessionId)).video.length, { timeout: 60_000 })
+    .toBe(4);
+  const record = await attemptRecord(page, sessionId);
+  expect(record.video.map((clip) => `${clip.camera} ${clip.segment}`).sort()).toEqual([
+    'laptop scramble',
+    'laptop solve',
+    'laptop-2 scramble',
+    'laptop-2 solve',
+  ]);
+  const files = await attemptFiles(page, sessionId, 1);
+  expect(Object.keys(files)).toHaveLength(9);
+  for (const clip of record.video) {
+    expect(files[clip.file], clip.file).toBe(clip.bytes);
+    expect(files[clip.framesFile], clip.framesFile).toBeGreaterThan(0);
+  }
+
+  // Then the phone is let go, the session's end the reason, and nothing is noted missing.
+  await expect(phone.getByTestId('device-state')).toHaveAttribute('data-state', 'left', {
+    timeout: 15_000,
+  });
+  await expect(phone.getByTestId('device-problem')).toContainText('the session ended');
+  await expect(row).toHaveCount(0);
+  expect((await sessionJson(page, sessionId)).notes).not.toContain('remote clip missing');
+  await expect
+    .poll(async () => (await events(page)).filter((e) => e.kind === 'remote.clip').length, {
+      timeout: 20_000,
+    })
+    .toBe(2);
+  const all = await events(page);
+  expect(all.filter((e) => e.kind === 'remote.clip.missing')).toEqual([]);
+  expect(
+    all.some((e) => e.kind === 'rtc.disconnected' && e.data['reason'] === 'the session ended'),
+  ).toBe(true);
+  await phone.close();
 });

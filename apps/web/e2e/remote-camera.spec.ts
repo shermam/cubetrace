@@ -121,10 +121,10 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
     timeout: 15_000,
   });
 
-  // The clock sync converges: ten kept answers over ten seconds, within 3 ms of spread (on this
-  // loopback the least round trip is about a millisecond, and about half of the trips are kept:
-  // the two main threads encode video and measure sharpness); both pages read the same browser's
-  // clock, so the offset is near 0.
+  // The clock sync converges: ten kept answers over ten seconds, within 5 ms of spread (the pings
+  // come every 500 ms until then, and the fit keeps at least the ten of least round trip of its two
+  // minutes, however much the two main threads' video and sharpness work delays the others, T4.2b);
+  // both pages read the same browser's clock, so the offset is near 0.
   await expect(row(page)).toHaveAttribute('data-converged', 'true', { timeout: 90_000 });
   const sync = (await row(page).getByTestId('remote-camera-sync').textContent()) ?? '';
   expect(sync).toMatch(/^synced · round trip [\d.]+ ms · offset /u);

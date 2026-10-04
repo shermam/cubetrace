@@ -82,7 +82,13 @@ export {
 } from './transfer';
 
 // The clock sync's plumbing (the maths is core's RemoteClockFit).
-export { ClockPinger, PING_INTERVAL_MS, answerPings } from './clock-sync';
+export {
+  ClockPinger,
+  FAST_PINGS_MS,
+  FAST_PING_INTERVAL_MS,
+  PING_INTERVAL_MS,
+  answerPings,
+} from './clock-sync';
 
 // The pairing token.
 export type { PairingInput, PairingRefusal } from './pairing';
