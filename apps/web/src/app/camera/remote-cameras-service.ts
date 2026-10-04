@@ -38,6 +38,7 @@ import { SessionIndexService } from '../cloud/session-index';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { thisDevice } from '../rtc/device-info';
+import { e2eRemote } from '../rtc/e2e-remote';
 import { helloOrClose } from '../rtc/hello';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
 import { SESSION_SIGNALING, type SessionSignaling } from '../rtc/session-signaling';
@@ -53,9 +54,10 @@ import { RemoteCutsService, type CutCamera } from './remote-cuts-service';
  * first connection failed and the host waits for the phone to call again with its token, T4.2b, for
  * the pairing's ten minutes), `connected` (the channel is open and `hello` exchanged), `reconnecting`
  * (the connection ended without a `leave`: the phone calls again, the host waits
- * {@link RECONNECT_WINDOW_MS}).
+ * {@link RECONNECT_WINDOW_MS}), `finishing` (its session ended while clips of it were still to come:
+ * the host keeps the connection until they are in, {@link FINISH_WAIT_MS} at most, T4.2b).
  */
-export type RemoteCameraState = 'connecting' | 'connected' | 'reconnecting';
+export type RemoteCameraState = 'connecting' | 'connected' | 'reconnecting' | 'finishing';
 
 /** The clock sync of a remote camera as the host measures it (docs/RTC.md §4). */
 export interface RemoteSync {
@@ -108,6 +110,8 @@ export interface RemoteCamera {
   readonly thumbnail: RemoteThumbnail | null;
   /** The clock sync; null before the first answer. */
   readonly sync: RemoteSync | null;
+  /** While `finishing`, how many clips of the session that ended are still to come; 0 otherwise. */
+  readonly clipsLeft: number;
 }
 
 /** A pairing the host shows: the token, the QR's URL and until when the token is taken. */
@@ -130,6 +134,16 @@ export const HELLO_TIMEOUT_MS = 15_000;
 export const RECONNECT_WINDOW_MS = 5 * 60_000;
 
 /**
+ * How long a camera stays connected once its session ended, at most, for the clips of the session
+ * still to come (T4.2b, follow-up (l): New session right after a solve let the phone go before its
+ * last clips came). The phone's clip is ready about a second after its window's end, which is a
+ * second and a half after the solve, and a transfer took 1.8 s at the median and 8 s at most on the
+ * owner's Wi-Fi (2026-10-04): 15 s covers the slowest with room, and a phone that does not answer
+ * holds the leave no longer than that. The end-to-end suite shortens it (`E2eRemote.finishWaitMs`).
+ */
+export const FINISH_WAIT_MS = 15_000;
+
+/**
  * How often the clock sync goes into the diagnostics while the camera is connected (`rtc.clock`,
  * `minute` while converged, with the fit's record into the session too; `syncing` before, T4.2b,
  * so that a link that never converges still says how it behaves).
@@ -145,6 +159,8 @@ export const LEAVE_GRACE_MS = 250;
 /** The host's side of one peer: the connection, the pinger and the fit, and the camera's row. */
 interface Peer {
   camera: RemoteCamera;
+  /** The session it was paired in, which it films: its clips are that session's. */
+  readonly sessionId: string;
   /** The fit of the phone's clock, kept across its reconnections. */
   readonly fit: RemoteClockFit;
   transport: Transport | null;
@@ -160,31 +176,35 @@ interface Peer {
   converged: boolean;
   removalTimer: unknown;
   recordTimer: unknown;
+  /** While `finishing`: the end of the wait, and what stops watching its clips still to come. */
+  finishing: { timer: unknown; off: () => void } | null;
 }
 
 /**
  * The remote cameras of the host (docs/PLAN.md T4.1, docs/RTC.md): the phones paired to the session
  * under way, which film it from other angles. Add camera publishes a pairing (a token, its hash in
- * the session's document in Firestore for ten minutes, the QR code's URL) and watches for the phone's
- * offer; the first peer that presents the token is answered (`TRANSPORT_CONNECTOR`, the real
- * `WebRtcTransport` or the tests' memory pairs) and the pairing closed, so that the token is taken
- * once. Over the channel the host sends its `hello`, takes the phone's (its device, its build and
- * its camera), pings (`ClockPinger`, one `RemoteClockFit` per phone: every 500 ms until the fit
+ * the session's document in Firestore for ten minutes, the QR code's URL) and watches for the
+ * phone's offer; the first peer that presents the token is answered (`TRANSPORT_CONNECTOR`, the
+ * real `WebRtcTransport` or the tests' memory pairs) and the pairing closed, so that the token is
+ * taken once. Over the channel the host sends its `hello`, takes the phone's (its device, its build
+ * and its camera), pings (`ClockPinger`, one `RemoteClockFit` per phone: every 500 ms until the fit
  * converges, then every 2 s) and tells the phone what it measures (`clock`), and keeps the phone's
  * `state` and `thumbnail` for the list. The camera goes into the session's `cameras[]` with
  * `local: false` and `remote` naming the device, under the label the session gives it
  * (`SessionService.putCamera`), and its clock fit into `clock.cameras[label].remote` when the fit
  * converges and every minute after (the diagnostics' `rtc.clock` every minute of the connection,
- * converged or not). A phone whose
- * connection ends without a `leave` is listed as reconnecting for five minutes, during which its
- * call with the same token is answered again; then it is removed; a phone that leaves, or a camera
- * the host removes (`leave` sent, the peer document deleted), goes at once. Its entry stays in the
- * session: the session records what filmed it. Everything ends when the session does, or the page
- * goes (`pagehide`, best effort). The pairing's documents are the account's own: Add camera needs
- * the account signed in, and a session under way (its document in the index: `indexForPairing`, a
- * demo session's too). Each connection is handed to `RemoteCutsService` (T4.2), which asks the phone
- * for each attempt's clips and takes them into the attempt's folder; a camera taken off the list
- * gives up its clips still to come.
+ * converged or not). A phone whose first connection fails is listed as connecting while it calls
+ * again with its token, for the pairing's ten minutes (T4.2b); one whose connection ends without a
+ * `leave` is listed as reconnecting for five minutes, during which its call with the same token is
+ * answered again; then it is removed; a phone that leaves, or a camera the host removes (`leave`
+ * sent, the peer document deleted), goes at once. Its entry stays in the session: the session
+ * records what filmed it. Everything ends when the session does (a camera with clips of it still to
+ * come once they are in, 15 s at most: `finishing`, T4.2b), or the page goes (`pagehide`, best
+ * effort). The pairing's documents are the account's own: Add camera needs the account signed in,
+ * and a session under way (its document in the index: `indexForPairing`, a demo session's too).
+ * Each connection is handed to `RemoteCutsService` (T4.2), which asks the phone for each attempt's
+ * clips and takes them into the attempt's folder; a camera taken off the list gives up its clips
+ * still to come.
  */
 @Injectable({ providedIn: 'root' })
 export class RemoteCamerasService {
@@ -200,6 +220,8 @@ export class RemoteCamerasService {
   private readonly connect = inject(TRANSPORT_CONNECTOR);
   /** The cuts and the clips of the cameras (T4.2), which follow the connections made here. */
   private readonly cuts = inject(RemoteCutsService);
+  /** The wait for a camera's last clips at its session's end; shorter in the end-to-end suite. */
+  private readonly finishWaitMs = e2eRemote(this.globals).finishWaitMs ?? FINISH_WAIT_MS;
 
   private readonly pairingSignal = signal<Pairing | null>(null);
   private readonly pairingErrorSignal = signal<string | null>(null);
@@ -235,14 +257,15 @@ export class RemoteCamerasService {
   private pending: Promise<unknown> = Promise.resolve();
 
   constructor() {
-    // The session ended, or another began: the cameras of the old one go, and so does its pairing.
+    // The session ended, or another began: the cameras of the old one go (once their last clips are
+    // in, T4.2b), and so does its pairing.
     let sessionId = this.session.session()?.id ?? null;
     effect(() => {
       const next = this.session.session()?.id ?? null;
       untracked(() => {
         if (next !== sessionId) {
           sessionId = next;
-          this.endAll('the session ended');
+          this.sessionEnded();
         }
       });
     });
@@ -364,7 +387,7 @@ export class RemoteCamerasService {
     }
     this.unwatch = signaling.watchOffers(
       (offer) => {
-        this.track(this.onOffer(offer));
+        this.track(this.onOffer(offer, signaling.sessionId));
       },
       (error) => {
         const reason = errorMessage(error);
@@ -400,7 +423,7 @@ export class RemoteCamerasService {
    * connection ended (reconnecting) or before it ever had one (connecting: its first call failed,
    * T4.2b); anything else is a stale or a wrong call, whose documents go.
    */
-  private async onOffer(offer: IncomingOffer): Promise<void> {
+  private async onOffer(offer: IncomingOffer, sessionId: string): Promise<void> {
     const now = this.timers.now();
     const back = [...this.peers.values()].find(
       (peer) =>
@@ -443,7 +466,9 @@ export class RemoteCamerasService {
         reportMs: null,
         thumbnail: null,
         sync: null,
+        clipsLeft: 0,
       },
+      sessionId,
       fit: new RemoteClockFit(),
       transport: null,
       signaling: null,
@@ -454,6 +479,7 @@ export class RemoteCamerasService {
       converged: false,
       removalTimer: null,
       recordTimer: null,
+      finishing: null,
     };
     this.peers.set(peer.camera.id, peer);
     this.camerasSignal.update((cameras) => [...cameras, peer.camera]);
@@ -581,6 +607,7 @@ export class RemoteCamerasService {
     // The clips (T4.2): the cuts it has not answered go now, its offers and files are taken.
     const camera: CutCamera = {
       id: peer.camera.id,
+      session: peer.sessionId,
       label: () => peer.camera.label,
       peer: () => peer.camera.device.label,
       fit: peer.fit,
@@ -656,6 +683,11 @@ export class RemoteCamerasService {
     });
     peer.generation++;
     this.detach(peer, reason);
+    if (peer.finishing !== null) {
+      // Its session is over: no call of it is answered any more, and its last clips are given up.
+      this.drop(peer, `the connection ended before its last clips came (${reason})`);
+      return;
+    }
     this.patch(peer, { state: 'reconnecting', sinceMs: now });
     if (peer.removalTimer === null) {
       peer.removalTimer = this.timers.setTimeout(() => {
@@ -742,6 +774,7 @@ export class RemoteCamerasService {
    * (`RemoteCutsService.gone`), with `reason`, unless `giveUp` is false.
    */
   private drop(peer: Peer, reason: string, giveUp = true): void {
+    this.stopFinishing(peer);
     this.cuts.gone(peer.camera.id, reason, giveUp);
     this.clearRemoval(peer);
     this.clearRecord(peer);
@@ -759,6 +792,39 @@ export class RemoteCamerasService {
     for (const peer of [...this.peers.values()]) {
       this.end(peer, reason, `The host let the camera go: ${reason}.`, graceMs, close, giveUp);
     }
+    this.closeSession();
+  }
+
+  /**
+   * The session ended (New session, its deletion): a camera connected with clips of it still to come
+   * stays until they are in, {@link FINISH_WAIT_MS} at most (T4.2b), the others go at once, as does
+   * the pairing. A camera already finishing (a session before) goes on waiting for its own.
+   */
+  private sessionEnded(): void {
+    for (const peer of [...this.peers.values()]) {
+      if (peer.finishing !== null) {
+        continue;
+      }
+      const left =
+        peer.camera.state === 'connected' && peer.link !== null
+          ? this.cuts.pendingOf(peer.camera.id)
+          : 0;
+      if (left > 0) {
+        this.finish(peer, left);
+      } else {
+        this.end(
+          peer,
+          'the session ended',
+          'The host let the camera go: the session ended.',
+          LEAVE_GRACE_MS,
+        );
+      }
+    }
+    this.closeSession();
+  }
+
+  /** The pairing closed and the offers no longer watched: the session's signaling is let go. */
+  private closeSession(): void {
     this.clearExpiry();
     if (this.pairingSignal() !== null) {
       this.pairingSignal.set(null);
@@ -767,6 +833,51 @@ export class RemoteCamerasService {
     this.unwatch?.();
     this.unwatch = null;
     this.signaling = null;
+  }
+
+  /**
+   * Keeps `peer` connected after its session ended, for its `left` clips still to come (T4.2b): the
+   * list says so, and the host says `leave` once they are stored, refused or given up (a turn later,
+   * so that the last file's acknowledgement goes first), or when {@link FINISH_WAIT_MS} is up, which
+   * gives up those still to come. Remove lets it go at once; its connection ending, too.
+   */
+  private finish(peer: Peer, left: number): void {
+    const id = peer.camera.id;
+    const leave = (why: string): void => {
+      if (this.peers.get(id) === peer) {
+        this.end(peer, why, 'The host let the camera go: the session ended.', LEAVE_GRACE_MS);
+      }
+    };
+    this.clearRecord(peer);
+    this.patch(peer, { state: 'finishing', sinceMs: this.timers.now(), clipsLeft: left });
+    const off = this.cuts.watchPending(id, (pending) => {
+      if (pending > 0) {
+        this.patch(peer, { clipsLeft: pending });
+        return;
+      }
+      this.stopFinishing(peer);
+      this.patch(peer, { clipsLeft: 0 });
+      this.timers.setTimeout(() => {
+        leave('the session ended');
+      }, 0);
+    });
+    const timer = this.timers.setTimeout(() => {
+      this.stopFinishing(peer);
+      leave(
+        `the session ended; its last clips did not come within ${String(Math.round(this.finishWaitMs / 1000))} s`,
+      );
+    }, this.finishWaitMs);
+    peer.finishing = { timer, off };
+  }
+
+  /** Stops waiting for a finishing camera's last clips. */
+  private stopFinishing(peer: Peer): void {
+    const finishing = peer.finishing;
+    if (finishing !== null) {
+      peer.finishing = null;
+      this.timers.clearTimeout(finishing.timer);
+      finishing.off();
+    }
   }
 
   private failed(peer: Peer, step: string, reason: string): void {
@@ -780,7 +891,8 @@ export class RemoteCamerasService {
 
   /**
    * An answer came: the sync shown and sent back; the event and the record at convergence, the event
-   * at a withdrawal (the minute's are {@link scheduleRecord}'s).
+   * at a withdrawal (the minute's are {@link scheduleRecord}'s); nothing recorded of a camera whose
+   * session ended (finishing).
    */
   private sampled(peer: Peer, fit: RemoteClockFit): void {
     const params = fit.params;
@@ -801,6 +913,9 @@ export class RemoteCamerasService {
       offsetMs: params.offsetMs,
       rttMs: params.rttMs,
     });
+    if (peer.finishing !== null) {
+      return;
+    }
     if (converged && !peer.converged) {
       peer.converged = true;
       this.recordClock(peer, params, 'converged');
@@ -880,7 +995,7 @@ export class RemoteCamerasService {
   private putClock(peer: Peer, params: RemoteClockRecord): void {
     const label = peer.camera.label;
     const session = this.session.session();
-    if (label === null || session === null) {
+    if (label === null || session === null || session.id !== peer.sessionId) {
       return;
     }
     const existing = session.clock.cameras[label] as CameraClock | undefined;
@@ -905,7 +1020,7 @@ export class RemoteCamerasService {
   private putEntry(peer: Peer): void {
     const camera = peer.camera.camera;
     const session = this.session.session();
-    if (camera === null || session === null) {
+    if (camera === null || session === null || session.id !== peer.sessionId) {
       return;
     }
     const entry: CameraInfo = {

@@ -108,7 +108,10 @@ export class RemoteCameras {
     this.service.remove(id);
   }
 
-  /** "connected for 2 min 05 s", "reconnecting for 12 s (removed after 5 min)", "connecting…". */
+  /**
+   * "connected for 2 min 05 s", "reconnecting for 12 s (removed after 5 min)", "connecting…",
+   * "waiting for the phone's last clips (2)" (its session ended, T4.2b).
+   */
   protected stateText(camera: RemoteCamera): string {
     const since = durationText(this.now() - camera.sinceMs);
     switch (camera.state) {
@@ -118,6 +121,8 @@ export class RemoteCameras {
         return `connected for ${since}`;
       case 'reconnecting':
         return `reconnecting for ${since} (removed after ${durationText(RECONNECT_WINDOW_MS)} away)`;
+      case 'finishing':
+        return `waiting for the phone's last clips (${String(camera.clipsLeft)})`;
     }
   }
 

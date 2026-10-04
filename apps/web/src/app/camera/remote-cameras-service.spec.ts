@@ -21,6 +21,7 @@ import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
 import {
   CLOCK_RECORD_MS,
+  FINISH_WAIT_MS,
   HELLO_TIMEOUT_MS,
   LEAVE_GRACE_MS,
   RECONNECT_WINDOW_MS,
@@ -572,7 +573,9 @@ describe('RemoteCamerasService', () => {
     const phone = await paired();
     await r.service.addCamera();
     expect(r.service.pairing()).not.toBeNull();
-    // A solve, so that the session has an attempt and New session may close it.
+    // A solve, so that the session has an attempt and New session may close it; nothing asked of
+    // the phone (Record remote cameras off), so nothing of the session is still to come from it.
+    r.s.settings.setRecordRemoteCameras(false);
     turn(r.s, fake, 'R U F');
     await pump(r.s, 1000);
     turn(r.s, fake, inverse('R U F'), 500);
@@ -582,15 +585,86 @@ describe('RemoteCamerasService', () => {
     await pump(r.s, 20);
     expect(r.service.cameras()).toEqual([]);
     expect(r.service.pairing()).toBeNull();
-    // The attempt's two clips were asked for (T4.2); this phone does not answer them.
     expect(phone.received.map((m) => m.type).filter((t) => t !== 'ping' && t !== 'clock')).toEqual([
       'hello',
-      'cut',
-      'cut',
       'leave',
+    ]);
+    expect(phone.of('leave')[0].reason).toBe('The host let the camera go: the session ended.');
+    await pump(r.s, LEAVE_GRACE_MS);
+    expect(phone.link?.state).toBe('closed');
+  });
+
+  it('keeps a camera with clips of the ended session still to come, 15 s at most, then lets it go and notes them missing', async () => {
+    const fake = await ready(r.s);
+    const phone = await paired();
+    const ended = r.s.service.session()?.id ?? '';
+    turn(r.s, fake, 'R U F');
+    await pump(r.s, 1000);
+    turn(r.s, fake, inverse('R U F'), 500);
+    await pump(r.s, 1000);
+    // New session right after the solve: the attempt's two clips were asked for (T4.2), and this
+    // phone does not answer them; the camera stays, connected, and the list says what it waits for.
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(r.s.service.session()?.id).not.toBe(ended);
+    expect(r.service.cameras()).toHaveLength(1);
+    expect(r.service.cameras()[0]).toMatchObject({ state: 'finishing', clipsLeft: 2 });
+    expect(r.service.pairing()).toBeNull();
+    expect(phone.of('leave')).toEqual([]);
+    // Nothing of it goes into the new session.
+    expect(r.s.service.session()?.cameras).toEqual([]);
+    await pass(r.s, FINISH_WAIT_MS - 1000);
+    expect(phone.of('leave')).toEqual([]);
+    await pass(r.s, 2000);
+    expect(r.service.cameras()).toEqual([]);
+    expect(phone.of('leave').map((m) => m.reason)).toEqual([
+      'The host let the camera go: the session ended.',
     ]);
     await pump(r.s, LEAVE_GRACE_MS);
     expect(phone.link?.state).toBe('closed');
+    // The ended session's notes say whose clips are missing, and why.
+    const notes = (await r.s.store.exportSession(ended)).session.notes.split('\n');
+    expect(notes).toEqual(
+      ['scramble', 'solve'].map(
+        (segment) =>
+          `remote clip missing: ${segment} of attempt 1 from phone-rear: the phone left (the session ended; its last clips did not come within 15 s)`,
+      ),
+    );
+    const all = await events();
+    expect(all.filter((e) => e.kind === 'rtc.disconnected').at(-1)?.data).toMatchObject({
+      reason: 'the session ended; its last clips did not come within 15 s',
+    });
+  });
+
+  it('lets a camera waiting for its last clips go at once when it is removed, or when its connection ends', async () => {
+    const fake = await ready(r.s);
+    const phone = await paired();
+    turn(r.s, fake, 'R U F');
+    await pump(r.s, 1000);
+    turn(r.s, fake, inverse('R U F'), 500);
+    await pump(r.s, 1000);
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(r.service.cameras()[0].state).toBe('finishing');
+    r.service.remove(r.service.cameras()[0].id);
+    expect(r.service.cameras()).toEqual([]);
+    await pump(r.s, 10);
+    expect(phone.of('leave').map((m) => m.reason)).toEqual(['The host removed this camera.']);
+
+    // Another phone, another session ended: its connection drops while it waits.
+    r = await rig();
+    const again = await ready(r.s);
+    const second = await paired();
+    turn(r.s, again, 'R U F');
+    await pump(r.s, 1000);
+    turn(r.s, again, inverse('R U F'), 500);
+    await pump(r.s, 1000);
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(r.service.cameras()[0].state).toBe('finishing');
+    second.drop();
+    await pump(r.s, 10);
+    expect(r.service.cameras()).toEqual([]);
   });
 
   it('gives a phone of another protocol version up, with the reason', async () => {

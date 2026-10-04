@@ -20,8 +20,10 @@ import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from 
 // conversion of its frame times shows, and cuts its connection once in the middle of a file, which
 // the reconnection resumes; marked as a real cube's session, the attempt's nine files go to the fake
 // bucket. A second phone never answers: the attempt waits for it, a shortened wait, then goes
-// without its clips, and the session's notes say whose are missing. Launch options force a browser
-// of their own for this file (the encoding project, one at a time: both pages encode).
+// without its clips, and the session's notes say whose are missing. A third pairing presses New
+// session right after the solve: the host keeps the phone until its clips are in, in the ended
+// session's attempt, then lets it go (T4.2b). Launch options force a browser of their own for this
+// file (the encoding project, one at a time: both pages encode).
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],
@@ -418,4 +420,64 @@ test('a phone that never answers: the attempt waits for it, then goes without it
       .concat(`${prefix}/session.json`)
       .sort(),
   );
+});
+
+test("New session right after a solve: the host keeps the phone until its clips are in the ended session's attempt, four clips and no note, then lets it go", async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(240_000);
+  // The host waits for the phone's last clips up to 15 s; longer here, so that a slow runner's
+  // transfer is not mistaken for the wait's bound, which the unit tests hold.
+  await bend(page, { finishWaitMs: 60_000 });
+  const { phone, sessionId } = await pairedPhone(context, page, {});
+
+  await replayDemo(page);
+  await expectSolves(page, 1);
+  // At once: the phone cuts the solve clip a second and a half after the solve's end at the
+  // earliest, then sends it, so its clips are still to come.
+  await page.getByTestId('new-session').click();
+  const row = page.getByTestId('remote-camera');
+  await expect(row).toHaveAttribute('data-state', 'finishing');
+  await expect(row.getByTestId('remote-camera-state')).toHaveText(
+    /^waiting for the phone's last clips \([12]\)$/u,
+  );
+  await expect.poll(() => currentSessionId(page)).not.toBe(sessionId);
+
+  // The clips come into the ended session's attempt: four clips, each with its frames file.
+  await expect
+    .poll(async () => (await attemptRecord(page, sessionId)).video.length, { timeout: 60_000 })
+    .toBe(4);
+  const record = await attemptRecord(page, sessionId);
+  expect(record.video.map((clip) => `${clip.camera} ${clip.segment}`).sort()).toEqual([
+    'laptop scramble',
+    'laptop solve',
+    'laptop-2 scramble',
+    'laptop-2 solve',
+  ]);
+  const files = await attemptFiles(page, sessionId, 1);
+  expect(Object.keys(files)).toHaveLength(9);
+  for (const clip of record.video) {
+    expect(files[clip.file], clip.file).toBe(clip.bytes);
+    expect(files[clip.framesFile], clip.framesFile).toBeGreaterThan(0);
+  }
+
+  // Then the phone is let go, the session's end the reason, and nothing is noted missing.
+  await expect(phone.getByTestId('device-state')).toHaveAttribute('data-state', 'left', {
+    timeout: 15_000,
+  });
+  await expect(phone.getByTestId('device-problem')).toContainText('the session ended');
+  await expect(row).toHaveCount(0);
+  expect((await sessionJson(page, sessionId)).notes).not.toContain('remote clip missing');
+  await expect
+    .poll(async () => (await events(page)).filter((e) => e.kind === 'remote.clip').length, {
+      timeout: 20_000,
+    })
+    .toBe(2);
+  const all = await events(page);
+  expect(all.filter((e) => e.kind === 'remote.clip.missing')).toEqual([]);
+  expect(
+    all.some((e) => e.kind === 'rtc.disconnected' && e.data['reason'] === 'the session ended'),
+  ).toBe(true);
+  await phone.close();
 });

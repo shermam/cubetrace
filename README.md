@@ -187,24 +187,25 @@ when there is one, and `attempt.json` (Chrome may ask once to allow multiple dow
 
 ## Remote cameras
 
-A phone can film a session from another angle (phase 4, [`docs/RTC.md`](docs/RTC.md)). Both
-devices sign in to the same account. On the host, Camera settings → Cameras → Add camera shows a QR
-code (the app's Camera page with the session and a one-time code, good for 10 minutes, for one
-phone) and the code under it; on the phone, scan it with the camera app, or open cubetrace → `/camera`
-and type the code or paste the link. The phone turns its rear camera on, keeps the last 90 s in
-memory from then on, and connects to the host directly over the Wi-Fi (WebRTC, Google's STUN server,
-no relay: a guest network with client isolation does not connect). The host lists it in the Cameras
-section with its name (the phone's host label), a picture every 2 s, its state, what it reports
-(recording, frame rate, sharpness, framing, battery) and the clock sync: the host measures the offset
-and the drift of the phone's clock with a ping every 2 s and calls it synced once ten answers over
-ten seconds agree within 3 ms, which a phone awake on a quiet Wi-Fi gives; the phone shows the same
-line. The camera goes into the session's `cameras[]` with `remote` naming the phone, and its clock
-fit into `clock.cameras[<label>].remote`, as `docs/DATA-MODEL.md` §6 has them; its label is the
-session's (`phone-rear`, a second phone `phone-rear-2`), the phone's host label telling two phones
-apart. The phone keeps the screen on and asks to be plugged in; a connection that drops is made
-again by itself for five minutes (the host lists the camera as reconnecting meanwhile), then the
-phone says the host is gone and the host lets the camera go; Leave on the phone, Remove on the host
-or the session's end part the two at once.
+A phone can film a session from another angle (phase 4, [`docs/RTC.md`](docs/RTC.md)). Both devices
+sign in to the same account. On the host, Camera settings → Cameras → Add camera shows a QR code
+(the app's Camera page with the session and a one-time code, good for 10 minutes, for one phone) and
+the code under it; on the phone, scan it with the camera app, or open cubetrace → `/camera` and type
+the code or paste the link. The phone turns its rear camera on, keeps the last 90 s in memory from
+then on, and connects to the host directly over the Wi-Fi (WebRTC, Google's STUN server, no relay: a
+guest network with client isolation does not connect). The host lists it in the Cameras section with
+its name (the phone's host label), a picture every 2 s, its state, what it reports (recording, frame
+rate, sharpness, framing, battery) and the clock sync: the host measures the offset and the drift of
+the phone's clock with pings (every 500 ms until it is synced, then every 2 s), from the answers of
+least round trip, and calls it synced once ten of them over ten seconds agree within 5 ms; the phone
+shows the same line. The camera goes into the session's `cameras[]` with `remote` naming the phone,
+and its clock fit into `clock.cameras[<label>].remote`, as `docs/DATA-MODEL.md` §6 has them; its
+label is the session's (`phone-rear`, a second phone `phone-rear-2`), the phone's host label telling
+two phones apart. The phone keeps the screen on and asks to be plugged in; a connection that drops
+is made again by itself for five minutes (the host lists the camera as reconnecting meanwhile), then
+the phone says the host is gone and the host lets the camera go; Leave on the phone, Remove on the
+host or the session's end part the two at once (New session right after a solve keeps the phone
+until its last clips are in, 15 s at most).
 
 Each attempt's clips from the phone come into the host's attempt folder (T4.2): the host asks for
 the scramble's and the solve's clips at the moments it cuts its own, the window in the phone's clock

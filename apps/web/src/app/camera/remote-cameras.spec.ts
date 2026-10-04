@@ -1,5 +1,6 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import type { CameraInfo } from '@cubetrace/core';
+import type { FakeCube } from '@cubetrace/gan';
 import {
   FirestoreSignaling,
   MessageLink,
@@ -15,7 +16,7 @@ import { bluetoothNavigator } from '../cube/cube-testing';
 import { FakeLocalStorage, settle } from '../device/fake-browser';
 import { MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
-import { ready, setup, type Setup } from '../session/session-harness';
+import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
 import { SettingsService } from '../settings/settings-service';
 import { RemoteCameras, tokenText } from './remote-cameras';
 import { RemoteCamerasService } from './remote-cameras-service';
@@ -38,6 +39,7 @@ describe('RemoteCameras', () => {
   let backend: FakeAccountBackend;
   let connector: MemoryConnector;
   let fixture: ComponentFixture<RemoteCameras>;
+  let cube: FakeCube | null = null;
 
   async function render(options: { signedIn?: boolean; session?: boolean } = {}): Promise<void> {
     TestBed.resetTestingModule();
@@ -68,9 +70,7 @@ describe('RemoteCameras', () => {
     connector = made;
     TestBed.inject(AuthService);
     await settle();
-    if (options.session !== false) {
-      await ready(s);
-    }
+    cube = options.session === false ? null : await ready(s);
     fixture = TestBed.createComponent(RemoteCameras);
     await pump(0);
   }
@@ -269,5 +269,23 @@ describe('RemoteCameras', () => {
     expect(text('remote-camera-state')).toMatch(
       /^reconnecting for \d+ s \(removed after 5 min 00 s away\)$/,
     );
+  });
+
+  it("shows a phone that the ended session's last clips keep connected", async () => {
+    await render();
+    element('add-camera')?.click();
+    await pump(0);
+    await joinPhone('Pixel');
+    // A solve, whose two clips the phone does not send, then New session.
+    const fake = cube as FakeCube;
+    turn(s, fake, 'R U F');
+    await pump(1000);
+    turn(s, fake, inverse('R U F'), 500);
+    await pump(1000);
+    s.service.newSession();
+    await pump(20);
+    const row = element('remote-camera');
+    expect(row?.getAttribute('data-state')).toBe('finishing');
+    expect(text('remote-camera-state')).toBe("waiting for the phone's last clips (2)");
   });
 });

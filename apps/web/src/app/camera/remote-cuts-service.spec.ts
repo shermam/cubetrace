@@ -671,6 +671,75 @@ describe('RemoteCutsService', () => {
     expect(r.cameras.cameras()[0].state).toBe('connected');
   });
 
+  it("keeps the phone at New session until its last clips are in: stored into the ended session's attempt, no note, then the leave", async () => {
+    const phone = await paired();
+    const ended = sessionId();
+    await scrambled();
+    await solved();
+    const scrambleCut = phone.cut('scramble');
+    const solveCut = phone.cut('solve');
+    expect(r.inFlight.has(ended, 1)).toBe(true);
+    // New session right after the solve, before the phone's clips came: the camera stays.
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(sessionId()).not.toBe(ended);
+    expect(r.cameras.cameras()[0]).toMatchObject({ state: 'finishing', clipsLeft: 2 });
+    expect(r.cuts.pendingOf(r.cameras.cameras()[0].id)).toBe(2);
+    expect(phone.of('leave')).toEqual([]);
+
+    // The clips come: into the ended session's attempt, its record saved again in the store.
+    expect(await drive(phone.deliver(scrambleCut))).toEqual(['frames from 0', 'mp4 from 0']);
+    await pump(r.s, 20);
+    expect(r.cameras.cameras()[0]).toMatchObject({ state: 'finishing', clipsLeft: 1 });
+    expect(phone.of('leave')).toEqual([]);
+    expect(await drive(phone.deliver(solveCut))).toEqual(['frames from 0', 'mp4 from 0']);
+    await pump(r.s, 20);
+    expect(phone.of('clip-ack').map((ack) => `${ack.segment} ${String(ack.stored)}`)).toEqual([
+      'scramble true',
+      'solve true',
+    ]);
+    // Then the word, after the last acknowledgement, and the camera goes.
+    expect(
+      phone.received.map((m) => m.type).filter((t) => t === 'clip-ack' || t === 'leave'),
+    ).toEqual(['clip-ack', 'clip-ack', 'leave']);
+    expect(phone.of('leave')[0].reason).toBe('The host let the camera go: the session ended.');
+    expect(r.cameras.cameras()).toEqual([]);
+    expect(r.inFlight.has(ended, 1)).toBe(false);
+    const stored = await r.s.store.exportSession(ended);
+    expect(stored.attempts[0].video.map((clip) => `${clip.camera}.${clip.segment}`)).toEqual([
+      'phone-rear.scramble',
+      'phone-rear.solve',
+    ]);
+    expect(stored.session.notes).toBe('');
+    expect(r.written.get('1/phone-rear.solve.mp4')).toEqual(mp4());
+    const all = await events();
+    expect(all.filter((e) => e.kind === 'remote.clip').map((e) => e.session)).toEqual([
+      ended,
+      ended,
+    ]);
+    expect(all.filter((e) => e.kind === 'remote.clip.missing')).toEqual([]);
+    expect(all.filter((e) => e.kind === 'rtc.disconnected').at(-1)?.data).toMatchObject({
+      reason: 'the session ended',
+    });
+  });
+
+  it('asks a camera waiting for its last clips for nothing of the new session', async () => {
+    const phone = await paired();
+    await scrambled();
+    await solved();
+    r.s.service.newSession();
+    await pump(r.s, 20);
+    expect(r.cameras.cameras()[0].state).toBe('finishing');
+    // The new session's first attempt (the scramble the ended one had shown next), scrambled: its
+    // clips are asked of no one.
+    await pump(r.s, 1000);
+    turn(r.s, r.fake, r.s.service.attempt()?.scramble ?? '', 100);
+    await pump(r.s, 20);
+    expect(r.s.service.attempt()?.state).toBe('armed');
+    expect(phone.of('cut').map((cut) => cut.segment)).toEqual(['scramble', 'solve']);
+    expect(r.inFlight.has(sessionId(), 1)).toBe(false);
+  });
+
   it('sends the cuts of a phone that was reconnecting when the attempt needed them once it is back', async () => {
     const phone = await paired();
     phone.drop();

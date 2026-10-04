@@ -27,6 +27,11 @@ export interface E2eRemote {
   readonly ignoreCuts?: boolean;
   /** The host waits this long for the remote clips after an attempt's end, in place of 120 s. */
   readonly clipWaitMs?: number;
+  /**
+   * The host keeps a camera connected this long at most once its session ended, for the clips of
+   * the session still to come, in place of 15 s (T4.2b).
+   */
+  readonly finishWaitMs?: number;
 }
 
 /** The end-to-end suite's settings, in a development build; none otherwise. */
@@ -48,5 +53,6 @@ export function e2eRemote(globals: BrowserGlobals): E2eRemote {
     closeAfterBytes: number('closeAfterBytes'),
     ignoreCuts: ignoreCuts === true,
     clipWaitMs: number('clipWaitMs'),
+    finishWaitMs: number('finishWaitMs'),
   };
 }

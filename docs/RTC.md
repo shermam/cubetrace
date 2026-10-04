@@ -310,7 +310,7 @@ keeps the phone's first frame time as `t0RemoteMs` and the estimate that convert
 | A busy network (round trips of tens of ms, scattered) | the offset stays within a few ms, the sync is not called converged; T4.1 shows the round trip and the spread | nothing to do |
 | A frame that is not a message (a bug, another app on the channel) | `MessageLink.onError` reports it; the frame is dropped, the connection kept | the same |
 | The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time: the camera goes from the list at once (its entry stays in the session), the transport closed and the peer document deleted with its candidates; the clips it has not sent are given up at once (the notes say they are missing), and still taken if it pairs again and offers them | Leave sends `leave` and closes the connection 250 ms later, once the word is out; a page that goes (`pagehide`) sends it and leaves the connection to the browser |
-| The host removes the camera or ends the session | `leave`, the connection closed 250 ms later, the peer document deleted with its candidates; the clips the phone has not sent are given up (the notes say so); a host page that goes (`pagehide`) sends `leave` and deletes the documents, as far as there is time | the page says the host let it go, with the reason; without the word (the host's page died), `onClosed('the documents are gone')` ends the transport and the phone calls again for five minutes, then says the host is gone |
+| The host removes the camera or ends the session | `leave`, the connection closed 250 ms later, the peer document deleted with its candidates; the clips the phone has not sent are given up (the notes say so); at the session's end (New session), a camera with clips of the session still to come is kept until they are stored, refused or given up, 15 s at most, listed as waiting for its last clips (T4.2b), then let go the same way (what is still to come then is noted missing); a host page that goes (`pagehide`) sends `leave` and deletes the documents, as far as there is time | the page says the host let it go, with the reason; without the word (the host's page died), `onClosed('the documents are gone')` ends the transport and the phone calls again for five minutes, then says the host is gone |
 
 ## 8. The lifecycle (T4.1)
 
@@ -369,8 +369,18 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    the connection 250 ms later, once the word is out (`RTCPeerConnection.close` drops what the channel
    still holds); the host deletes the peer document with its candidates whenever its transport closes
    (`Signaling.close`), and a phone that left goes from the list at once, its entry kept in the
-   session (the session records what filmed it). `pagehide` on either side sends `leave` and leaves
-   the connection to the browser (the host deletes the documents too, as far as there is time).
+   session (the session records what filmed it). At the session's end (New session, the session
+   deleted), a camera connected with clips of the session still to come (asked for, or on their way)
+   stays (T4.2b, follow-up (l) of `docs/PLAN.md`: New session right after a solve let the phone go
+   before its last clips came): the list says `waiting for the phone's last clips (n)`, the host asks
+   it for nothing of the next session and brings its clips into the ended session's attempts, and
+   says `leave` once they are stored, refused or given up (a turn after the last clip's
+   acknowledgement), or when 15 s are up (`FINISH_WAIT_MS`: the phone's clip is ready about a second
+   after its window's end, and a transfer took 1.8 s at the median and 8 s at most on the owner's
+   Wi-Fi), which gives up the rest with a note; Remove, the phone's Leave or its connection ending
+   let it go at once. The next session's pairing is published as ever. `pagehide` on either side
+   sends `leave` and leaves the connection to the browser (the host deletes the documents too, as far
+   as there is time).
 7. **Diagnostics** (`docs/DIAGNOSTICS.md`): `rtc.paired`, `rtc.connected`, `rtc.disconnected`,
    `rtc.clock` and `rtc.failed`, on both devices.
 
@@ -424,9 +434,13 @@ clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the
    (`REMOTE_CLIP_WAIT_MS`): then the attempt goes to the upload queue without them, and the session's
    notes name the camera (`remote clip missing: solve of attempt 7 from phone-rear: no clip within
    120 s of the attempt's end`). A clip the phone could not cut, or of a phone that left or was let
-   go (Leave, Remove, five minutes away, the session's end), is given up at once. A clip given up that
-   comes later is still attached and noted (`remote clip late: …`), and uploaded as an addition: the
-   upload queue signs only the files not uploaded yet, with `attempt.json` again.
+   go (Leave, Remove, five minutes away), is given up at once; at the session's end, the phone is let
+   go once its clips of the session are in, or after 15 s (§8, T4.2b), and those still to come then
+   are given up. A clip given up that comes later is still attached and noted (`remote clip late:
+   …`), and uploaded as an addition: the upload queue signs only the files not uploaded yet, with
+   `attempt.json` again. Each camera's clips are its session's: those that come after the session
+   ended go into its attempts (`SessionService.attachClip` takes an attempt of a session that is no
+   longer the current one).
 6. **Kept until the host's word.** The phone keeps a staged clip until its `clip-ack`, and offers the
    clips staged for the session first, the oldest first, over each connection: a reconnection, the
    Camera page loaded again, the phone paired again with a new code (a host page loaded again takes
