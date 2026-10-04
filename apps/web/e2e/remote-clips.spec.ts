@@ -8,7 +8,7 @@ import { type BrowserContext, type Locator, type Page, expect, test } from '@pla
 import { Ajv2020 } from 'ajv/dist/2020';
 
 import { ADA, type FakeBucket, fakeAccount, fakeAccountState, fakeBucket } from './helpers/account';
-import { bend, fileText, pill } from './helpers/remote';
+import { RECORDING, bend, fileText, pill } from './helpers/remote';
 import { fakeSignaling } from './helpers/signaling';
 import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from './helpers/timer';
 
@@ -108,16 +108,23 @@ async function events(page: Page): Promise<{ kind: string; data: Record<string, 
   );
 }
 
+/** How long the phone records before an attempt: the next attempt's lead and margin in its buffer. */
+const BUFFERED_MS = 6000;
+
 /**
  * `ready` once the pair can record an attempt: the phone connected, the clock sync with an answer
  * (a cut's estimate: before the fit keeps three samples, the offset of the trip of least round trip,
  * which on loopback places the clock within a few ms), and the phone recording for longer than the
- * next attempt's lead and margin (connected for 6 s); otherwise the lines that say what is missing.
- * Not convergence, nor a number of samples kept: a cut waits for neither (T4.2), and between two
- * pages of one browser that both encode, most round trips are far over the least (a median of 17 to
- * 18 ms against 2 to 3 on CI), so convergence can take a while there.
+ * next attempt's lead and margin (`BUFFERED_MS` since its picture line first said so,
+ * `recordingSince`, on the test's clock); otherwise the lines that say what is missing. Until T4.3
+ * this was the host's "connected for 6 s", which assumed a phone recording since before it
+ * connected: its capture has its first frames 2 to 5 s after its camera opens, so after the
+ * connection, and the full run's load once truncated the solve's clip by 0.9 s that way. Not
+ * convergence, nor a number of samples kept: a cut waits for neither (T4.2), and between two pages
+ * of one browser that both encode, most round trips are far over the least (a median of 17 to 18 ms
+ * against 2 to 3 on CI), so convergence can take a while there.
  */
-async function readiness(phone: Page, row: Locator): Promise<string> {
+async function readiness(phone: Page, row: Locator, recordingSince: number): Promise<string> {
   const state = await pill(phone);
   const host = (await row.getByTestId('remote-camera-state').allTextContents()).join(' ').trim();
   const sync = (await row.getByTestId('remote-camera-sync').allTextContents()).join(' ').trim();
@@ -125,9 +132,10 @@ async function readiness(phone: Page, row: Locator): Promise<string> {
   const minutes = Number(/(\d+) min/u.exec(host)?.[1] ?? 0);
   const seconds = Number(/(\d+) s$/u.exec(host)?.[1] ?? 0);
   const connectedFor = host.startsWith('connected for ') ? minutes * 60 + seconds : -1;
-  return state === 'connected' && sync.includes('round trip') && connectedFor >= 6
+  const recordedMs = Date.now() - recordingSince;
+  return state === 'connected' && sync.includes('round trip') && recordedMs >= BUFFERED_MS
     ? 'ready'
-    : `phone: ${state}; host: ${host}; sync: ${sync}`;
+    : `phone: ${state}, recording for ${String(Math.round(recordedMs / 1000))} s; host: ${host} (${String(connectedFor)} s); sync: ${sync}`;
 }
 
 /**
@@ -176,15 +184,17 @@ async function pairedPhone(
   await phone.goto(`${url.pathname}${url.search}`);
   // Connected; a join refused fails with its reason (the pill's problem line).
   await expect.poll(() => pill(phone), { timeout: 45_000 }).toBe('connected');
-  await expect(phone.getByTestId('device-picture-line')).toContainText('recording', {
+  // The phone records once its capture has its first frames, after the connection as often as not.
+  await expect(phone.getByTestId('device-picture-line')).toContainText(RECORDING, {
     timeout: 15_000,
   });
+  const recordingSince = Date.now();
   const row = page.getByTestId('remote-camera');
   await expect(row).toHaveAttribute('data-label', 'laptop-2');
-  await expect(row.getByTestId('remote-camera-report')).toContainText('recording', {
+  await expect(row.getByTestId('remote-camera-report')).toContainText(RECORDING, {
     timeout: 15_000,
   });
-  await expect.poll(() => readiness(phone, row), { timeout: 30_000 }).toBe('ready');
+  await expect.poll(() => readiness(phone, row, recordingSince), { timeout: 30_000 }).toBe('ready');
   return { phone, sessionId, bucket };
 }
 

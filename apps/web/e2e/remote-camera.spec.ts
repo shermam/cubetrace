@@ -2,6 +2,7 @@ import type { CameraClock, SessionRecord } from '@cubetrace/core';
 import { type Locator, type Page, expect, test } from '@playwright/test';
 
 import { fakeAccount, fakeAccountState } from './helpers/account';
+import { RECORDING } from './helpers/remote';
 import { fakeSignaling } from './helpers/signaling';
 import { currentSessionId, demoPath, expectSolves } from './helpers/timer';
 
@@ -110,7 +111,7 @@ test('a second page joins as a remote camera: listed with a thumbnail, its live 
   // Desktop Chrome, which says Windows): the two pages share the settings, as one profile does.
   await expect(phone.getByTestId('device-host')).toContainText(/ · \w+ laptop \(\w+\)$/u);
   await expect(phone.getByTestId('device-preview')).toBeVisible();
-  await expect(phone.getByTestId('device-picture-line')).toContainText('recording', {
+  await expect(phone.getByTestId('device-picture-line')).toContainText(RECORDING, {
     timeout: 15_000,
   });
   // The pairing is taken: the QR code is down and the camera is listed, with a thumbnail within 5 s.
@@ -123,7 +124,7 @@ test('a second page joins as a remote camera: listed with a thumbnail, its live 
   await expect(row(page).getByTestId('remote-camera-name')).toHaveText(/^\w+ laptop$/u);
   // The host's own camera is `laptop`; the phone's, the same fake camera on another device, `laptop-2`.
   await expect(row(page).getByTestId('remote-camera-label')).toHaveText('laptop-2');
-  await expect(row(page).getByTestId('remote-camera-report')).toContainText('recording', {
+  await expect(row(page).getByTestId('remote-camera-report')).toContainText(RECORDING, {
     timeout: 15_000,
   });
 

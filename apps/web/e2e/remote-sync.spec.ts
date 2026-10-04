@@ -3,6 +3,7 @@ import { type Locator, type Page, expect, test } from '@playwright/test';
 
 import { fakeAccount, fakeAccountState } from './helpers/account';
 import {
+  RECORDING,
   SYNTHETIC_CAMERA,
   bend,
   fileText,
@@ -130,11 +131,11 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
   await fakeSignaling(phone);
   await phone.goto(`${url.pathname}${url.search}`);
   await expect.poll(() => pill(phone), { timeout: 45_000 }).toBe('connected');
-  await expect(phone.getByTestId('device-picture-line')).toContainText('recording', {
+  await expect(phone.getByTestId('device-picture-line')).toContainText(RECORDING, {
     timeout: 15_000,
   });
   const row = page.getByTestId('remote-camera');
-  await expect(row.getByTestId('remote-camera-report')).toContainText('recording', {
+  await expect(row.getByTestId('remote-camera-report')).toContainText(RECORDING, {
     timeout: 15_000,
   });
   await expect(row.getByTestId('remote-camera-sync')).toContainText('round trip', {

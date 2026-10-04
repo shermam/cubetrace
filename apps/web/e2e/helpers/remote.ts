@@ -64,6 +64,14 @@ export async function pill(phone: Page): Promise<string> {
   return problem === '' ? state : `${state}: ${problem}`;
 }
 
+/**
+ * "recording" as a part of the phone's picture line (`… · 1920×1080 · recording`) or of the host's
+ * report of it (`recording · 30 fps · …`), not "not recording", which a plain `toContainText`
+ * matches too: the line says "not recording" from the page's start until the capture has its first
+ * frames, 2 to 5 s after the camera opens (T4.3's runs).
+ */
+export const RECORDING = /(?:^|· )recording(?: ·|$)/u;
+
 /** The synthetic camera's picture: its size, and the square that flips inside it. */
 export const SYNTHETIC_CAMERA = {
   width: 640,
