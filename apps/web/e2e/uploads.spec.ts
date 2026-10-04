@@ -339,10 +339,11 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
     'Up to date: every attempt of this device is uploaded.',
   );
   // Across the deletion and the page loads since, attempt.json was signed once, with the attempt's
-  // other files, and nothing more went up.
+  // other files, its index document was not written again, and nothing more went up.
   const signed = (await fakeAccountState(page)).uploadCalls.filter((call) =>
     call.startsWith('sign '),
   );
+  expect(await attemptWrites()).toBe(writesBefore);
   expect(signed.filter((call) => call.split(' ')[2].split(',').includes('attempt.json'))).toEqual([
     `sign ${sessionId}/1 attempt.json,laptop.scramble.mp4,laptop.scramble.frames.json,laptop.solve.mp4,laptop.solve.frames.json,session.json`,
   ]);
