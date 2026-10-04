@@ -31,9 +31,9 @@ export const CONTENT_TYPES: Readonly<Record<UploadFileKind, string>> = {
 };
 
 /**
- * `attempt` as the dataset holds it: without `local` on its clips, which says whether a clip's MP4
- * is still on the device that recorded it (T3.3): in the bucket, every clip is beside its
- * attempt.json. So the uploaded attempt.json does not change when the device deletes a clip.
+ * `attempt` as the dataset holds it: without `local` on its clips, which said whether a clip's MP4
+ * was still on the device that recorded it (T3.3; the records written before T4.2a may have it, and
+ * the app sets it in memory for its pages): in the bucket, every clip is beside its attempt.json.
  */
 export function datasetAttempt(attempt: AttemptRecord): AttemptRecord {
   return {

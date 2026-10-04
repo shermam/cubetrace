@@ -108,7 +108,7 @@ versions follow [Semantic Versioning](https://semver.org/).
   pauses, the clips deleted by policy, the cubes synced (a count), the downloads and the errors the
   app logs — never a MAC address, an email, a video or a user agent. The events go in batches, 5 s
   after the first or at 20, offline through Firestore's cache; signed out, nothing is kept beyond the
-  page; a device writes at most 2,000 a day. Settings → Account → Diagnostics, on by default, turns
+  page; a device writes at most 5,000 a day. Settings → Account → Diagnostics, on by default, turns
   it off after one last event. Sessions → QA view gains a Diagnostics section: per device its last
   start and build, the events by kind over the last 7 days, and the failures. The manual rounds are
   now read from these events by the coordinator's round report (`npm run round-report`, with a
@@ -163,12 +163,31 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The diagnostics' daily cap is 5,000 events a device and local day (2,000 before; T4.2a): a phone
+  paired as a camera adds about six events per attempt on the host (each clip's `remote.cut` sent and
+  done, and its `remote.clip`), so a day of the owner's 130 to 170 attempts reached 2,000 at about
+  155 and the evidence stopped mid-session; at 5,000, Firestore's writes stay within a quarter of its
+  free tier.
+- Development (T4.2a): `SessionService.releaseClips`, which saves nothing, and the upload source's
+  `releaseClips` option, in place of `markClipsGone`; `AttemptFiles.list`; `clipsOnDevice`,
+  `withClipsOnDevice` and `withoutLocal` (`apps/web/src/app/session/clips-on-device.ts`); `local` in
+  `attempt.json` is no longer written (the readers take it as before).
 - The upload quota per account and UTC day is 15 GB and 3,000 files (6 GB and 1,200 before): on
   2026-10-03 the owner reached 1,199 files with 171 attempts in the day plus the re-signatures of
   `attempt.json` after clips deleted by policy, and phase 4 adds a phone's clips to each attempt.
 - The clip viewer's layout (T3.10): the 3D cube under the video instead of beside it, the video at
   most 45% of the screen's height and the cube 30%; the view's controls and the mirror in one
   wrapping row under the cube, Re-zero and Raw under the orientation line.
+
+### Fixed
+
+- Deleting uploaded clips by policy ("Keep local copies" off, or the storage past 70%) no longer
+  uploads `attempt.json` again (T4.2a). The deletion saved the record again to say that the clips had
+  left the device, and a record read back otherwise than it was uploaded (one written before a later
+  field) went up again, a file of the day's quota each; in a later page load than the upload, it also
+  rewrote the attempt's index document, which the rules refused, with a note in the session. The
+  record is now left as it was uploaded: `uploads.json` keeps which clips left, the pages read it from
+  the attempts' folders, and still say "in the cloud".
 
 ## 0.3.0 — 2026-10-02
 

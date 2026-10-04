@@ -3,6 +3,7 @@ import {
   ATTEMPTS_FOLDER,
   SESSIONS_FOLDER,
   attemptFolder,
+  isNotFound,
   writeAttemptFile,
   type FileContent,
   type OpfsDirectoryHandle,
@@ -29,6 +30,14 @@ export interface AttemptFiles {
    * the browser has no origin private file system.
    */
   write(sessionId: string, index: number, name: string, content: FileContent): Promise<void>;
+  /**
+   * The names of the files in each attempt's folder of session `sessionId`, by the attempt's index:
+   * what this device holds of them (T4.2a: a clip's MP4 the upload queue deleted by policy is gone
+   * from its folder, and its record does not say so); empty when the session has no attempts;
+   * rejects where the browser has no origin private file system. Absent from the stand-ins of tests
+   * that know nothing of the folders.
+   */
+  list?(sessionId: string): Promise<ReadonlyMap<number, ReadonlySet<string>>>;
 }
 
 /** The attempts' files in `navigator.storage.getDirectory()`; the unit tests give a fake. */
@@ -58,6 +67,33 @@ export const ATTEMPT_FILES = new InjectionToken<AttemptFiles>('ATTEMPT_FILES', {
         content: FileContent,
       ): Promise<void> {
         await writeAttemptFile(await root(), sessionId, index, name, content);
+      },
+      async list(sessionId: string): Promise<ReadonlyMap<number, ReadonlySet<string>>> {
+        let dir = await root();
+        try {
+          for (const folder of [SESSIONS_FOLDER, sessionId, ATTEMPTS_FOLDER]) {
+            dir = await dir.getDirectoryHandle(folder);
+          }
+        } catch (error: unknown) {
+          if (isNotFound(error)) {
+            return new Map();
+          }
+          throw error;
+        }
+        const found = new Map<number, ReadonlySet<string>>();
+        for await (const entry of dir.values()) {
+          if (entry.kind !== 'directory' || !/^\d+$/.test(entry.name)) {
+            continue;
+          }
+          const names = new Set<string>();
+          for await (const file of entry.values()) {
+            if (file.kind === 'file') {
+              names.add(file.name);
+            }
+          }
+          found.set(Number(entry.name), names);
+        }
+        return found;
       },
     };
   },

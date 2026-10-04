@@ -451,7 +451,7 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
     switched / off, recording.started / stopped /       event, at 20, when the page hides or goes away
     notice, clip.saved / failed, audio.missing           ─▶ AccountBackend.saveEvents (writeBatch) ─▶ Firestore's
   SyncService: sync.check                                cache ─▶ the server (a refusal: said once, dropped)
-  UploadService: upload.state / paused / resumed, storage.deleted     at most 2,000 a local day per device
+  UploadService: upload.state / paused / resumed, storage.deleted     at most 5,000 a local day per device
   CubeSyncService: cubes.synced (a count)                             (localStorage), then error.* alone
   AuthService: account.signin / signout; the pages: clips.viewed, download; every console `cubetrace:` warning: error.app
 the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the
@@ -574,9 +574,13 @@ per attempt, once its record is final (solved or DNF, its clips saved or known a
 - **The clips on the device.** Once uploaded, clips are deleted by policy: with "Keep local copies" off
   (a phone's default; a laptop keeps them), the clips of an attempt once all its files are confirmed;
   in any case, once the browser's storage is 70% full, the oldest uploaded clips first, until it would
-  be under 60%. The record says so first (`video[].local` false, saved through `SessionService`, which
-  also writes it to the index), then the MP4 is deleted; `attempt.json`, the frames files and
-  `gyro.json` stay, and the pages say "in the cloud" for such a clip.
+  be under 60%. `SessionService` lets the clips go first (`releaseClips`: the attempt is still there),
+  then the MP4 is deleted and `uploads.json` says so; `attempt.json`, the frames files and `gyro.json`
+  stay, the record unchanged (T4.2a: until then the app saved it again with `video[].local` false,
+  which the queue took for a changed record and signed `attempt.json` again for, and which rewrote its
+  index document). The pages say "in the cloud" for such a clip: `SessionService` reads which clips
+  are on the device from the attempts' folders (`clipsOnDevice`), and the timer's copy of the
+  current session learns it from `releaseClips`.
 - **The pages.** The Sessions page has the queue's panel (where the uploads are, the attempts still to
   upload with their progress, their errors and Retry, those uploaded last, the clips freed); the
   header, an arrow with the attempts to upload (dashed while paused, red with failures), which opens

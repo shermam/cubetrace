@@ -25,8 +25,9 @@
 //   twice.
 // - Once uploaded, clips are deleted from the device by policy: all of an attempt's once it is all
 //   uploaded, without "Keep local copies"; in any case, from 70% of the storage quota, the oldest
-//   uploaded ones first, down to 60%. The attempt's record then says so (`video[].local` false); its
-//   attempt.json and frames files stay.
+//   uploaded ones first, down to 60%. uploads.json says so (`local` false); the record does not
+//   change (T4.2a), so that deleting a clip signs nothing again; its attempt.json and frames files
+//   stay.
 import { attemptDocumentId, isSimulated } from '@cubetrace/core';
 import type { AttemptRecord, CloudUpload, SessionRecord } from '@cubetrace/core';
 
@@ -847,9 +848,11 @@ export class UploadQueue {
   /**
    * Brings attempt `record`'s upload up to date: each of its files keeps its stored state while it is
    * the same (attempt.json by the hash of its text, a clip's files by their sizes), is done when the
-   * index says the bucket has it with that size (`cloud`), and is pending otherwise. A clip whose MP4
-   * is no longer on the device (`local` false) was uploaded before it went; a clip's file that is
-   * not on the device is not sent.
+   * index says the bucket has it with that size (`cloud`), and is pending otherwise. A clip's MP4
+   * that is no longer on the device was uploaded before it went, and stays done, when uploads.json
+   * has it done (or the index does, when uploads.json does not know it), or when its record says so
+   * (`local` false, which the app wrote until T4.2a); any other file that is not on the device is
+   * not sent.
    */
   async #reconcile(
     session: SessionTask,
@@ -902,7 +905,8 @@ export class UploadQueue {
               ? previous
               : pending(bytes, previous, hash);
       } else if (kind === 'clip' && clip?.local === false) {
-        // Deleted from the device after its upload was confirmed: done, whatever was kept of it.
+        // Deleted from the device after its upload was confirmed, which its record says (written so
+        // before T4.2a): done, whatever was kept of it.
         entry =
           previous?.state === 'done'
             ? previous
@@ -910,14 +914,26 @@ export class UploadQueue {
         entry.local = false;
       } else {
         const size = await this.#source.fileSize(session.id, record.index, path).catch(() => null);
-        entry =
-          size === null || size === 0
-            ? null
-            : previous === undefined
+        if (size === null || size === 0) {
+          // Not on the device: a clip's MP4 deleted after its upload stays done, as uploads.json
+          // says, or the index when uploads.json does not know it; any other file is not sent.
+          entry =
+            kind !== 'clip' || clip === null
+              ? null
+              : previous?.state === 'done'
+                ? previous
+                : fromCloud(cloud, path, clip.bytes);
+          if (entry !== null) {
+            entry.local = false;
+          }
+        } else {
+          entry =
+            previous === undefined
               ? (fromCloud(cloud, path, size) ?? pending(size, undefined))
               : previous.bytes === size || task?.active === true
                 ? previous
                 : pending(size, previous);
+        }
       }
       if (entry === null) {
         continue;
@@ -1611,7 +1627,8 @@ export class UploadQueue {
   /**
    * Deletes uploaded clips from the device: without "Keep local copies", every clip of an attempt
    * all uploaded; and, from {@link STORAGE_DELETE_FROM} of the storage quota, the oldest uploaded
-   * clips first until the use would be under {@link STORAGE_DELETE_TO}.
+   * clips first until the use would be under {@link STORAGE_DELETE_TO}. uploads.json says which
+   * (`local` false); the attempts' records are not changed (T4.2a).
    */
   async #applyPolicy(): Promise<void> {
     const plan = new Map<AttemptTask, string[]>();
@@ -1691,14 +1708,6 @@ export class UploadQueue {
             bytes: this.#freed.bytes + file.stored.bytes,
           };
         }
-      }
-      if (attempt.record !== null) {
-        attempt.record = {
-          ...attempt.record,
-          video: attempt.record.video.map((clip) =>
-            files.includes(clip.file) ? { ...clip, local: false } : clip,
-          ),
-        };
       }
       this.#persist();
       this.#notify();

@@ -27,8 +27,13 @@ export const FLUSH_AT = 20;
 /** The events kept in memory while no account is signed in: the last this many. */
 export const RING_SIZE = 500;
 
-/** The events a device writes in a local day, at most; past it, only the `error.*` kinds go. */
-export const DAILY_CAP = 2000;
+/**
+ * The events a device writes in a local day, at most; past it, only the `error.*` kinds go. 5,000
+ * since T4.2a (2,000 before): a phone paired as a camera adds about six events per attempt on the
+ * host, and 2,000 was reached at about 155 attempts, mid-session at the owner's 130–170 a day;
+ * Firestore's free tier is 20,000 writes a day.
+ */
+export const DAILY_CAP = 5000;
 
 /** The account the events go to: its uid and the backend that writes them. */
 export interface EventSink {

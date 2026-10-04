@@ -1677,8 +1677,9 @@ attempt and shows 7: the 3, plus the demo cube's reconnection at each replay (`c
 cube's session does not have; the cloud flow's first attempt carries its session's setup too (the
 camera's and the recording's start, the cubes synced, the attempt deleted). So a day of 150
 attempts writes about 900 events of the attempts and about a hundred of the rest (the starts, the
-pages, the cube, the camera, the settings), within the cap of 2,000 a device and far under the free
-tier's 20,000 writes a day; the index's writes (a session's, about three per attempt) come on top.
+pages, the cube, the camera, the settings), within the cap of 5,000 a device (2,000 until T4.2a,
+which a paired phone's six events per attempt made too low) and far under the free tier's 20,000
+writes a day; the index's writes (a session's, about three per attempt) come on top.
 
 **Sizes** (`ng build`, 2026-10-02, against `main` at eccedc1): the initial bundle is 264.57 kB raw
 (264.63 before; the CLI's estimate of its transfer, 72.5 to 72.7 kB, moves by a few tens of bytes

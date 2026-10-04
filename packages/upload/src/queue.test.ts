@@ -1,4 +1,4 @@
-import type { VideoClip } from '@cubetrace/core';
+import type { AttemptRecord, VideoClip } from '@cubetrace/core';
 import { recordJson } from '@cubetrace/storage';
 import { describe, expect, it } from 'vitest';
 
@@ -1012,22 +1012,31 @@ describe('UploadQueue', () => {
     await queue.stop();
   });
 
-  it('without Keep local copies, deletes the clips of an attempt once all its files are uploaded, keeping attempt.json and the frames files', async () => {
+  it('without Keep local copies, deletes the clips of an attempt once all its files are uploaded, keeping attempt.json, unchanged, and the frames files', async () => {
     const d = device();
     await record(d, session(A, 1_790_000_000_000), [
       attempt(A, 1, [clip('scramble', 1000), clip('solve', 2000)]),
     ]);
+    const folder = `sessions/${A}/attempts/0001`;
+    const recorded = fileText(d, `${folder}/attempt.json`);
     const queue = queueOf(d, { wifiOnly: false, keepLocalCopies: false });
     await queue.start();
     await flush();
-    const folder = `sessions/${A}/attempts/0001`;
     expect(d.removed).toEqual([`${A}/1 laptop.scramble.mp4,laptop.solve.mp4`]);
     expect(fileText(d, `${folder}/laptop.solve.mp4`)).toBeNull();
     expect(fileText(d, `${folder}/laptop.scramble.mp4`)).toBeNull();
     expect(fileText(d, `${folder}/laptop.solve.frames.json`)).toBe('f'.repeat(FRAMES_BYTES));
-    const [stored] = (await d.store.exportSession(A)).attempts;
-    expect(stored.video.map((c) => c.local)).toEqual([false, false]);
+    // The record is not changed (T4.2a): the device keeps what it knows of its clips in uploads.json.
+    expect(fileText(d, `${folder}/attempt.json`)).toBe(recorded);
     expect(queue.view().freed).toEqual({ clips: 2, bytes: 3000 });
+    expect(queue.attemptView(A, 1)?.files.map((file) => file.local)).toEqual([
+      true,
+      false,
+      true,
+      false,
+      true,
+      true,
+    ]);
     d.env.advance(1000);
     await flush();
     expect(stateOf(d)?.sessions[A].attempts['0001'].files['laptop.solve.mp4']).toMatchObject({
@@ -1043,6 +1052,108 @@ describe('UploadQueue', () => {
     await flush();
     expect(d.http.puts.length).toBe(puts);
     expect(reloaded.view().counts.done).toBe(1);
+    await reloaded.stop();
+  });
+
+  it("signs nothing again when an attempt's uploaded clips are deleted by policy: the app lets them go without saving the record, which the store may read back otherwise than it was uploaded (T4.2a)", async () => {
+    const d = device();
+    const s = session(A, 1_790_000_000_000);
+    await record(d, s, []);
+    const queue = queueOf(d, { wifiOnly: false, keepLocalCopies: false });
+    await queue.start();
+    await flush();
+    // The timer saves attempt 1 and tells the queue of the record it saved (SessionChanges), whose
+    // text is what goes up: here one whose file the store's reader gives back otherwise than it was
+    // written, as for every record written before a field the reader defaults (T3.7's resyncs, read
+    // as none when missing; the records written before T3.7 have no gyro either).
+    const a1 = attempt(A, 1, [clip('scramble', 1000), clip('solve', 2000)]);
+    const older: Partial<AttemptRecord> = { ...a1 };
+    delete older.resyncs;
+    const recorded = older as AttemptRecord;
+    await d.store.saveAttempt(recorded);
+    const folder = `sessions/${A}/attempts/0001`;
+    for (const c of a1.video) {
+      await d.root.plant(`${folder}/${c.file}`, 'v'.repeat(c.bytes));
+      await d.root.plant(`${folder}/${c.framesFile}`, 'f'.repeat(FRAMES_BYTES));
+    }
+    const [readBack] = (await d.store.exportSession(A)).attempts;
+    expect(recordJson(readBack)).not.toBe(recordJson(recorded));
+    queue.attemptSaved(recorded);
+    await flush();
+    d.env.advance(1000);
+    await flush();
+    const signs = (): string[] => d.cloud.calls.filter((call) => call.startsWith('sign'));
+    expect(signs()).toEqual([
+      `sign ${A}/1 attempt.json,laptop.scramble.mp4,laptop.scramble.frames.json,laptop.solve.mp4,laptop.solve.frames.json,session.json`,
+    ]);
+    // Uploaded, the clips left the device; the record did not change, so nothing is signed again
+    // (until T4.2a the app saved it once more, as the store read it back, and attempt.json went
+    // again: a file of the day's quota for nothing the dataset holds).
+    expect(d.removed).toEqual([`${A}/1 laptop.scramble.mp4,laptop.solve.mp4`]);
+    expect(fileText(d, `${folder}/laptop.solve.mp4`)).toBeNull();
+    expect(fileText(d, `${folder}/attempt.json`)).toBe(recordJson(recorded));
+    expect(d.bucket.objects.get(key(A, 'attempt.json'))?.text).toBe(
+      recordJson(datasetAttempt(recorded)),
+    );
+    d.env.advance(SESSION_QUIET_MS);
+    await flush();
+    expect(signs()).toHaveLength(1);
+    expect(putsOf(d, 'attempt.json')).toEqual([`0001/attempt.json 200`]);
+    // Nor at the next start.
+    await queue.stop();
+    const reloaded = queueOf(d, { wifiOnly: false, keepLocalCopies: false });
+    await reloaded.start();
+    await flush();
+    expect(signs()).toHaveLength(1);
+    expect(reloaded.view().counts).toMatchObject({ done: 1, pending: 0 });
+    await reloaded.stop();
+  });
+
+  it('keeps a clip deleted by policy done without its record saying so: from uploads.json when the app saves the record again, from the index when uploads.json is lost (T4.2a)', async () => {
+    const d = device();
+    const s = session(A, 1_790_000_000_000);
+    const a1 = attempt(A, 1, [clip('scramble', 1000), clip('solve', 2000)]);
+    await record(d, s, [a1]);
+    const queue = queueOf(d, { wifiOnly: false, keepLocalCopies: false });
+    await queue.start();
+    await flush();
+    expect(d.removed).toEqual([`${A}/1 laptop.scramble.mp4,laptop.solve.mp4`]);
+    const signs = (): string[] => d.cloud.calls.filter((call) => call.startsWith('sign'));
+    expect(signs()).toHaveLength(1);
+    const local = (view: ReturnType<typeof queue.attemptView>): Record<string, string> =>
+      Object.fromEntries(
+        (view?.files ?? []).map((file) => [file.path, `${file.state}${file.local ? '' : ' gone'}`]),
+      );
+    const expected = {
+      'attempt.json': 'done',
+      'laptop.scramble.mp4': 'done gone',
+      'laptop.scramble.frames.json': 'done',
+      'laptop.solve.mp4': 'done gone',
+      'laptop.solve.frames.json': 'done',
+    };
+    // The app saves the record again (a note, a late clip of another camera): the clips gone stay done.
+    queue.attemptSaved(a1);
+    await flush();
+    expect(local(queue.attemptView(A, 1))).toEqual({ ...expected, 'session.json': 'done' });
+    expect(signs()).toHaveLength(1);
+    d.env.advance(1000);
+    await flush();
+    await queue.stop();
+
+    // uploads.json lost: the index says the bucket has the clips, which are not on the device.
+    await d.root.removeEntry('uploads.json');
+    const reloaded = queueOf(d, { wifiOnly: false, keepLocalCopies: false });
+    await reloaded.start();
+    await flush();
+    expect(local(reloaded.attemptView(A, 1))).toMatchObject(expected);
+    expect(signs().filter((call) => !call.endsWith(' session.json'))).toHaveLength(1);
+    expect(putNames(d).filter((name) => name !== 'session.json')).toEqual([
+      'attempt.json',
+      'laptop.scramble.frames.json',
+      'laptop.scramble.mp4',
+      'laptop.solve.frames.json',
+      'laptop.solve.mp4',
+    ]);
     await reloaded.stop();
   });
 
@@ -1093,8 +1204,16 @@ describe('UploadQueue', () => {
     expect(fileText(d, `sessions/${B}/attempts/0001/attempt.json`)).not.toBeNull();
     expect(fileText(d, `sessions/${B}/attempts/0001/laptop.solve.frames.json`)).not.toBeNull();
     expect(queue.view().freed).toEqual({ clips: 4, bytes: 120_000 });
+    // The records are not changed (T4.2a): uploads.json says which clips left the device.
     const [b1] = (await d.store.exportSession(B)).attempts;
-    expect(b1.video.map((c) => c.local)).toEqual([false, false]);
+    expect(b1.video.map((c) => c.local)).toEqual([undefined, undefined]);
+    d.env.advance(1000);
+    await flush();
+    const b1Files = stateOf(d)?.sessions[B].attempts['0001'].files;
+    expect([b1Files?.['laptop.scramble.mp4'].local, b1Files?.['laptop.solve.mp4'].local]).toEqual([
+      false,
+      false,
+    ]);
     await queue.stop();
   });
 

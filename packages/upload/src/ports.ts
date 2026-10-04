@@ -27,9 +27,10 @@ export interface UploadSource {
   /** The file `name` of attempt `index`'s folder, to send as it is. */
   readFile(sessionId: string, index: number, name: string): Promise<Blob>;
   /**
-   * Deletes the clips' MP4s `files` of the attempt `ref` from the device, once its record says that
-   * they are not there any more (`video[].local` false); false, deleting nothing, when the attempt
-   * is gone.
+   * Deletes the clips' MP4s `files` of the attempt `ref` from the device, its record unchanged
+   * (T4.2a: whether this device still holds a clip's file is the device's to know, in uploads.json
+   * and its folder, not the dataset's record); false, deleting nothing, when the attempt is gone
+   * (deleted, or begun again with its index).
    */
   removeClips(ref: AttemptRef, files: readonly string[]): Promise<boolean>;
   /**

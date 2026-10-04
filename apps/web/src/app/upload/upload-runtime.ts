@@ -38,7 +38,7 @@ export function createUploadQueue(deps: UploadDeps): UploadQueue | null {
   const source = new OpfsUploadSource({
     root: manager.getDirectory(),
     store: deps.store,
-    markClipsGone: deps.markClipsGone,
+    releaseClips: deps.releaseClips,
     settled: deps.settled,
   });
   return new UploadQueue({

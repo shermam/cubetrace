@@ -273,7 +273,7 @@ saved or failed, the sync checks, the uploads' progress, the settings changed an
 meets, each with the device's label, never a MAC address, an email, a video or a user agent. The
 owner's round report reads it in place of the manual test checklists. Settings → Account →
 Diagnostics, on by default, turns it off; nothing is kept while signed out either way, and a device
-writes at most 2,000 events a day.
+writes at most 5,000 events a day.
 
 **The policies**, in Settings → Uploads: Upload sessions turns the uploads off; Wi-Fi only, on a
 phone whose browser tells Wi-Fi from mobile data (on by default there), waits for Wi-Fi; Keep local

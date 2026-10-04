@@ -32,7 +32,10 @@ export interface StoredFile {
   error: string | null;
   /** When the bucket confirmed it, ms since 1970 on the server's clock; null until then. */
   doneMs: number | null;
-  /** A clip's MP4 deleted from the device after its upload (T3.3); absent while it is there. */
+  /**
+   * A clip's MP4 deleted from the device after its upload (T3.3); absent while it is there. What the
+   * device knows of its clips, kept here and not in the record (T4.2a).
+   */
   local?: false;
 }
 
