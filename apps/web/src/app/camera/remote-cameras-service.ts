@@ -126,7 +126,8 @@ export interface Pairing {
  * How long the host waits for the phone's `hello` once the channel is open (10 s until T4.2b; the
  * phone's wait is as long, `camera-device-service.ts` says why). A wait over, or the connection
  * closed first, before the first hello is no longer the end of the pairing: the phone calls again
- * with its token, which is answered while it has not connected (T4.2b).
+ * with its token, which is answered while it has not connected (T4.2b). The host says its own hello
+ * once the phone's came, never before (`connectPeer` says why).
  */
 export const HELLO_TIMEOUT_MS = 15_000;
 
@@ -525,7 +526,12 @@ export class RemoteCamerasService {
     const link = new MessageLink(transport);
     peer.transport = transport;
     peer.link = link;
-    link.send(this.hello());
+    // The host speaks second (T4.2b): its hello answers the phone's. The hello the host sent the
+    // moment its channel opened now and then never reached the phone's page, while the frames after
+    // it did (7 of about 115 hello exchanges in the end-to-end runs while T4.2b was tested, and most
+    // likely PR #62's refusal in CI): it had gone out before the phone's page had its own channel
+    // open, as far as the clocks tell. The phone says hello once its channel is open, so whatever the
+    // host sends after the phone's hello finds the phone's channel open.
     let hello: Hello;
     try {
       hello = await this.withTimeout(
@@ -548,6 +554,8 @@ export class RemoteCamerasService {
     if (generation !== peer.generation) {
       return;
     }
+    // Before a refusal too, so that the phone says which versions disagree.
+    link.trySend(this.hello());
     if (hello.v !== PROTOCOL_VERSION || hello.role !== 'camera') {
       const reason =
         hello.v !== PROTOCOL_VERSION

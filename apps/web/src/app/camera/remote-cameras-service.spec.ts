@@ -785,15 +785,19 @@ describe('RemoteCamerasService', () => {
     });
   });
 
-  it('pairs with a hello that comes late but within the wait', async () => {
+  it('pairs with a hello that comes late but within the wait, and says its own only once the phone’s came', async () => {
     // The phone's page is busy: its hello comes 12 s after the channel opened.
     const phone = new Phone(r, 'ThinkPhone', 1234.5, 0, 12_000);
     await paired(phone);
     expect(r.service.cameras()[0].state).toBe('connecting');
     await pass(r.s, 11_000);
     expect(r.service.cameras()[0].state).toBe('connecting');
+    // The host speaks second: nothing of it before the phone's hello (a frame sent the moment the
+    // channel opened could find the phone's page without its channel open yet, T4.2b).
+    expect(phone.received).toEqual([]);
     await pass(r.s, 2000);
     expect(r.service.cameras()[0].state).toBe('connected');
+    expect(phone.received[0]).toMatchObject({ type: 'hello', role: 'host' });
     const all = await events();
     expect(kinds(all)).toEqual(['rtc.paired', 'rtc.connected']);
   });

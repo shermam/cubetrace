@@ -77,11 +77,12 @@ export const THUMBNAIL_PX = 320;
 
 /**
  * How long the camera device waits for the host's `hello` once the channel is open (10 s until
- * T4.2b). Each side sends its hello the moment its channel opens, and a build of another protocol
- * version says hello all the same (and is refused at once), so the wait only catches a host page that
- * says nothing, for which 5 s more change nothing; a page starved of CPU (the end-to-end pair on a
- * busy CI runner, once in PR #62's first run) gets half as long again before its hello counts as lost
- * (and a lost one costs a call again, T4.2b, no longer the pairing).
+ * T4.2b). The phone says hello the moment its channel opens and the host answers it at once (T4.2b:
+ * a host that spoke first could lose its hello, `RemoteCamerasService.connectPeer` says how), and a
+ * build of another protocol version says hello all the same (and is refused at once), so the wait
+ * only catches a host page that says nothing, for which 5 s more change nothing, or one starved of
+ * CPU, which gets half as long again (a hello missed costs a call again, T4.2b, no longer the
+ * pairing).
  */
 export const HELLO_TIMEOUT_MS = 15_000;
 
