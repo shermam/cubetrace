@@ -206,12 +206,13 @@ comparison) pinged every 2 s as it was, three pairings each:
 
 | Simulation | The band alone, pinged every 2 s | T4.2b |
 |---|---|---|
-| The home Wi-Fi: each leg 2.8 ms and a wait of 5 ms on average, one ping in 20 held 100 to 300 ms on its way to the phone (Wi-Fi power saving), so the least trip about 6 ms and the median 14; the phone 240 ms behind, drifting by 5 ppm; 20 minutes | kept 3 to 26 of 60 (10 to 12 at the median); converged after 98 to 104 s, withdrawn 13 to 15 times | converged after 10.5 to 12 s, never withdrawn; the offset within 1.1 to 1.5 ms of the truth at the 99th percentile of the samples while converged, 0.7 ms at the end (2.3 ms at worst, for 4 s of one pairing: a drift fitted through ten samples at 50 ppm for a while) |
+| The home Wi-Fi: each leg 2.8 ms and a wait of 5 ms on average, one ping in 20 held 100 to 300 ms on its way to the phone (Wi-Fi power saving), so the least trip about 6 ms and the median 14; the phone 240 ms behind, drifting by 5 ppm; 20 minutes | kept 3 to 26 of 60 (10 to 12 at the median); converged after 98 to 104 s, withdrawn 13 to 15 times | converged after 10.5 to 12 s, never withdrawn; the offset within 1.1 to 1.5 ms of the truth at the 99th percentile of the samples while converged, 0.7 ms at the end (2.3 ms at worst: two samples of one pairing, while a drift of 50 ppm was fitted through ten samples) |
 | Two loaded pages of one browser: each leg 1 ms and a wait of 9 ms on average, so the least trip 2 to 3 ms and the median 16 to 19; 5 minutes | kept 1 to 10 of 60; converged after 130 s in one pairing, never in the two others | converged after 13.5 to 22 s, withdrawn 1 to 5 times; the offset within 1.9 ms while converged |
 
-The drift fitted through the ten or so samples a jittery Wi-Fi keeps in two minutes is good to about
-15 ppm (the home Wi-Fi's: 3 to 16 ppm for a true 5), a millisecond a minute: the conversions of T4.2
-are within that, and T4.3's drift applied at a clip's time may want a longer history.
+The drift fitted through the ten or so samples a jittery Wi-Fi keeps in two minutes is rough: on the
+home Wi-Fi's simulation, 3 to 16 ppm at the end for a true 5, and 23 to 50 ppm at worst while
+converged, one to three milliseconds a minute, which the offset's errors above include; T4.3's drift
+applied across a clip may want a longer history.
 
 **The pings** (`clock-sync.ts`). `ClockPinger` (the host) pings every 500 ms (`FAST_PING_INTERVAL_MS`)
 until an answer leaves the fit converged, or for the first minute at most (`FAST_PINGS_MS`), then
@@ -303,7 +304,7 @@ keeps the phone's first frame time as `t0RemoteMs` and the estimate that convert
 | The channel closes in the middle of a file | the receiver keeps the bytes held in the page's memory; the attempt waits for the clip (`ClipsInFlight`) until 120 s after its end | the sender's promise rejects with `closed`; the clip stays staged and is offered again, first thing, over the next connection: the file goes on from the receiver's offset |
 | A chunk is corrupted (a bit flipped, a misplaced chunk) | the checksum at `file-done` does not match: `file-resume` from 0 | the file goes again, twice at most, then `file-abort`: the clip stays on the phone and is offered again over the next connection; past the wait, the attempt's notes say it is missing |
 | The phone never answers a cut (asleep, its page frozen, its capture stopped) | 120 s after the attempt's end, the attempt goes to the upload queue without the clip and the session's notes say `remote clip missing: … from <label>: …` (`remote.clip.missing`); a clip that comes later is attached, noted late and uploaded as an addition | a cut it could not save is answered `cut-failed`, which the host gives up at once |
-| The clock sync never converges (Wi-Fi power saving, a busy network) | the cuts and the conversions go with the estimate there is (§9), the window widened by its margin; the records say `converged` false | nothing to do |
+| The clock sync never converges (Wi-Fi power saving, a busy network) | the cuts and the conversions go with the estimate there is (§9), the window widened by its margin; the records say `converged` false; `rtc.clock` says every minute how the link behaves (`syncing`, the window's round trips, T4.2b) | nothing to do |
 | The host page reloads, or another host page pairs the phone | the clips expected are not given up (no note): the attempt is uploaded without them; the phone, paired again with a new code, offers them first, and the host takes those of attempts it has, as additions | the staged clips are kept, and offered to the next connection to the same session; another session's join deletes them |
 | The receiver cannot store a file (no room) | `file-abort` with the reason; the failure reported | the send rejects with `aborted`; the clip stays on the phone |
 | The clocks disagree (the phone slept, its clock stopped) | the first sample after is farther from the estimate than its round trip allows: `converged` is withdrawn at once, the state says syncing, and comes back once the window turned over (two minutes) | nothing to do; the host converts with the fit it has |

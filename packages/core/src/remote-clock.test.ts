@@ -599,9 +599,9 @@ describe('RemoteClockFit', () => {
       expect(run20.first ?? Infinity).toBeLessThan(60);
       expect(run20.withdrawn).toBe(0);
       expect(run20.fit.converged).toBe(true);
-      // Within 2 ms of the truth, but for a few seconds in some pairings: the drift fitted through
-      // ten samples or so of two minutes can be off by 30 to 50 ppm for a while, a millisecond or two
-      // at the window's end (seed 3: 2.3 ms for 4 s).
+      // Within 2 ms of the truth but for two samples of one pairing (seed 3: 2.2 and 2.3 ms): the
+      // drift fitted through ten samples or so of two minutes can be off by 20 to 45 ppm for a while
+      // (23 to 50 ppm for a true 5), a millisecond or two at the window's end.
       expect(run20.p99Ms).toBeLessThan(2);
       expect(run20.worstMs).toBeLessThan(2.5);
       expect(Math.abs(run20.endMs)).toBeLessThan(2);
