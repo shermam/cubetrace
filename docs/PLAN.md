@@ -760,7 +760,11 @@ written, or leave the reader's defaults out of the hash. (p) The peer documents 
 connection ends or a call is refused, and the hour's cleanup of the phase 4 design was not built; harmless
 at one solver, a Cloud Function or a startup sweep later. (q) The phone's goodbye reads twice ("The host let
 this camera go: The host let the camera go: the session ended."); a unit spec asserts the text, so both
-change together.
+change together. (r) An attempt's index document can stay at `upload.state: uploading` although every
+file is in the bucket (session 8afffe34, attempts 180 and 183 on 2026-10-04: six objects each in the bucket,
+one file each unconfirmed in the index, after the refused index write of (n)); the round report then counts
+the attempt as not uploaded (item 3.3.4, 54 of 55). The queue should write the index's `done` again when
+`uploads.json` has every file done and the index disagrees, and the report could read the bucket's listing.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
