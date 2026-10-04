@@ -1,6 +1,6 @@
 {
   "name": "@cubetrace/rtc",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "The connection between the host and a remote camera (phase 4): the data channel's protocol, the chunked file transfer with backpressure and resume, the clock sync's pings, the signaling over Firestore with the pairing token, and the WebRTC transport, with in-memory fakes of the transport and the signaling for the tests. Plain TypeScript; never imports Angular.",
   "license": "MIT",

@@ -1108,6 +1108,261 @@ describe('the checklist after T4.3', () => {
   });
 });
 
+describe('the checklist after T4', () => {
+  const NEXT = 'e1f2a3b4-5c6d-4e7f-8a9b-0c1d2e3f4a5b';
+  const MOTO = { label: 'Moto g60', platform: 'Android', installed: false };
+
+  /**
+   * A day on the desk rig, as both devices' events tell it: the ThinkPhone paired and synced, both
+   * sync checks, twenty attempts with four clips while the clock sync stays converged for 25
+   * minutes, the viewer and its download, the preview off and on, a walk out of reach, the Wi-Fi off
+   * for three minutes, New session right after a solve with the phone held for its last clip, and a
+   * second phone in the next session.
+   */
+  function rigDay(): ReportEvent[] {
+    const t0 = NOW - 5 * HOUR;
+    const MIN = 60_000;
+    const scope = (attempt: number, session = SESSION) => ({ session, attempt });
+    const clip = (tsMs: number, attempt: number, segment: string, extra = {}) =>
+      at(
+        tsMs,
+        'remote.clip',
+        { camera: 'phone-rear', peer: 'ThinkPhone', segment, late: false, ...extra },
+        LAPTOP,
+        scope(attempt),
+      );
+    const done = (tsMs: number, attempt: number, clips: number, session = SESSION) =>
+      at(
+        tsMs,
+        'attempt.done',
+        { status: 'solved', clips, settled: true, settledMs: 4200, gyroSamples: 250 },
+        LAPTOP,
+        scope(attempt, session),
+      );
+    const events: ReportEvent[] = [
+      // Paired, its live picture over the preview, synced 12 s later.
+      at(t0, 'rtc.paired', { peer: 'ThinkPhone', camera: 'phone-rear', ms: 1800 }, LAPTOP, {
+        session: SESSION,
+      }),
+      at(t0 + 200, 'rtc.paired', { host: 'office-mbp', ms: 1900 }, PHONE),
+      at(t0 + 3000, 'preview.started', { width: 1920, height: 1080, scale: 5 }, PHONE),
+      at(
+        t0 + 12_000,
+        'rtc.clock',
+        { camera: 'phone-rear', why: 'converged', converged: true, rttMs: 6.2 },
+        LAPTOP,
+      ),
+      // Both checks.
+      at(
+        t0 + MIN,
+        'sync.check',
+        { outcome: 'ok', camera: 'laptop', offsetMs: 38.3, spreadMs: 51.2 },
+        LAPTOP,
+        { session: SESSION },
+      ),
+      at(
+        t0 + 2 * MIN,
+        'sync.check',
+        { outcome: 'ok', camera: 'phone-rear', offsetMs: 112.4, spreadMs: 9.5, remote: true },
+        LAPTOP,
+        { session: SESSION },
+      ),
+    ];
+    // Twenty attempts, a minute apart, each with the phone's two clips (its lag) and ten files up.
+    for (let k = 1; k <= 20; k++) {
+      const end = t0 + (2 + k) * MIN;
+      events.push(
+        clip(end + 3000, k, 'scramble', { syncResidualMs: 112.4 }),
+        clip(end + 4000, k, 'solve', { syncResidualMs: 112.4 }),
+        done(end + 4200, k, 4),
+        at(end + 40_000, 'upload.state', { state: 'done', files: 10 }, LAPTOP, scope(k)),
+      );
+    }
+    // The clock sync's minute records: converged for 25 minutes.
+    for (let m = 1; m <= 25; m++) {
+      events.push(
+        at(
+          t0 + 12_000 + m * MIN,
+          'rtc.clock',
+          { camera: 'phone-rear', why: 'minute', converged: true },
+          LAPTOP,
+        ),
+      );
+    }
+    events.push(
+      // The viewer, and Download: four clips, their frame times, gyro.json and attempt.json.
+      at(t0 + 26 * MIN, 'clips.viewed', { clips: 4, local: 4, gyro: true }, LAPTOP),
+      at(t0 + 26 * MIN + 5000, 'files.downloaded', { what: 'clips', files: 10 }, LAPTOP),
+      // The live preview off for a minute, then on.
+      at(t0 + 27 * MIN, 'settings.changed', { key: 'livePreviewFromPhones', value: false }),
+      at(t0 + 27 * MIN + 300, 'preview.stopped', { why: 'off', seconds: 1600 }, PHONE),
+      at(t0 + 28 * MIN, 'settings.changed', { key: 'livePreviewFromPhones', value: true }),
+      at(t0 + 28 * MIN + 300, 'preview.started', { width: 1920, height: 1080, scale: 5 }, PHONE),
+      // A walk out of reach right after attempt 21: back 40 s later, its clip resumed.
+      done(t0 + 30 * MIN - 10_000, 21, 2),
+      at(t0 + 30 * MIN, 'rtc.disconnected', { reason: 'the connection failed' }, LAPTOP),
+      at(t0 + 30 * MIN + 40_000, 'rtc.connected', { reconnection: true }, LAPTOP),
+      clip(t0 + 30 * MIN + 43_000, 21, 'solve', { resumedBytes: 1_310_720 }),
+      // The Wi-Fi off for three minutes after attempt 22: given up, back, late.
+      at(
+        t0 + 33 * MIN,
+        'remote.clip.missing',
+        { camera: 'phone-rear', segment: 'solve', reason: 'wait', afterEndMs: 120_000 },
+        LAPTOP,
+        scope(22),
+      ),
+      at(t0 + 33 * MIN + 30_000, 'rtc.disconnected', { reason: 'the connection failed' }, LAPTOP),
+      at(t0 + 34 * MIN, 'rtc.connected', { reconnection: true }, LAPTOP),
+      clip(t0 + 34 * MIN + 5000, 22, 'solve', { late: true }),
+      at(
+        t0 + 34 * MIN + 5000,
+        'remote.clip.late',
+        { camera: 'phone-rear', segment: 'solve', afterEndMs: 185_000, afterMissedMs: 65_000 },
+        LAPTOP,
+        scope(22),
+      ),
+      // New session 1.5 s after attempt 30's end: its solve clip comes 3 s after, then the phone
+      // is let go, and paired again to the new session.
+      at(t0 + 40 * MIN + 1500, 'session.started', { hardware: '0.5' }, LAPTOP, {
+        session: NEXT,
+      }),
+      clip(t0 + 40 * MIN + 4500, 30, 'solve'),
+      done(t0 + 40 * MIN + 4700, 30, 4),
+      at(t0 + 40 * MIN + 4800, 'rtc.disconnected', { reason: 'the session ended' }, LAPTOP),
+      at(t0 + 42 * MIN, 'rtc.paired', { peer: 'ThinkPhone', camera: 'phone-rear' }, LAPTOP, {
+        session: NEXT,
+      }),
+      // The second phone, in the new session: six clips an attempt, fourteen files.
+      at(t0 + 43 * MIN, 'rtc.paired', { peer: 'Moto g60', camera: 'phone-rear-2' }, LAPTOP, {
+        session: NEXT,
+      }),
+      at(t0 + 43 * MIN + 200, 'rtc.paired', { host: 'office-mbp' }, MOTO),
+      done(t0 + 45 * MIN, 1, 6, NEXT),
+      at(
+        t0 + 45 * MIN + 40_000,
+        'upload.state',
+        { state: 'done', files: 14 },
+        LAPTOP,
+        scope(1, NEXT),
+      ),
+    );
+    return events;
+  }
+
+  it('ticks the desk rig from both devices’ events: paired, both checks, three solves, the viewer, the preview, twenty minutes, a walk, the Wi-Fi off, New session, a second phone', () => {
+    const results = new Map(evaluate(rigDay(), NOW).map((item) => [item.id, item.result]));
+    const status = (id: string): string | undefined => results.get(id)?.status;
+    const facts = (id: string): string => results.get(id)?.facts ?? '';
+
+    expect(status('4.4.1')).toBe('ok');
+    expect(facts('4.4.1')).toBe(
+      '3 pairings on office-mbp, 1 synced within five minutes, 12 s after the pairing, round trip 6.2 ms (medians); 2 live previews on ThinkPhone sent',
+    );
+    expect(status('4.4.2')).toBe('ok');
+    expect(facts('4.4.2')).toBe(
+      "both passed in 1 session: the MacBook's camera lags 38.3 ms (±51.2), the phone's 112.4 ms (±9.5) (medians)",
+    );
+    expect(status('4.4.3')).toBe('ok');
+    expect(facts('4.4.3')).toBe(
+      "21 attempts in one session with four clips or more and nothing left to come (4.2 s after the end, median); 40 remote clips on office-mbp with the phone's lag; 21 uploads on office-mbp with every file",
+    );
+    expect(status('4.4.4')).toBe('ok');
+    expect(facts('4.4.4')).toBe(
+      '1 viewing on office-mbp of four clips or more; 1 download on office-mbp of nine files or more (10)',
+    );
+    expect(status('4.4.5')).toBe('ok');
+    expect(facts('4.4.5')).toBe(
+      '1 switch on office-mbp off, 1 preview on ThinkPhone stopped by it, 1 preview on ThinkPhone started again after one',
+    );
+    expect(status('4.4.6')).toBe('ok');
+    expect(facts('4.4.6')).toBe(
+      'the clock sync converged for 25 minutes at the longest, 0 withdrawals; 20 of the 20 attempts in that stretch with four clips or more',
+    );
+    expect(status('4.4.7')).toBe('ok');
+    expect(facts('4.4.7')).toBe(
+      '2 reconnections on office-mbp, 35 s after the drop (median), 2 followed by a clip within two minutes; 1 clip on office-mbp resumed in the middle of a file',
+    );
+    expect(status('4.4.8')).toBe('ok');
+    expect(facts('4.4.8')).toBe(
+      "1 clip on office-mbp given up after the two minutes, 1 late clip on office-mbp attached 185 s after the attempt's end (median), 1 once the phone was back",
+    );
+    expect(status('4.4.9')).toBe('ok');
+    expect(facts('4.4.9')).toBe(
+      "1 clip of an ended session stored after New session, 3 s after it (median); 1 camera let go once the session's clips were in, 0 after the 15 s; 1 paired again within half an hour",
+    );
+    expect(status('4.4.10')).toBe('ok');
+    expect(facts('4.4.10')).toBe(
+      '1 second camera on office-mbp paired (phone-rear-2); 1 real attempt on office-mbp with six clips or more; 1 upload on office-mbp with every file',
+    );
+
+    // None of it without the events.
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result.status]));
+    for (const id of CHECKLIST.map((item) => item.id).filter((id) => id.startsWith('4.4.'))) {
+      expect(empty.get(id), id).toBe('none');
+    }
+  });
+
+  it('marks a phone check that only failed, and a phone let go before its last clips; leaves short stretches, too few solves and a download of the laptop’s clips alone', () => {
+    const resultOf = (events: ReportEvent[], id: string) =>
+      evaluate(events, NOW).find((item) => item.id === id)?.result;
+
+    // The phone's check failed, never passed: ❗.
+    const checkFailed = rigDay().map((e) =>
+      e.kind === 'sync.check' && e.data['remote'] === true
+        ? {
+            ...e,
+            data: {
+              ...e.data,
+              outcome: 'failed',
+              reason: 'no-motion',
+              message: 'the camera saw no motion inside the rectangle',
+            },
+          }
+        : e,
+    );
+    expect(resultOf(checkFailed, '4.4.2')).toEqual({
+      status: 'failed',
+      facts:
+        "both passed in 0 sessions: the MacBook's camera lags ? ms (±?), the phone's ? ms (±?) (medians); 1 failed check on office-mbp of a phone's camera: the camera saw no motion inside the rectangle",
+    });
+
+    // New session let the phone go after the 15 s, its last clip given up: ❗.
+    const lost = rigDay()
+      .filter((e) => !(e.kind === 'remote.clip' && e.attempt === 30))
+      .map((e) =>
+        e.kind === 'rtc.disconnected' && e.data['reason'] === 'the session ended'
+          ? {
+              ...e,
+              data: { reason: 'the session ended; its last clips did not come within 15 s' },
+            }
+          : e,
+      );
+    expect(resultOf(lost, '4.4.9')?.status).toBe('failed');
+    expect(resultOf(lost, '4.4.9')?.facts).toContain('0 clips of an ended session');
+
+    // Ten minutes converged, two solves, a download of five files: not yet.
+    const short = rigDay().filter(
+      (e) => !(e.kind === 'rtc.clock' && e.tsMs > NOW - 5 * HOUR + 11 * 60_000),
+    );
+    expect(resultOf(short, '4.4.6')).toEqual({
+      status: 'none',
+      facts:
+        'the clock sync converged for 10 minutes at the longest, 0 withdrawals; 8 of the 8 attempts in that stretch with four clips or more',
+    });
+    const twoSolves = rigDay().filter(
+      (e) => !(e.kind === 'attempt.done' && e.session === SESSION && (e.attempt ?? 0) > 2),
+    );
+    expect(resultOf(twoSolves, '4.4.3')?.status).toBe('none');
+    const laptopOnly = rigDay().map((e) =>
+      e.kind === 'files.downloaded' ? { ...e, data: { what: 'clips', files: 6 } } : e,
+    );
+    expect(resultOf(laptopOnly, '4.4.4')).toEqual({
+      status: 'none',
+      facts: 'viewed, but no download of nine files or more',
+    });
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });

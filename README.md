@@ -5,14 +5,14 @@ Cubeast: it shows a scramble, follows the cube while you scramble it, starts the
 first turn, stops it when the cube is solved, and breaks each solve into its CFOP phases. Its side
 effect is a dataset: every attempt is kept with its scramble, every move on the device's clock and
 on the cube's, its phases and, with the device's camera on, two video clips of it in sync with the
-moves. Signed in, the sessions of every device end up in one dataset in the cloud; the later phases
-of the [plan](docs/PLAN.md) add phones as extra cameras.
+moves. Signed in, the sessions of every device end up in one dataset in the cloud, and a phone can
+film a laptop's session as a second camera, from another angle.
 
-**Status:** version 0.3.0: phase 3 (the cloud: an optional account, the session index, the uploads,
-the cubes' MAC addresses on every device) on top of phases 1 (the timer) and 2 (the device's own
-camera), before the owner's third test round, on two devices with one account
-([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), Round 3). What each version does is listed in
-[`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+**Status:** version 0.4.0: phase 4 of the [plan](docs/PLAN.md) (remote cameras: a phone signed in to
+the same account joins a laptop's session by a QR code, and its clips of each attempt come into the
+attempt on the laptop's clock) on top of phases 1 (the timer), 2 (the device's own camera) and 3
+(the cloud), before the owner's round on the desk rig ([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md),
+"After T4"). What each version does is listed in [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 ## Use it
 
@@ -227,6 +227,134 @@ tap it to make it the main picture, and the laptop's tile to swap back; without 
 the phone's picture is the main one. Camera settings → Cameras → "Live preview from phones" (on by
 default) turns it off.
 
+## The desk rig
+
+The owner's rig at his desk (phase 4): the MacBook hosts the session with its own camera and the GAN
+12 ui, the ThinkPhone films from another angle as `phone-rear`, and a second phone, when one is at
+hand, as `phone-rear-2`. [`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), "After T4", goes through
+the whole rig once as a checklist.
+
+**Before pairing.** Both devices on one Wi-Fi (the home network: a guest network that keeps its
+devices apart does not connect them), signed in to the same account, and the phone plugged in. Each
+device goes by its name, Settings → This device: the MacBook lists a phone by it and tells two phones
+apart by it, so a second phone needs a name other than the first's (every phone starts as "Android
+phone"). On the MacBook, connect the cube (the session begins with it) and turn the camera on.
+
+**Pair the phone.** On the MacBook, Camera settings → Cameras → Add camera shows a QR code, its link
+and its 8-character code, "Good for 10 min, for one phone". Scan the QR code with the phone's camera
+app: cubetrace's Camera page opens there (in Chrome, or in the installed app), asks once for the
+camera, the rear one, and the microphone, and connects: its line says "Connected · <the MacBook's
+name> (macOS)", and its Clock line "syncing · …", then "synced · round trip … · offset …". Without
+the camera app, open https://shermam.github.io/cubetrace/camera on the phone and type the code (in
+any case, with or without the space). The MacBook lists the phone with its name, `phone-rear`,
+"connected for …", its picture every 2 s, what it reports ("recording · 29.9 fps · sharpness … ·
+framing … · battery …") and the clock sync, "syncing · n samples · round trip …" until "synced ·
+round trip … · offset … · drift … ppm": within seconds on a quiet Wi-Fi (10.5 to 12 s in a simulation
+of the owner's, `docs/RTC.md` §4). On a busy Wi-Fi, or with the phone saving power on it, the sync
+may stay syncing: the clips are cut all the same, their windows widened by the clock estimate's
+margin (half a second or more on each side), and the records say the sync had not converged.
+
+**Where to put the phone.** On a stand (a tripod with a phone clamp), at an angle the MacBook's
+camera does not have: from above, which sees every face as it turns, or from the side at about 45°,
+which sees the hands' grip; mark the stand's place on the desk, so that the next sessions look the
+same. On the phone's Camera page, Camera settings → Edit the framing: drag its framing rectangle
+around the cube and the hands, as on the MacBook (its sharpness meter measures inside it, and its
+sync check watches it). The phone's picture is a tile in the top right corner of the MacBook's
+preview on the Timer page ("Live preview from phones", on by default): keep the cube inside the
+rectangle on both pictures while scrambling and solving. A tap on the tile makes the phone's picture
+the main one, and a tap on the MacBook's tile swaps them back.
+
+**The lamp.** Light makes sharp frames: in a bright scene the camera exposes each frame for less
+time, so a fast turn blurs less. A desk lamp with a diffuser, aimed at the cube and the hands from
+beside the cameras, until both sharpness meters say good (the MacBook's in the line under its
+preview, the phone's on its Camera page and in its report on the MacBook). The light must be steady:
+a lamp that flickers with the mains (some LED bulbs and dimmers pulse at twice its 50 or 60 Hz) makes
+the picture's brightness pulse from frame to frame, or roll through it in bands. The sync check
+counts a pixel as moving only when its brightness changes by more than 12 levels, which a faint
+flicker never does, but a flicker strong enough to see moves whole bands by more than that, which
+the check takes for motion; if bands roll through either picture, change the bulb, or turn the
+dimmer to full.
+
+**The sync checks.** Each camera has its own (Recording, above). The MacBook's is due by itself
+before the first scramble of each session; a phone's never is: start it from its line under the
+MacBook's preview ("Sync: phone-rear has no check in this session", then Sync check) once the
+phone's framing rectangle is drawn. Both go alike: hold the cube still in front of the cameras, then
+flick one face and back, five times. "Camera lags the cube by X ms (±Y)", or "phone-rear lags the
+cube by X ms (±Y)": X is how much later a turn shows in that camera's frames than the cube reports
+it, for the phone on the MacBook's clock once its frames' times are converted (so its delivery and
+the clock sync's error are in it), and the camera's later clips keep it as their `syncResidualMs`,
+for the training to subtract; Y is the range of the lags kept, and a check fails over 50 ms plus a
+frame (83 ms at 30 fps). Measured so far (`docs/DEVICES.md`): the MacBook's FaceTime camera about 20
+to 40 ms (19 and 38 ms in round 2), a USB webcam far more (the Logitech C930e: 177 ms, ±12); a
+phone's lag is the "After T4" round's to measure. A new session needs its checks again.
+
+**Each attempt.** Solve as usual. The MacBook cuts its own two clips a second or so after each
+segment ends and asks the phone for its two at the same moments: the phone's Clips line says "1 clip
+waits for the host; kept on this phone until it has them" until the clip is across, then "each
+attempt’s clips go to the host as they are cut" again (a clip took 1.8 s at the median and 8 s at
+most on the owner's Wi-Fi, `docs/DEVICES.md`), and the MacBook's report line counts the clips to send
+meanwhile. The attempt then has four clips, which its badge counts and the clip viewer names by
+camera: `laptop.scramble.mp4`, `laptop.solve.mp4`, `phone-rear.scramble.mp4` and
+`phone-rear.solve.mp4`, each with its frames file. Signed in, it uploads once the phone's clips are
+in: ten files with the cube's `gyro.json` (nine for a cube without a gyroscope), each a file of the
+day's quota (Cloud, below). A phone that misses a clip (out of reach, its Wi-Fi off) never holds an
+attempt back: two minutes after the attempt's end it goes without that clip, the session's notes
+saying which is missing, and a clip that comes later is added and uploaded then.
+
+**Ending a session.** New session lets the phones go, once their last clips are in: right after a
+solve, the MacBook lists the phone as "waiting for the phone's last clips (n)" for a few seconds (15 s
+at most), its clips go into the attempt just ended, and the phone says the host let it go. A phone
+belongs to the session it was paired in, so the next session needs Add camera again (on the phone,
+Join again with the new code, or the new QR code scanned). A reload of the MacBook's page needs a new
+code too, and the phone, paired again to the same session, first offers the clips the MacBook did not
+get. Leave on the phone, or Remove on the MacBook, part them at once; a connection that drops is made
+again by itself within five minutes, without a new code.
+
+**A second phone**, with a name of its own (Before pairing, above), pairs with a second Add camera
+while the first is connected: it is listed as `phone-rear-2`, with a tile of its own over the
+preview and a sync check of its own, and each attempt then has six clips and uploads fourteen files
+(with `gyro.json`).
+
+**What the records hold.** A phone's camera is a camera of the session like the MacBook's: its entry
+in `session.json`'s `cameras` names the phone (`remote`: its name and platform), its clock sync is in
+`clock.cameras["phone-rear"].remote` beside its sync check's lag, and each of its clips' frames files
+keeps the phone's own time of the first frame (`t0RemoteMs`) beside the MacBook's (`t0HostMs`), with
+the clock estimate that converted it (`remote`): [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) §5, §6,
+§7 and §9.
+
+## Known limitations
+
+Open in [`docs/PLAN.md`](docs/PLAN.md)'s follow-ups, or waiting for measurements:
+
+- A capture worker made after the laptop or the phone slept may count time apart from its page by
+  the length of the sleep (each has its own time origin, and the monotonic clock stops in sleep), so
+  that its clips' frame times are off by that much, which a sync check then reports as "frame times
+  are off by … s: the frame clock is wrong": reload the page after a sleep (follow-up (a)).
+- A change of video quality, Record audio or Microphone during an attempt starts the recording again
+  and empties its memory, so that attempt's clips begin late, marked so: change them between
+  attempts (follow-up (c)).
+- The clips keep the whole frame, the framing rectangle being metadata: recording only the rectangle
+  (crop at the source), the biggest saving left on their size, is not built (follow-up (d)).
+- The clip viewer's drag turns cubing.js's camera about the cube, which stops at the poles and never
+  rolls, so some orientations of the cube cannot be reached by dragging (issue #57, follow-up (f)).
+- The diagnostics can lose the events of the last seconds before a reload or a closed tab (follow-up
+  (h)), a setting changed right before one among them, or the wake lock's or the storage
+  persistence's change; and a switch toggled before the account is attached waits in memory, which
+  turning Diagnostics off then clears (follow-up (i)).
+- "attempt N could not be indexed: Missing or insufficient permissions" can still come into a
+  session's notes when an older attempt is saved again in a later page load (a phone's clip that came
+  after the MacBook's page reloaded): the attempt's document in the index then misses that change
+  (follow-up (n)).
+- An update whose reader adds a field to the records makes the uploads sign each older attempt's
+  `attempt.json` once more, at the next load of its session, a file of the day's quota each
+  (follow-up (o)).
+- The clock sync's convergence rule was set from the owner's home Wi-Fi as measured before T4.2b and
+  from simulations: whether a pairing there stays synced for twenty minutes is the "After T4" round's
+  to tell (issue #61); "synced" coming and going costs the clips nothing.
+- Measurements still to come from that round (`docs/DEVICES.md`, Remote cameras): the Wi-Fi's round
+  trips since T4.2b, a phone camera's lag, the transfer of the clips, what the live preview costs the
+  ThinkPhone's recording, and its warmth after twenty minutes.
+
 ## Cloud
 
 An account is optional. Signed in, the sessions of all your devices end up in one dataset: an index
@@ -260,8 +388,9 @@ sends it once the network is back:
   opens the same on every device.
 
 **What uploads.** Each attempt of a real cube's session, once it is over and its clips are saved:
-its `attempt.json` (with the moves), each clip's MP4 and frame times, and the session's
-`session.json` (again when it changes, once the session has been quiet for two minutes), into the
+its `attempt.json` (with the moves), each clip's MP4 and frame times (a paired phone's too), its
+`gyro.json`, and the session's `session.json` (again when it changes, once the session has been
+quiet for two minutes), into the
 bucket under `users/<your id>/sessions/<session id>/`. The files go two at a time, each through a
 URL that the account's Cloud Functions sign for its exact size and type, valid 15 minutes; a failure
 is tried again after 1 s, 2 s, 4 s, … up to 5 minutes, and a file the bucket refuses waits for
@@ -290,9 +419,10 @@ copies, on by default on a laptop and off on a phone, keeps the clips on the dev
 uploaded: off, an attempt's clips are deleted from it once all its files are uploaded (its
 `attempt.json` and frame times stay, and the clip says "in the cloud"). In any case, once the
 browser's storage is 70% full, the oldest uploaded clips are deleted until it is under 60%. Each
-account may have 6 GB and 1,200 files signed per UTC day, every signature counted: at most 200 attempts
-with their clips and gyro files (six files each: `attempt.json`, two MP4s, two frames files and
-`gyro.json`); past it, the uploads wait for the next UTC day, and the panel says until when.
+account may have 15 GB and 3,000 files signed per UTC day, every signature counted: at most 500
+attempts with their clips and gyro files (six files each: `attempt.json`, two MP4s, two frames files
+and `gyro.json`), 300 with a paired phone's clips too (ten files each); past it, the uploads wait for
+the next UTC day, and the panel says until when.
 
 **Whose cloud.** The account, the index and the bucket are the owner's: the Firebase project
 `cubetrace-cacd9` (Authentication with Google, Firestore in `nam5`, the Cloud Functions in
@@ -374,6 +504,8 @@ apps/web/          the Angular app (standalone components, signals, SCSS, PWA); 
 packages/core/     @cubetrace/core: notation, cube simulator, scrambles, CFOP phases, attempt state machine, records, statistics, JSON Schemas
 packages/gan/      @cubetrace/gan: GAN Bluetooth driver wrapper, Bluetooth support check, fake cube
 packages/storage/  @cubetrace/storage: the session store over the origin private file system
+packages/upload/   @cubetrace/upload: the upload queue (phase 3): the attempts' files into the bucket through
+                   signed URLs, retried and resumed, its state in uploads.json
 packages/rtc/      @cubetrace/rtc: the connection to a remote camera (phase 4): the data channel's protocol, the
                    file transfer, the clock sync's pings, the pairing token, the signaling over Firestore
 packages/capture/  @cubetrace/capture: the camera and the recording
@@ -397,6 +529,10 @@ The packages are plain TypeScript, tested in Node, and never import Angular.
 - [`docs/PLAN.md`](docs/PLAN.md): phases, tasks and acceptance criteria
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): modules and their contracts
 - [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md): the JSON the app produces
+- [`docs/RTC.md`](docs/RTC.md): the remote cameras' connection: the protocol, the transfer, the clock
+  sync, the signaling and the failure modes
+- [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md): the app's events in the account, and the round report
+  that reads the manual checklists from them
 - [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md): versions, commands and toolchain decisions
 - [`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md): checks that need a real cube or phone
 - [`docs/DEVICES.md`](docs/DEVICES.md): what the owner's devices and their cameras can do, measured
@@ -420,9 +556,13 @@ The packages are plain TypeScript, tested in Node, and never import Angular.
   the cameras (`cameras`: label, facing, the browser's settings, capabilities and constraints, the
   framing) and their sync checks (`clock.cameras`). Each clip's `<camera>.<segment>.frames.json`
   gives the host time of its first frame (`t0HostMs`) and the interval before each of the others
-  (`dtMs`, from the frames' own timestamps), and its keyframes. Records of version 1 (written by
-  0.1.0) are read as version 2 and never rewritten; [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) has
-  every field.
+  (`dtMs`, from the frames' own timestamps), and its keyframes. Later versions added optional fields
+  only: the cube's whole record (0.4.0, T3.7: a `gyro.json` per attempt, each move's counter, the
+  resyncs, the battery, the build in every file) and a paired phone's camera (0.4.0, phase 4: its
+  entry with `remote`, its clock sync in `clock.cameras[label].remote`, and in its clips' frames
+  files the phone's own time, `t0RemoteMs`, with the clock estimate, `remote`). Records of version 1
+  (written by 0.1.0) are read as version 2 and never rewritten; [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)
+  has every field.
 - **Fixtures.** `fixtures/solves.json` holds 300 real solves from the owner's Cubeast export: the
   scramble, the scrambled state, the raw move stream on the cube's clock, and Cubeast's results and
   phase times. `fixtures/identities.json` holds reference cube states for the simulator's tests. A

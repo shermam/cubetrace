@@ -321,18 +321,19 @@ means to join, and that the host wants it now.
 ## 6. The records (`docs/DATA-MODEL.md` §6, §10)
 
 The schemas stay at version 2 with new optional fields, as T3.7's: in `session.json` a camera's
-`local` may be false, and then `remote: {label, platform}` names the device it runs on (its host label
-and platform, as its own records have them); a camera clock may carry `remote`, the clock fit's
-record above, beside the clapperboard's result (`rttMs` and `driftPpm` repeat the fit's; the lag of
-the phone's own sync check since T4.3, §10, `docs/DATA-MODEL.md` §6 says what it means). The host
-gives a remote camera its label with `labelFor`, as any camera (`phone-rear`, a second phone
-`phone-2-rear`); its clips are `video[]` entries like any other, named after it. In Firestore the
-session's document gains `pairing`, the peer documents and their candidates get schemas of their own
-(`cloud-peer.schema.json`, `cloud-candidate.schema.json`) and readers (`parseCloudPeer`,
-`parseCloudCandidate`, `parseSessionPairing`), and the rules open all of it to the session's owner
-alone. Since T4.2 the `remote` record of a camera clock may say `converged`: false for the estimate
-a first cut relied on before the fit converged (§9), true once it did; a remote camera's frames file
-keeps the phone's first frame time as `t0RemoteMs` and the estimate that converted it as `remote`
+`local` may be false, and then `remote: {label, platform}` names the device it runs on (its host
+label and platform, as its own records have them); a camera clock may carry `remote`, the clock
+fit's record above, beside the clapperboard's result (`rttMs` and `driftPpm` repeat the fit's; the
+lag of the phone's own sync check since T4.3, §10, `docs/DATA-MODEL.md` §6 says what it means). The
+host gives a remote camera its label with `labelFor`, as any camera (`phone-rear`, a second phone
+`phone-rear-2`, two phones told apart by their host labels); its clips are `video[]` entries like
+any other, named after it. In Firestore the session's document gains `pairing`, the peer documents
+and their candidates get schemas of their own (`cloud-peer.schema.json`,
+`cloud-candidate.schema.json`) and readers (`parseCloudPeer`, `parseCloudCandidate`,
+`parseSessionPairing`), and the rules open all of it to the session's owner alone. Since T4.2 the
+`remote` record of a camera clock may say `converged`: false for the estimate a first cut relied on
+before the fit converged (§9), true once it did; a remote camera's frames file keeps the phone's
+first frame time as `t0RemoteMs` and the estimate that converted it as `remote`
 (`docs/DATA-MODEL.md` §9): since T4.3 the estimate of its cut, its `offsetMs` the one applied at the
 first frame.
 

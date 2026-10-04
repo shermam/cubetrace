@@ -2501,6 +2501,22 @@ rounds of T4.1–T4.3 found something small.
 
 **Acceptance.** Everything green; the owner creates the release.
 
+**Outcome (2026-10-04).** As contracted, PR #66. `README.md` has "The desk rig" (pairing, the
+phone's place and framing, the lamp, the sync checks with the lags measured so far, what an attempt
+and a session's end bring, a second phone, the records) and "Known limitations" (follow-ups (a),
+(c), (d), (f), (h), (i), (n), (o), #61, the cells of `docs/DEVICES.md`). The read-through against
+the code fixed `docs/DATA-MODEL.md` (the clock record's `samples` are the band and at least the ten
+least round trips since T4.2b, not "within 1.5× the least"; nothing deletes the peer documents
+"after an hour"; the example of a session with a phone's camera; ten files with a phone's clips),
+`docs/ARCHITECTURE.md` (phase 4's events in the diagnostics' diagram, `files.downloaded`, the clip
+converted at its cut, the uploads with a phone's clips, the cloud project's pairing), `docs/RTC.md`
+(a second phone is `phone-rear-2`; the decisions above still say `phone-2-rear` and "after an
+hour") and the quota of before 2026-10-03 in the README and round 3. `docs/MANUAL-TESTS.md` "After
+T4" (ten items, a second phone if at hand) with items 4.4.1–4.4.10 in the round report and
+`docs/DIAGNOSTICS.md`; the CHANGELOG's 0.4.0 (T3.6 was in 0.3.0); versions 0.4.0 and the lockfile;
+the release and the round in `docs/USER-ACTIONS.md`. One change to the app: the clip viewer's
+Download line counted four clips as "both clips".
+
 ## Phase 5
 
 Outline only, written into a board when phase 4 ends: **Community** — the versioned consent flow

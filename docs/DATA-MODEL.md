@@ -214,7 +214,7 @@ when its Camera page opens.
   "schema": 2,
   "id": "3f1c…",                         // UUID
   "createdMs": 1730640000000.0,          // host clock at creation
-  "app": {"version": "0.2.0", "commit": "abc1234"},
+  "app": {"version": "0.4.0", "commit": "abc1234"},
   "host": {"label": "office-mbp", "userAgent": "…", "platform": "macOS", "isPhone": false},
   "cube": {"model": "GAN 12 ui FreePlay", "hardware": "…", "firmware": "…", "gyro": true,
            "productDate": null},        // T3.7: the production date, when the cube says it
@@ -238,7 +238,7 @@ when its Camera page opens.
                            "samples": [{"moveHostMs": 1730640010000.5, "onsetHostMs": 1730640010040.5}, …]},
                 "phone-rear": {"offsetMs": 63.0, "rttMs": 9.6, "driftPpm": 37.8,
                                "clapperboardResidualMs": 8.1, "clapperboardSamples": 8,
-                               "remote": {"offsetMs": -3127.4, "driftPpm": 37.8, "rttMs": 9.6, "samples": 58,
+                               "remote": {"offsetMs": 3127.4, "driftPpm": 37.8, "rttMs": 9.6, "samples": 58,
                                           "residualP95Ms": 1.1, "since": 1730640000123.5,
                                           "converged": true}}}   // T4.0; converged: T4.2
   },
@@ -364,18 +364,20 @@ schema is unchanged). `rttMs` and `driftPpm` are the round-trip time and the dri
 camera's clock sync (phase 4); a local camera shares the host's clock and has 0 for both. Since T4.0
 a remote camera's entry carries the clock sync itself in `remote` (`docs/RTC.md` §4, `RemoteClockFit`
 in `packages/core/src/remote-clock.ts`), as it was when the record was written: `offsetMs`, the
-phone's clock minus the host's, in ms (`remoteMs ≈ hostMs + offsetMs`); `driftPpm`, how fast that
-offset grows, in parts per million (50 ppm is 3 ms a minute; 0 before the samples spanned a minute);
-`rttMs`, the least round trip of the samples the estimate stands on; `samples`, how many they are
-(the samples of the window whose round trip was within 1.5× the least); `residualP95Ms`, the 95th
-percentile of the absolute residuals of their offsets from the estimate; `since`, the host time
-of the oldest of them; and, since T4.2, `converged`, whether the fit had converged when the record
-was written: true at the convergence and in the records of each minute after it (T4.1), false for
-the estimate a remote camera's first cut relied on when it went before (T4.2, `docs/RTC.md` §9: the
-cuts never wait for the fit to converge, which a busy Wi-Fi may never let it do), which the
-convergence overwrites; absent from the records written before T4.2, which were all written at
-convergence. The entry's own `rttMs` and `driftPpm` repeat the fit's. A remote camera's `offsetMs`
-is the lag its own sync check measured (T4.3, `docs/RTC.md` §10), 0 with the other clapperboard
+phone's clock minus the host's, in ms (`remoteMs ≈ hostMs + offsetMs`), at the newest sample;
+`driftPpm`, how fast that offset grows, in parts per million (50 ppm is 3 ms a minute; 0 before the
+samples spanned a minute); `rttMs`, the least round trip of the samples the estimate stands on;
+`samples`, how many they are (the samples of the last two minutes kept: those within 1.5 times the
+least round trip or 3 ms over it, and at least the 10 of least round trip, `docs/RTC.md` §4; before
+T4.2b, the band alone of the last 60 samples); `residualP95Ms`, the 95th percentile of the absolute
+residuals of their offsets from the estimate; `since`, the host time of the oldest of them; and,
+since T4.2, `converged`, whether the fit had converged when the record was written: true at the
+convergence and in the records of each minute after it (T4.1), false for the estimate a remote
+camera's first cut relied on when it went before (T4.2, `docs/RTC.md` §9: the cuts never wait for
+the fit to converge, which a busy Wi-Fi may never let it do), which the convergence overwrites;
+absent from the records written before T4.2, which were all written at convergence. The entry's
+own `rttMs` and `driftPpm` repeat the fit's. A remote camera's `offsetMs` is the lag its own sync
+check measured (T4.3, `docs/RTC.md` §10), 0 with the other clapperboard
 fields until that check: the check is the host's, on the cube's turns, with the motion measured by
 the phone's capture on its own frames inside the phone's framing rectangle, each frame's times put on
 the host clock through the clock sync before the turns are matched. So `offsetMs` is how far the
@@ -893,11 +895,12 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
   `upload` as it is. `path` is the file's name in the attempt's folder (`attempt.json`,
   `<camera>.<segment>.mp4`, `<camera>.<segment>.frames.json`, `gyro.json`), or `session.json`, the
   session's file, recorded on the attempt it was uploaded with; at most 33 files in one call. An
-  attempt with one camera and a gyroscope is six files (T3.7: `gyro.json` after the clips), plus
-  `session.json` now and then, each signature a file of the day's quota: with the 3,000 files a
-  day set on 2026-10-03 (1,200 before), at most 500 attempts with their clips and gyro files upload
-  in a day, fewer with `session.json` (the owner reached 1,199 files on 2026-10-03 with 171
-  attempts and the re-signatures of follow-up (g)).
+  attempt with one camera and a gyroscope is six files (T3.7: `gyro.json` after the clips), ten with
+  a paired phone's two clips and their frames files (T4.2), plus `session.json` now and then, each
+  signature a file of the day's quota: with the 3,000 files a day set on 2026-10-03 (1,200 before),
+  at most 500 attempts with their clips and gyro files upload in a day, 300 with a phone's, fewer
+  with `session.json` (the owner reached 1,199 files on 2026-10-03 with 171 attempts and the
+  re-signatures of follow-up (g)).
 - The objects are `users/{uid}/sessions/{id}/attempts/{index}/<path>`, and
   `users/{uid}/sessions/{id}/session.json` for the session's file, in the bucket of the configuration
   (`bucket/README.md`).
@@ -1012,8 +1015,12 @@ of the last days with the Admin SDK, past the rules (`npm run round-report`, `do
 The documents through which a phone joins a session as a remote camera (`docs/RTC.md` §5, `docs/PLAN.md`
 phase 4): the FirebaseRTC pattern, the offer and the answer in one document, the ICE candidates of
 each side in a subcollection under it. They are the account's own, never the dataset's (no file of §5
-holds them), and short-lived: the host deletes a peer's documents when the phone leaves, or after an
-hour.
+holds them), and short-lived: the host deletes a peer's documents whenever its connection with that
+phone ends (Leave, Remove, the session's end, a drop, after which the phone calls again with a new
+document), and those of a call it does not take (a wrong, stale or used token) as soon as it sees
+them. Nothing deletes them by age: the documents of a call that no host page took (the host's page
+gone) stay, an offer's until the next Add camera of that session, one the phone marked closed for
+good.
 
 ```jsonc
 // sessions/3f1c…                                       the session's document (above), plus:

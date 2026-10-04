@@ -5,8 +5,58 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-04
+
+Phase 4 of `docs/PLAN.md`: remote cameras. A phone signed in to the same account joins a laptop's
+session as a camera through a QR code: it films the cube from another angle with its own camera,
+cuts each attempt's two clips from its own memory when the laptop cuts its own, and sends them over
+a direct WebRTC connection on the Wi-Fi into the attempt's folder, their frame times placed on the
+laptop's clock, to be uploaded with the attempt; each phone has a sync check of its own and a live
+picture over the laptop's preview. With them come the follow-ups of phase 3: the cube's whole record
+(the gyroscope over each attempt, the moves' counters, the resyncs, the battery, the build in every
+file), a 3D cube in the clip viewer that follows the video, and the app's own diagnostics in the
+account, from which the manual rounds are now read. Deployed at
+https://shermam.github.io/cubetrace/; `README.md`, "The desk rig", sets the laptop and the phones
+up, and its "Known limitations" lists what is still open.
+
 ### Added
 
+- Remote cameras, the pairing and the connection (T4.1, phase 4; `docs/RTC.md` §8, `README.md`
+  "Remote cameras"): a phone films a session from another angle. On the host, Camera settings →
+  Cameras → Add camera publishes a one-time code (10 minutes, one phone) and shows it as a QR code
+  (drawn by the app, no dependency), a link and 8 characters to type; the Cameras section and the
+  connection's code load only then. On the phone, the new Camera page (`/camera`, from the QR's URL
+  or with the code typed or the link pasted; signed in to the same account, with Sign in there when
+  it is not) turns the rear camera on (a camera choice of its own, apart from the Timer page's),
+  runs the capture pipeline from the start, shows the preview with the framing rectangle, the
+  sharpness meter and the camera's controls, the host, the connection's state, the clock sync as the
+  host measures it, the battery and a thermal hint, keeps the screen on, reconnects by itself for
+  five minutes after a drop and then says the host is gone, and leaves with Leave (or when the page
+  goes). The host lists each phone with its name, its label in the session, its state (connected,
+  reconnecting for up to five minutes), the sync (syncing, or synced with the round trip, the offset
+  and the drift), what it reports (recording, frame rate, sharpness, framing, battery, a thermal
+  hint), a picture every 2 s, and Remove; the camera goes into `session.json`'s `cameras[]` with
+  `remote`, and its clock fit into `clock.cameras[<label>].remote` when it converges and every
+  minute after. A demo session pairs too: its document goes to the index for the pairing (its
+  attempts never). Diagnostics: `rtc.paired`, `rtc.connected`, `rtc.disconnected`, `rtc.clock`,
+  `rtc.failed` on both devices; the round report's "After T4.1" items.
+- Remote cameras' clips (T4.2, phase 4; `docs/RTC.md` §9): a phone paired as a camera records each
+  attempt. The host asks it for the scramble's and the solve's clips at the moments it cuts its own,
+  the window in the phone's clock through the clock sync's estimate, converged or not, widened by
+  half a second or more on each side; the phone cuts and keeps each clip until the host has it,
+  sends it over the data channel (resumed after a reconnection, offered again after a reload or a
+  new pairing to the same session), and the host writes it into the attempt's folder with its times
+  on the host clock: an attempt filmed by the laptop and the phone has four clips, uploaded
+  together. The attempt waits for the phone's clips up to two minutes after its end, then is
+  uploaded without them and the session's notes name the camera; a clip that comes later is added
+  and uploaded then. Camera settings → Cameras has "Record remote cameras" (on by default) and says
+  how many clips a phone still has to send; the phone's Camera page says how many wait. The clip
+  viewer names each clip's camera when an attempt has several, and the QA view counts the clips by
+  camera. The frames file of a phone's clip keeps the phone's own first frame time (`t0RemoteMs`)
+  and the clock estimate that converted it (`remote`), and `clock.cameras[<label>].remote` may say
+  `converged` false (schema 2, optional fields; `docs/DATA-MODEL.md` §6, §9). Diagnostics:
+  `remote.cut`, `remote.clip`, `remote.clip.late`, `remote.clip.missing`; the round report's "After
+  T4.2" items.
 - A paired phone's sync check, and its live picture over the host's preview (T4.3, phase 4;
   `docs/RTC.md` §10; issue #60). Under the Timer page's preview each phone has a line of its own
   ("Sync: phone-rear has no check in this session"), whose Sync check runs the laptop's check on the
@@ -20,87 +70,52 @@ versions follow [Semantic Versioning](https://semver.org/).
   live video while it comes and its latest thumbnail otherwise, with the phone's framing rectangle;
   a tap swaps it with the main picture, and with the host's camera off the first phone's picture is
   the main one. Camera settings → Cameras → "Live preview from phones" (on by default). Diagnostics:
-  `sync.check` says `remote` and the clock sync that placed the phone's frames, `remote.clip` the lag
-  its clip took, `preview.started` and `preview.stopped` what the preview cost the phone's recording;
-  the round report's "After T4.3" items.
-- Development (T4.3): the protocol's `sync-start`, `sync-stop`, `sync-motion`, `sync-meter`,
-  `sync-error` and `preview` (additive within version 1); rtc's `PREVIEW_ENCODING`,
-  `PreviewChannel`, `previewStats` and `WebRtcTransport`'s `preview` option (a send-only video
-  transceiver in the first offer, no renegotiation), `Transport.preview`; core's `RemoteClockLine` and
-  `RemoteClockFit.line()`; the app's `RemoteCameraRegistry`, `CameraDeviceSync`, `CameraDevicePreview`
-  and `RemotePreviews`; the end-to-end suite's synthetic camera and the demo cube's turns at given
-  times (`apps/web/e2e/helpers/remote.ts`); the remote specs wait for six seconds of the phone's
-  recording before an attempt (their "recording" matched "not recording"), and their reads of the
-  origin private file system, `uploads.spec.ts`'s too, try again while the app replaces a file.
-- Remote cameras' clips (T4.2, phase 4; `docs/RTC.md` §9): a phone paired as a camera now records
-  each attempt. The host asks it for the scramble's and the solve's clips at the moments it cuts its
-  own, the window in the phone's clock through the clock sync's estimate, converged or not (the first
-  real pairing's sync never converged on a home Wi-Fi), widened by half a second or more on each
-  side; the phone cuts and keeps each clip until the host has it, sends it over the data channel
-  (resumed after a reconnection, offered again after a reload or a new pairing to the same session),
-  and the host writes it into the attempt's folder with its times on the host clock: an attempt
-  filmed by the laptop and the phone has four clips, uploaded together. The attempt waits for the
-  phone's clips up to two minutes after its end, then is uploaded without them and the session's
-  notes name the camera; a clip that comes later is added and uploaded then. Camera settings →
-  Cameras has "Record remote cameras" (on by default) and says how many clips a phone still has to
-  send; the phone's Camera page says how many wait. The clip viewer names each clip's camera when an
-  attempt has several, and the QA view counts the clips by camera. The frames file of a phone's clip
-  keeps the phone's own first frame time (`t0RemoteMs`) and the clock estimate that converted it
-  (`remote`), and `clock.cameras[<label>].remote` may say `converged` false (schema 2, optional
-  fields; `docs/DATA-MODEL.md` §6, §9). Diagnostics: `remote.cut`, `remote.clip`,
-  `remote.clip.late`, `remote.clip.missing`; the round report's "After T4.2" items.
-- Development: `cut` names the camera's label and the attempt's `scrambleShown`, `cut-done` carries
-  what the phone's capture said of the clip, and `clip-ack` is new (additive within protocol version
-  1); core's `parseFrames`, `remoteFrames` and the fit's `least` and `rttP95Ms`; the capture's clip
-  worker can stage a clip under a folder of its own (`SaveClipParams.staging`); `writeAttemptFile`
-  takes bytes in parts; the end-to-end suite's `window.cubetraceE2eRemote` (development builds only)
-  moves a camera device's clock, cuts its connection once in the middle of a file, ignores its cuts
-  or shortens the host's wait.
-- Remote cameras, the pairing and the connection (T4.1, phase 4; `docs/RTC.md` §8, `README.md`
-  "Remote cameras"): a phone films a session from another angle. On the host, Camera settings →
-  Cameras → Add camera publishes a one-time code (10 minutes, one phone) and shows it as a QR code
-  (drawn by the app, no dependency), a link and 8 characters to type; the Cameras section and the
-  connection's code load only then. On the phone, the new Camera page (`/camera`, from the QR's URL
-  or with the code typed or the link pasted; signed in to the same account, with Sign in there when it
-  is not) turns the rear camera on (a camera choice of its own, apart from the Timer page's), runs the
-  capture pipeline from the start, shows the preview with the framing rectangle, the sharpness meter
-  and the camera's controls, the host, the connection's state, the clock sync as the host measures
-  it, the battery and a thermal hint, keeps the screen on, reconnects by itself for five minutes
-  after a drop and then says the host is gone, and leaves with Leave (or when the page goes). The
-  host lists each phone with its name, its label in the session, its state (connected, reconnecting
-  for up to five minutes), the sync (syncing, or synced with the round trip, the offset and the
-  drift), what it reports (recording, frame rate, sharpness, framing, battery, a thermal hint), a
-  picture every 2 s, and Remove; the camera goes into `session.json`'s `cameras[]` with `remote`, and
-  its clock fit into `clock.cameras[<label>].remote` when it converges and every minute after. A
-  demo session pairs too: its document goes to the index for the pairing (its attempts never).
-  Diagnostics: `rtc.paired`, `rtc.connected`, `rtc.disconnected`, `rtc.clock`, `rtc.failed` on both
-  devices. The clips of a remote camera come with T4.2, its sync check and live preview with T4.3.
-- Development: the `clock` message (host to phone) in the protocol; `CameraChoice.facing`;
+  `sync.check` says `remote` and the clock sync that placed the phone's frames, `remote.clip` the
+  lag its clip took, `preview.started` and `preview.stopped` what the preview cost the phone's
+  recording; the round report's "After T4.3" items.
+- Development (T4.0; `docs/RTC.md`): the groundwork of the remote cameras, the package
+  `@cubetrace/rtc` with the data channel's protocol (versioned `hello`, pings, the camera's state
+  and thumbnails, cuts, the file messages, `leave`; JSON control frames and binary chunk frames),
+  the chunked file transfer (64 KB chunks paced by the channel's buffered amount under a 256 KB
+  threshold, acknowledged every megabyte, resumed from the receiver's offset after a reconnection,
+  the whole file checked by CRC-32 at the end), the clock sync's pings over core's new
+  `RemoteClockFit` (the offset from the samples of least round trip, a drift fit once they span a
+  minute, `toHostMs`/`toRemoteMs`, a convergence rule), the pairing token (8 characters of
+  Crockford's base32 in the QR's URL, stored as its SHA-256), the signaling over Firestore
+  (`FirestoreSignaling` on the account backend's new calls) and `WebRtcTransport` on
+  `RTCPeerConnection` with Google's STUN server and ICE restart; `MemoryTransport`,
+  `MemorySignaling` and `FakeTimers` for the tests. `session.json` keeps schema 2 with optional
+  fields: a camera's `local` may be false, with `remote` naming its device, and a camera clock may
+  carry `remote`, the fit's record (`docs/DATA-MODEL.md` §6). In Firestore, the session's document
+  gains `pairing`, the peer documents and their candidates get their schemas, readers and rules
+  (owner-only, shapes checked; §10), and `AccountBackend` gains `writePairing`, `createPeer`,
+  `updatePeer`, `deletePeer`, `watchPeers`, `watchPeer`, `addCandidate` and `watchCandidates` in the
+  SDK and both fakes.
+- Development (T4.1): the `clock` message (host to phone) in the protocol; `CameraChoice.facing`;
   `FramingEditor` and `SharpnessMeter` as components of their own; `openMicrophone` shared by both
   recordings; the camera device's seams in `apps/web/src/app/rtc/`; the end-to-end suite's signaling
   over a `BroadcastChannel` (`apps/web/e2e/helpers/signaling.ts`) and its two pairing flows, the
   fast one on the loopback interface and the cloud one through the Firestore emulator; the QR
   encoder's test reads its codes back with `jsqr` (a devDependency).
-- Development: the groundwork of the remote cameras (T4.0, phase 4; `docs/RTC.md`), which no page
-  uses yet: the package `@cubetrace/rtc` with the data channel's protocol (versioned `hello`, pings,
-  the camera's state and thumbnails, cuts, the file messages, `leave`; JSON control frames and binary
-  chunk frames), the chunked file transfer (64 KB chunks paced by the channel's buffered amount under
-  a 256 KB threshold, acknowledged every megabyte, resumed from the receiver's offset after a
-  reconnection, the whole file checked by CRC-32 at the end), the clock sync's pings over core's new
-  `RemoteClockFit` (the offset from the samples of least round trip, a drift fit once they span a
-  minute, `toHostMs`/`toRemoteMs`, convergence under 3 ms of spread), the pairing token (8 characters
-  of Crockford's base32 in the QR's URL, stored as its SHA-256), the signaling over Firestore
-  (`FirestoreSignaling` on the account backend's new calls) and `WebRtcTransport` on
-  `RTCPeerConnection` with Google's STUN server and ICE restart; `MemoryTransport`, `MemorySignaling`
-  and `FakeTimers` for the tests. `session.json` keeps schema 2 with optional fields: a camera's
-  `local` may be false, with `remote` naming its device, and a camera clock may carry `remote`, the
-  fit's record (`docs/DATA-MODEL.md` §6). In Firestore, the session's document gains `pairing`, the
-  peer documents and their candidates get their schemas, readers and rules (owner-only, shapes
-  checked; §10), and `AccountBackend` gains `writePairing`, `createPeer`, `updatePeer`, `deletePeer`,
-  `watchPeers`, `watchPeer`, `addCandidate` and `watchCandidates` in the SDK and both fakes.
-
-- The cube's whole record (T3.7; `docs/DATA-MODEL.md` §5, §6, §7, §11): everything the cube sends
-  is kept now, to be trimmed later if useless. Each attempt of a cube with a gyroscope gets a
+- Development (T4.2): `cut` names the camera's label and the attempt's `scrambleShown`, `cut-done`
+  carries what the phone's capture said of the clip, and `clip-ack` is new (additive within protocol
+  version 1); core's `parseFrames`, `remoteFrames` and the fit's `least` and `rttP95Ms`; the
+  capture's clip worker can stage a clip under a folder of its own (`SaveClipParams.staging`);
+  `writeAttemptFile` takes bytes in parts; the end-to-end suite's `window.cubetraceE2eRemote`
+  (development builds only) moves a camera device's clock, cuts its connection once in the middle of
+  a file, ignores its cuts or shortens the host's wait.
+- Development (T4.3): the protocol's `sync-start`, `sync-stop`, `sync-motion`, `sync-meter`,
+  `sync-error` and `preview` (additive within version 1); rtc's `PREVIEW_ENCODING`,
+  `PreviewChannel`, `previewStats` and `WebRtcTransport`'s `preview` option (a send-only video
+  transceiver in the first offer, no renegotiation), `Transport.preview`; core's `RemoteClockLine`
+  and `RemoteClockFit.line()`; the app's `RemoteCameraRegistry`, `CameraDeviceSync`,
+  `CameraDevicePreview` and `RemotePreviews`; the end-to-end suite's synthetic camera and the demo
+  cube's turns at given times (`apps/web/e2e/helpers/remote.ts`); the remote specs wait for six
+  seconds of the phone's recording before an attempt (their "recording" matched "not recording"),
+  and their reads of the origin private file system, `uploads.spec.ts`'s too, try again while the
+  app replaces a file.
+- The cube's whole record (T3.7; `docs/DATA-MODEL.md` §5, §6, §7, §11): everything the cube sends is
+  kept now, to be trimmed later if useless. Each attempt of a cube with a gyroscope gets a
   `gyro.json` in its folder, written a second after the attempt ends, with or without a camera: the
   gyroscope's orientation (unit quaternions, as the cube reports them) and, on the Gen2 cubes, its
   angular velocity (raw 4-bit integers), from 2 s before the first scramble turn to 1 s after the
@@ -114,14 +129,14 @@ versions follow [Semantic Versioning](https://semver.org/).
   always has), so that the files of a buggy or an older build can be told apart later. All of it is
   optional in the schemas: every file written so far still validates, and reads with the fields
   absent, null or empty.
-- `gyro.json` is uploaded as the attempt's sixth file, after the clips, counted by the day's quota
-  like any file (an attempt with its clips is six files now: at most 200 a day with the default
-  1,200), and stays on the device with the frames files when the clips are deleted by policy; the
-  functions accept it (33 files a call); the session index's documents carry the new fields, and the
-  rules check their shape. The clip viewer's Download includes it, and the QA view's new Gyro column
-  counts the attempts with one and says the median of their rates.
-- Development: the fake cube reports a gyroscope when asked (`?gyro=1` in demo mode: a slow steady
-  turn at 50 Hz while a replay turns, with a velocity), which the end-to-end suite uses;
+- `gyro.json` is uploaded as the attempt's sixth file (T3.7), after the clips, counted by the day's
+  quota like any file (an attempt with its clips is six files now, ten with a phone's), and stays on
+  the device with the frames files when the clips are deleted by policy; the functions accept it (33
+  files a call); the session index's documents carry the new fields, and the rules check their
+  shape. The clip viewer's Download includes it, and the QA view's new Gyro column counts the
+  attempts with one and says the median of their rates.
+- Development (T3.7): the fake cube reports a gyroscope when asked (`?gyro=1` in demo mode: a slow
+  steady turn at 50 Hz while a replay turns, with a velocity), which the end-to-end suite uses;
   `GyroBuffer`, `gyroFile`, `gyroSummary`, `parseGyro` and `gyro.schema.json` in `packages/core`,
   `writeAttemptFile` in `packages/storage`.
 - Diagnostics (T3.9; `docs/DIAGNOSTICS.md`, `docs/DATA-MODEL.md` §10): signed in, the app keeps a
@@ -132,80 +147,81 @@ versions follow [Semantic Versioning](https://semver.org/).
   camera and the recording, each clip saved or failed, the sync checks, the uploads' states and
   pauses, the clips deleted by policy, the cubes synced (a count), the downloads and the errors the
   app logs — never a MAC address, an email, a video or a user agent. The events go in batches, 5 s
-  after the first or at 20, offline through Firestore's cache; signed out, nothing is kept beyond the
-  page; a device writes at most 5,000 a day. Settings → Account → Diagnostics, on by default, turns
-  it off after one last event. Sessions → QA view gains a Diagnostics section: per device its last
-  start and build, the events by kind over the last 7 days, and the failures. The manual rounds are
-  now read from these events by the coordinator's round report (`npm run round-report`, with a
-  service-account key: `functions/scripts/round-report.mts`), which ticks the checklists of
-  `docs/MANUAL-TESTS.md` with the facts; the owner looks only at what no event can show.
-- Development: `cloudEvent`, `sanitizeEventData`, `eventId`, `parseCloudEvent` and
+  after the first or at 20, offline through Firestore's cache; signed out, nothing is kept beyond
+  the page; a device writes at most 5,000 a day (2,000 until T4.2a: with a phone paired, about six
+  events more per attempt on the host, a day of the owner's 130 to 170 attempts reached it at about
+  155 and the evidence stopped mid-session; at 5,000, Firestore's writes stay within a quarter of
+  its free tier). Settings → Account → Diagnostics, on by default, turns it off after one last
+  event. Sessions → QA view gains a Diagnostics section: per device its last start and build, the
+  events by kind over the last 7 days, and the failures. The manual rounds are now read from these
+  events by the coordinator's round report (`npm run round-report`, with a service-account key:
+  `functions/scripts/round-report.mts`), which ticks the checklists of `docs/MANUAL-TESTS.md` with
+  the facts; the owner looks only at what no event can show.
+- Development (T3.9): `cloudEvent`, `sanitizeEventData`, `eventId`, `parseCloudEvent` and
   `cloud-event.schema.json` in `packages/core`; the rules for `users/{uid}/events` (create-only by
   the account, never updated or deleted) with their tests; `AccountBackend.saveEvents` and
   `listEvents` in the SDK and both fakes; `diagnostics.spec.ts` in the end-to-end suite and the
   events checked in the cloud project.
-- A 3D cube in the clip viewer that follows the video (T3.8): beside the clip, cubing.js's cube in
-  3D turns with the attempt's moves as the picture shows them (the next move animated in about
-  100 ms; the state rebuilt at once after a seek) and, when the attempt has a `gyro.json` (T3.7),
-  tilts and turns as the real cube did, from the gyroscope's samples around the moment the picture
-  shows, upright at the clip's first frame (the gyroscope's yaw is arbitrary); "Re-zero" takes the
-  current moment as upright, and "Raw" shows the samples as recorded. The moves list and the cube
-  both apply the camera's lag from the sync check (`syncResidualMs`), so the highlighted move changes
-  when the picture shows the turn, which it used to lead by that lag. Without a gyro file (an older
-  attempt, a cube without a gyroscope) the cube still turns, upright, and a line says the orientation
-  is not recorded; a file that cannot be read is said in that line. On a laptop the cube stands
-  beside the video, as tall as it; on a phone, under it. No 3D cube on the Timer page: the solver
-  watches the real cube, and WebGL would compete with the capture. The gyroscope's frame is mapped
-  from the driver's documentation, not yet from a real recording: `docs/MANUAL-TESTS.md`, "After
-  T3.8", says how to check it.
-- Development: `orientation.ts` (quaternion arithmetic, the frame mapping `CUBE_TO_PLAYER`, the
-  interpolation over a gyro file, `cubeStep`) and `clip.ts` (a clip's time on the host clock, the
-  camera's lag applied) in `packages/core`, and `clip-cube.ts` (the player driven through
-  `experimentalAddMove`, `experimentalCurrentThreeJSPuzzleObject` and the vantages) in
-  `apps/web/src/app/timer`, with their tests; the recording flow of the end-to-end suite seeks and
-  plays a clip and checks the puzzle object's quaternion, the player's alg and the highlighted move
-  against what core computes from the gyro file the app wrote.
-- The clip viewer's 3D cube seen straight on, with the view and a mirror kept per camera (T3.10,
-  issue #55): the cube is under the video now, as wide as it and about half as tall, and the
-  player's camera looks at it level and from the front (cubing.js looks from above and to the right
-  by default, so an upright cube already looked tilted), so that its tilt can be compared with the
-  hands'. Under the cube, Turn ◀ ▶ (90° around it), Tilt ▲ ▼ (90° over it, within ±90°), Behind and
-  Reset view move the viewpoint, a drag with the mouse or a finger turns it freely (cubing.js's own
-  drag input; a click adds no move), and Mirror (none, left–right, up–down, front–back, all) reflects
-  the orientation shown, for a camera behind or beside the cube or a cube whose gyroscope's axes
-  differ. The view and the mirror are kept per camera label: on the device (Settings, at most 8
-  cameras) and, signed in, in the account (`users/{uid}.viewer`, `docs/DATA-MODEL.md` §10), read once
-  at each sign-in and merged with the device's (the account's for the cameras the device has not
-  set), then written a second after the last change; a clip of a camera without a choice opens with
-  the defaults; Re-zero and Raw stay per clip. One line under the controls says how to calibrate,
-  and `docs/MANUAL-TESTS.md`, "After T3.10", replaces "After T3.8" with the steps.
-- Development: `Mirror`, `mirrored` and `shownOrientation`'s mirror, `ViewerChoice` with its reader,
-  merge and diff (`user.ts`) in `packages/core`; `viewer` in `user.schema.json` and in the rules,
-  with their tests; `AccountBackend.getUser` and `saveViewer` in the SDK and both fakes;
-  `ClipCube.view`, `target`, `orbit` and `onDrag`; `ViewerSyncService`; the recording flow of the
-  end-to-end suite checks the layout, the straight-on view, the presets, a drag with the mouse, the
-  mirror and the choice kept on a second open.
+- A 3D cube in the clip viewer that follows the video (T3.8, T3.10; issue #55): under the video, as
+  wide as it and about half as tall (the video at most 45% of the screen's height and the cube 30%;
+  on a phone the video, the cube, then the moves), cubing.js's cube in 3D turns with the attempt's
+  moves as the picture shows them (the next move animated in about 100 ms; the state rebuilt at once
+  after a seek) and, when the attempt has a `gyro.json` (T3.7), tilts and turns as the real cube
+  did, from the gyroscope's samples around the moment the picture shows, upright at the clip's first
+  frame (the gyroscope's yaw is arbitrary); "Re-zero" takes the current moment as upright, and "Raw"
+  shows the samples as recorded. The moves list and the cube both apply the camera's lag from the
+  sync check (`syncResidualMs`), so the highlighted move changes when the picture shows the turn,
+  which it used to lead by that lag. The player's camera looks at the cube level and from the front
+  (cubing.js looks from above and to the right by default, so an upright cube already looked
+  tilted), so that its tilt can be compared with the hands'. Under the cube, in one wrapping row,
+  Turn ◀ ▶ (90° around it), Tilt ▲ ▼ (90° over it, within ±90°), Behind and Reset view move the
+  viewpoint, a drag with the mouse or a finger turns it freely (cubing.js's own drag input; a click
+  adds no move), and Mirror (none, left–right, up–down, front–back, all) reflects the orientation
+  shown, for a camera behind or beside the cube or a cube whose gyroscope's axes differ; Re-zero and
+  Raw are under the orientation line. The view and the mirror are kept per camera label: on the
+  device (Settings, at most 8 cameras) and, signed in, in the account (`users/{uid}.viewer`,
+  `docs/DATA-MODEL.md` §10), read once at each sign-in and merged with the device's (the account's
+  for the cameras the device has not set), then written a second after the last change; a clip of a
+  camera without a choice opens with the defaults; Re-zero and Raw stay per clip. Without a gyro
+  file (an older attempt, a cube without a gyroscope) the cube still turns, upright, and a line says
+  the orientation is not recorded; a file that cannot be read is said in that line. No 3D cube on
+  the Timer page: the solver watches the real cube, and WebGL would compete with the capture. The
+  gyroscope's frame is mapped from the driver's documentation, not yet from a real recording: one
+  line under the controls says how to calibrate, and `docs/MANUAL-TESTS.md`, "After T3.10", has the
+  steps.
+- Development (T3.8, T3.10): `orientation.ts` (quaternion arithmetic, the frame mapping
+  `CUBE_TO_PLAYER`, the interpolation over a gyro file, `cubeStep`) and `clip.ts` (a clip's time on
+  the host clock, the camera's lag applied) in `packages/core`, with `Mirror`, `mirrored` and
+  `shownOrientation`'s mirror, and `ViewerChoice` with its reader, merge and diff (`user.ts`);
+  `viewer` in `user.schema.json` and in the rules, with their tests; `AccountBackend.getUser` and
+  `saveViewer` in the SDK and both fakes; `clip-cube.ts` (the player driven through
+  `experimentalAddMove`, `experimentalCurrentThreeJSPuzzleObject` and the vantages; `ClipCube.view`,
+  `target`, `orbit` and `onDrag`) in `apps/web/src/app/timer`, with their tests, and
+  `ViewerSyncService`; the recording flow of the end-to-end suite seeks and plays a clip and checks
+  the puzzle object's quaternion, the player's alg and the highlighted move against what core
+  computes from the gyro file the app wrote, and the layout, the straight-on view, the presets, a
+  drag with the mouse, the mirror and the choice kept on a second open.
 
 ### Changed
 
-- A phone's clip is placed on the host clock with the clock estimate of its cut, at the clip's own
-  time (T4.3, `docs/RTC.md` §4): T4.2 converted it with the estimate of the moment its files came,
-  which a phone that slept meanwhile (its clock stopped) moved, five minutes off after a five-minute
-  sleep in the simulation; the frames file's `remote.offsetMs` is now the offset applied at the clip's
-  first frame (`docs/DATA-MODEL.md` §9). A clip 10 minutes into a session with 50 ppm of drift is
-  placed within 1 ms.
 - The clock sync of a paired phone converges on a Wi-Fi whose round trips jitter (T4.2b,
   `docs/RTC.md` §4; issue #61): the estimate stands on the samples within a band of the least round
   trip and on at least the 10 of least round trip of the last two minutes (the band alone kept 2 to
   14 of 60 on the owner's home Wi-Fi, and 10 of 36 cuts had a converged sync), it is synced once ten
   of them over ten seconds agree within 5 ms (3 ms before), and it is withdrawn at once by a sample
   farther from the estimate than its own round trip allows (the phone's clock stopped while it
-  slept). The host pings every 500 ms until the sync converges, for a minute at most, then every 2
-  s. On a simulation of the owner's Wi-Fi the sync converges in about 12 s and stays so for 20
-  minutes (after about 100 s, and withdrawn 13 to 15 times, before). The diagnostics' `rtc.clock`
+  slept). The host pings every 500 ms until the sync converges, for a minute at most, then every
+  2 s. On a simulation of the owner's Wi-Fi the sync converges in about 12 s and stays so for
+  20 minutes (after about 100 s, and withdrawn 13 to 15 times, before). The diagnostics' `rtc.clock`
   goes once a minute of the connection, converged or not (`syncing` before convergence), with the
   window's round trips (median, 95th percentile, how many, the share kept), so that a pairing says
   how its Wi-Fi behaves.
+- A phone's clip is placed on the host clock with the clock estimate of its cut, at the clip's own
+  time (T4.3, `docs/RTC.md` §4): T4.2 converted it with the estimate of the moment its files came,
+  which a phone that slept meanwhile (its clock stopped) moved, five minutes off after a five-minute
+  sleep in the simulation; the frames file's `remote.offsetMs` is now the offset applied at the
+  clip's first frame (`docs/DATA-MODEL.md` §9). A clip 10 minutes into a session with 50 ppm of
+  drift is placed within 1 ms.
 - Development (T4.2b): core's `REMOTE_CLOCK_WINDOW_MS` (two minutes) and `REMOTE_CLOCK_MIN_KEPT`
   (10), `REMOTE_CLOCK_WINDOW` 240 (60 before), `RemoteClockFit`'s `windowMs` option and `window`
   (the window's round trips), `REMOTE_CLOCK_CONVERGED.spreadMs` 5; rtc's `FAST_PING_INTERVAL_MS`
@@ -216,45 +232,40 @@ versions follow [Semantic Versioning](https://semver.org/).
   `finishing`; the end-to-end suite's `cubetraceE2eRemote.finishWaitMs`, and its reads of an
   attempt's files trying again when the app is replacing one; the unit tests'
   `MemoryConnector.failRole`.
-- The diagnostics' daily cap is 5,000 events a device and local day (2,000 before; T4.2a): a phone
-  paired as a camera adds about six events per attempt on the host (each clip's `remote.cut` sent and
-  done, and its `remote.clip`), so a day of the owner's 130 to 170 attempts reached 2,000 at about
-  155 and the evidence stopped mid-session; at 5,000, Firestore's writes stay within a quarter of its
-  free tier.
+- The upload quota per account and UTC day is 15 GB and 3,000 files (6 GB and 1,200 in 0.3.0): on
+  2026-10-03 the owner reached 1,199 files with 171 attempts in the day plus the re-signatures of
+  `attempt.json` after clips deleted by policy, and phase 4 adds a phone's clips to each attempt.
 - Development (T4.2a): `SessionService.releaseClips`, which saves nothing, and the upload source's
   `releaseClips` option, in place of `markClipsGone`; `AttemptFiles.list`; `clipsOnDevice`,
   `withClipsOnDevice` and `withoutLocal` (`apps/web/src/app/session/clips-on-device.ts`); `local` in
   `attempt.json` is no longer written (the readers take it as before).
-- The upload quota per account and UTC day is 15 GB and 3,000 files (6 GB and 1,200 before): on
-  2026-10-03 the owner reached 1,199 files with 171 attempts in the day plus the re-signatures of
-  `attempt.json` after clips deleted by policy, and phase 4 adds a phone's clips to each attempt.
-- The clip viewer's layout (T3.10): the 3D cube under the video instead of beside it, the video at
-  most 45% of the screen's height and the cube 30%; the view's controls and the mirror in one
-  wrapping row under the cube, Re-zero and Raw under the orientation line.
 
 ### Fixed
 
 - New session right after a solve no longer loses the paired phone's last clips (T4.2b, follow-up
   (l) of `docs/PLAN.md`): the session's end let the phone go at once, its clips still to come were
-  noted missing and never reached the attempt although the phone kept them. A phone with clips of the
-  ended session still to come now stays connected until they are in, 15 s at most, the Cameras list
-  saying "waiting for the phone's last clips (n)"; the clips go into the ended session's attempt, and
-  the phone is let go with "the session ended". Remove still lets it go at once.
-- A phone's first call to the host that fails (the connection not made, a hello that a busy page sent
-  late) no longer ends the pairing (T4.2b): the phone calls again with the same code every 3 s, saying
-  "Joining…" and why, until the code's ten minutes are up, and the host answers it, listing the camera
-  as connecting meanwhile; a wrong, expired or used code is still refused at once.
+  noted missing and never reached the attempt although the phone kept them. A phone with clips of
+  the ended session still to come now stays connected until they are in, 15 s at most, the Cameras
+  list saying "waiting for the phone's last clips (n)"; the clips go into the ended session's
+  attempt, and the phone is let go with "the session ended". Remove still lets it go at once.
+- A phone's first call to the host that fails (the connection not made, a hello that a busy page
+  sent late) no longer ends the pairing (T4.2b): the phone calls again with the same code every 3 s,
+  saying "Joining…" and why, until the code's ten minutes are up, and the host answers it, listing
+  the camera as connecting meanwhile; a wrong, expired or used code is still refused at once.
 - The host's hello no longer goes missing at a pairing (T4.2b): the host said it the moment its
   channel opened, and now and then it never reached the phone's page (7 of about 115 hello exchanges
   in the end-to-end runs; the pairing was refused before T4.2b, and took 18 s longer with its
   retries). The host now answers the phone's hello, which the phone says once its channel is open.
 - Deleting uploaded clips by policy ("Keep local copies" off, or the storage past 70%) no longer
-  uploads `attempt.json` again (T4.2a). The deletion saved the record again to say that the clips had
-  left the device, and a record read back otherwise than it was uploaded (one written before a later
-  field) went up again, a file of the day's quota each; in a later page load than the upload, it also
-  rewrote the attempt's index document, which the rules refused, with a note in the session. The
-  record is now left as it was uploaded: `uploads.json` keeps which clips left, the pages read it from
-  the attempts' folders, and still say "in the cloud".
+  uploads `attempt.json` again (T4.2a). The deletion saved the record again to say that the clips
+  had left the device, and a record read back otherwise than it was uploaded (one written before a
+  later field) went up again, a file of the day's quota each; in a later page load than the upload,
+  it also rewrote the attempt's index document, which the rules refused, with a note in the session.
+  The record is now left as it was uploaded: `uploads.json` keeps which clips left, the pages read
+  it from the attempts' folders, and still say "in the cloud".
+- The clip viewer's line beside Download counts the clips it gives: "all 4 clips, …" for an attempt
+  with a phone's clips, where it said "both clips", and "the 2 clips on this device, …" where it
+  said "the clip" (T4.4).
 
 ## 0.3.0 — 2026-10-02
 
