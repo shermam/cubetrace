@@ -968,7 +968,7 @@ events in memory and writes them in one batch (Firestore's `writeBatch`, each do
 whole) 5 s after the first of them, at 20 of them, and when the page is hidden or goes away;
 Firestore's persistent cache carries a batch while the device is offline. Signed out, the events
 wait in memory (the last 500) for a sign-in during the page's life, and are gone with the page;
-nothing of them is kept on the device but the day's count, for the cap of 2,000 events a device
+nothing of them is kept on the device but the day's count, for the cap of 5,000 events a device
 writes in a local day (`localStorage` `cubetrace.diagnostics`), past which only the `error.*` kinds
 go. A write the server refuses is said once in the console (`cubetrace: diagnostics: …`) and
 dropped: the diagnostics never record themselves.

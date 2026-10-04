@@ -451,7 +451,7 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
     switched / off, recording.started / stopped /       event, at 20, when the page hides or goes away
     notice, clip.saved / failed, audio.missing           ─▶ AccountBackend.saveEvents (writeBatch) ─▶ Firestore's
   SyncService: sync.check                                cache ─▶ the server (a refusal: said once, dropped)
-  UploadService: upload.state / paused / resumed, storage.deleted     at most 2,000 a local day per device
+  UploadService: upload.state / paused / resumed, storage.deleted     at most 5,000 a local day per device
   CubeSyncService: cubes.synced (a count)                             (localStorage), then error.* alone
   AuthService: account.signin / signout; the pages: clips.viewed, download; every console `cubetrace:` warning: error.app
 the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the

@@ -69,7 +69,7 @@ recorded without a scope of its own.
   on again, it records `settings.changed` (`diagnostics` true) and goes on. When the page is hidden
   or goes away, the switch's new value takes effect before what is queued is written, so its event
   goes with that batch even when the page is left right after the toggle.
-- **The daily cap.** A device writes at most 2,000 events a local day, counted in `localStorage`
+- **The daily cap.** A device writes at most 5,000 events a local day, counted in `localStorage`
   (`cubetrace.diagnostics`, with the build last seen, for `app.start`); past it, only the `error.*`
   kinds go until the next day. An attempt with the camera on costs 3 events (`attempt.done`, two
   `clip.saved`), 6 with uploads (three `upload.state`): the end-to-end flows measure it and annotate
@@ -81,8 +81,11 @@ recorded without a scope of its own.
   and far under Firestore's free tier of 20,000 writes a day (the session index's writes, about
   three per attempt, come on top). A phone paired as a camera (T4.2) adds 6 events per attempt on
   the host (each clip's `remote.cut` sent and done, and its `remote.clip`) and none on the phone
-  unless a cut fails: about 1,900 a day with a phone, still within the cap, which a day of more
-  than about 155 attempts with a phone would reach (the `error.*` kinds go on all the same).
+  unless a cut fails, and `rtc.clock` once a minute while its clock sync is converged (60 an hour):
+  about 2,100 a day with a phone. The cap was 2,000 until T4.2a, which a day of more than about 155
+  attempts with a phone reached mid-session, and the evidence stopped there; at 5,000 a day with a
+  phone has room for about 390 attempts, and Firestore's writes at that scale stay within a quarter
+  of its free tier (the `error.*` kinds go on past the cap all the same).
 - **What goes wrong stays out.** A kind that is not one, facts that cannot be made into an event, a
   batch the server refuses: said once in the console (`cubetrace: diagnostics: …`) and dropped; the
   diagnostics never record themselves.
