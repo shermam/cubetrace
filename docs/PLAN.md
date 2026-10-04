@@ -2016,6 +2016,7 @@ phase 3 (T2.0–T2.14, T3.0–T3.10).
 | T4.1 | `web`: the Camera page (join by QR or token, preview, framing, sharpness, state) and the host's Cameras panel (Add camera, the list, thumbnails); the connection's lifecycle; the clock sync running; the camera registered in the session | T4.0 | ✅ #59 (2026-10-03) |
 | T4.2 | `web`, `capture`, `upload`: remote cuts and clip transfer into the attempt's folder and record; the upload of remote clips, late clips as additions; diagnostics events | T4.1 | ✅ #62 (2026-10-04) |
 | T4.2a | `upload`, `web`: deleting an uploaded clip leaves its record as uploaded (no `attempt.json` re-signed; `local` from the folder); the diagnostics daily cap 5,000; the clock record's effect on `session.json` measured | T4.2 | ✅ #63 (2026-10-04) |
+| T4.2b | `core`, `rtc`, `web`: the clock fit keeps its ten least round trips (two-minute window, 5 ms spread, a clock-jump check), 500 ms pings until converged, `rtc.clock` with the link's distribution; the first call retries, the host's hello second (a lost-hello bug); the leave at New session held for the last clips (15 s) | T4.2a | ✅ #64 (2026-10-04) |
 | T4.3 | `web`, `capture`: the sync check on a remote camera; frame times converted with the drift fit; the live preview track; measurements in `docs/DEVICES.md` | T4.2 | ⬜ |
 | T4.4 | the desk rig: docs, "After T4" items, the round report's checklist, `0.4.0` | T4.3 | ⬜ |
 
@@ -2411,13 +2412,18 @@ and answers with the offset and the spread; the host stores `clock.cameras[label
 beside it and applies the result to the phone's later clips as T2.8 does for the laptop's. The
 frame times of remote clips converted with the drift fit at the clip's time, not the offset at
 pairing. The live preview: the phone adds a video track from its camera stream, sent at a fifth of
-the resolution and at most 300 kbps (`RTCRtpSender.setParameters`), shown in the host's Cameras
-list in place of the thumbnails when it flows, the thumbnails kept as the fallback; measured on the
+the resolution and at most 300 kbps (`RTCRtpSender.setParameters`), shown beside the host's own
+preview in the Timer page's always-visible preview area (a small tile per remote camera, tappable to
+swap with the main picture; issue #60: the thumbnail at the bottom of the Camera panel was too far
+from the host's preview to keep the cube in the phone's frame), the thumbnail kept in the Cameras
+list as the pairing's state and as the fallback when the track does not flow; measured on the
 ThinkPhone: the encoder's extra cost, the frame rate of the recording with and without it. Settings
-→ Cameras: "Live preview from phones" on by default. `docs/DEVICES.md`: a "Remote cameras" table
-(the Wi-Fi's round trip and the clock sync's spread, the data channel's throughput, the transfer
-time of an attempt's clips, the sync residual of the phone's camera, the phone's temperature after
-20 minutes). `docs/MANUAL-TESTS.md` ("After T4.3": a sync check on the paired phone, the residual
+→ Cameras: "Live preview from phones" on by default. `docs/DEVICES.md`: the "Remote cameras" table
+(seeded by T4.2b) completed from the owner's pairings with T4.2b's `rtc.clock` fields (the window's
+sample count, the kept share, the round trips' p50 and p95), the clock sync's spread, the data
+channel's throughput, the transfer time of an attempt's clips, the sync residual of the phone's camera,
+the phone's temperature after 20 minutes; `REMOTE_CLOCK_*` tuned again only if those numbers say so
+(issue #61 closes when a pairing stays converged for 20 minutes on the home Wi-Fi). `docs/MANUAL-TESTS.md` ("After T4.3": a sync check on the paired phone, the residual
 and the spread; the preview; twenty minutes of solves on the rig).
 
 **Acceptance.** The end-to-end pair runs a sync check on the remote camera with the fake cube's
