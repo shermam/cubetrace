@@ -98,12 +98,16 @@ interface RemoteClip {
   readonly askedMs: number;
   /**
    * The window as first sent in the phone's clock, widened by the estimate's margin on each side:
-   * sent again as it was, so that it is one cut.
+   * sent again as it was, so that it is one cut; and the estimate it was converted with, frozen, and
+   * when it was taken, which convert the clip's frame times when its files come (T4.3: the estimate
+   * of the clip's own time, whatever the fit became meanwhile).
    */
   sent: {
     readonly fromRemoteMs: number;
     readonly toRemoteMs: number;
     readonly marginMs: number;
+    readonly estimate: ClockEstimate;
+    readonly takenMs: number;
   } | null;
   state: RemoteClipState;
   /** It holds its attempt back from the upload queue (`ClipsInFlight`). */
@@ -149,7 +153,8 @@ interface Present {
  * clip: `cut-done` with what its capture said of it, then its frames file and its MP4
  * (`FileReceiver`, into memory: a transfer cut in the middle goes on from the bytes held over the
  * next connection). The host writes the frames file into the attempt's folder with its times on the
- * host clock (`remoteFrames`: the phone's first frame time kept as `t0RemoteMs`, the fit beside
+ * host clock (`remoteFrames`: the phone's first frame time kept as `t0RemoteMs`, converted by the
+ * estimate the cut was sent with, frozen then, at the clip's own time, T4.3, and that estimate beside
  * it), then the MP4, adds the clip to the attempt's record (`SessionService.attachClip`) and says
  * so (`clip-ack`), after which the phone deletes its copy. The wait has a limit,
  * {@link REMOTE_CLIP_WAIT_MS} after the attempt's end: then the attempt goes to the upload queue
@@ -417,6 +422,8 @@ export class RemoteCutsService {
           fromRemoteMs: estimate.toRemoteMs(window.fromMs - estimate.marginMs),
           toRemoteMs: estimate.toRemoteMs(window.toMs + estimate.marginMs),
           marginMs: estimate.marginMs,
+          estimate,
+          takenMs: this.timers.now(),
         });
         const delivered = link.trySend({
           type: 'cut',
@@ -657,10 +664,12 @@ export class RemoteCutsService {
   }
 
   /**
-   * A clip's frames file is complete and checked: its times on the host clock through the fit
-   * (`remoteFrames`), written into the attempt's folder. A file that is not a frames file of the
-   * clip refuses the clip; a fit without an answer yet throws (the phone sends the file again over
-   * the next connection).
+   * A clip's frames file is complete and checked: its times on the host clock (`remoteFrames`), by
+   * the estimate the host took when it cut the clip (T4.3: its line at the clip's first frame), or,
+   * for a clip this page did not cut (offered after the page was loaded again), the fit's estimate
+   * now; written into the attempt's folder. A file that is not a frames file of the clip refuses the
+   * clip; a fit without an answer yet throws (the phone sends the file again over the next
+   * connection).
    */
   private async framesCame(camera: CutCamera, clip: RemoteClip, file: PartialFile): Promise<void> {
     if (clip.state === 'stored' || clip.state === 'refused') {
@@ -676,20 +685,21 @@ export class RemoteCutsService {
       this.refuse(camera, clip, `its frames file could not be read: ${errorMessage(error)}`);
       return;
     }
-    const estimate: ClockEstimate | null = (await this.synced(camera))
-      ? clockEstimate(camera.fit)
-      : null;
+    const cut = clip.sent;
+    const estimate: ClockEstimate | null =
+      cut?.estimate ?? ((await this.synced(camera)) ? clockEstimate(camera.fit) : null);
     if (estimate === null) {
       throw new Error('the clock sync has had no answer yet');
     }
+    const takenMs = cut?.takenMs ?? this.timers.now();
     if (!this.session.hasAttempt(clip.ref)) {
       this.refuse(camera, clip, 'the attempt is gone');
       return;
     }
     let frames: FramesJson;
     try {
-      // The estimate now, converged or not; the file says which it was.
-      frames = remoteFrames(phone, clip.label, estimate, this.timers.now());
+      // The estimate of the cut (or now), converged or not; the file says which it was.
+      frames = remoteFrames(phone, clip.label, estimate, takenMs);
     } catch (error: unknown) {
       this.refuse(camera, clip, `its frames file could not be read: ${errorMessage(error)}`);
       return;
@@ -775,6 +785,10 @@ export class RemoteCutsService {
     const scope = scopeOf(clip);
     const bytes = clip.framesBytes + mp4Bytes;
     const transferMs = clip.offeredMs === null ? null : Math.round(now - clip.offeredMs);
+    // The lag the clip took (T4.3): the camera's sync check in the session under way, as
+    // `withSyncResidual` gave it; null before one, or for a clip of a session that ended.
+    const session = this.session.session();
+    const check = session?.id === clip.ref.session ? session.clock.cameras[clip.label] : undefined;
     this.diagnostics.record(
       'remote.clip',
       {
@@ -792,6 +806,8 @@ export class RemoteCutsService {
         converged: frames.remote?.converged ?? null,
         offsetMs:
           frames.t0RemoteMs === undefined ? null : round1(frames.t0RemoteMs - frames.t0HostMs),
+        syncResidualMs:
+          check === undefined || check.clapperboardSamples === 0 ? null : round1(check.offsetMs),
         truncatedStart: clip.details?.truncatedStart ?? false,
       },
       scope,

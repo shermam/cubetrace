@@ -98,8 +98,10 @@ export {
   REMOTE_CLOCK_WINDOW,
   REMOTE_CLOCK_WINDOW_MS,
   RemoteClockFit,
+  RemoteClockLine,
 } from './remote-clock';
 // T4.2 — a remote camera's clip: its frames file's times placed on the host clock through the fit
+// (T4.3: the line the host took when it cut the clip, `RemoteClockLine`, at the clip's own time)
 export type { RemoteClockSnapshot } from './remote-frames';
 export { remoteFrames } from './remote-frames';
 export type { PhaseAverage } from './stats';

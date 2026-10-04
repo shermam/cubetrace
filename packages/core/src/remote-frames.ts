@@ -1,16 +1,20 @@
 // The frames file of a remote camera's clip, as the host keeps it (docs/DATA-MODEL.md §9, docs/RTC.md,
-// docs/PLAN.md T4.2). The phone's capture writes a clip's frames file as the host's does, on its own
-// clock: its `t0HostMs` is the phone's time of the first frame. The host keeps that time as
-// `t0RemoteMs`, puts the first frame on the host clock through the clock sync of the data channel
-// (`RemoteClockFit.toHostMs`: the fit's offset at the clip's time, its line once the drift is fitted),
-// and records the sync it used in `remote`, so that the dataset stays on the host clock and says how
-// each remote clip was placed on it. Pure: the caller gives the fit.
+// docs/PLAN.md T4.2 and T4.3). The phone's capture writes a clip's frames file as the host's does, on
+// its own clock: its `t0HostMs` is the phone's time of the first frame. The host keeps that time as
+// `t0RemoteMs`, puts the first frame on the host clock through the clock sync of the data channel (the
+// estimate's line evaluated at the clip's own time: since T4.3 the line the host took when it cut the
+// clip, `RemoteClockLine`), and records the sync it used in `remote`, its offset the one applied at the
+// first frame, so that the dataset stays on the host clock and says how each remote clip was placed on
+// it. Pure: the caller gives the estimate.
 import type { FramesJson } from './attempt';
 import type { RemoteClockParams } from './remote-clock';
 
-/** What the conversion needs of the clock sync: {@link RemoteClockFit} gives it. */
+/**
+ * What the conversion needs of the clock sync: `RemoteClockFit` gives it, and so does the app's clock
+ * estimate, a frozen `RemoteClockLine` with the fit's record (T4.3).
+ */
 export interface RemoteClockSnapshot {
-  /** The host time of a time on the phone's clock, by the fit now. */
+  /** The host time of a time on the phone's clock, by the estimate: its line's value there. */
   toHostMs(remoteMs: number): number;
   /** The fit's record (`clock.cameras[label].remote` of session.json). */
   readonly params: RemoteClockParams;
@@ -24,11 +28,13 @@ const LABEL = /^[a-z0-9]+(-[a-z0-9]+)*$/u;
  * The frames file `phone` of a remote camera's clip, as the phone's capture wrote it (its times on
  * the phone's clock), as the host keeps it: `camera` the label the session gives the phone's camera,
  * the phone's first frame time kept as `t0RemoteMs`, `t0HostMs` that time on the host clock through
- * `sync`, rounded to 0.01 ms as the capture rounds it, and `remote` the sync's record with whether
- * it had converged and `takenMs`, the host time it was taken at. The frame intervals, the keyframes
- * and the arrival fit stay the phone's: intervals are the same on both clocks to the drift (50 ppm
- * is a millisecond over 20 s). Throws a RangeError for a file that is already a remote clip's (its
- * times converted once) and for a label that cannot name a clip.
+ * `sync` (its line's value at the clip's own time), rounded to 0.01 ms as the capture rounds it, and
+ * `remote` the sync's record with whether it had converged and `takenMs`, the host time it was taken
+ * at: its `offsetMs` the offset applied at the first frame (T4.3: `t0RemoteMs − t0HostMs`, to 0.01
+ * ms), its `driftPpm` the line's slope, so that the record alone converts the clip again. The frame
+ * intervals, the keyframes and the arrival fit stay the phone's: intervals are the same on both clocks
+ * to the drift (50 ppm is a millisecond over 20 s). Throws a RangeError for a file that is already a
+ * remote clip's (its times converted once) and for a label that cannot name a clip.
  */
 export function remoteFrames(
   phone: FramesJson,
@@ -43,16 +49,27 @@ export function remoteFrames(
     throw new RangeError(`"${camera}" is not a camera label.`);
   }
   const t0RemoteMs = phone.t0HostMs;
+  const t0HostMs = hundredths(sync.toHostMs(t0RemoteMs));
   return {
     schema: phone.schema,
     camera,
     segment: phone.segment,
     ...(phone.app === undefined ? {} : { app: { ...phone.app } }),
-    t0HostMs: Math.round(sync.toHostMs(t0RemoteMs) * 100) / 100,
+    t0HostMs,
     t0RemoteMs,
     dtMs: [...phone.dtMs],
     keyframes: [...phone.keyframes],
     arrival: { ...phone.arrival },
-    remote: { ...sync.params, converged: sync.converged, takenMs },
+    remote: {
+      ...sync.params,
+      offsetMs: hundredths(t0RemoteMs - t0HostMs),
+      converged: sync.converged,
+      takenMs,
+    },
   };
+}
+
+/** `ms` to a hundredth, never -0. */
+function hundredths(ms: number): number {
+  return Math.round(ms * 100) / 100 + 0;
 }

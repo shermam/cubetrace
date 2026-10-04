@@ -25,14 +25,22 @@ export type {
   Hello,
   Leave,
   Message,
+  MotionReport,
   Ping,
   Pong,
+  Preview,
+  SyncError,
+  SyncMeter,
+  SyncMotion,
+  SyncStart,
+  SyncStop,
   ThermalHint,
   Thumbnail,
   WireFrame,
 } from './protocol';
 export {
   CHUNK_HEADER_BYTES,
+  MAX_MOTION_FRAMES,
   PROTOCOL_VERSION,
   ProtocolError,
   THUMBNAIL_HEADER_BYTES,
@@ -52,6 +60,9 @@ export type {
 export { MemoryTransport, REAL_TIMERS } from './transport';
 export { MessageLink } from './link';
 export type { WebRtcTransportOptions } from './webrtc';
+// The live preview (T4.3): a small video track of the phone's camera over the same connection.
+export type { PreviewChannel, PreviewStats } from './preview';
+export { PREVIEW_ENCODING, previewStats } from './preview';
 export { CONNECT_TIMEOUT_MS, DATA_CHANNEL_LABEL, STUN_SERVERS, WebRtcTransport } from './webrtc';
 
 // The file transfer: the paced sender, the assembling receiver, the stores.

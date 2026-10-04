@@ -8,6 +8,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import type { ClapperboardFrame, MotionMeterInfo } from '@cubetrace/capture';
 import {
   RemoteClockFit,
   type AppBuild,
@@ -47,7 +48,9 @@ import { SessionService } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import type { PairingBlock } from './pairing-block';
+import { RemoteCameraRegistry, type RemoteCameraEntry } from './remote-camera-registry';
 import { RemoteCutsService, type CutCamera } from './remote-cuts-service';
+import { clockEstimate } from './remote-estimate';
 
 /**
  * Where a remote camera is: `connecting` (its offer is answered, the channel not open yet; or its
@@ -112,6 +115,14 @@ export interface RemoteCamera {
   readonly sync: RemoteSync | null;
   /** While `finishing`, how many clips of the session that ended are still to come; 0 otherwise. */
   readonly clipsLeft: number;
+  /** The session it was paired in, which it films. */
+  readonly session: string;
+  /**
+   * The live preview's track (T4.3) of its current connection, once the phone's offer brought one;
+   * null otherwise. It flows while the host asks for it ("Live preview from phones") and the phone
+   * sends it: muted while it does not.
+   */
+  readonly preview: MediaStreamTrack | null;
 }
 
 /** A pairing the host shows: the token, the QR's URL and until when the token is taken. */
@@ -221,6 +232,8 @@ export class RemoteCamerasService {
   private readonly connect = inject(TRANSPORT_CONNECTOR);
   /** The cuts and the clips of the cameras (T4.2), which follow the connections made here. */
   private readonly cuts = inject(RemoteCutsService);
+  /** Where the Timer page's preview area and the sync check find the cameras (T4.3). */
+  private readonly registry = inject(RemoteCameraRegistry);
   /** The wait for a camera's last clips at its session's end; shorter in the end-to-end suite. */
   private readonly finishWaitMs = e2eRemote(this.globals).finishWaitMs ?? FINISH_WAIT_MS;
 
@@ -256,8 +269,32 @@ export class RemoteCamerasService {
   private expiryTimer: unknown = null;
   /** The operations under way, for the tests to wait on. */
   private pending: Promise<unknown> = Promise.resolve();
+  /** The number of the next sync check of a camera (`sync-start`), for this page. */
+  private nextCheck = 1;
 
   constructor() {
+    // The cameras for the Timer page's preview area and for the sync check (T4.3).
+    this.registry.provide({
+      cameras: computed(() => this.camerasSignal().map(entryOf)),
+      watchMotion: (id, onSample, onError, onMeter) =>
+        this.watchMotion(id, onSample, onError, onMeter),
+      clockRecord: (id) => {
+        const fit = this.peers.get(id)?.fit;
+        const estimate = fit === undefined ? null : clockEstimate(fit);
+        return estimate === null ? null : { ...estimate.params, converged: estimate.converged };
+      },
+    });
+    // "Live preview from phones" changed: every phone connected is told (T4.3).
+    effect(() => {
+      const on = this.settings.livePreviewFromPhones();
+      untracked(() => {
+        for (const peer of this.peers.values()) {
+          if (peer.camera.state === 'connected' || peer.camera.state === 'finishing') {
+            peer.link?.trySend({ type: 'preview', on });
+          }
+        }
+      });
+    });
     // The session ended, or another began: the cameras of the old one go (once their last clips are
     // in, T4.2b), and so does its pairing.
     let sessionId = this.session.session()?.id ?? null;
@@ -468,6 +505,8 @@ export class RemoteCamerasService {
         thumbnail: null,
         sync: null,
         clipsLeft: 0,
+        session: sessionId,
+        preview: null,
       },
       sessionId,
       fit: new RemoteClockFit(),
@@ -578,6 +617,19 @@ export class RemoteCamerasService {
       ...(again ? {} : { pairedMs: now }),
     });
     this.putEntry(peer);
+    // Whether the phone sends its live picture (T4.3): "Live preview from phones"; the track its
+    // offer brought, for the Timer page's preview area.
+    link.trySend({ type: 'preview', on: this.settings.livePreviewFromPhones() });
+    const preview = transport.preview;
+    if (preview !== undefined) {
+      peer.offs.push(
+        preview.onTrack((track) => {
+          if (peer.transport === transport) {
+            this.patch(peer, { preview: track });
+          }
+        }),
+      );
+    }
     peer.offs.push(
       link.on('hello', (message) => {
         if (message.v === PROTOCOL_VERSION) {
@@ -775,6 +827,9 @@ export class RemoteCamerasService {
     peer.transport = null;
     peer.signaling = null;
     this.clearRecord(peer);
+    if (peer.camera.preview !== null && this.peers.get(peer.camera.id) === peer) {
+      this.patch(peer, { preview: null });
+    }
   }
 
   /**
@@ -995,10 +1050,11 @@ export class RemoteCamerasService {
   }
 
   /**
-   * The fit's record into the session's `clock.cameras[label].remote`, beside a clapperboard
-   * result there may be (none yet in T4.1: the lag stays 0 until T4.3 measures it): at convergence
-   * and every minute after (`converged` true), and, before that, the estimate a first cut relied on
-   * (T4.2, `converged` false, through `RemoteCutsService`).
+   * The fit's record into the session's `clock.cameras[label].remote`, beside the lag of a sync
+   * check of the camera there may be (T4.3: its `offsetMs`, residual and samples, kept as they are; 0
+   * until a check measures them): at convergence and every minute after (`converged` true), and,
+   * before that, the estimate a first cut relied on (T4.2, `converged` false, through
+   * `RemoteCutsService`).
    */
   private putClock(peer: Peer, params: RemoteClockRecord): void {
     const label = peer.camera.label;
@@ -1017,6 +1073,86 @@ export class RemoteCamerasService {
       remote: params,
     };
     this.session.putCameraClock(label, clock);
+  }
+
+  // ---- The sync check (T4.3) ----
+
+  /**
+   * The phone `id` measures the motion of its frames for a sync check (`sync-start`), and each frame
+   * of its `sync-motion` is given to `onSample` with its times on the host clock: its arrival and its
+   * reception by the phone's page converted by the clock estimate of the moment its batch came (frozen
+   * then, as a clip's is at its cut), its own timestamp kept; how its worker reads them to `onMeter`.
+   * The phone's `sync-error`, or the connection's end, ends it with `onError`. Returns the stop, which
+   * says `sync-stop`; null when the camera is not connected, or its clock sync has had no answer.
+   */
+  private watchMotion(
+    id: string,
+    onSample: (sample: ClapperboardFrame) => void,
+    onError: (message: string) => void,
+    onMeter: (meter: MotionMeterInfo) => void,
+  ): (() => void) | null {
+    const peer = this.peers.get(id);
+    const link = peer?.link ?? null;
+    if (
+      peer === undefined ||
+      link === null ||
+      !link.open ||
+      peer.camera.state !== 'connected' ||
+      peer.fit.samples === 0
+    ) {
+      return null;
+    }
+    const check = this.nextCheck++;
+    let watching = true;
+    const offs: (() => void)[] = [];
+    const end = (): void => {
+      watching = false;
+      for (const off of offs) {
+        off();
+      }
+    };
+    offs.push(
+      link.on('sync-motion', (message) => {
+        const estimate = clockEstimate(peer.fit);
+        if (message.id !== check || estimate === null) {
+          return;
+        }
+        for (const frame of message.frames) {
+          onSample({
+            timestampUs: frame.timestampUs,
+            arrivalHostMs: estimate.toHostMs(frame.arrivalMs),
+            receivedHostMs: estimate.toHostMs(frame.receivedMs),
+            mean: frame.mean,
+            changed: frame.changed,
+            costMs: frame.costMs,
+          });
+        }
+      }),
+      link.on('sync-meter', (message) => {
+        if (message.id === check) {
+          onMeter({ ...message.meter, region: { ...message.meter.region } });
+        }
+      }),
+      link.on('sync-error', (message) => {
+        if (message.id === check) {
+          end();
+          onError(`the phone: ${message.message}`);
+        }
+      }),
+      link.transport.onStateChange((state) => {
+        if (watching && (state === 'closed' || state === 'failed')) {
+          end();
+          onError("the phone's connection ended");
+        }
+      }),
+    );
+    link.send({ type: 'sync-start', id: check });
+    return () => {
+      if (watching) {
+        end();
+        link.trySend({ type: 'sync-stop', id: check });
+      }
+    };
   }
 
   // ---- The session's entry, the state and the thumbnails ----
@@ -1093,6 +1229,25 @@ export class RemoteCamerasService {
       );
     });
   }
+}
+
+/** A camera of the list as the Timer page's preview area and the sync check see it (T4.3). */
+function entryOf(camera: RemoteCamera): RemoteCameraEntry {
+  return {
+    id: camera.id,
+    name: camera.device.label,
+    label: camera.label,
+    session: camera.session,
+    state: camera.state,
+    synced: camera.sync !== null,
+    converged: camera.sync?.converged ?? false,
+    recording: camera.report?.recording ?? false,
+    framing: camera.report?.framing ?? null,
+    frame: camera.report?.frame ?? null,
+    deviceLabel: camera.camera?.deviceLabel ?? '',
+    preview: camera.preview,
+    thumbnail: camera.thumbnail?.url ?? null,
+  };
 }
 
 /** `value` to a tenth. */

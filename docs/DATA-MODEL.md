@@ -36,7 +36,11 @@ the remote cameras; `docs/RTC.md`) added, optional in the same way, in `session.
 own only, `local` true, and neither field. T4.2 (a remote camera's clips) added, optional in the
 same way: in a remote camera's frames file, `t0RemoteMs` and `remote` (§9), each there exactly when
 the other is; and in `session.json`, `converged` in a camera clock's `remote` (§6), absent from the
-records written before, all of which were written at the fit's convergence.
+records written before, all of which were written at the fit's convergence. T4.3 added no field: a
+remote camera's clock entry gained the sync check's fields that a local camera's has (§6, until then
+0), and the `remote` of a remote clip's frames file is the estimate of the clip's cut, its `offsetMs`
+the one applied at the clip's first frame (§9; in the files written before, the fit's when the file
+came, at its newest sample).
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -370,12 +374,22 @@ was written: true at the convergence and in the records of each minute after it 
 the estimate a remote camera's first cut relied on when it went before (T4.2, `docs/RTC.md` §9: the
 cuts never wait for the fit to converge, which a busy Wi-Fi may never let it do), which the
 convergence overwrites; absent from the records written before T4.2, which were all written at
-convergence. The entry's own `rttMs` and `driftPpm` repeat the fit's; `offsetMs` stays the
-clapperboard's lag, measured on the phone's own frames (T4.3), on top of the clock sync, 0 with the
-other clapperboard fields until that check. A local camera's entry has no `remote`, and the files
-written before phase 4 have none. A clip's `syncResidualMs` (§7) is its camera's `offsetMs` when it
-was recorded, once the entry has a check's result (`clapperboardSamples` above 0): a remote camera's
-entry before its sync check gives its clips none.
+convergence. The entry's own `rttMs` and `driftPpm` repeat the fit's. A remote camera's `offsetMs`
+is the lag its own sync check measured (T4.3, `docs/RTC.md` §10), 0 with the other clapperboard
+fields until that check: the check is the host's, on the cube's turns, with the motion measured by
+the phone's capture on its own frames inside the phone's framing rectangle, each frame's times put on
+the host clock through the clock sync before the turns are matched. So `offsetMs` is how far the
+phone's frames lag the cube on the host clock once converted: the camera's own latency and the
+phone's delivery of the frame to its capture worker (which make a local camera's lag), plus what the
+clock estimate was off by during the check (a few ms on a converged fit: its `residualP95Ms`), which
+is why a remote camera's lag is measured on top of the clock sync rather than added to it. Positive
+when the frames come late, as they always do. The record in `remote` stays the clock sync's: its
+convergence and the records of each minute after it rewrite `remote`, `rttMs` and `driftPpm`, and
+keep the check's fields; the check writes the record it found there, or, when there was none yet,
+the clock estimate at its end. A local camera's entry has no `remote`, and the files written
+before phase 4 have none. A clip's `syncResidualMs` (§7) is its camera's `offsetMs` when it was
+recorded, once the entry has a check's result (`clapperboardSamples` above 0), for a remote camera
+as for a local one: a remote camera's entry before its sync check gives its clips none.
 
 ## 7. `attempt.json`
 
@@ -521,7 +535,8 @@ the host's clock estimate (at least 500 ms), since the phone's clock is only kno
 may begin up to a keyframe interval and the margin earlier than the host's own clip, and end up to
 the margin later. `firstFrameHostMs` is the phone's first frame time converted to the host clock
 (`t0HostMs` of its frames file, which keeps the phone's own time and the estimate used, §9), `crop`
-the phone's framing when it cut, `syncResidualMs` null until the phone's sync check (T4.3), and
+the phone's framing when it cut, `syncResidualMs` null until the phone's camera has a sync check of
+its own in the session (T4.3), and then its `offsetMs` (§6), as a local camera's clips take theirs, and
 `truncatedStart` true when the phone's buffer did not reach back to the window's start (`notes` says
 how late, §6). A remote clip comes seconds after the attempt's end (cut once its window has ended,
 then sent over the Wi-Fi); the attempt waits for it at most 120 s after its end before its upload
@@ -614,18 +629,25 @@ when the other is:
   "arrival": {"offsetMs": 1730634807190.1, "residualP95Ms": 6.1},   // on the phone's clock
   "remote": {"offsetMs": 3127.4, "driftPpm": 0, "rttMs": 112.3, "samples": 6,
              "residualP95Ms": 41.0, "since": 1730640001123.5,
-             "converged": false, "takenMs": 1730640024012.5}       // T4.2: the estimate used
+             "converged": false, "takenMs": 1730640024012.5}       // T4.2: the estimate used (T4.3: the cut's)
 }
 ```
 
 `t0RemoteMs` is the phone's time of the first frame, as its capture placed it (the arrival fit above,
 on the phone's clock). `remote` is the host's estimate of the phone's clock that converted it into
-`t0HostMs` when the file came (§6's record: `offsetMs`, `driftPpm`, `rttMs`, `samples`,
-`residualP95Ms`, `since`), with `converged`, whether the fit had converged then, and `takenMs`, the
-host time it was taken: the fit's own once it kept 3 samples, before that the offset of its sample of
-least round trip, `driftPpm` 0. `t0HostMs` is right to within that estimate's error, which the margin
-of the clip's window covers (§7); the training pipeline may convert `t0RemoteMs` again with a better
-fit, the session's `clock.cameras[camera].remote` at its end. The intervals, the keyframes and the
+`t0HostMs` (§6's record: `offsetMs`, `driftPpm`, `rttMs`, `samples`, `residualP95Ms`, `since`), with
+`converged`, whether the fit had converged then, and `takenMs`, the host time it was taken: the fit's
+own once it kept 3 samples, before that the offset of its sample of least round trip, `driftPpm` 0.
+Since T4.3 the estimate is the one the host took when it cut the clip, a line (the fit's offset at
+its newest sample, and its drift) evaluated at the clip's own first frame: `offsetMs` is the offset
+applied there (`t0RemoteMs − t0HostMs`, to 0.01 ms) and `driftPpm` the line's slope, so that the
+record alone converts the clip's times again, and a clip whose file comes late (the phone gone for a
+while, asleep) is converted as it was when it was cut; a clip the host did not cut (one the phone
+offers after the host's page loaded again) takes the estimate when its file comes. In the files
+written before T4.3 the estimate is the fit's when the file came, and `offsetMs` its offset at its
+newest sample. `t0HostMs` is right to within that estimate's error, which the margin of the clip's
+window covers (§7); the training pipeline may convert `t0RemoteMs` again with a better fit, the
+session's `clock.cameras[camera].remote` at its end. The intervals, the keyframes and the
 arrival fit are the phone's: intervals are the same on both clocks to the drift (50 ppm is a
 millisecond in 20 s). The host's own clips have neither field.
 

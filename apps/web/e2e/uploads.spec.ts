@@ -75,6 +75,32 @@ async function fileText(page: Page, sessionId: string, path: string[]): Promise<
   );
 }
 
+/**
+ * The upload queue's state, `uploads.json` at the root of the origin private file system, as text.
+ * The queue writes it again as it works, replacing the file (`writeTextFile`): a read at that instant
+ * finds no file (`NotFoundError`) or a file replaced after the page took it (`NotReadableError`,
+ * which ended the poll of the clips' `local` once in T4.3's runs), so it is read again then, a few
+ * times, 100 ms apart.
+ */
+async function uploadsJsonText(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    for (let tries = 1; ; tries++) {
+      try {
+        const root = await navigator.storage.getDirectory();
+        return await (await (await root.getFileHandle('uploads.json')).getFile()).text();
+      } catch (error: unknown) {
+        const replaced =
+          error instanceof DOMException &&
+          (error.name === 'NotFoundError' || error.name === 'NotReadableError');
+        if (!replaced || tries === 5) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+  });
+}
+
 test('signed in, a real session recorded with the camera on is uploaded, followed on every page; without local copies its clips are in the cloud', async ({
   page,
 }) => {
@@ -177,10 +203,7 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
   // the next page loads find it all done.
   await expect
     .poll(async () => {
-      const text = await page.evaluate(async () => {
-        const root = await navigator.storage.getDirectory();
-        return (await (await root.getFileHandle('uploads.json')).getFile()).text();
-      });
+      const text = await uploadsJsonText(page);
       const state = JSON.parse(text) as {
         accounts: Record<
           string,
@@ -287,10 +310,7 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
   expect(await fileText(page, sessionId, ['attempts', '0001', 'attempt.json'])).toBe(attemptJson);
   await expect
     .poll(async () => {
-      const text = await page.evaluate(async () => {
-        const root = await navigator.storage.getDirectory();
-        return (await (await root.getFileHandle('uploads.json')).getFile()).text();
-      });
+      const text = await uploadsJsonText(page);
       const state = JSON.parse(text) as {
         accounts: Record<
           string,

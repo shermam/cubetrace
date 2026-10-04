@@ -1,7 +1,15 @@
 import { Ajv2020 } from 'ajv/dist/2020';
 import { describe, expect, it } from 'vitest';
 
-import { FRAMES_SCHEMA, RemoteClockFit, parseFrames, remoteFrames } from './index';
+import {
+  FRAMES_SCHEMA,
+  RemoteClockFit,
+  parseFrames,
+  remoteFrames,
+  type RemoteClockLine,
+  type RemoteClockSnapshot,
+} from './index';
+import { H0 as SIM_H0, homeWifi, pinged, simulation } from './remote-clock-sim';
 import { APP, framesJson } from './test-records';
 
 // The frames file of a remote camera's clip as the host keeps it (docs/DATA-MODEL.md §9, T4.2): the
@@ -44,11 +52,14 @@ describe('remoteFrames', () => {
     expect(Math.abs(kept.t0HostMs - truth)).toBeLessThan(1);
     // Rounded to 0.01 ms, as the capture rounds a frames file's first frame time.
     expect(Math.round(kept.t0HostMs * 100)).toBe(kept.t0HostMs * 100);
+    // The fit's record, its offset the one applied at the first frame (T4.3).
     expect(kept.remote).toEqual({
       ...fit.params,
+      offsetMs: Math.round(((kept.t0RemoteMs ?? 0) - kept.t0HostMs) * 100) / 100,
       converged: fit.converged,
       takenMs: lastMs + 250,
     });
+    expect(Math.abs((kept.remote?.offsetMs ?? 0) + 3127.4)).toBeLessThan(1);
     expect(kept.remote?.converged).toBe(true);
     // The rest is the phone's, copied; the phone's file is untouched.
     expect(kept.dtMs).toEqual(phone.dtMs);
@@ -91,6 +102,8 @@ describe('remoteFrames', () => {
     // The newest sample's offset alone would put it 3.2 ms off.
     expect(Math.abs(remote(truth) - fit.offsetMs - truth)).toBeGreaterThan(3);
     expect(kept.remote?.driftPpm).toBeCloseTo(80, 0);
+    // The record converts the clip again by itself: its offset is the one applied at the first frame.
+    expect((kept.t0RemoteMs ?? 0) - (kept.remote?.offsetMs ?? 0)).toBeCloseTo(kept.t0HostMs, 1);
   });
 
   it("refuses a file converted already and a label that cannot name the clip's files", () => {
@@ -105,4 +118,95 @@ describe('remoteFrames', () => {
     // A file without a build stays without one.
     expect('app' in kept).toBe(false);
   });
+
+  // T4.3: the line the host took when it cut the clip, at the clip's own time.
+
+  it('converts a clip recorded 10 minutes into a session with 50 ppm of drift within 1 ms of the truth, with the line taken at its cut', () => {
+    // The phone 240 ms behind, drifting by 50 ppm (30 ms over the 10 minutes), pinged as ClockPinger
+    // pings over a quiet link (6 ms, a millisecond of jitter per leg).
+    const sim = simulation({ offsetMs: -240, driftPpm: 50, rttMs: 6, jitterMs: 2, seed: 3 });
+    const fit = new RemoteClockFit();
+    const cutMs = pinged(fit, sim, 600);
+    // The cut at the window's end: the solve's clip, its first frame 23 s earlier.
+    const line = fit.line();
+    const atCut = snapshot(line, fit);
+    const truth = cutMs - 23_000;
+    // The clip's files come 3 s later, the pings going on meanwhile.
+    pinged(fit, sim, 3, () => undefined, cutMs + 2000);
+    const kept = remoteFrames(
+      { ...framesJson(), t0HostMs: sim.remote(truth) },
+      'phone-rear',
+      atCut,
+      cutMs + 3000,
+    );
+    expect(Math.abs(kept.t0HostMs - truth)).toBeLessThan(1);
+    expect(kept.remote?.driftPpm).toBeCloseTo(50, -1);
+    expect(kept.remote?.takenMs).toBe(cutMs + 3000);
+    // The offset at the pairing would put it 29 ms off, and the line's offset at the cut without its
+    // drift 1.15 ms (23 s at 50 ppm).
+    expect(Math.abs(sim.offsetAt(SIM_H0) - sim.offsetAt(truth))).toBeGreaterThan(28);
+    expect(Math.abs(sim.remote(truth) - line.offsetMs - truth)).toBeGreaterThan(1);
+  });
+
+  it("converts a clip whose files come after the phone was away with the line of its cut, not the fit's estimate then", () => {
+    const sim = simulation({ offsetMs: -240, driftPpm: 50, rttMs: 6, jitterMs: 2, seed: 4 });
+    const fit = new RemoteClockFit();
+    const cutMs = pinged(fit, sim, 600);
+    const atCut = snapshot(fit.line(), fit);
+    const truth = cutMs - 23_000;
+    const phone = { ...framesJson(), t0HostMs: sim.remote(truth) };
+    // The phone slept for five minutes right after its cut, its clock stopped meanwhile (the
+    // monotonic clock does not count a sleep): 300 s behind from then on. Two minutes of answers
+    // after it woke, the fit is all of the new clock, and its clips come.
+    const woken = simulation({
+      offsetMs: -240 - 300_000,
+      driftPpm: 50,
+      rttMs: 6,
+      jitterMs: 2,
+      seed: 5,
+    });
+    const back = cutMs + 300_000;
+    pinged(fit, woken, 120, () => undefined, back);
+    const late = remoteFrames(phone, 'phone-rear', atCut, back + 120_000);
+    expect(Math.abs(late.t0HostMs - truth)).toBeLessThan(1);
+    // The fit's estimate then would place it five minutes off.
+    const now = remoteFrames(phone, 'phone-rear', fit, back + 120_000);
+    expect(Math.abs(now.t0HostMs - truth)).toBeGreaterThan(299_000);
+  });
+
+  it('places the clips of 20 minutes on the simulated home Wi-Fi within 1.5 ms of the truth with the lines of their cuts', () => {
+    // T4.2b's simulation of the owner's home Wi-Fi (least round trip about 6 ms, median 14, one ping
+    // in 20 held 100 to 300 ms), the phone 240 ms behind drifting by 50 ppm; a clip cut every minute
+    // from the second, each converted with the line taken at its cut.
+    for (const seed of [1, 2, 3]) {
+      const sim = simulation({ offsetMs: -240, driftPpm: 50, legs: homeWifi, seed });
+      const fit = new RemoteClockFit();
+      const errors: number[] = [];
+      let nextCut = SIM_H0 + 120_000;
+      pinged(fit, sim, 1200, ([t1]) => {
+        if (t1 >= nextCut) {
+          nextCut += 60_000;
+          const truth = t1 - 20_000;
+          const kept = remoteFrames(
+            { ...framesJson(), t0HostMs: sim.remote(truth) },
+            'phone-rear',
+            snapshot(fit.line(), fit),
+            t1,
+          );
+          errors.push(Math.abs(kept.t0HostMs - truth));
+        }
+      });
+      expect(errors.length).toBeGreaterThanOrEqual(18);
+      expect(Math.max(...errors), `seed ${String(seed)}: ${errors.join(', ')}`).toBeLessThan(1.5);
+    }
+  });
 });
+
+/** The estimate a host takes at a cut: the fit's line, frozen, with its record and convergence. */
+function snapshot(line: RemoteClockLine, fit: RemoteClockFit): RemoteClockSnapshot {
+  return {
+    toHostMs: (remoteMs) => line.toHostMs(remoteMs),
+    params: { ...fit.params },
+    converged: fit.converged,
+  };
+}

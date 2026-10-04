@@ -16,7 +16,9 @@ import { CameraPreview } from './camera-preview';
 import { CameraService, LUMA_SAMPLER } from './camera-service';
 import { CAPTURE_STARTER, CLIP_TAIL_MS, ENCODER_SETTLE_MS } from './recording-service';
 import { FakeCaptureStarter, statsOf } from './recording-testing';
+import { RemoteCameraRegistry } from './remote-camera-registry';
 import { SyncService } from './sync-service';
+import { FakeRemoteSource, remotePhone } from './sync-testing';
 
 /** A canvas whose pixels are squares of 20, dark and light: a sharp picture. */
 class CheckerCanvas implements Canvas2D<CanvasImageSource> {
@@ -268,5 +270,35 @@ describe('CameraPreview', () => {
     starter.last.emitError({ message: 'The video encoder failed: EncodingError', fatal: true });
     await update();
     expect(text('camera-status-recording')).toBe('stopped');
+  });
+
+  it("shows the phones paired over its picture once one has a camera, and a phone's picture with the camera off (T4.3)", async () => {
+    const camera = await render();
+    await camera.start();
+    await update();
+    // No phone: the tiles' code is not loaded.
+    expect(host().querySelector('app-remote-previews')).toBeNull();
+    const source = new FakeRemoteSource();
+    TestBed.inject(RemoteCameraRegistry).provide(source);
+    source.cameras.set([remotePhone('x')]);
+    await update();
+    await update();
+    const box = element('camera-preview-box');
+    expect(box?.querySelector('app-remote-previews')).not.toBeNull();
+    expect(
+      box?.querySelector('[data-testid="remote-preview-tile"]')?.getAttribute('data-label'),
+    ).toBe('phone-rear');
+
+    // The camera off: the phone's picture is the preview, without a word about the camera.
+    camera.stop();
+    await update();
+    expect(host().classList.contains('shown')).toBe(true);
+    expect(element('camera-preview')).toBeNull();
+    expect(host().textContent).not.toContain('The camera is not working');
+    expect(element('remote-preview-main')?.getAttribute('data-label')).toBe('phone-rear');
+    // The phone goes: nothing is shown.
+    source.cameras.set([]);
+    await update();
+    expect(host().classList.contains('shown')).toBe(false);
   });
 });

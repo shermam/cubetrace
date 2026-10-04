@@ -25,6 +25,7 @@ import {
   type MotionMeterInfo,
   type TurnAnalysis,
 } from '@cubetrace/capture';
+import type { RemoteClockRecord } from '@cubetrace/core';
 
 import type { MotionCost, SyncOutcome, SyncRunData } from './sync-run';
 
@@ -42,6 +43,11 @@ export interface SyncReportContext {
   readonly app: { readonly version: string; readonly commit: string };
   /** `navigator.userAgent`: the browser and its version; null when unknown. */
   readonly userAgent: string | null;
+  /**
+   * A remote camera's check (T4.3): the phone (its host label), and the clock estimate that placed
+   * its frames on the host clock when the check began; absent for this device's own camera.
+   */
+  readonly remote?: { readonly peer: string; readonly clock: RemoteClockRecord | null };
 }
 
 /**
@@ -71,6 +77,11 @@ export interface SyncReport {
   };
   /** The framing rectangle (null: the whole frame), and whether it is wide (over 60% of it). */
   readonly framing: { readonly rect: FramingRect | null; readonly wide: boolean };
+  /**
+   * A remote camera's check (T4.3): the phone, and the clock estimate that placed its frames on the
+   * host clock; absent for this device's own camera, whose frames are on the host clock already.
+   */
+  readonly remote?: { readonly peer: string; readonly clock: RemoteClockRecord | null };
   /** How the capture worker read the frames (format, copied or drawn, region, plane). */
   readonly meter: MotionMeterInfo | null;
   /** The detection's parameters (packages/capture/src/clapperboard.ts). */
@@ -177,6 +188,14 @@ export function syncReport(
       rect: context.framing,
       wide: isWideFraming(context.framing, context.frameSize ?? meterSize(data.meter)),
     },
+    ...(context.remote === undefined
+      ? {}
+      : {
+          remote: {
+            peer: context.remote.peer,
+            clock: context.remote.clock === null ? null : { ...context.remote.clock },
+          },
+        }),
     meter: data.meter,
     detection: {
       estimator: analysis.estimator,

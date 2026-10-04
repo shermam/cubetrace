@@ -7,8 +7,9 @@ T4.0 built it in `packages/rtc` (the code), `packages/core` (the clock maths, th
 the documents' shapes) and `firebase/firestore.rules` (the signaling's rules): the messages of the
 data channel, the file transfer, the clock sync, the signaling and the pairing token, and what each
 side does when something fails. The pages that use it came with T4.1 (§8 below: the lifecycle as the host's Cameras section and
-the phone's Camera page run it), the cuts and the clips' transfer with T4.2 (§9); the sync check and
-the live preview come with T4.3. `docs/ARCHITECTURE.md` ("Remote cameras") places it in the app.
+the phone's Camera page run it), the cuts and the clips' transfer with T4.2 (§9), the sync check of
+the phone's camera and the live preview with T4.3 (§10). `docs/ARCHITECTURE.md` ("Remote cameras")
+places it in the app.
 
 **Stream for control, record locally for data.** One `RTCPeerConnection` between the two devices,
 made with Google's public STUN server (`stun:stun.l.google.com:19302`) and no TURN relay: on one Wi-Fi
@@ -16,8 +17,8 @@ the two connect directly, on a network with client isolation (a guest or office 
 not, and the office rig stays the laptop's own webcam. One reliable, ordered data channel
 (`cubetrace`, `ordered: true`, no retransmit limit) carries everything of this document: the clock
 pings, the camera's state and thumbnails, the cut commands, and the clip files themselves, as bytes.
-A low-bitrate video track for the live preview comes with T4.3 and is never data. Nothing is
-transcoded on the host.
+Since T4.3 a low-bitrate video track, the live preview, goes over the same connection (§2, §10): it
+is never data, and nothing of it is recorded. Nothing is transcoded on the host.
 
 **Roles.** The device that opened the session is the *host*; the phone is a *camera device*. Over
 the signaling the phone is the *caller* (it creates the peer document with its offer) and the host
@@ -56,13 +57,21 @@ file name without a path).
 | `file-done` | sender | `id`, `crc32` (of the whole file) | after the last chunk |
 | `file-abort` | either | `id`, `reason` | the sender gives the file up (the checksum refused three times), or the receiver cannot take it (no room, a chunk that does not fit) |
 | `leave` | either | `reason` | the phone's Leave, the host's Remove, a protocol version that does not match |
+| `sync-start` | host | `id` (the check's number on the host's page) | a sync check of the phone's camera starts (T4.3, §10); a new one ends the one before |
+| `sync-stop` | host | `id` | the check ended (done, failed, put off) |
+| `sync-motion` | phone | `id`, `frames: [{timestampUs, arrivalMs, receivedMs, mean, changed, costMs}]` (each frame's own timestamp, its arrival in the capture worker and its reception by the page on the phone's clock, its mean change and its changed area inside the framing rectangle, the worker's time on it; at most 240, `MAX_MOTION_FRAMES`) | every 250 ms while the check measures, when there is something to send |
+| `sync-meter` | phone | `id`, `meter: {format, path, frameWidth, frameHeight, region, planeWidth, planeHeight, changeLevels}` (how the capture worker reads the frames) | first, and when it changes |
+| `sync-error` | phone | `id`, `message` | the phone cannot measure (it does not record, its recording stopped during the check, its frames cannot be read): the host's check ends as failed |
+| `preview` | host | `on` | after the hellos, and whenever "Live preview from phones" changes (T4.3, §10): whether the phone sends its live picture |
 
 The thumbnail's binary frame is a 13-byte header too: the kind `0x02`, the time as a float64, the
 width and the height as 2 bytes each, then the JPEG. `MessageLink` wraps a transport, decodes each
 frame and hands the message to the handlers of its type (`link.on('pong', …)`), reports a frame that
 is not a message (`onError`) and drops it, and sends messages encoded (`link.send`, or `trySend`,
 which does nothing on a closed transport). The fields of the cuts and `clip-ack` came with T4.2,
-additive within version 1: no build before T4.2 cuts.
+additive within version 1: no build before T4.2 cuts. The sync messages and `preview` came with T4.3,
+additive the same way: a phone of a build before T4.3 drops them as frames that are not messages
+(`onError`), sends no picture, and a check of its camera ends without frames.
 
 ## 2. The transport (`transport.ts`, `webrtc.ts`)
 
@@ -85,6 +94,22 @@ the same signaling (the peer document's offer replaced, its answer cleared), and
 it; `disconnected` is left to ICE, which comes back by itself when it can. Closing the transport
 closes the channel, the connection and the signaling. This file alone in the package touches the
 browser's WebRTC API: the unit tests never load it, and the end-to-end suite of T4.1 covers it.
+
+**The live preview's video** (T4.3, §10). A caller made with `preview: true` (the phone,
+`apps/web/src/app/rtc/transport-connector.ts`) adds a send-only video transceiver before its data
+channel, so that its first offer carries a video section beside the channel's and the picture turns
+on and off with no new offer, no renegotiation through the signaling: the transceiver's encoding is
+inactive and capped by `PREVIEW_ENCODING` (`preview.ts`: `scaleResolutionDownBy` 5, `maxBitrate`
+300 kbps, `maxFramerate` 15), without a track until `preview.send(track)`, which replaces the track
+and then activates the encoding with the caps (`RTCRtpSender.replaceTrack`, `setParameters`), and to
+stop deactivates it before it drops the track: never an active encoding without a track, nor a track
+sent uncapped. The callee takes the track of an offer that brings one (`ontrack`); Chrome's receiving
+track is muted while no frame comes, which is how the host tells a picture that flows. Both ends read
+the stream's statistics (`preview.stats()`, `previewStats`: frames encoded or decoded, the frame rate,
+the size, the bytes, the encoder's time and implementation, why the quality is held back and for how
+long by the CPU). The offer grows from 458 to 2,740 characters with the video section (the answer
+2,440), far under the 20,000 the signaling's rules allow; a renegotiation was not needed, and the
+signaling documents, which hold one offer and one answer, are unchanged.
 
 `MemoryTransport.pair({delayMs, jitterMs, bytesPerSecond, loss, retransmitMs, maxMessageSize,
 timers})` joins two ends in memory for the tests, as a reliable channel over a network behaves: each
@@ -211,8 +236,24 @@ comparison) pinged every 2 s as it was, three pairings each:
 
 The drift fitted through the ten or so samples a jittery Wi-Fi keeps in two minutes is rough: on the
 home Wi-Fi's simulation, 3 to 16 ppm at the end for a true 5, and 23 to 50 ppm at worst while
-converged, one to three milliseconds a minute, which the offset's errors above include; T4.3's drift
-applied across a clip may want a longer history.
+converged, one to three milliseconds a minute, which the offset's errors above include.
+
+**The estimate at a clip's own time** (T4.3). What converts a time is a line: `RemoteClockFit.line()`
+freezes the fit's estimate (`RemoteClockLine`: its offset at its newest kept sample and its drift;
+before the drift is fitted, the median offset and no drift), and the app's clock estimate
+(`remote-estimate.ts`, which before 3 kept samples takes the offset of the window's least-round-trip
+sample) is that line with the fit's record. The host takes the estimate when it sends a cut and keeps
+it with the cut; the clip's frame times are converted with it when the files come, at the clip's own
+first frame (the line's value at `t0RemoteMs`), so that a file that comes late (the phone away, or
+asleep with its clock stopped, which moves the live fit) is converted as it was when it was cut. A
+clip the host did not cut (one offered after the host's page loaded again) takes the estimate when
+its file comes. The simulations (`remote-frames.test.ts`, on `remote-clock-sim.ts`): a clip 10
+minutes into a session with 50 ppm of drift converts within 1 ms of the truth (29 ms off with the
+offset at pairing); the clips of 20 minutes on the simulated home Wi-Fi within 0.64 to 0.89 ms at
+worst over three pairings (with the estimate 3 s later, when the files come: 0.67 to 1.12 ms); a clip
+whose files come after a five-minute sleep within 1 ms with the line of its cut, five minutes off
+with the fit's estimate then. The sync check's frames (§10) are converted with the estimate of the
+moment each batch comes, a quarter of a second after them.
 
 **The pings** (`clock-sync.ts`). `ClockPinger` (the host) pings every 500 ms (`FAST_PING_INTERVAL_MS`)
 until an answer leaves the fit converged, or for the first minute at most (`FAST_PINGS_MS`), then
@@ -282,7 +323,8 @@ means to join, and that the host wants it now.
 The schemas stay at version 2 with new optional fields, as T3.7's: in `session.json` a camera's
 `local` may be false, and then `remote: {label, platform}` names the device it runs on (its host label
 and platform, as its own records have them); a camera clock may carry `remote`, the clock fit's
-record above, beside the clapperboard's result (`rttMs` and `driftPpm` repeat the fit's). The host
+record above, beside the clapperboard's result (`rttMs` and `driftPpm` repeat the fit's; the lag of
+the phone's own sync check since T4.3, §10, `docs/DATA-MODEL.md` §6 says what it means). The host
 gives a remote camera its label with `labelFor`, as any camera (`phone-rear`, a second phone
 `phone-2-rear`); its clips are `video[]` entries like any other, named after it. In Firestore the
 session's document gains `pairing`, the peer documents and their candidates get schemas of their own
@@ -291,7 +333,8 @@ session's document gains `pairing`, the peer documents and their candidates get 
 alone. Since T4.2 the `remote` record of a camera clock may say `converged`: false for the estimate
 a first cut relied on before the fit converged (§9), true once it did; a remote camera's frames file
 keeps the phone's first frame time as `t0RemoteMs` and the estimate that converted it as `remote`
-(`docs/DATA-MODEL.md` §9).
+(`docs/DATA-MODEL.md` §9): since T4.3 the estimate of its cut, its `offsetMs` the one applied at the
+first frame.
 
 ## 7. Failure modes
 
@@ -310,6 +353,9 @@ keeps the phone's first frame time as `t0RemoteMs` and the estimate that convert
 | The clocks disagree (the phone slept, its clock stopped) | the first sample after is farther from the estimate than its round trip allows: `converged` is withdrawn at once, the state says syncing, and comes back once the window turned over (two minutes) | nothing to do; the host converts with the fit it has |
 | A busy network (round trips of tens of ms, scattered) | the offset stays within a few ms, the sync is not called converged; T4.1 shows the round trip and the spread | nothing to do |
 | A frame that is not a message (a bug, another app on the channel) | `MessageLink.onError` reports it; the frame is dropped, the connection kept | the same |
+| The phone cannot measure during a sync check (it stopped recording, its frames cannot be read) | the check ends as failed with the phone's words (`sync-error`), Retry measures the phone again; nothing is kept | `sync-error`, and it stops measuring |
+| The phone goes during a sync check (Leave, its connection ends) | the check ends as failed (`the phone's connection ended`); the lag the session has stays | the measuring stops with the connection |
+| The live preview does not flow (the setting off, the phone's camera off or changing, a busy network) | the remote track is muted: the tile shows the latest thumbnail, every 2 s, until frames come again | sends nothing, or the camera's new track once it has one |
 | The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time: the camera goes from the list at once (its entry stays in the session), the transport closed and the peer document deleted with its candidates; the clips it has not sent are given up at once (the notes say they are missing), and still taken if it pairs again and offers them | Leave sends `leave` and closes the connection 250 ms later, once the word is out; a page that goes (`pagehide`) sends it and leaves the connection to the browser |
 | The host removes the camera or ends the session | `leave`, the connection closed 250 ms later, the peer document deleted with its candidates; the clips the phone has not sent are given up (the notes say so); at the session's end (New session), a camera with clips of the session still to come is kept until they are stored, refused or given up, 15 s at most, listed as waiting for its last clips (T4.2b), then let go the same way (what is still to come then is noted missing); a host page that goes (`pagehide`) sends `leave` and deletes the documents, as far as there is time | the page says the host let it go, with the reason; without the word (the host's page died), `onClosed('the documents are gone')` ends the transport and the phone calls again for five minutes, then says the host is gone |
 
@@ -333,7 +379,9 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    the camera device has a choice of its own in Settings, apart from the Timer page's), runs the
    capture pipeline from then on (the ring buffer, so that T4.2's first cut has its margin), checks
    the pairing, calls (`call`, `WebRtcTransport.connect` as the caller) and sends `hello` with its
-   camera as its own session.json would describe it (`local: true`; the host relabels it).
+   camera as its own session.json would describe it (`local: true`; the host relabels it). Since
+   T4.3 its transport carries the live preview's transceiver (§2), and the host says whether it wants
+   the picture (`preview`) as soon as the hellos are exchanged.
 3. **The answer.** The host answers the first peer whose `tokenHash` is the pairing's, before it
    expires, and closes the pairing: the token is taken once, and stays the phone's for the pairing's
    ten minutes (`PAIRING_TTL_MS`, T4.2b): until it connects, the camera is listed as connecting and a
@@ -358,7 +406,8 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    (`ClockPinger`, one `RemoteClockFit` per phone, kept across its reconnections: every 500 ms until
    the fit converges, then every 2 s, §4) and sends `clock` after each answer; when the fit
    converges, and every minute after, the fit's record goes into `clock.cameras[label].remote` (the
-   clapperboard fields stay at 0 until T4.3 measures the lag), and every minute of the connection,
+   clapperboard fields stay at 0 until a sync check of the camera measures its lag, §10, which the
+   later records keep), and every minute of the connection,
    converged or not, the sync goes into the diagnostics (`rtc.clock`, with the window's round trips
    since T4.2b). The phone answers the pings, sends `state` and a `thumbnail` (a JPEG of at most 320
    px from its preview) every 2 s, and `hello` again when its camera changes (another camera, the
@@ -409,7 +458,7 @@ clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the
    the window's least-round-trip sample before; a cut waits for the clock sync's first answer (at
    most 10 s: a phone paired again starts a new fit), never for convergence, which a busy Wi-Fi may
    never give (the first pairing on real hardware never converged on the owner's home Wi-Fi, and
-   T4.3 revisits the criterion). The window is widened on each side by the estimate's margin, the
+   T4.2b revisited the criterion, §4). The window is widened on each side by the estimate's margin, the
    95th percentile of the kept round trips plus that of the residuals, and 500 ms at least
    (`CUT_MARGIN_MS`: half a round trip is the most a symmetric path's offset is off by, and the
    Wi-Fi's power-saving bursts of 100 to 300 ms are covered several times over, for about a second
@@ -430,10 +479,11 @@ clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the
    (`FileReceiver`; a file cut in the middle goes on from the bytes held over the next connection of
    the same page), checks the frames file (`parseFrames`) and writes it into the attempt's folder with
    its times on the host clock (`remoteFrames`: `t0RemoteMs` the phone's first frame time, `t0HostMs`
-   that time through the estimate of the moment, the estimate itself in `remote`, with `converged`
-   and when it was taken), then the MP4; the clip goes into the attempt's record (`attachClip`:
-   `firstFrameHostMs` the converted time; no `syncResidualMs` until T4.3's sync check measures the
-   camera's lag) and the host says so (`clip-ack`, `stored`). A clip the host does not take (its
+   that time through the estimate the cut was sent with, at the clip's own time since T4.3 (§4), the
+   estimate itself in `remote`, with `converged` and when it was taken), then the MP4; the clip goes
+   into the attempt's record (`attachClip`: `firstFrameHostMs` the converted time; `syncResidualMs`
+   the camera's lag once a sync check of it measured one in the session, §10, none before) and the
+   host says so (`clip-ack`, `stored`). A clip the host does not take (its
    attempt deleted or dropped, its frames file unreadable) is answered `stored: false` with why;
    either way the phone deletes its copy.
 5. **The wait.** The host waits for an attempt's remote clips until 120 s after its end
@@ -457,3 +507,76 @@ clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the
 7. **Diagnostics** (`docs/DIAGNOSTICS.md`): `remote.cut` (sent, done, failed), `remote.clip` (the
    bytes, the transfer's time and throughput, the bytes resumed), `remote.clip.late`,
    `remote.clip.missing`; the QA view counts the clips by camera label.
+
+## 10. The sync check of a remote camera and the live preview (T4.3)
+
+How the host's `SyncService` (`apps/web/src/app/camera/sync-service.ts`) measures a phone's camera
+against the cube, and how the phone's live picture reaches the Timer page (`docs/PLAN.md` T4.3 has
+the contract):
+
+1. **Starting it.** Each phone of the Cameras section with a camera has a line of its own under the
+   Timer page's preview (`Sync: phone-rear has no check in this session`, or its lag, with "Sync
+   check"). It can start once the phone is connected to the session under way, its clock sync has
+   had an answer (its frames can be placed on the host clock) and it records, wherever the attempt
+   lets a check start (no scramble begun, no solve); the line says why not otherwise. The check is the
+   one of the host's own camera (T2.5, T2.8, T2.11: hold still, the countdown, a face flicked and
+   flicked back five times, the timer tracking no attempt meanwhile), the panel naming the phone's
+   label. While the phone's framing rectangle, as its `state` reports it, is the whole frame or most
+   of it, the panel asks for a rectangle drawn on the phone first (its Camera page), with Start
+   anyway. A phone's check is never due by itself (the host's own camera's is, once it records, and
+   two in a row would ask too much of the solver); its line says the phone has none.
+2. **Who measures, who matches.** The host sends `sync-start`. The phone (`CameraDeviceSync`) asks
+   its capture worker to measure each frame's motion inside its framing rectangle
+   (`CameraDeviceCapture.watchMotion`: the meter of the host's own check, `motion.ts` of
+   `@cubetrace/capture`, the changed area of the frame's luma downscaled to 160 pixels wide, 320 for
+   a wide rectangle), and sends the measures every 250 ms (`sync-motion`) with how the worker reads
+   the frames (`sync-meter`), until `sync-stop`, the connection's end or five minutes. The host
+   (`RemoteCamerasService.watchMotion`) puts each frame's arrival and reception on its own clock with
+   the clock estimate of the moment its batch came (§4), keeps the frame's own timestamp, and hands it
+   to the same `SyncRun` as its own camera's frames: `detectClapperboard` places each frame by its
+   timestamp and the median arrival offset, and matches the motion against the cube's turns, which
+   never leave the host clock. One code path for every camera, so the same result, the same
+   diagnostics and the same check data to download; the phone holds no copy of the matching, and
+   sends about six numbers a frame (a few kB a second). A phone that cannot measure says
+   `sync-error`, which ends the check as failed with its words; so do its leaving and its
+   connection's end, and a recording that stops during the check (the camera off or changed). The
+   Timer page reaches the phones through `RemoteCameraRegistry`, which the Cameras section's service
+   fills: neither the check nor the preview area loads the `rtc` chunk.
+3. **What it measures, and where it goes.** The lag of the phone's frames behind the cube on the host
+   clock, once their times are converted: the camera's own latency and the phone's delivery of the
+   frame to its capture worker, as a local camera's lag is, plus what the clock estimate is off by
+   during the check (a few ms on a converged fit), so measured on top of the clock sync rather than
+   added to it (`docs/DATA-MODEL.md` §6). It goes into `clock.cameras[label]` beside the clock sync's
+   record (`remote`: the record there, or, when there is none yet, the clock estimate at the check's
+   end; `rttMs` and `driftPpm` repeat it), which the clock sync's later records keep, and
+   the phone's later clips take it as their `syncResidualMs` (`withSyncResidual`), as T2.8 gives a
+   local camera's clips theirs. The end-to-end pair (two pages of one browser, a synthetic camera
+   whose square flips 120 ms after each of the demo cube's turns, the phone's clock 5 s ahead) finds
+   126 and 135 ms: the frame that first shows a flip comes with the canvas's next capture, up to a
+   frame later, and reaches the worker a few ms after.
+4. **The live preview.** The phone's connection carries the preview's transceiver (§2). As soon as
+   the hellos are exchanged, and whenever the setting changes, the host says whether it wants the
+   picture (`preview`, "Live preview from phones" in Camera settings → Cameras, on by default). The
+   phone (`CameraDevicePreview`) then sends its camera's track, the one its recording reads (the
+   preview's encoder scales it down; the recording is not touched), another camera's track replacing
+   it as the camera changes, and stops when the host says off, the camera goes off or the connection
+   ends. The host (`RemoteCamerasService`) takes the track into the camera's entry, and the Timer
+   page's `RemotePreviews`, deferred inside the preview until a phone with a camera is listed, shows
+   each phone's picture as a tile in the top right corner of the host's preview: its live video while
+   the track flows (unmuted), its latest thumbnail otherwise, its framing rectangle over it. A tap
+   swaps a tile with the main picture, a tap on this device's tile swaps back, and without a camera of
+   the host's own the first phone's picture is the main one (issue #60: the thumbnail at the bottom of
+   Camera settings was too far from the preview to keep the cube in the phone's frame). The Cameras
+   list keeps its thumbnail every 2 s, the pairing's state.
+5. **What the preview costs the phone.** Each start says, in `preview.started`, how the recording
+   went over the span before it (without the preview: its frame rate measured, the least of its
+   seconds, the frames encoded a second and those dropped), and each stop, in `preview.stopped`, how
+   the preview's encoder went (its frames, frame rate, bitrate, time per frame, implementation, the
+   size it sent, why it held the quality back and the share of time the CPU did) and the recording
+   over the same span (with the preview). The owner's measurement on the ThinkPhone
+   (`docs/MANUAL-TESTS.md`, "After T4.3") switches the setting off and on in turns while recording,
+   and compares the spans. In the end-to-end pair (a still 640 × 360 canvas): 128 × 72 at 15 fps,
+   4 kbps, 0.36 ms of `libvpx` per frame, the recording at 30.2 fps meanwhile.
+6. **Diagnostics** (`docs/DIAGNOSTICS.md`): `sync.check` with `remote: true`, the phone's `peer` and
+   the clock sync that placed its frames (`clockConverged`, `clockOffsetMs`, `clockRttMs`,
+   `clockSamples`); `preview.started` and `preview.stopped` on the phone.

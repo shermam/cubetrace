@@ -1,4 +1,4 @@
-import type { RemoteClockFit, RemoteClockSnapshot } from '@cubetrace/core';
+import { RemoteClockLine, type RemoteClockFit, type RemoteClockSnapshot } from '@cubetrace/core';
 
 /**
  * From this many samples kept, the fit's estimate (their offsets' median, the drift once they span a
@@ -16,8 +16,14 @@ export const ESTIMATE_MIN_SAMPLES = 3;
  */
 export const CUT_MARGIN_MS = 500;
 
-/** The clock estimate of a remote camera, as its cuts and the conversion of its clips use it. */
+/**
+ * The clock estimate of a remote camera, as its cuts, the conversion of its clips and its sync check
+ * use it: frozen when it was taken (T4.3), so that a clip converts with the estimate of its cut,
+ * whatever the fit became before its files came.
+ */
 export interface ClockEstimate extends RemoteClockSnapshot {
+  /** The estimate's line, frozen: its offset and drift at the host time it was taken. */
+  readonly line: RemoteClockLine;
   /** The phone's time of a host time. */
   toRemoteMs(hostMs: number): number;
   /**
@@ -28,11 +34,12 @@ export interface ClockEstimate extends RemoteClockSnapshot {
 }
 
 /**
- * The estimate a cut or a conversion uses now (T4.2), whether the fit has converged or not: the fit's
- * own once it keeps {@link ESTIMATE_MIN_SAMPLES} samples, the offset of its least-round-trip sample
- * before; null with no sample at all (nothing places the phone's clock yet). Its record (`params`)
- * says which numbers it stands on, and `converged` whether the fit had converged: a fit on a busy
- * Wi-Fi may never be (the first real pairing, 2026-10-03), and nothing waits for it.
+ * The estimate a cut, a conversion or a sync check uses now (T4.2), whether the fit has converged or
+ * not, frozen (T4.3: `RemoteClockFit.line`): the fit's own once it keeps {@link ESTIMATE_MIN_SAMPLES}
+ * samples (its line, the drift once the samples span a minute), the offset of its least-round-trip
+ * sample before; null with no sample at all (nothing places the phone's clock yet). Its record
+ * (`params`) says which numbers it stands on, and `converged` whether the fit had converged: a fit on
+ * a busy Wi-Fi may never be (the first real pairing, 2026-10-03), and nothing waits for it.
  */
 export function clockEstimate(fit: RemoteClockFit): ClockEstimate | null {
   const least = fit.least;
@@ -42,20 +49,28 @@ export function clockEstimate(fit: RemoteClockFit): ClockEstimate | null {
   const params = fit.params;
   const marginMs = Math.max(CUT_MARGIN_MS, fit.rttP95Ms + params.residualP95Ms);
   if (params.samples >= ESTIMATE_MIN_SAMPLES) {
-    return {
-      toHostMs: (remoteMs) => fit.toHostMs(remoteMs),
-      toRemoteMs: (hostMs) => fit.toRemoteMs(hostMs),
-      params,
-      converged: fit.converged,
-      marginMs,
-    };
+    return frozen(fit.line(), params, fit.converged, marginMs);
   }
-  const offsetMs = least.offsetMs;
+  return frozen(
+    new RemoteClockLine(least.offsetMs, 0, least.hostMs),
+    { ...params, offsetMs: least.offsetMs, driftPpm: 0 },
+    false,
+    marginMs,
+  );
+}
+
+function frozen(
+  line: RemoteClockLine,
+  params: ClockEstimate['params'],
+  converged: boolean,
+  marginMs: number,
+): ClockEstimate {
   return {
-    toHostMs: (remoteMs) => remoteMs - offsetMs,
-    toRemoteMs: (hostMs) => hostMs + offsetMs,
-    params: { ...params, offsetMs, driftPpm: 0 },
-    converged: false,
+    line,
+    toHostMs: (remoteMs) => line.toHostMs(remoteMs),
+    toRemoteMs: (hostMs) => line.toRemoteMs(hostMs),
+    params,
+    converged,
     marginMs,
   };
 }

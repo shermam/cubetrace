@@ -4,14 +4,18 @@ import { SYNC_GRACE_MS, SYNC_SETTLE_MS } from '../session/session-service';
 import { SYNC_TICK_MS } from './sync-run';
 import { SyncCheck } from './sync-check';
 import { FAKE_FACETIME, FAKE_WEBCAM, settle } from '../device/fake-browser';
-import { turn } from '../session/session-harness';
+import { ready, turn } from '../session/session-harness';
 import { statsOf } from './recording-testing';
+import { RemoteCameraRegistry } from './remote-camera-registry';
 import {
   AROUND_THE_CUBE,
+  FakeRemoteSource,
   STILL,
   clapperboard,
   film,
+  filmTo,
   recording,
+  remotePhone,
   rig,
   update,
   type Rig,
@@ -268,5 +272,57 @@ describe('SyncCheck', () => {
     expect(start?.disabled).toBe(true);
     expect(start?.title).toBe('Once a cube is connected.');
     expect(text(element, 'sync-why')).toBe('Once a cube is connected.');
+  });
+
+  it("shows a line for each phone, whose Sync check measures the phone's camera: the panel names it, asks for the framing on the phone, and says its lag (T4.3)", async () => {
+    const r = rig();
+    const { element, refresh } = render(r);
+    const fake = await ready(r.s);
+    const source = new FakeRemoteSource();
+    source.cameras.set([remotePhone(r.s.service.session()?.id ?? '', { framing: null })]);
+    TestBed.inject(RemoteCameraRegistry).provide(source);
+    await refresh();
+    // This device's camera is off: its line is not there; the phone's is.
+    expect(text(element, 'sync-line')).toBeUndefined();
+    expect(text(element, 'sync-remote-line')).toBe(
+      'Sync: phone-rear has no check in this session. Sync check',
+    );
+    expect(button(element, 'sync-remote-start')?.disabled).toBe(false);
+
+    button(element, 'sync-remote-start')?.click();
+    await refresh();
+    expect(state(element)).toBe('framing');
+    expect(text(element, 'sync-heading')).toBe('Sync check · phone-rear');
+    expect(text(element, 'sync-framing')).toBe(
+      'Draw the framing rectangle around the cube on the phone first (its Camera page → Camera settings → Edit the framing): the check looks for motion inside it.',
+    );
+    // The framing is the phone's to edit: no "Edit the framing" here.
+    expect(button(element, 'sync-edit-framing')).toBeNull();
+    button(element, 'sync-anyway')?.click();
+    await refresh();
+    expect(state(element)).toBe('running');
+    expect(element.textContent).toContain("Hold the cube still inside the phone's rectangle.");
+
+    const lags = [95, 60, 97, 98, 99, 145, 99, 100, 101, 103];
+    const { turns, energy } = clapperboard(r.s.perf.hostMs, lags);
+    await filmTo(r, source.sink, fake, 2000, energy, turns, true);
+    await refresh();
+    expect(text(element, 'sync-progress')).toBe('Turn 1 of 10');
+    expect(text(element, 'sync-count')).toContain("1 seen by the phone's camera");
+    await filmTo(r, source.sink, fake, 12_000, energy, turns, true);
+    await refresh();
+    expect(state(element)).toBe('passed');
+    expect(text(element, 'sync-result')).toBe('phone-rear lags the cube by 99 ms (±8).');
+
+    button(element, 'sync-later')?.click();
+    await refresh();
+    expect(text(element, 'sync-remote-line')).toBe(
+      'Sync: phone-rear lags the cube by 99 ms (±8). Sync check',
+    );
+    // The phone stops recording: its check cannot start, and the line says why.
+    source.change({ recording: false });
+    await refresh();
+    expect(button(element, 'sync-remote-start')?.disabled).toBe(true);
+    expect(text(element, 'sync-remote-why')).toBe('Once the phone records.');
   });
 });

@@ -424,6 +424,7 @@ export class DiagnosticsService {
       wifiOnly: () => settings.wifiOnlySetting(),
       keepLocalCopies: () => settings.keepLocalCopies(),
       recordRemoteCameras: () => settings.recordRemoteCameras(),
+      livePreviewFromPhones: () => settings.livePreviewFromPhones(),
     };
     let last: Record<string, string | number | boolean> | null = null;
     effect(() => {

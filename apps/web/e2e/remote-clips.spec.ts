@@ -8,6 +8,7 @@ import { type BrowserContext, type Locator, type Page, expect, test } from '@pla
 import { Ajv2020 } from 'ajv/dist/2020';
 
 import { ADA, type FakeBucket, fakeAccount, fakeAccountState, fakeBucket } from './helpers/account';
+import { RECORDING, bend, fileText, pill } from './helpers/remote';
 import { fakeSignaling } from './helpers/signaling';
 import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from './helpers/timer';
 
@@ -47,23 +48,10 @@ const SOLVE_LEAD_MS = 3000;
 const TAIL_MS = 1000;
 const MARGIN_MS = 500;
 
-/** The window property the app reads in development builds (src/app/rtc/e2e-remote.ts). */
-const E2E_REMOTE = 'cubetraceE2eRemote';
-
 const isFrames = new Ajv2020({ allowUnionTypes: true, allErrors: true }).compile(FRAMES_SCHEMA);
 
 function banner(page: Page): Locator {
   return page.getByRole('banner');
-}
-
-/** Sets what the suite bends on every load of `page` (src/app/rtc/e2e-remote.ts). */
-async function bend(page: Page, settings: Record<string, number | boolean>): Promise<void> {
-  await page.addInitScript(
-    ({ key, value }) => {
-      Reflect.set(window, key, value);
-    },
-    { key: E2E_REMOTE, value: settings },
-  );
 }
 
 /**
@@ -103,34 +91,6 @@ async function attemptFiles(
   );
 }
 
-/**
- * A file of the session's folder, as text: `session.json`, or `attempts/0001/<name>`. The app
- * replaces a file by moving a new one over it (`writeTextFile`), and a read at that instant finds
- * no file (a `NotFoundError`, which failed a poll of the record once in T4.2b's runs): it is read
- * again then, a few times, 100 ms apart.
- */
-async function fileText(page: Page, sessionId: string, path: string[]): Promise<string> {
-  return page.evaluate(
-    async ({ sessionId, path }) => {
-      for (let tries = 1; ; tries++) {
-        try {
-          let dir = await navigator.storage.getDirectory();
-          for (const name of ['sessions', sessionId, ...path.slice(0, -1)]) {
-            dir = await dir.getDirectoryHandle(name);
-          }
-          return await (await (await dir.getFileHandle(path[path.length - 1])).getFile()).text();
-        } catch (error: unknown) {
-          if (!(error instanceof DOMException) || error.name !== 'NotFoundError' || tries === 5) {
-            throw error;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-      }
-    },
-    { sessionId, path },
-  );
-}
-
 async function attemptRecord(page: Page, sessionId: string): Promise<AttemptRecord> {
   return JSON.parse(
     await fileText(page, sessionId, ['attempts', '0001', 'attempt.json']),
@@ -148,26 +108,23 @@ async function events(page: Page): Promise<{ kind: string; data: Record<string, 
   );
 }
 
-/**
- * The phone's pill as a failure should read it: its state, and the problem line when it has one (why
- * a join was refused, why the host is gone).
- */
-async function pill(phone: Page): Promise<string> {
-  const state = (await phone.getByTestId('device-state').getAttribute('data-state')) ?? '';
-  const problem = (await phone.getByTestId('device-problem').allTextContents()).join(' ').trim();
-  return problem === '' ? state : `${state}: ${problem}`;
-}
+/** How long the phone records before an attempt: the next attempt's lead and margin in its buffer. */
+const BUFFERED_MS = 6000;
 
 /**
  * `ready` once the pair can record an attempt: the phone connected, the clock sync with an answer
  * (a cut's estimate: before the fit keeps three samples, the offset of the trip of least round trip,
  * which on loopback places the clock within a few ms), and the phone recording for longer than the
- * next attempt's lead and margin (connected for 6 s); otherwise the lines that say what is missing.
- * Not convergence, nor a number of samples kept: a cut waits for neither (T4.2), and between two
- * pages of one browser that both encode, most round trips are far over the least (a median of 17 to
- * 18 ms against 2 to 3 on CI), so convergence can take a while there.
+ * next attempt's lead and margin (`BUFFERED_MS` since its picture line first said so,
+ * `recordingSince`, on the test's clock); otherwise the lines that say what is missing. Until T4.3
+ * this was the host's "connected for 6 s", which assumed a phone recording since before it
+ * connected: its capture has its first frames 2 to 5 s after its camera opens, so after the
+ * connection, and the full run's load once truncated the solve's clip by 0.9 s that way. Not
+ * convergence, nor a number of samples kept: a cut waits for neither (T4.2), and between two pages
+ * of one browser that both encode, most round trips are far over the least (a median of 17 to 18 ms
+ * against 2 to 3 on CI), so convergence can take a while there.
  */
-async function readiness(phone: Page, row: Locator): Promise<string> {
+async function readiness(phone: Page, row: Locator, recordingSince: number): Promise<string> {
   const state = await pill(phone);
   const host = (await row.getByTestId('remote-camera-state').allTextContents()).join(' ').trim();
   const sync = (await row.getByTestId('remote-camera-sync').allTextContents()).join(' ').trim();
@@ -175,9 +132,10 @@ async function readiness(phone: Page, row: Locator): Promise<string> {
   const minutes = Number(/(\d+) min/u.exec(host)?.[1] ?? 0);
   const seconds = Number(/(\d+) s$/u.exec(host)?.[1] ?? 0);
   const connectedFor = host.startsWith('connected for ') ? minutes * 60 + seconds : -1;
-  return state === 'connected' && sync.includes('round trip') && connectedFor >= 6
+  const recordedMs = Date.now() - recordingSince;
+  return state === 'connected' && sync.includes('round trip') && recordedMs >= BUFFERED_MS
     ? 'ready'
-    : `phone: ${state}; host: ${host}; sync: ${sync}`;
+    : `phone: ${state}, recording for ${String(Math.round(recordedMs / 1000))} s; host: ${host} (${String(connectedFor)} s); sync: ${sync}`;
 }
 
 /**
@@ -226,15 +184,17 @@ async function pairedPhone(
   await phone.goto(`${url.pathname}${url.search}`);
   // Connected; a join refused fails with its reason (the pill's problem line).
   await expect.poll(() => pill(phone), { timeout: 45_000 }).toBe('connected');
-  await expect(phone.getByTestId('device-picture-line')).toContainText('recording', {
+  // The phone records once its capture has its first frames, after the connection as often as not.
+  await expect(phone.getByTestId('device-picture-line')).toContainText(RECORDING, {
     timeout: 15_000,
   });
+  const recordingSince = Date.now();
   const row = page.getByTestId('remote-camera');
   await expect(row).toHaveAttribute('data-label', 'laptop-2');
-  await expect(row.getByTestId('remote-camera-report')).toContainText('recording', {
+  await expect(row.getByTestId('remote-camera-report')).toContainText(RECORDING, {
     timeout: 15_000,
   });
-  await expect.poll(() => readiness(phone, row), { timeout: 30_000 }).toBe('ready');
+  await expect.poll(() => readiness(phone, row, recordingSince), { timeout: 30_000 }).toBe('ready');
   return { phone, sessionId, bucket };
 }
 

@@ -9,10 +9,11 @@ export type TransportConnector = (signaling: Signaling) => Promise<Transport>;
 
 /**
  * The connector: `WebRtcTransport.connect` (an `RTCPeerConnection` with Google's STUN server, one
- * reliable ordered data channel, ICE restart on failure). The unit tests of the services give one
- * that joins `MemoryTransport` pairs.
+ * reliable ordered data channel, ICE restart on failure), the phone's with the send-only video
+ * transceiver of the live preview in its first offer (T4.3: it sends nothing until the host asks).
+ * The unit tests of the services give one that joins `MemoryTransport` pairs.
  */
 export const TRANSPORT_CONNECTOR = new InjectionToken<TransportConnector>('TRANSPORT_CONNECTOR', {
   providedIn: 'root',
-  factory: () => (signaling) => WebRtcTransport.connect({ signaling }),
+  factory: () => (signaling) => WebRtcTransport.connect({ signaling, preview: true }),
 });

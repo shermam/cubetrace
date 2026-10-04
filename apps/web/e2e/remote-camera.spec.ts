@@ -2,6 +2,7 @@ import type { CameraClock, SessionRecord } from '@cubetrace/core';
 import { type Locator, type Page, expect, test } from '@playwright/test';
 
 import { fakeAccount, fakeAccountState } from './helpers/account';
+import { RECORDING } from './helpers/remote';
 import { fakeSignaling } from './helpers/signaling';
 import { currentSessionId, demoPath, expectSolves } from './helpers/timer';
 
@@ -9,7 +10,8 @@ import { currentSessionId, demoPath, expectSolves } from './helpers/timer';
 // cube, Chrome's fake camera, signed in to the fake account) adds a camera in Camera settings and
 // shows the QR code's URL; a second page opens it as the camera device (the same fake camera), pairs
 // through the BroadcastChannel signaling (helpers/signaling.ts) and the real RTCPeerConnection on the
-// loopback interface, and the host lists it with a thumbnail within 5 s; the clock sync converges
+// loopback interface, and the host lists it with a thumbnail within 5 s; its live picture is a tile
+// over the host's preview, which a tap swaps with the main picture (T4.3); the clock sync converges
 // (both pages read one browser's clock: the offset is near 0); the camera is in session.json with
 // `remote`; Leave removes it. Then a second pairing by the code typed, and Remove from the host.
 // Launch options force a browser of their own for this file (the encoding project, one at a time).
@@ -49,6 +51,11 @@ function row(page: Page): Locator {
   return page.getByTestId('remote-camera');
 }
 
+/** The size of the frames a video element shows: 0 × 0 before the first. */
+async function videoSize(video: Locator): Promise<[number, number]> {
+  return video.evaluate((element: HTMLVideoElement) => [element.videoWidth, element.videoHeight]);
+}
+
 /** The offset of the sync line: "synced · round trip 1.2 ms · offset −0.3 ms · drift 0.0 ppm". */
 function offsetOf(text: string): number {
   const match = /offset (−?)([\d,.]+) ms/u.exec(text);
@@ -56,7 +63,7 @@ function offsetOf(text: string): number {
   return (match?.[1] === '−' ? -1 : 1) * Number(match?.[2].replace(/,/g, ''));
 }
 
-test('a second page joins as a remote camera: listed with a thumbnail, the sync converges, in session.json with remote, Leave removes it; the code typed, Remove', async ({
+test('a second page joins as a remote camera: listed with a thumbnail, its live picture a tile over the preview, the sync converges, in session.json with remote, Leave removes it; the code typed, Remove', async ({
   context,
   page,
 }) => {
@@ -104,7 +111,7 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   // Desktop Chrome, which says Windows): the two pages share the settings, as one profile does.
   await expect(phone.getByTestId('device-host')).toContainText(/ · \w+ laptop \(\w+\)$/u);
   await expect(phone.getByTestId('device-preview')).toBeVisible();
-  await expect(phone.getByTestId('device-picture-line')).toContainText('recording', {
+  await expect(phone.getByTestId('device-picture-line')).toContainText(RECORDING, {
     timeout: 15_000,
   });
   // The pairing is taken: the QR code is down and the camera is listed, with a thumbnail within 5 s.
@@ -117,9 +124,32 @@ test('a second page joins as a remote camera: listed with a thumbnail, the sync 
   await expect(row(page).getByTestId('remote-camera-name')).toHaveText(/^\w+ laptop$/u);
   // The host's own camera is `laptop`; the phone's, the same fake camera on another device, `laptop-2`.
   await expect(row(page).getByTestId('remote-camera-label')).toHaveText('laptop-2');
-  await expect(row(page).getByTestId('remote-camera-report')).toContainText('recording', {
+  await expect(row(page).getByTestId('remote-camera-report')).toContainText(RECORDING, {
     timeout: 15_000,
   });
+
+  // Its live picture (T4.3, issue #60): a tile over the host's preview, its frames a fifth of the
+  // camera's (the fake camera's 1920 × 1080: 384 × 216, or fewer pixels while the encoder adapts
+  // to the CPU); a tap swaps it with the main picture, and a tap on this device's tile swaps back.
+  const tile = page.getByTestId('remote-preview-tile');
+  await expect(tile).toHaveAttribute('data-label', 'laptop-2');
+  await expect(tile.locator('app-remote-picture')).toHaveAttribute('data-live', 'true', {
+    timeout: 15_000,
+  });
+  const tileVideo = tile.getByTestId('remote-picture-video');
+  await expect
+    .poll(async () => (await videoSize(tileVideo))[0], { timeout: 10_000 })
+    .toBeGreaterThan(0);
+  const [width, height] = await videoSize(tileVideo);
+  expect(width).toBeLessThanOrEqual(384);
+  expect(width / height).toBeCloseTo(16 / 9, 1);
+  await tile.click();
+  const main = page.getByTestId('remote-preview-main');
+  await expect(main).toHaveAttribute('data-label', 'laptop-2');
+  await expect(tile).toHaveCount(0);
+  await page.getByTestId('remote-preview-local').click();
+  await expect(main).toHaveCount(0);
+  await expect(tile).toHaveAttribute('data-label', 'laptop-2');
 
   // The clock sync converges: ten kept answers over ten seconds, within 5 ms of spread (the pings
   // come every 500 ms until then, and the fit keeps at least the ten of least round trip of its two

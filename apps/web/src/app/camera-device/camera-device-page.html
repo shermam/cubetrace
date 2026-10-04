@@ -73,7 +73,19 @@
       <dd data-testid="device-clips" [attr.data-pending]="service.pendingClips()">
         {{ clipsText() }}
       </dd>
+      @if (service.state() === 'connected') {
+        <dt>Preview</dt>
+        <dd data-testid="device-live-preview" [attr.data-sending]="livePreview.sending()">
+          {{ previewText() }}
+        </dd>
+      }
     </dl>
+    @if (syncCheck.active()) {
+      <p class="notice" role="status" data-testid="device-sync-check">
+        The host's sync check is watching this camera: keep the cube inside its framing rectangle,
+        flick one face and back after a second, five times, as the host's screen says.
+      </p>
+    }
     @if (thermalText(); as thermal) {
       <p class="problem" role="status" data-testid="device-thermal">{{ thermal }}</p>
     }

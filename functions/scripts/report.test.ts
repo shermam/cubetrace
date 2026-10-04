@@ -955,6 +955,159 @@ describe('the checklist after T4.2', () => {
   });
 });
 
+describe('the checklist after T4.3', () => {
+  /**
+   * A day with the phone paired and its live preview on, as both devices' events tell it: a sync
+   * check of the phone's camera failed then passed, the clips after it with its lag, the preview off
+   * and on, and the clock sync converged for 25 minutes after a withdrawal.
+   */
+  function syncDay(): ReportEvent[] {
+    const t0 = NOW - 4 * HOUR;
+    const scope = (attempt: number) => ({ session: SESSION, attempt });
+    const check = (offsetMs: number, outcome: string, extra: Record<string, unknown> = {}) => ({
+      outcome,
+      reason: outcome === 'ok' ? null : 'no-motion',
+      message: outcome === 'ok' ? null : 'the camera saw no motion inside the rectangle',
+      camera: 'phone-rear',
+      offsetMs,
+      spreadMs: 9.5,
+      remote: true,
+      peer: 'ThinkPhone',
+      clockConverged: true,
+      clockOffsetMs: -241.3,
+      clockRttMs: 6.1,
+      clockSamples: 12,
+      ...extra,
+    });
+    const preview = (kind: string, tsMs: number, data: Record<string, unknown>) =>
+      at(tsMs, kind, data, PHONE, { session: SESSION });
+    const events: ReportEvent[] = [
+      at(t0, 'sync.check', { outcome: 'ok', camera: 'laptop', offsetMs: 41.2, spreadMs: 7 }),
+      at(t0 + 60_000, 'sync.check', check(0, 'failed')),
+      at(t0 + 120_000, 'sync.check', check(112.4, 'ok')),
+      preview('preview.started', t0 - 60_000, {
+        width: 1920,
+        height: 1080,
+        scale: 5,
+        maxKbps: 300,
+        maxFps: 15,
+        recordingSeconds: 0,
+      }),
+      // Off for five minutes, then on again: a span with the preview, then one without.
+      at(t0 + 10 * 60_000, 'settings.changed', { key: 'livePreviewFromPhones', value: false }),
+      preview('preview.stopped', t0 + 10 * 60_000 + 200, {
+        why: 'off',
+        seconds: 660,
+        frames: 9800,
+        fps: 14.8,
+        kbps: 210,
+        encodeMsPerFrame: 3.2,
+        encoder: 'ExternalEncoder',
+        cpuLimitedShare: 0.02,
+        recordingSeconds: 660,
+        recordingFps: 28.9,
+        recordingFpsMin: 26,
+        recordingDropped: 4,
+      }),
+      at(t0 + 15 * 60_000, 'settings.changed', { key: 'livePreviewFromPhones', value: true }),
+      preview('preview.started', t0 + 15 * 60_000 + 200, {
+        width: 1920,
+        height: 1080,
+        scale: 5,
+        maxKbps: 300,
+        maxFps: 15,
+        recordingSeconds: 300,
+        recordingFps: 29.9,
+        recordingFpsMin: 29,
+        recordingDropped: 0,
+      }),
+    ];
+    // The phone's clips of the three solves after the check: its lag.
+    for (let k = 1; k <= 3; k++) {
+      for (const segment of ['scramble', 'solve']) {
+        events.push(
+          at(
+            t0 + (3 + k) * 60_000,
+            'remote.clip',
+            { camera: 'phone-rear', segment, late: false, syncResidualMs: 112.4 },
+            LAPTOP,
+            scope(k),
+          ),
+        );
+      }
+    }
+    // One clip before the check: none.
+    events.push(
+      at(
+        t0 + 30_000,
+        'remote.clip',
+        { camera: 'phone-rear', segment: 'solve', late: false, syncResidualMs: null },
+        LAPTOP,
+        scope(0),
+      ),
+    );
+    // The clock sync: withdrawn once, then converged for 25 minutes of minute records.
+    const clock = (tsMs: number, why: string, converged: boolean) =>
+      at(tsMs, 'rtc.clock', { camera: 'phone-rear', peer: 'ThinkPhone', why, converged });
+    events.push(
+      clock(t0 + 20 * 60_000, 'converged', true),
+      clock(t0 + 22 * 60_000, 'withdrawn', false),
+      clock(t0 + 23 * 60_000, 'syncing', false),
+      clock(t0 + 24 * 60_000, 'converged', true),
+    );
+    for (let m = 1; m <= 25; m++) {
+      events.push(clock(t0 + (24 + m) * 60_000, 'minute', true));
+    }
+    return events;
+  }
+
+  it('ticks the remote sync check, the lag its clips take, the preview and what it cost, and twenty minutes converged', () => {
+    const results = new Map(evaluate(syncDay(), NOW).map((item) => [item.id, item.result]));
+    const status = (id: string): string | undefined => results.get(id)?.status;
+    const facts = (id: string): string => results.get(id)?.facts ?? '';
+
+    expect(status('4.3.1')).toBe('ok');
+    expect(facts('4.3.1')).toBe(
+      "1 check on office-mbp of a phone's camera passed (phone-rear): lag 112.4 ms, spread 9.5 ms, 1 with the clock sync converged, its round trip 6.1 ms (medians); the MacBook's own camera 41.2 ms; 1 failed check on office-mbp: the camera saw no motion inside the rectangle",
+    );
+    expect(status('4.3.2')).toBe('ok');
+    expect(facts('4.3.2')).toBe(
+      '6 remote clips on office-mbp of 7 with the lag of a check (112 ms)',
+    );
+    expect(status('4.3.3')).toBe('ok');
+    expect(facts('4.3.3')).toBe(
+      '2 previews on ThinkPhone sent (1920×1080 / 5; at most 300 kbps and 15 fps)',
+    );
+    expect(status('4.3.4')).toBe('ok');
+    expect(facts('4.3.4')).toBe(
+      'the recording at 28.9 fps with the preview (least 26, 4 frames dropped), 29.9 fps without (least 29, 0 dropped), over 1 and 1 spans; the preview 14.8 fps at 210 kbps, 3.2 ms a frame (ExternalEncoder), the CPU holding it back 0.02 of the time (medians)',
+    );
+    expect(status('4.3.5')).toBe('ok');
+    expect(facts('4.3.5')).toBe(
+      'the clock sync converged for 25 minutes at the longest, 1 withdrawal; 7 remote clips on office-mbp',
+    );
+
+    // None of it without the events; a phone's check that only failed marks 4.3.1; less than twenty
+    // minutes converged leaves 4.3.5.
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result.status]));
+    for (const id of ['4.3.1', '4.3.2', '4.3.3', '4.3.4', '4.3.5']) {
+      expect(empty.get(id), id).toBe('none');
+    }
+    const onlyFailed = syncDay().filter(
+      (e) => !(e.kind === 'sync.check' && e.data['remote'] === true && e.data['outcome'] === 'ok'),
+    );
+    expect(evaluate(onlyFailed, NOW).find((item) => item.id === '4.3.1')?.result.status).toBe(
+      'failed',
+    );
+    const short = syncDay().filter(
+      (e) => !(e.kind === 'rtc.clock' && e.tsMs > NOW - 4 * HOUR + 40 * 60_000),
+    );
+    const shortResult = evaluate(short, NOW).find((item) => item.id === '4.3.5')?.result;
+    expect(shortResult?.status).toBe('none');
+    expect(shortResult?.facts).toContain('converged for 16 minutes at the longest');
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });

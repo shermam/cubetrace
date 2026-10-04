@@ -28,7 +28,9 @@ export function tokenText(token: string): string {
  * reconnecting), its clock sync (syncing, or synced with the round trip and the offset), what it
  * reports (recording, frame rate, sharpness, framing, battery, a thermal hint, the clips it still has
  * to send) and Remove; and "Record remote cameras" (T4.2, on by default): whether each attempt's clips
- * are asked of the phones. The panel loads it only when Add camera is pressed (`@defer (when
+ * are asked of the phones; and "Live preview from phones" (T4.3, on by default): whether they send a
+ * small live picture, shown over the Timer page's preview (`RemotePreviews`), the thumbnail here
+ * staying the pairing's state. The panel loads it only when Add camera is pressed (`@defer (when
  * addRequests() > 0)`), and counts the presses in `addRequests`, so that the first pairing starts as
  * the section appears.
  */

@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 
 import { RecordingService } from './recording-service';
+import type { RemoteCameraEntry } from './remote-camera-registry';
 import { SYNC_TURNS } from './sync-run';
 import { SyncService, type SyncBlock } from './sync-service';
 
@@ -18,7 +19,18 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
   scrambling: "Before the scramble's first turn, or after the solve.",
   solving: 'After the solve.',
   running: 'A check is under way.',
+  'remote-gone': 'Once the phone is connected.',
+  'remote-syncing': "Once the phone's clock sync has its first answer.",
+  'remote-not-recording': 'Once the phone records.',
 };
+
+/** A remote camera's line under the preview (T4.3): its lag, or that it has none, and its button. */
+interface RemoteLine {
+  readonly camera: RemoteCameraEntry;
+  readonly text: string;
+  /** Why its check cannot be started now; null when it can. */
+  readonly why: string | null;
+}
 
 /**
  * The sync check under the camera's preview (docs/PLAN.md, T2.5, T2.8 and T2.11): while the framing
@@ -30,7 +42,10 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
  * behind the cube, or why the check failed, with Retry and "Download check data" (a small link after
  * a success); "Later" hides it. Hidden, one line says the lag this session has for the camera, with
  * "Sync check" to run one. Wherever a check cannot be started, the reason is written beside its
- * button. The logic is `SyncService`'s; this only shows it.
+ * button. Since T4.3 each phone of the Cameras section has a line of its own too ("Sync: phone-rear
+ * has no check in this session", or its lag), whose "Sync check" runs the same check on the phone's
+ * camera, the panel then naming it and asking for the framing on the phone. The logic is
+ * `SyncService`'s; this only shows it.
  */
 @Component({
   selector: 'app-sync-check',
@@ -42,24 +57,36 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
         data-testid="sync-check"
         [attr.data-state]="state()"
       >
-        <h3 id="sync-heading">Sync check</h3>
+        <h3 id="sync-heading" data-testid="sync-heading">
+          Sync check{{ targetLabel() === null ? '' : ' · ' + targetLabel() }}
+        </h3>
         @switch (state()) {
           @case ('framing') {
             <p class="ask" data-testid="sync-framing">
-              Draw the framing rectangle around the cube first (Camera settings → Framing → Edit):
-              the check looks for motion inside it.
+              @if (remote()) {
+                Draw the framing rectangle around the cube on the phone first (its Camera page →
+                Camera settings → Edit the framing): the check looks for motion inside it.
+              } @else {
+                Draw the framing rectangle around the cube first (Camera settings → Framing → Edit):
+                the check looks for motion inside it.
+              }
             </p>
           }
           @case ('ready') {
             <p class="ask" data-testid="sync-ready">
-              The framing rectangle is set: start the check with the cube in it.
+              {{
+                remote()
+                  ? "The phone's framing rectangle is set: start the check with the cube in it."
+                  : 'The framing rectangle is set: start the check with the cube in it.'
+              }}
             </p>
           }
           @case ('running') {
             @if (sync.run(); as run) {
               <p class="ask">
-                Hold the cube still inside the rectangle. With one finger, flick one face; keep your
-                other hand and the cube still; after a second, flick it back. Five times.
+                Hold the cube still inside the {{ remote() ? "phone's rectangle" : 'rectangle' }}.
+                With one finger, flick one face; keep your other hand and the cube still; after a
+                second, flick it back. Five times.
               </p>
               <p
                 class="count"
@@ -101,14 +128,16 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
         <div class="actions">
           @switch (state()) {
             @case ('framing') {
-              <button
-                type="button"
-                class="primary"
-                data-testid="sync-edit-framing"
-                (click)="sync.editFraming()"
-              >
-                Edit the framing
-              </button>
+              @if (!remote()) {
+                <button
+                  type="button"
+                  class="primary"
+                  data-testid="sync-edit-framing"
+                  (click)="sync.editFraming()"
+                >
+                  Edit the framing
+                </button>
+              }
               <button
                 type="button"
                 data-testid="sync-anyway"
@@ -126,7 +155,7 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
                 data-testid="sync-go"
                 [disabled]="blocked()"
                 [title]="blockedText()"
-                (click)="sync.start()"
+                (click)="sync.again()"
               >
                 Start
               </button>
@@ -138,7 +167,7 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
                 data-testid="sync-retry"
                 [disabled]="blocked()"
                 [title]="blockedText()"
-                (click)="sync.start()"
+                (click)="sync.again()"
               >
                 Retry
               </button>
@@ -152,7 +181,7 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
                 data-testid="sync-again"
                 [disabled]="blocked()"
                 [title]="blockedText()"
-                (click)="sync.start()"
+                (click)="sync.again()"
               >
                 Check again
               </button>
@@ -179,26 +208,51 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
           <p class="notice" role="status" data-testid="sync-notice">{{ notice }}</p>
         }
       </section>
-    } @else if (lineShown()) {
-      <p class="line" data-testid="sync-line">
-        <span>{{ line() }}</span>
-        <button
-          type="button"
-          class="link"
-          data-testid="sync-start"
-          [disabled]="blocked()"
-          [title]="blockedText()"
-          (click)="sync.start()"
-        >
-          Sync check
-        </button>
-        @if (blocked()) {
-          <span class="why" data-testid="sync-why">{{ blockedText() }}</span>
-        }
+    } @else {
+      @if (lineShown()) {
+        <p class="line" data-testid="sync-line">
+          <span>{{ line() }}</span>
+          <button
+            type="button"
+            class="link"
+            data-testid="sync-start"
+            [disabled]="localBlocked()"
+            [title]="localBlockedText()"
+            (click)="sync.start()"
+          >
+            Sync check
+          </button>
+          @if (localBlocked()) {
+            <span class="why" data-testid="sync-why">{{ localBlockedText() }}</span>
+          }
+          @if (sync.notice(); as notice) {
+            <span class="notice" role="status" data-testid="sync-notice">{{ notice }}</span>
+          }
+        </p>
+      }
+      @for (line of remoteLines(); track line.camera.id) {
+        <p class="line" data-testid="sync-remote-line" [attr.data-label]="line.camera.label">
+          <span>{{ line.text }}</span>
+          <button
+            type="button"
+            class="link"
+            data-testid="sync-remote-start"
+            [disabled]="line.why !== null"
+            [title]="line.why ?? ''"
+            (click)="sync.start({ remote: line.camera.id })"
+          >
+            Sync check
+          </button>
+          @if (line.why; as why) {
+            <span class="why" data-testid="sync-remote-why">{{ why }}</span>
+          }
+        </p>
+      }
+      @if (!lineShown() && remoteLines().length > 0) {
         @if (sync.notice(); as notice) {
-          <span class="notice" role="status" data-testid="sync-notice">{{ notice }}</span>
+          <p class="notice" role="status" data-testid="sync-notice">{{ notice }}</p>
         }
-      </p>
+      }
     }
   `,
   styles: `
@@ -287,6 +341,12 @@ export class SyncCheck {
   protected readonly sync = inject(SyncService);
   private readonly recording = inject(RecordingService);
 
+  /** The check shown measures a remote camera (T4.3). */
+  protected readonly remote = computed(() => this.sync.target() !== null);
+  /** The remote camera's label, for the heading; null for this device's own camera. */
+  protected readonly targetLabel = computed(() =>
+    this.sync.target() === null ? null : (this.sync.targetCamera()?.label ?? null),
+  );
   protected readonly state = computed<PanelState>(() => {
     if (this.sync.run()?.state() === 'running') {
       return 'running';
@@ -308,10 +368,11 @@ export class SyncCheck {
   /** "2 seen by the camera", and what to do once the ten turns are made. */
   protected readonly seen = computed(() => {
     const run = this.sync.run();
-    const seen = `${String(run?.matched() ?? 0)} seen by the camera`;
+    const camera = this.remote() ? "the phone's camera" : 'the camera';
+    const seen = `${String(run?.matched() ?? 0)} seen by ${camera}`;
     return (run?.moves() ?? 0) >= SYNC_TURNS ? `${seen}; hold the cube still` : seen;
   });
-  /** "Camera lags the cube by 38 ms (±7); was 41 ms." */
+  /** "Camera lags the cube by 38 ms (±7); was 41 ms." ("phone-rear lags …" for a phone's.) */
   protected readonly passed = computed(() => {
     const result = this.sync.result();
     if (result === null || !result.outcome.ok) {
@@ -323,7 +384,8 @@ export class SyncCheck {
         ? ''
         : `; was ${String(Math.round(result.previousOffsetMs))} ms`;
     const kept = result.saved ? '' : ' No session was under way to keep it in.';
-    return `${lagText(offsetMs, clapperboardResidualMs)}${was}.${kept}`;
+    const subject = result.remote === null ? 'Camera' : result.label;
+    return `${lagText(offsetMs, clapperboardResidualMs, subject)}${was}.${kept}`;
   });
   protected readonly failed = computed(() => {
     const outcome = this.sync.result()?.outcome;
@@ -345,23 +407,52 @@ export class SyncCheck {
       ? 'Sync: this camera has no check in this session.'
       : `Sync: ${lagText(stored.offsetMs, stored.clapperboardResidualMs).toLowerCase()}.`;
   });
-  /** A check cannot be started now (one that runs aside). */
-  protected readonly blocked = computed(() => this.sync.blocked() !== null);
+  /** Each phone's line (T4.3): its lag in this session, or that it has none, and why it cannot start. */
+  protected readonly remoteLines = computed<readonly RemoteLine[]>(() =>
+    this.sync.remotes().map((camera) => {
+      const label = camera.label ?? '';
+      const check = this.sync.checkOf(label);
+      const blocked = this.sync.remoteBlocked(camera.id);
+      return {
+        camera,
+        text:
+          check === null
+            ? `Sync: ${label} has no check in this session.`
+            : `Sync: ${lagText(check.offsetMs, check.clapperboardResidualMs, label)}.`,
+        why: blocked === null ? null : BLOCKED[blocked],
+      };
+    }),
+  );
+  /** A check of the panel's camera cannot be started now (one that runs aside). */
+  protected readonly blocked = computed(() => this.panelBlock() !== null);
   protected readonly blockedText = computed(() => {
+    const blocked = this.panelBlock();
+    return blocked === null ? '' : BLOCKED[blocked];
+  });
+  /** A check of this device's camera cannot be started now (its line's button). */
+  protected readonly localBlocked = computed(() => this.sync.blocked() !== null);
+  protected readonly localBlockedText = computed(() => {
     const blocked = this.sync.blocked();
     return blocked === null ? '' : BLOCKED[blocked];
   });
+
+  /** Why the panel's camera (this device's, or the remote one it shows) cannot be checked now. */
+  private panelBlock(): SyncBlock | null {
+    const target = this.sync.target();
+    return target === null ? this.sync.blocked() : this.sync.remoteBlocked(target);
+  }
 }
 
 /**
  * "Camera lags the cube by 41 ms (±12)": the offset and, after ±, the spread of the check's lags (the
- * range of the lags kept, `clapperboardResidualMs`), in whole ms.
+ * range of the lags kept, `clapperboardResidualMs`), in whole ms; `subject` names a remote camera
+ * ("phone-rear lags the cube by 112 ms (±9)", T4.3).
  */
-function lagText(offsetMs: number, spreadMs: number): string {
+function lagText(offsetMs: number, spreadMs: number, subject = 'Camera'): string {
   const offset = Math.round(offsetMs);
   const lag =
     offset >= 0
-      ? `Camera lags the cube by ${String(offset)} ms`
-      : `Camera is ahead of the cube by ${String(-offset)} ms`;
+      ? `${subject} lags the cube by ${String(offset)} ms`
+      : `${subject} is ahead of the cube by ${String(-offset)} ms`;
   return `${lag} (±${String(Math.round(spreadMs))})`;
 }

@@ -209,6 +209,8 @@ interface StoredSettings {
   readonly viewer: ViewerChoices;
   /** T4.2: the host asks its remote cameras (the phones paired) for each attempt's clips. */
   readonly recordRemoteCameras: boolean;
+  /** T4.3: the host asks its remote cameras for a live picture, beside its own preview. */
+  readonly livePreviewFromPhones: boolean;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -236,6 +238,7 @@ const DEFAULTS: StoredSettings = {
   diagnostics: true,
   viewer: {},
   recordRemoteCameras: true,
+  livePreviewFromPhones: true,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -262,7 +265,8 @@ export function macAddressProblem(text: string): string {
  * and the clip viewer's choice per camera (T3.10): where its 3D cube is seen from and the mirror
  * applied to its orientation, by the camera's label, synced with the account's by ViewerSyncService;
  * and whether the host records its remote cameras (T4.2: "Record remote cameras", in the Cameras
- * section of Camera settings). Signals, kept
+ * section of Camera settings) and asks them for a live picture (T4.3: "Live preview from phones",
+ * there too). Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
  * Signed in, the cube list is kept in sync with the account's by CubeSyncService (T3.4), which is
@@ -368,6 +372,13 @@ export class SettingsService {
    * phones stay connected.
    */
   readonly recordRemoteCameras = computed(() => this.stored().recordRemoteCameras);
+  /**
+   * "Live preview from phones" (T4.3, the Cameras section of Camera settings): the host asks every
+   * phone paired for a small live picture of its camera (a fifth of its resolution, at most 300 kbps
+   * and 15 fps), shown beside its own preview on the Timer page; on by default. Off, the phones send
+   * none, and the Cameras list's thumbnail every 2 s is the picture.
+   */
+  readonly livePreviewFromPhones = computed(() => this.stored().livePreviewFromPhones);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -538,6 +549,12 @@ export class SettingsService {
     }
   }
 
+  setLivePreviewFromPhones(on: boolean): void {
+    if (on !== this.stored().livePreviewFromPhones) {
+      this.update({ livePreviewFromPhones: on });
+    }
+  }
+
   /** The clip viewer's choice for the camera labelled `camera`, or null when it has none. */
   viewerChoiceFor(camera: string): ViewerChoice | null {
     const choices = this.stored().viewer;
@@ -692,6 +709,7 @@ function readSettings(
   const diagnostics = member(parsed, 'diagnostics');
   const viewer = member(parsed, 'viewer');
   const recordRemoteCameras = member(parsed, 'recordRemoteCameras');
+  const livePreviewFromPhones = member(parsed, 'livePreviewFromPhones');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
   const settings: StoredSettings = {
     hostLabel:
@@ -748,6 +766,11 @@ function readSettings(
     // Settings stored before T4.2 have none: on, as for a new device.
     recordRemoteCameras:
       typeof recordRemoteCameras === 'boolean' ? recordRemoteCameras : DEFAULTS.recordRemoteCameras,
+    // Settings stored before T4.3 have none: on, as for a new device.
+    livePreviewFromPhones:
+      typeof livePreviewFromPhones === 'boolean'
+        ? livePreviewFromPhones
+        : DEFAULTS.livePreviewFromPhones,
   };
   return { settings, migrated: cubeMacs.migrated };
 }

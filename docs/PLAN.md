@@ -730,10 +730,11 @@ page unloads can be lost (T3.9): a `keepalive` REST write would close it; (i) th
 `settings.changed` events, `wake.lock` and
 `storage.persistence` are recorded in effects (T3.9), so a change followed at once by an unload loses
 its event (the Diagnostics switch itself settles before the page goes since #59), and a switch toggled
-before `AuthService` attaches the account goes to the ring, which a toggle off then clears. (j) The remote camera's picture on the host (T4.1) is the thumbnail at the bottom of the Camera
+before `AuthService` attaches the account goes to the ring, which a toggle off then clears. (j) ~~The remote camera's picture on the host (T4.1) is the thumbnail at the bottom of the Camera
 panel, too far from the host's preview to keep the cube in the phone's frame while solving (issue #60):
 T4.3's live preview belongs next to the host's preview on the Timer page, the thumbnail staying in the
-Cameras list as the pairing's state. (k) ~~The remote clock fit never converged in the first real
+Cameras list as the pairing's state~~, done by T4.3 (#65): each phone's live picture is a tile
+over the Timer page's preview, a tap swapping it with the main picture, its thumbnail the fallback. (k) ~~The remote clock fit never converged in the first real
 pairing (two connections of 12 and 4 minutes on the home Wi-Fi, no `rtc.clock` event; issue #61):
 `REMOTE_CLOCK_CONVERGED` was tuned on loopback and simulations; T4.2 was told not to gate the cuts on
 `converged` (the current estimate, a padded window, the numbers in the record); T4.3 measures the real
@@ -2429,6 +2430,62 @@ and the spread; the preview; twenty minutes of solves on the rig).
 **Acceptance.** The end-to-end pair runs a sync check on the remote camera with the fake cube's
 turns and a synthetic motion on the phone page's fake camera, the result stored and applied; the
 preview track's presence asserted; unit tests of the conversion with drift.
+
+**Outcome (2026-10-04).** As contracted, PR #65, with these choices. **The remote check's division
+of labour**, as the coordinator's guidance preferred rather than the scope's letter: the phone
+measures and the host matches. On `sync-start` the phone's capture worker measures each frame's
+motion inside the phone's framing rectangle (the meter of the host's own check) and the phone sends
+the series every 250 ms (`sync-motion`, `sync-meter`, `sync-error`; `sync-stop` ends it), each
+frame's arrival and reception on its clock; the host converts them with the clock estimate of each
+batch and runs the same `SyncRun` and `detectClapperboard` on the cube's turns, which never leave
+the host clock: one code path, one `sync.check` shape (with `remote: true`, the phone and the clock
+sync that placed the frames), one "Download check data". A phone's check starts from its own line
+under the Timer page's preview, is never due by itself (the laptop's is), asks for the framing on
+the phone while the phone's rectangle is wide (Start anyway), and ends as failed when the phone
+cannot measure (its recording stopped included), leaves or loses its connection. **The result**:
+`offsetMs` of a remote camera is the lag of its frames behind the cube on the host clock once
+converted (`docs/DATA-MODEL.md` §6: the camera's latency and the phone's delivery, plus the clock
+estimate's error during the check), kept in `clock.cameras[label]` beside the clock sync's record,
+which its later records keep; `withSyncResidual` gives the phone's later clips their
+`syncResidualMs`. **The drift at the clip's time**: the estimate is a line frozen when taken
+(`RemoteClockFit.line()`, `RemoteClockLine`), taken with each cut and applied at the clip's first
+frame when its files come; the frames file's `remote.offsetMs` is the offset applied there. **The
+live preview**: a send-only video transceiver in the phone's first offer (no renegotiation; the
+offer 2,740 characters with it, 458 without), capped by `PREVIEW_ENCODING` (a fifth of the
+resolution, 300 kbps, 15 fps) and toggled with `replaceTrack` and `setParameters` at the host's
+`preview` word ("Live preview from phones", Camera settings → Cameras, on by default); on the Timer
+page, a tile per phone in the top right corner of the host's preview (`RemotePreviews`, deferred
+until a phone is listed), the live video while the receiving track is unmuted, the thumbnail
+otherwise, a tap to swap with the main picture, the first phone's picture the main one without a
+camera of the host's own; the Timer page reaches the phones through `RemoteCameraRegistry`, without
+the `rtc` chunk. **The measurement**: `preview.started` (the recording over the span without the
+preview) and `preview.stopped` (the encoder's frames, rate, bitrate, ms per frame, implementation,
+quality limitation and CPU share, and the recording over the span with it); the round report's
+"After T4.3" items (4.3.1–4.3.5) read them with the check's and the clips' events (`remote.clip` now
+says the lag its clip took). **The e2e**: the phone's page films a synthetic camera (the test
+replaces `getUserMedia` with a 640 × 360 canvas whose square flips when told, so nothing enters the
+app) and the test turns the demo cube through the dev server's `ng` API. Measured: the e2e found 122
+to 148 ms in 13 runs for a synthetic lag of 120 ms (136 at the median; the flips 118 to 128 ms after
+their turns as the pages' timers made them; the spread 2 to 42 ms); the preview in the e2e 128 × 72
+at 15 fps, 4 kbps, 0.36 ms a frame (`libvpx`), the recording at 30.2 fps meanwhile; the conversion
+in the simulations: a clip 10 minutes into a session with 50 ppm of drift within 1 ms (29 ms with
+the offset at pairing), 20 minutes of the home Wi-Fi's clips within 0.64 to 0.89 ms at worst, a clip
+after a five-minute sleep within 1 ms (five minutes off with the estimate when its files came).
+Bundle: the initial 264.96 kB unchanged; the phone's Camera page chunk 48.85 kB (42.07 before), the
+Cameras section's 45.91 kB (42.91), the `@cubetrace/rtc` chunk 28.08 kB (24.88), the sync check's
+19.89 kB (15.09), core's shared chunk 81.21 kB (80.29), and the new `remote-previews` chunk 7.12 kB,
+loaded once a phone is listed. Tests: 1,384 package and 841 app unit tests (1,356 and 824 before),
+81 end-to-end (80), 4 cloud (4). Found on the way and fixed: the pipeline ends a motion watch
+silently when it stops (the phone now says `sync-error`); the pair's fixture took "connected for 6
+s" for 6 s of the phone's buffer, and its "recording" checks matched "not recording" (the phone's
+capture has its first frames 2.2 to 3.3 s after its camera opens, after the connection, with the
+preview or without it: it now waits for 6 s of the phone's recording); `uploads.spec.ts` read
+`uploads.json` while the queue replaced it (`NotReadableError`, now read again); a unit test counted
+a hello's wait to the half second after a real `crypto.subtle` hash (now waits for the call). Left
+for later: the measured cells of `docs/DEVICES.md`'s Remote cameras table and its new table of the
+preview's cost (the method is there, cell by cell from the events), the ThinkPhone's numbers with
+and without the preview, and any retuning of `REMOTE_CLOCK_*`, which waits for them; issues #60 and
+#61 for the coordinator to close.
 
 ### T4.4 — the desk rig, docs, `0.4.0`
 

@@ -28,10 +28,11 @@ import {
   FakeWakeLock,
   settle,
 } from '../device/fake-browser';
-import { MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
+import { FakePreview, MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { SESSION_A, SESSION_B, testSession } from '../session/session-testing';
 import { CameraDeviceCapture } from './camera-device-capture';
+import { CameraDevicePreview, PREVIEW_STATS_MS } from './camera-device-preview';
 import {
   CameraDeviceService,
   HELLO_TIMEOUT_MS,
@@ -41,6 +42,7 @@ import {
   REPORT_INTERVAL_MS,
   RETRY_DELAY_MS,
 } from './camera-device-service';
+import { CameraDeviceSync, MOTION_BATCH_MS } from './camera-device-sync';
 import { THUMBNAIL_GRABBER, type ThumbnailGrabber } from './thumbnail-grabber';
 
 const ANDROID = 'Mozilla/5.0 (Linux; Android 16; K) Chrome/155.0.0.0 Mobile Safari/537.36';
@@ -278,6 +280,20 @@ describe('CameraDeviceService', () => {
     }
   }
 
+  /**
+   * Lets the phone's call reach `host` (its `connections`-th) without the clock moving. A join
+   * hashes its token with `crypto.subtle`, real work that a loaded machine may not finish within a
+   * pump's settles: time passed meanwhile would start the hello's wait late on the fake clock, and a
+   * test that counts that wait to the half second would fail now and then.
+   */
+  async function called(host: Host, connections: number): Promise<void> {
+    for (let k = 0; k < 200 && host.connections < connections; k++) {
+      await settle();
+    }
+    expect(host.connections).toBe(connections);
+    await settle();
+  }
+
   /** The events written to the account, after the diagnostics' batch delay. */
   async function events(): Promise<CloudEvent[]> {
     await pump(5000);
@@ -298,7 +314,9 @@ describe('CameraDeviceService', () => {
   /** A host with a pairing, and this phone joined to it by the QR's URL. */
   async function joined(host = new Host(r)): Promise<Host> {
     const token = await host.publish();
+    const before = host.connections;
     r.service.join({ sessionId: host.sessionId, token });
+    await called(host, before + 1);
     await pump(20);
     expect(r.service.state()).toBe('connected');
     return host;
@@ -562,6 +580,7 @@ describe('CameraDeviceService', () => {
     slow.helloDelays.push(12_000);
     const token = await slow.publish();
     r.service.join({ sessionId: SESSION_A, token });
+    await called(slow, 1);
     await pass(11_000);
     expect(r.service.state()).toBe('joining');
     await pass(2000);
@@ -575,6 +594,7 @@ describe('CameraDeviceService', () => {
     late.helloDelays.push(16_000);
     const second = await late.publish();
     r.service.join({ sessionId: SESSION_B, token: second });
+    await called(late, 1);
     await pass(15_500);
     expect(r.service.state()).toBe('joining');
     expect(r.service.problem()).toMatch(/the host sent no hello/u);
@@ -622,5 +642,197 @@ describe('CameraDeviceService', () => {
     expect(all.filter((e) => e.kind === 'rtc.disconnected').at(-1)?.data['reason']).toMatch(
       /^gave up/,
     );
+  });
+
+  // ---- T4.3: the host's sync check of this camera, and the live preview ----
+
+  it("measures its frames for the host's sync check in its framing rectangle and sends them in batches with its times, until sync-stop (T4.3)", async () => {
+    const host = await joined();
+    TestBed.inject(CameraDeviceCapture).setWanted(true);
+    await pump(10);
+    const capture = r.starter.last;
+    capture.emitStats(statsOf(3));
+    await pump(10);
+    const sync = TestBed.inject(CameraDeviceSync);
+    r.camera.setFraming({ x: 100, y: 200, w: 800, h: 600 });
+
+    host.link?.send({ type: 'sync-start', id: 7 });
+    await pump(10);
+    expect(sync.active()).toBe(true);
+    expect(capture.watches).toHaveLength(1);
+    expect(capture.watches[0].rect).toEqual({ x: 100, y: 200, w: 800, h: 600 });
+    capture.watches[0].onMeter?.({
+      format: 'NV12',
+      path: 'copy',
+      frameWidth: 1080,
+      frameHeight: 1920,
+      region: { x: 100, y: 200, w: 800, h: 600 },
+      planeWidth: 160,
+      planeHeight: 120,
+      changeLevels: 12,
+    });
+    const arrival = r.perf.hostMs - 5;
+    for (let k = 0; k < 9; k++) {
+      capture.watches[0].onSample({
+        timestampUs: 1_000_000 + k * 33_333,
+        arrivalHostMs: arrival + k * 33.3,
+        mean: 1.5,
+        changed: k === 4 ? 0.31 : 0.002,
+        costMs: 0.8,
+      });
+    }
+    await pump(MOTION_BATCH_MS, 1);
+    const meters = host.of('sync-meter');
+    expect(meters).toHaveLength(1);
+    expect(meters[0]).toMatchObject({ id: 7, meter: { format: 'NV12', planeWidth: 160 } });
+    const motion = host.of('sync-motion');
+    expect(motion).toHaveLength(1);
+    expect(motion[0].id).toBe(7);
+    expect(motion[0].frames).toHaveLength(9);
+    // Its own clock: the frames' arrivals as the worker had them, received by the page now.
+    expect(motion[0].frames[4]).toEqual({
+      timestampUs: 1_133_332,
+      arrivalMs: arrival + 4 * 33.3,
+      receivedMs: expect.any(Number) as number,
+      mean: 1.5,
+      changed: 0.31,
+      costMs: 0.8,
+    });
+    // A batch about four times a second; nothing while there is nothing to send.
+    await pump(MOTION_BATCH_MS * 2, 2);
+    expect(host.of('sync-motion')).toHaveLength(1);
+
+    host.link?.send({ type: 'sync-stop', id: 7 });
+    await pump(10);
+    expect(capture.watches[0].stopped).toBe(true);
+    expect(sync.active()).toBe(false);
+  });
+
+  it("says so when it cannot measure: not recording, its frames' pixels unreadable, the recording stopped (T4.3)", async () => {
+    const host = await joined();
+    host.link?.send({ type: 'sync-start', id: 1 });
+    await pump(10);
+    expect(host.of('sync-error')).toEqual([
+      { type: 'sync-error', id: 1, message: 'the phone is not recording' },
+    ]);
+
+    TestBed.inject(CameraDeviceCapture).setWanted(true);
+    await pump(10);
+    r.starter.last.emitStats(statsOf(3));
+    host.link?.send({ type: 'sync-start', id: 2 });
+    await pump(10);
+    r.starter.last.watches[0].onError?.('the frames cannot be read');
+    await pump(10);
+    expect(host.of('sync-error').at(-1)).toEqual({
+      type: 'sync-error',
+      id: 2,
+      message: 'the frames cannot be read',
+    });
+    expect(TestBed.inject(CameraDeviceSync).active()).toBe(false);
+
+    // The recording stops during a check (the camera off): the host is told at once.
+    host.link?.send({ type: 'sync-start', id: 3 });
+    await pump(10);
+    const stopped = r.starter.last;
+    expect(stopped.watches[1].stopped).toBe(false);
+    TestBed.inject(CameraDeviceCapture).setWanted(false);
+    await pump(10);
+    expect(host.of('sync-error').at(-1)).toEqual({
+      type: 'sync-error',
+      id: 3,
+      message: 'the phone stopped recording',
+    });
+    expect(stopped.watches[1].stopped).toBe(true);
+    expect(TestBed.inject(CameraDeviceSync).active()).toBe(false);
+
+    // A check under way stops with the connection.
+    TestBed.inject(CameraDeviceCapture).setWanted(true);
+    await pump(10);
+    r.starter.last.emitStats(statsOf(3));
+    host.link?.send({ type: 'sync-start', id: 4 });
+    await pump(10);
+    const watch = r.starter.last.watches.at(-1);
+    expect(watch?.stopped).toBe(false);
+    host.drop();
+    await pump(10);
+    expect(watch?.stopped).toBe(true);
+    expect(host.of('sync-error')).toHaveLength(3);
+  });
+
+  it('sends its camera as the live preview while the host asks for it, and says what it cost (T4.3)', async () => {
+    r.connector.previews = true;
+    const host = await joined();
+    TestBed.inject(CameraDeviceCapture).setWanted(true);
+    await pump(10);
+    const preview = TestBed.inject(CameraDevicePreview);
+    const channel = r.connector.last('caller').transport.preview as FakePreview;
+    // Nothing before the host asks.
+    expect(channel.sent).toEqual([]);
+    expect(preview.sending()).toBe(false);
+
+    host.link?.send({ type: 'preview', on: true });
+    await pump(10);
+    const track = r.camera.stream()?.getVideoTracks()[0];
+    expect(channel.sent).toEqual([track]);
+    expect(preview.sending()).toBe(true);
+    // The recording's seconds with the preview, then its encoder's statistics.
+    for (let k = 0; k < 4; k++) {
+      r.starter.last.emitStats({ ...statsOf(3), fps: 29 + k * 0.5, encodedFps: 29, dropped: k });
+      await pump(1000, 1);
+    }
+    channel.statistics = {
+      frames: 60,
+      fps: 15,
+      width: 216,
+      height: 384,
+      bytes: 150_000,
+      encodeMs: 120,
+      implementation: 'libvpx',
+      qualityLimitation: 'none',
+      cpuLimitedSeconds: 0.5,
+    };
+    await pump(PREVIEW_STATS_MS, 1);
+
+    // Another camera: its track replaces the first.
+    await r.camera.select(FAKE_PHONE_FRONT.deviceId);
+    await pump(10);
+    const front = r.camera.stream()?.getVideoTracks()[0];
+    expect(front).not.toBe(track);
+    expect(channel.sent.at(-1)).toBe(front);
+
+    // The host's switch off: it stops, and says what the preview cost.
+    host.link?.send({ type: 'preview', on: false });
+    await pump(10);
+    expect(channel.sent.at(-1)).toBeNull();
+    expect(preview.sending()).toBe(false);
+    const all = await events();
+    const started = all.filter((e) => e.kind === 'preview.started');
+    const stopped = all.filter((e) => e.kind === 'preview.stopped');
+    expect(started).toHaveLength(1);
+    expect(started[0].data).toMatchObject({ scale: 5, maxKbps: 300, maxFps: 15 });
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0].data).toMatchObject({
+      why: 'off',
+      frames: 60,
+      encoder: 'libvpx',
+      encodeMsPerFrame: 2,
+      sentWidth: 216,
+      sentHeight: 384,
+      qualityLimitation: 'none',
+      recordingFps: 29.8,
+      recordingFpsMin: 29,
+      recordingEncodedFps: 29,
+      recordingDropped: 3,
+    });
+    expect(Number(stopped[0].data['kbps'])).toBeGreaterThan(0);
+
+    // On again, then the connection ends: it stops, its last statistics said.
+    host.link?.send({ type: 'preview', on: true });
+    await pump(10);
+    expect(channel.sent.at(-1)).toBe(front);
+    host.drop();
+    await pump(10);
+    const later = (await events()).filter((e) => e.kind === 'preview.stopped');
+    expect(later.at(-1)?.data['why']).toBe('connection');
   });
 });

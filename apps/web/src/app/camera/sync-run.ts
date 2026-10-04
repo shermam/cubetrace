@@ -36,17 +36,26 @@ export const SYNC_HOLD_MS = 1000;
  */
 export const SYNC_EARLY_QUIET_MS = 1000;
 
-/** Starts measuring the camera's motion in `rect`; returns the stop, or null without a capture. */
+/**
+ * Starts measuring the camera's motion in `rect`; returns the stop, or null without a capture. A
+ * sample may say when its motion reached the page (`receivedHostMs`: a remote camera's, T4.3, on the
+ * phone's page, converted); otherwise the check stamps it with the page's clock as it comes.
+ */
 export type MotionWatch = (
   rect: FramingRect | null,
-  onSample: (sample: MotionSample) => void,
+  onSample: (sample: ClapperboardFrame) => void,
   onError: (message: string) => void,
   onMeter: (meter: MotionMeterInfo) => void,
 ) => (() => void) | null;
 
 export interface SyncRunOptions {
-  /** The capture's `watchMotion` (the recording's, or the capture lab's). */
+  /** The capture's `watchMotion` (the recording's, the capture lab's, or a remote camera's, T4.3). */
   readonly watch: MotionWatch;
+  /**
+   * Why the check ends at once when `watch` gives no stop: by default "the camera is not recording"
+   * (a remote camera's says the phone is not connected, T4.3).
+   */
+  readonly unwatched?: string;
   /** The framing rectangle in frame pixels, or null for the whole frame. */
   readonly rect: FramingRect | null;
   /**
@@ -204,7 +213,7 @@ export class SyncRun {
       options.rect,
       (sample) => {
         if (this.stateSignal() === 'running') {
-          this.samples.push({ ...sample, receivedHostMs: options.now() });
+          this.samples.push({ ...sample, receivedHostMs: sample.receivedHostMs ?? options.now() });
           this.framesSignal.set(this.samples.length);
           this.lastSignal.set(sample);
         }
@@ -217,7 +226,7 @@ export class SyncRun {
       },
     );
     if (stop === null) {
-      this.interrupt('the camera is not recording');
+      this.interrupt(options.unwatched ?? 'the camera is not recording');
       return;
     }
     if (this.stateSignal() === 'running') {
