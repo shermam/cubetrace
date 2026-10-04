@@ -61,7 +61,7 @@ file name without a path).
 | `sync-stop` | host | `id` | the check ended (done, failed, put off) |
 | `sync-motion` | phone | `id`, `frames: [{timestampUs, arrivalMs, receivedMs, mean, changed, costMs}]` (each frame's own timestamp, its arrival in the capture worker and its reception by the page on the phone's clock, its mean change and its changed area inside the framing rectangle, the worker's time on it; at most 240, `MAX_MOTION_FRAMES`) | every 250 ms while the check measures, when there is something to send |
 | `sync-meter` | phone | `id`, `meter: {format, path, frameWidth, frameHeight, region, planeWidth, planeHeight, changeLevels}` (how the capture worker reads the frames) | first, and when it changes |
-| `sync-error` | phone | `id`, `message` | the phone cannot measure (it does not record, its frames cannot be read): the host's check ends as failed |
+| `sync-error` | phone | `id`, `message` | the phone cannot measure (it does not record, its recording stopped during the check, its frames cannot be read): the host's check ends as failed |
 | `preview` | host | `on` | after the hellos, and whenever "Live preview from phones" changes (T4.3, §10): whether the phone sends its live picture |
 
 The thumbnail's binary frame is a 13-byte header too: the kind `0x02`, the time as a float64, the
@@ -539,15 +539,16 @@ the contract):
    diagnostics and the same check data to download; the phone holds no copy of the matching, and
    sends about six numbers a frame (a few kB a second). A phone that cannot measure says
    `sync-error`, which ends the check as failed with its words; so do its leaving and its
-   connection's end. The Timer page reaches the phones through `RemoteCameraRegistry`, which the
-   Cameras section's service fills: neither the check nor the preview area loads the `rtc` chunk.
+   connection's end, and a recording that stops during the check (the camera off or changed). The
+   Timer page reaches the phones through `RemoteCameraRegistry`, which the Cameras section's service
+   fills: neither the check nor the preview area loads the `rtc` chunk.
 3. **What it measures, and where it goes.** The lag of the phone's frames behind the cube on the host
    clock, once their times are converted: the camera's own latency and the phone's delivery of the
    frame to its capture worker, as a local camera's lag is, plus what the clock estimate is off by
    during the check (a few ms on a converged fit), so measured on top of the clock sync rather than
    added to it (`docs/DATA-MODEL.md` §6). It goes into `clock.cameras[label]` beside the clock sync's
-   record (`remote`: the record there, or, when there is none yet, the estimate that placed the
-   check's frames; `rttMs` and `driftPpm` repeat it), which the clock sync's later records keep, and
+   record (`remote`: the record there, or, when there is none yet, the clock estimate at the check's
+   end; `rttMs` and `driftPpm` repeat it), which the clock sync's later records keep, and
    the phone's later clips take it as their `syncResidualMs` (`withSyncResidual`), as T2.8 gives a
    local camera's clips theirs. The end-to-end pair (two pages of one browser, a synthetic camera
    whose square flips 120 ms after each of the demo cube's turns, the phone's clock 5 s ahead) finds

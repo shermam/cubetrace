@@ -386,7 +386,7 @@ is why a remote camera's lag is measured on top of the clock sync rather than ad
 when the frames come late, as they always do. The record in `remote` stays the clock sync's: its
 convergence and the records of each minute after it rewrite `remote`, `rttMs` and `driftPpm`, and
 keep the check's fields; the check writes the record it found there, or, when there was none yet,
-the estimate that placed its frames. A local camera's entry has no `remote`, and the files written
+the clock estimate at its end. A local camera's entry has no `remote`, and the files written
 before phase 4 have none. A clip's `syncResidualMs` (§7) is its camera's `offsetMs` when it was
 recorded, once the entry has a check's result (`clapperboardSamples` above 0), for a remote camera
 as for a local one: a remote camera's entry before its sync check gives its clips none.
