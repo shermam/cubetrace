@@ -57,8 +57,11 @@ export interface UploadDeps {
   readonly globals: BrowserGlobals;
   /** The app's session store over the origin private file system. */
   readonly store: SessionStore;
-  /** `SessionService.markClipsGone`: an attempt's clips marked as gone in its record. */
-  readonly markClipsGone: (ref: AttemptRef, files: readonly string[]) => Promise<boolean>;
+  /**
+   * `SessionService.releaseClips`: whether an attempt's clips may be deleted (it is still there), the
+   * timer's copy then saying they are gone; its record is not changed (T4.2a).
+   */
+  readonly releaseClips: (ref: AttemptRef, files: readonly string[]) => Promise<boolean>;
   /** Whether attempt `index` of session `sessionId` has no clip still to come. */
   readonly settled: (sessionId: string, index: number) => boolean;
   /** Resolves once the session index has handed its writes so far to Firestore. */
@@ -290,7 +293,7 @@ export class UploadService {
       policy: this.policy(),
       globals: this.globals,
       store: this.sessionStorage.store,
-      markClipsGone: (ref, files) => this.sessions.markClipsGone(ref, files),
+      releaseClips: (ref, files) => this.sessions.releaseClips(ref, files),
       settled: (sessionId, index) => !this.clips.has(sessionId, index),
       indexIdle: () => this.index.whenIdle(),
     });

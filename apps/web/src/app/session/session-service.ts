@@ -54,6 +54,7 @@ import { SettingsService, hostPlatform } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { ATTEMPT_FILES } from './attempt-files';
 import { ClipsInFlight } from './clips-in-flight';
+import { clipsOnDevice } from './clips-on-device';
 import { PICKUP_THRESHOLD_DEG, rotationDeg, type Quaternion } from './pickup';
 import { SessionChanges } from './session-changes';
 import { SESSION_STORAGE } from './session-storage';
@@ -157,7 +158,8 @@ export interface SessionListItem {
   readonly mean: string;
   /**
    * The clips of its attempts (their `video` entries, T2.4), the bytes of their MP4s on this device,
-   * and how many are no longer on it, deleted once uploaded (`video[].local` false, T3.3).
+   * and how many are no longer on it, deleted once uploaded (T3.3: `video[].local` false, from the
+   * attempts' folders since T4.2a).
    */
   readonly clips: number;
   readonly clipBytes: number;
@@ -374,12 +376,17 @@ export class SessionService {
   /**
    * The store, whose writes also go to the session index in the cloud while an account is signed in
    * (T3.1, `SessionIndexService`): never awaited, and a refusal is noted in the session; and then to
-   * `SessionChanges`, which the upload queue follows (T3.3).
+   * `SessionChanges`, which the upload queue follows (T3.3). The attempts it saves are the dataset's
+   * records, without `local`, and those it reads say which clips' MP4s are not on this device, from
+   * their folders (T4.2a, `clipsOnDevice`).
    */
-  private readonly store = inject(SessionChanges).track(
-    this.cloudIndex.track(this.sessionStorage.store, (sessionId, line) =>
-      this.addNote(sessionId, line),
+  private readonly store = clipsOnDevice(
+    inject(SessionChanges).track(
+      this.cloudIndex.track(this.sessionStorage.store, (sessionId, line) =>
+        this.addNote(sessionId, line),
+      ),
     ),
+    this.files,
   );
   private readonly makeScramble = inject(SCRAMBLE_SOURCE);
 
@@ -905,50 +912,45 @@ export class SessionService {
   }
 
   /**
-   * Marks the clips `files` (their MP4s' names) of the attempt `ref` as no longer on this device
-   * (`video[].local` false, T3.3: the upload queue deletes a clip's MP4 once its upload is confirmed,
-   * by policy, and does so once this resolves) and saves its record, nothing else changed, also when
-   * its session is not the current one. Resolves to false, changing nothing, when the attempt is not
-   * there (deleted, or begun again with its index) or its session cannot be read.
+   * Lets the upload queue delete the clips `files` (their MP4s' names) of the attempt `ref` from this
+   * device (T3.3: once their upload is confirmed, by policy; it does so once this resolves to true),
+   * also when its session is not the current one. The timer's copy of the current session's attempt
+   * then says that they are not here (`video[].local` false, in memory: its pages say "in the
+   * cloud"); nothing is saved (T4.2a): the record stays as it was uploaded, and an attempt read again
+   * from the store says it from its folder (`clipsOnDevice`). Resolves to false, changing nothing,
+   * when the attempt is not there (deleted, or begun again with its index) or its session cannot be
+   * read.
    */
-  async markClipsGone(ref: AttemptRef, files: readonly string[]): Promise<boolean> {
+  async releaseClips(ref: AttemptRef, files: readonly string[]): Promise<boolean> {
     // The current session's attempts are the timer's once they are read from the store.
     await this.whenReady();
-    const gone = (record: AttemptRecord): AttemptRecord => ({
-      ...record,
-      video: record.video.map((clip) =>
-        files.includes(clip.file) ? { ...clip, local: false } : clip,
-      ),
-    });
     const session = this.sessionSignal();
     if (session?.id === ref.session) {
       const record = this.attemptsSignal().find((attempt) => isAttempt(attempt, ref));
       if (record === undefined) {
         return false;
       }
-      const updated = gone(record);
+      const updated: AttemptRecord = {
+        ...record,
+        video: record.video.map((clip) =>
+          files.includes(clip.file) ? { ...clip, local: false } : clip,
+        ),
+      };
       this.attemptsSignal.update((attempts) => attempts.map((a) => (a === record ? updated : a)));
       if (this.lastResultSignal() === record) {
         this.lastResultSignal.set(updated);
       }
-      await this.save((store) => store.saveAttempt(updated));
       return true;
     }
-    let found = false;
-    await this.save(async (store) => {
-      let attempts: AttemptRecord[];
-      try {
-        attempts = await store.loadAttempts(ref.session);
-      } catch {
-        return;
-      }
-      const record = attempts.find((attempt) => isAttempt(attempt, ref));
-      if (record !== undefined) {
-        await store.saveAttempt(gone(record));
-        found = true;
-      }
-    });
-    return found;
+    // Another session's: as the store has it once the writes queued so far are done (Delete last).
+    await this.whenSaved();
+    try {
+      return (await this.store.loadAttempts(ref.session)).some((attempt) =>
+        isAttempt(attempt, ref),
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**

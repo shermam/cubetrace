@@ -20,7 +20,8 @@ builds after cubetrace 0.1.0) changed, from version 1 (written by 0.1.0):
 Within version 2, optional fields were added, so that the version 2 files written before them stay
 valid, and no new version: a clip in `attempt.json` gained `truncatedStart` (§7, `docs/PLAN.md` T2.9;
 the readers take a missing one as false) and `local` (§7, T3.3: false once its MP4 left the device
-after its upload; a missing one means the file is there), and a camera in `session.json` gained
+after its upload; a missing one means the file is there; written until T4.2a only, which keeps it out
+of the record), and a camera in `session.json` gained
 `microphone` (§6, T2.12; the readers take a missing one as null). Since T2.14 a camera's `label` is
 one per device within its session (§6), which the schema always allowed (`laptop-2`); in the files
 written before, two devices of one session could share a label, its entry then the last one's.
@@ -411,7 +412,8 @@ entry before its sync check gives its clips none.
      "crop": {"x": 480, "y": 120, "w": 960, "h": 840}, "fpsNominal": 30, "frames": 721,
      "firstFrameHostMs": 1730640017211.9, "framesFile": "laptop.solve.frames.json",
      "syncResidualMs": 41.5, "truncatedStart": false}
-                                         // "local": false once the MP4 left the device (T3.3)
+                                         // "local": false once the MP4 left the device (T3.3;
+                                         // written until T4.2a only)
   ],
   "gyro": {                              // T3.7: the attempt's gyroscope file (§11); null without one
     "file": "gyro.json", "samples": 1234, "fromHostMs": 1730639998012.5,
@@ -528,12 +530,16 @@ that never comes is missing, and `notes` says whose.
 
 `local` is false once the clip's MP4 is no longer on the device that recorded it: the upload queue
 deleted it after the bucket confirmed it, by policy (`docs/PLAN.md` T3.3: "Keep local copies" off,
-or the browser's storage past 70%); its frames file stays, and so does `attempt.json`, which the queue
-saves with `local` false before it deletes the file. While the MP4 is there the field is absent, true
-is never written, and the files written before T3.3 have none. The `attempt.json` uploaded to the
-bucket never has it, since every clip is beside it there: the queue uploads the record without it, so
-deleting a clip does not change the uploaded file. The pages say "in the cloud" for such a clip, in
-place of playing or downloading it.
+or the browser's storage past 70%); its frames file stays, and so does `attempt.json`. Since T4.2a
+the field is not written: which clips' files a device still holds is its own to know, not the
+dataset's, so `uploads.json` keeps it (§10, `local` false on the clip's MP4) and the attempt's folder
+shows it, and the record does not change when a clip leaves the device (from T3.3 to T4.2 the app
+saved the record again with `local` false, which the upload queue took for a changed record and
+signed `attempt.json` again for). The files written by those builds keep the field, which the readers
+take as before; true is never written, and the files written before T3.3 have none. The app sets it
+in memory for its pages, from the attempt's folder, which the pages then say "in the cloud" for, in
+place of playing or downloading the clip. The `attempt.json` uploaded to the bucket never has it,
+since every clip is beside it there.
 
 `packages/core/schema/session.schema.json` and `attempt.schema.json` (JSON Schema draft
 2020-12) are §6 and this section in machine-readable form, for version 2; the version 1 files
@@ -920,7 +926,9 @@ being confirmed), `done` (confirmed in the bucket) or `failed` (refused for good
 `bytes` is its size, what it is signed for; `tries` the PUTs begun (and the confirmations asked for a
 file that may have been sent before a reload); `error` why its last try failed; `doneMs` when the
 bucket confirmed it, on the server's clock (`upload.files[path].doneMs` of the index); `local` false
-for a clip's MP4 deleted from the device; `hash` for `attempt.json` and `session.json`, made from
+for a clip's MP4 deleted from the device (what the device knows of its clips, which the record does
+not say since T4.2a: a clip's MP4 missing from its folder is done when this file, or the index, has
+it done); `hash` for `attempt.json` and `session.json`, made from
 their records, a 64-bit hash of the text uploaded (two FNV-1a passes), by which the queue tells that
 a record changed since. `tries` 0, `error` null and `doneMs` null are left out. `scrambleShown` is
 the attempt's `events.scrambleShown`, which tells it from another attempt that took its index after

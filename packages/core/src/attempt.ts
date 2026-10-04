@@ -178,7 +178,9 @@ export interface VideoClip {
    * False once the clip's MP4 is no longer on the device that recorded it: the upload queue deleted
    * it after its upload was confirmed (docs/PLAN.md T3.3), and it is in the dataset's bucket; its
    * frames file stays. Absent while the MP4 is there (true means the same), and in the uploaded
-   * attempt.json, whose clips are all beside it in the bucket.
+   * attempt.json, whose clips are all beside it in the bucket. Device-local: since T4.2a the app sets
+   * it in memory, from the attempt's folder, for its pages, and never writes it into attempt.json;
+   * the files written by the builds before may have it.
    */
   local?: boolean;
 }

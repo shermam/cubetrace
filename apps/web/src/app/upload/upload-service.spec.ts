@@ -136,7 +136,7 @@ describe('UploadService', () => {
     expect(runtime.last.calls).toEqual(['start']);
   });
 
-  it("marks an attempt's clips gone through SessionService, before the queue deletes them", async () => {
+  it("lets an attempt's clips go through SessionService before the queue deletes them, its record unchanged (T4.2a)", async () => {
     const app = start();
     await signIn(app.auth);
     const attempt = testAttempt(1, 10_000);
@@ -164,15 +164,18 @@ describe('UploadService', () => {
         },
       ],
     });
+    const [recorded] = await app.store.loadAttempts(SESSION_A);
+    const calls = runtime.last.calls.length;
     const ref = { session: SESSION_A, index: 1, scrambleShown: attempt.events.scrambleShown };
-    expect(await runtime.last.deps.markClipsGone(ref, ['laptop.solve.mp4'])).toBe(true);
-    const [stored] = await app.store.loadAttempts(SESSION_A);
-    expect(stored.video.map((clip) => clip.local)).toEqual([false]);
-    // Another attempt with that index, or none: nothing changes.
+    expect(await runtime.last.deps.releaseClips(ref, ['laptop.solve.mp4'])).toBe(true);
+    // Nothing is saved: the record stays as it was uploaded, and the queue is told of no write.
+    expect(await app.store.loadAttempts(SESSION_A)).toEqual([recorded]);
+    expect(runtime.last.calls.slice(calls)).toEqual([]);
+    // Another attempt with that index, or none: no.
     expect(
-      await runtime.last.deps.markClipsGone({ ...ref, scrambleShown: 1 }, ['laptop.solve.mp4']),
+      await runtime.last.deps.releaseClips({ ...ref, scrambleShown: 1 }, ['laptop.solve.mp4']),
     ).toBe(false);
-    expect(await runtime.last.deps.markClipsGone({ ...ref, index: 9 }, [])).toBe(false);
+    expect(await runtime.last.deps.releaseClips({ ...ref, index: 9 }, [])).toBe(false);
   });
 
   it('stops the queue on sign-out', async () => {

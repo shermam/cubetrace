@@ -109,7 +109,7 @@ export interface Device {
   readonly http: FakeUploadHttp;
   /** Attempts (`<session>/<index>`) whose clips are still to come. */
   readonly awaiting: Set<string>;
-  /** The record changes the device made when it deleted clips. */
+  /** The clips the device let go before it deleted them: `<session>/<index> <files>`. */
   readonly removed: string[];
 }
 
@@ -126,18 +126,14 @@ export function device(options: { lock?: boolean; root?: FakeDirectoryHandle } =
     root,
     store,
     settled: (sessionId, index) => !awaiting.has(`${sessionId}/${String(index)}`),
-    markClipsGone: async (ref: AttemptRef, files) => {
+    // As the app's SessionService: the attempt must still be there; its record is not changed.
+    releaseClips: async (ref: AttemptRef, files) => {
       const { attempts } = await store.exportSession(ref.session);
-      const record = attempts.find(
-        (a) => a.index === ref.index && a.events.scrambleShown === ref.scrambleShown,
-      );
-      if (record === undefined) {
+      if (
+        !attempts.some((a) => a.index === ref.index && a.events.scrambleShown === ref.scrambleShown)
+      ) {
         return false;
       }
-      await store.saveAttempt({
-        ...record,
-        video: record.video.map((c) => (files.includes(c.file) ? { ...c, local: false } : c)),
-      });
       removed.push(`${ref.session}/${String(ref.index)} ${files.join(',')}`);
       return true;
     },

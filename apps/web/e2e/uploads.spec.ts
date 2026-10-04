@@ -1,4 +1,4 @@
-import { CLOUD_ATTEMPT_SCHEMA, type AttemptRecord } from '@cubetrace/core';
+import { CLOUD_ATTEMPT_SCHEMA } from '@cubetrace/core';
 import { type Locator, type Page, expect, test } from '@playwright/test';
 import { Ajv2020 } from 'ajv/dist/2020';
 
@@ -11,7 +11,8 @@ import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from 
 // demo session's, which never goes; marked as a real cube's in its session.json, the next page load
 // uploads its attempt.json, both clips, their frame times and session.json, the indicator and the
 // Sessions page's panel following it, its row on the session's page saying "uploaded", and the QA
-// view counting it; with Keep local copies off, its clips leave the device and say "in the cloud".
+// view counting it; with Keep local copies off, its clips leave the device and say "in the cloud",
+// its record unchanged and its attempt.json signed once (T4.2a).
 // Launch options force a browser of their own for this file (the encoding project, one at a time).
 test.use({
   launchOptions: {
@@ -269,7 +270,13 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
   await expect(qaRow.getByTestId('qa-uploaded')).not.toHaveText('0 B');
 
   // Keep local copies off: the clips of the attempt, all uploaded, leave the device; attempt.json and
-  // the frame times stay, and the record says where the clips are.
+  // the frame times stay. The record does not change (T4.2a): which clips this device holds is its
+  // own to know (uploads.json, the attempt's folder), and the pages say it from there.
+  const attemptWrites = async (): Promise<number> =>
+    (await fakeAccountState(page)).indexWrites.filter(
+      (write) => write === `sessions/${sessionId}/attempts/0001`,
+    ).length;
+  const writesBefore = await attemptWrites();
   await page.goto('/settings');
   await page.getByTestId('keep-local-copies').uncheck();
   await expect
@@ -277,17 +284,37 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
       timeout: 15_000,
     })
     .toEqual(['attempt.json', 'laptop.scramble.frames.json', 'laptop.solve.frames.json']);
-  const record = JSON.parse(
-    await fileText(page, sessionId, ['attempts', '0001', 'attempt.json']),
-  ) as AttemptRecord;
-  expect(record.video.map((clip) => clip.local)).toEqual([false, false]);
-  // Its document in the index too (the app's write of the record), and nothing more went up.
+  expect(await fileText(page, sessionId, ['attempts', '0001', 'attempt.json'])).toBe(attemptJson);
   await expect
     .poll(async () => {
-      const video = (await fakeAccountState(page)).index.attempts[sessionId]['0001']['video'];
-      return (video as { local?: boolean }[]).map((clip) => clip.local);
+      const text = await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        return (await (await root.getFileHandle('uploads.json')).getFile()).text();
+      });
+      const state = JSON.parse(text) as {
+        accounts: Record<
+          string,
+          {
+            sessions: Record<
+              string,
+              { attempts: Record<string, { files: Record<string, { local?: boolean }> }> }
+            >;
+          }
+        >;
+      };
+      const files = state.accounts[ADA.uid].sessions[sessionId].attempts['0001'].files;
+      return ['laptop.scramble.mp4', 'laptop.solve.mp4'].map((name) => files[name].local);
     })
     .toEqual([false, false]);
+  // Its document in the index is not written again: its upload stays done, its clips as recorded;
+  // and nothing more went up.
+  const indexed = (await fakeAccountState(page)).index.attempts[sessionId]['0001'];
+  expect((indexed['video'] as { local?: boolean }[]).map((clip) => clip.local)).toEqual([
+    undefined,
+    undefined,
+  ]);
+  expect((indexed['upload'] as { state: string }).state).toBe('done');
+  expect(await attemptWrites()).toBe(writesBefore);
   expect(bucket.puts).toHaveLength(6);
 
   // The session's page and the Sessions page say the clips are in the cloud; the viewer says so in
@@ -311,4 +338,14 @@ test('signed in, a real session recorded with the camera on is uploaded, followe
   await expect(page.getByTestId('upload-panel').getByTestId('upload-status')).toHaveText(
     'Up to date: every attempt of this device is uploaded.',
   );
+  // Across the deletion and the page loads since, attempt.json was signed once, with the attempt's
+  // other files, and nothing more went up.
+  const signed = (await fakeAccountState(page)).uploadCalls.filter((call) =>
+    call.startsWith('sign '),
+  );
+  expect(signed.filter((call) => call.split(' ')[2].split(',').includes('attempt.json'))).toEqual([
+    `sign ${sessionId}/1 attempt.json,laptop.scramble.mp4,laptop.scramble.frames.json,laptop.solve.mp4,laptop.solve.frames.json,session.json`,
+  ]);
+  expect(signed).toHaveLength(1);
+  expect(bucket.puts).toHaveLength(6);
 });

@@ -1,7 +1,7 @@
 // The device's side of the queue in the browser (UploadSource): the sessions through the session
 // store, the clips' files and uploads.json in the origin private file system, and the deletion of an
-// uploaded clip, whose record the app updates first (`markClipsGone`: SessionService, so that the
-// timer's own copy of the record says so too).
+// uploaded clip, which the app lets go first (`releaseClips`: SessionService, which checks that the
+// attempt is still there and has its copy of the current session say so; the record is not changed).
 import type { SessionStore } from '@cubetrace/core';
 import {
   ATTEMPTS_FOLDER,
@@ -23,10 +23,11 @@ export interface OpfsUploadSourceOptions {
   /** The session store over that root: the app's own, so that its operations stay in one queue. */
   readonly store: SessionStore;
   /**
-   * Sets `local: false` on the clips `files` of the attempt `ref` in its record and saves it;
-   * resolves to false when the attempt is not there any more (the app: SessionService).
+   * Whether the clips `files` of the attempt `ref` may be deleted: false when the attempt is not
+   * there any more (deleted, or begun again with its index), and nothing is deleted. The app
+   * (SessionService) then shows them as gone; it saves nothing (T4.2a: the record stays as uploaded).
    */
-  readonly markClipsGone: (ref: AttemptRef, files: readonly string[]) => Promise<boolean>;
+  readonly releaseClips: (ref: AttemptRef, files: readonly string[]) => Promise<boolean>;
   /** Whether the attempt's record is final: no clip of it is still to come (the app: RecordWatch). */
   readonly settled?: (sessionId: string, index: number) => boolean;
 }
@@ -35,14 +36,14 @@ export interface OpfsUploadSourceOptions {
 export class OpfsUploadSource implements UploadSource {
   readonly #root: Promise<OpfsDirectoryHandle>;
   readonly #store: SessionStore;
-  readonly #markClipsGone: OpfsUploadSourceOptions['markClipsGone'];
+  readonly #releaseClips: OpfsUploadSourceOptions['releaseClips'];
   readonly #settled: (sessionId: string, index: number) => boolean;
 
   constructor(options: OpfsUploadSourceOptions) {
     this.#root = Promise.resolve(options.root);
     this.#root.catch(() => undefined);
     this.#store = options.store;
-    this.#markClipsGone = options.markClipsGone;
+    this.#releaseClips = options.releaseClips;
     this.#settled = options.settled ?? (() => true);
   }
 
@@ -78,7 +79,7 @@ export class OpfsUploadSource implements UploadSource {
   }
 
   async removeClips(ref: AttemptRef, files: readonly string[]): Promise<boolean> {
-    if (!(await this.#markClipsGone(ref, files))) {
+    if (!(await this.#releaseClips(ref, files))) {
       return false;
     }
     const dir = await this.#attemptDir(ref.session, ref.index);

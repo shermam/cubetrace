@@ -440,7 +440,7 @@
           "type": "boolean"
         },
         "local": {
-          "description": "False once the MP4 is no longer on the device that recorded it: deleted after its upload was confirmed, it is in the dataset's bucket (docs/DATA-MODEL.md §7, T3.3); its frames file stays. Absent while the file is there, which true means too, and in the uploaded attempt.json.",
+          "description": "False once the MP4 is no longer on the device that recorded it: deleted after its upload was confirmed, it is in the dataset's bucket (docs/DATA-MODEL.md §7, T3.3); its frames file stays. Absent while the file is there, which true means too, and in the uploaded attempt.json. Written by the builds before T4.2a only: since then the device keeps this to itself (uploads.json and the attempt's folder), and the record does not change when a clip leaves the device.",
           "type": "boolean"
         }
       }

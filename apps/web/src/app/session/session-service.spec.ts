@@ -1340,8 +1340,21 @@ describe('SessionService', () => {
   });
 
   describe('for the upload queue (T3.3)', () => {
-    it("tells SessionChanges of each write, once it is done; marks an attempt's clips gone, here and in the store", async () => {
-      const s = setup();
+    it("tells SessionChanges of each write, once it is done; lets an attempt's clips go without saving its record, the copy here and the store's reads saying where they are (T4.2a)", async () => {
+      // The attempts' folders as the device has them, as ATTEMPT_FILES lists them.
+      const folders = new Map<number, Set<string>>();
+      const s = setup({
+        providers: [
+          {
+            provide: ATTEMPT_FILES,
+            useValue: {
+              read: () => Promise.reject(new Error('not read here')),
+              write: () => Promise.resolve(),
+              list: () => Promise.resolve(folders),
+            },
+          },
+        ],
+      });
       const changes: string[] = [];
       TestBed.inject(SessionChanges).changes$.subscribe((change) => {
         changes.push(
@@ -1373,34 +1386,75 @@ describe('SessionService', () => {
         'session 1',
         'attempt 1 true,true',
       ]);
+      folders.set(
+        1,
+        new Set([
+          'attempt.json',
+          'laptop.scramble.mp4',
+          'laptop.scramble.frames.json',
+          'laptop.solve.mp4',
+          'laptop.solve.frames.json',
+        ]),
+      );
+      const [written] = (await s.store.exportSession(session)).attempts;
 
-      // The current session: its record here and in the store, the last result too.
-      expect(await s.service.markClipsGone(attempt, ['laptop.solve.mp4'])).toBe(true);
+      // The current session: the timer's copy says the clip is gone, the last result too; nothing is
+      // written, so that the record stays as it was uploaded.
+      expect(await s.service.releaseClips(attempt, ['laptop.solve.mp4'])).toBe(true);
       expect(s.service.attempts()[0].video.map((c) => c.local)).toEqual([undefined, false]);
       expect(s.service.lastResult()?.video.map((c) => c.local)).toEqual([undefined, false]);
-      const [stored] = (await s.store.exportSession(session)).attempts;
-      expect(stored.video.map((c) => c.local)).toEqual([undefined, false]);
-      expect(changes.at(-1)).toBe('attempt 1 true,false');
-      const listed = (await s.service.listSessions()).sessions[0];
-      expect(listed).toMatchObject({ clips: 2, clipBytes: 10, cloudClips: 1 });
+      await s.service.whenSaved();
+      expect(changes).toHaveLength(5);
+      expect((await s.store.exportSession(session)).attempts).toEqual([written]);
+      // Read again (the Sessions page, a session's page), it says so from the attempt's folder, which
+      // the queue's deletion left without the MP4.
+      folders.get(1)?.delete('laptop.solve.mp4');
+      expect((await s.service.listSessions()).sessions[0]).toMatchObject({
+        clips: 2,
+        clipBytes: 10,
+        cloudClips: 1,
+      });
+      const [read] = (await s.service.exportSession(session)).attempts;
+      expect(read.video.map((c) => c.local)).toEqual([undefined, false]);
+
+      // A later save of the record (a clip of another camera, T4.2's late clips) writes it without
+      // `local`, as the dataset holds it; the timer's copy keeps saying where the clips are.
+      const other: VideoClip = {
+        ...clip('solve', 30),
+        camera: 'laptop-2',
+        file: 'laptop-2.solve.mp4',
+        framesFile: 'laptop-2.solve.frames.json',
+      };
+      expect(await s.service.attachClip(attempt, other)).toBe('saved');
+      await s.service.whenSaved();
+      expect(changes.at(-1)).toBe('attempt 1 true,true,true');
+      const [grown] = (await s.store.exportSession(session)).attempts;
+      expect(grown.video.map((c) => c.local)).toEqual([undefined, undefined, undefined]);
+      expect(s.service.attempts()[0].video.map((c) => c.local)).toEqual([
+        undefined,
+        false,
+        undefined,
+      ]);
 
       // Another attempt with that index, or none: nothing changes.
-      expect(await s.service.markClipsGone({ ...attempt, scrambleShown: 1 }, [])).toBe(false);
-      expect(await s.service.markClipsGone({ ...attempt, index: 7 }, [])).toBe(false);
+      expect(await s.service.releaseClips({ ...attempt, scrambleShown: 1 }, [])).toBe(false);
+      expect(await s.service.releaseClips({ ...attempt, index: 7 }, [])).toBe(false);
 
-      // After New session, the earlier session's record in the store.
+      // After New session, the earlier session's attempt, as the store has it: nothing is written.
       s.service.newSession();
-      expect(await s.service.markClipsGone(attempt, ['laptop.scramble.mp4'])).toBe(true);
-      const [earlier] = (await s.store.exportSession(session)).attempts;
-      expect(earlier.video.map((c) => c.local)).toEqual([false, false]);
-      expect(await s.service.markClipsGone({ ...attempt, index: 2 }, [])).toBe(false);
+      const before = changes.length;
+      expect(await s.service.releaseClips(attempt, ['laptop.scramble.mp4'])).toBe(true);
+      expect(await s.service.releaseClips({ ...attempt, index: 2 }, [])).toBe(false);
       // A session that is not there.
       expect(
-        await s.service.markClipsGone(
+        await s.service.releaseClips(
           { session: '4b0f3c2a-0000-4000-8000-000000000000', index: 1, scrambleShown: 0 },
           [],
         ),
       ).toBe(false);
+      await s.service.whenSaved();
+      expect(changes.slice(before).filter((change) => change.startsWith('attempt'))).toEqual([]);
+      expect((await s.store.exportSession(session)).attempts).toEqual([grown]);
       expect(s.service.saveError()).toBeNull();
       await s.service.deleteSession(session);
       expect(changes.at(-1)).toBe('session-deleted');
