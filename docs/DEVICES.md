@@ -231,7 +231,7 @@ spread under the limit of 50 ms plus a frame interval (83 ms at 30 fps, 67 at 60
 | MacBook Pro 2021, FaceTime HD, 1080p30 | 2026-09-27, Chrome 153 | 38.3 ms / 51.2 ms / 8 kept of 10 (T2.8: −85.8 ms / 341.4 ms, failed) | 18.7 ms / 70.9 ms / 7 kept of 9 (T2.8: −269 ms / 343.5 ms, failed) | 0.8 and 0.9 ms / 1.9 ms |
 | MacBook Pro 2021 (office), Logitech Webcam C930e, 1080p30 | 2026-10-01, Chrome 154 | 177.4 ms / 11.6 ms / 6 kept of 8 (T2.11, GAN 12 ui) | — | 0.3 ms / 0.4 ms |
 | ThinkPhone, front camera | | | | |
-| ThinkPhone, rear camera | | | | |
+| ThinkPhone, rear camera | 2026-10-06, the phone as its own host (its own cube and camera, build 0.4.0 · 5dd2047), the coordinator from the diagnostics events | 25 ms / 46 ms / 6 kept of 10 (8 matched; T2.11) | — | — |
 
 The FaceTime row is the owner's first two checks of round 2 (issue #38, `fixtures/sync/`), made with
 app 0.2.0, whose detection (T2.8, the first rise of each turn's motion) failed both; T2.11 recomputed
