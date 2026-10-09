@@ -2564,7 +2564,7 @@ sign in the app (issue #67).
 
 | Id | Task | Depends on | Status |
 |---|---|---|---|
-| T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | 🔄 PR #68 |
+| T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | ✅ 2026-10-09 (#68) |
 | T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | – |
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | – |
 | T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0` | T5.2, T5.3 | – |
@@ -2618,6 +2618,38 @@ fields, the pressure observer behind a fake (`PressureObserver` absent, present 
 boxes within 2 px), the phone's line reads its fake camera's state, the setting switches to tiles and
 back, the preview's encoding parameters are T4.3's (the picture's size on the host changes nothing on
 the phone). Lint, unit and e2e green; the bundle's chunks noted in the Outcome.
+
+**Outcome (2026-10-09).** As contracted, PR #68, with these choices. **The breakpoint for two
+pictures beside the clock is a `live` column of 72rem**, measured with the dev server: the clock's
+section at its narrowest (its time at 3rem holds "1:02.34" from 236 px; its four buttons take four
+rows under 270 px, three from 270, two from 300) is 17.17rem (275 px) beside two cells of 53.83rem
+and their gap, and then about as tall as the two pictures with their lines (277 against 262 px). The
+Timer page's 80rem can never hold that column (55rem at most), so `app.scss` lets the page widen to
+120rem from a 97rem (1,552 px) window when two pictures or more are in cells; narrower, the pictures
+stand one under the other beside the clock (the owner's MacBook window: one under the other up to
+1,551 px, side by side from 1,552). "Pictures from phones" defaults by device (`SettingsService.isPhone`:
+tiles on a phone, same size elsewhere, stored as null until chosen, as `wifiOnly` does), not by the
+Timer layout of the moment, which the window's width would change under the user; `remotePicturesLayout`
+forces tiles in the overlay. The status line is `remoteStatusLine(input, form)` (`remote-status.ts`:
+the form `line` for the Timer page, `list` for the Cameras section; `shortParts` for a tile's caption,
+which says only what is wrong); the battery's amber and red hold only while the phone is unplugged (a
+plugged-in phone is plain at any level); "no report for N s" counts from a reconnection's start, so a
+phone just back from a drop is not red at once. The pressure observer (`pressure.ts`, with its fake)
+observes `thermals` where `knownSources` lists it and falls back on `cpu` when that source is refused;
+null only when every source is refused, none is listed or there is no observer; the phone's page says
+`fair (thermals)` beside its thermal hint. The minute's `rtc.clock` `report` is flat (an event's facts
+nest one level only: `batteryLevel`, `batteryCharging`, plus `soft` by the host's threshold, `recording`,
+`pressureSource`, `ageMs`). Tests: 1,390 package tests (1,386 before) and 870 app tests (841); the e2e
+pair measures the two boxes at 426.66 × 239.98 px, one under the other at 1,280 px and side by side at
+1,700 px, within 2 px, the line's words from a planted battery (15%, unplugged) and pressure (fair,
+thermals), tiles and back, T4.3's preview caps unchanged (scale 5, 300 kbps, 15 fps). Bundle (raw):
+initial 265.11 kB (264.96 before), `remote-previews` 10.04 kB (7.12), a new shared chunk of 5.58 kB
+with the status line, `remote-cameras` 47.40 kB (45.91), `camera-device-page` 51.36 kB (48.85),
+`timer-page` 31.66 kB (31.22). **Open:** whether the ThinkPhone's and the Moto g60's Chrome have
+`PressureObserver` ("After T5.1" says how to check: `'PressureObserver' in window` and
+`PressureObserver.knownSources` through `chrome://inspect`); 71rem would put the pictures side by side
+from 1,536 px at the cost of a fourth row of buttons; the overlay's pinned picture keeps the 427 px
+`max-width` in a laptop window of 427–960 px (before this PR too).
 
 ### T5.2 — remote camera controls
 
