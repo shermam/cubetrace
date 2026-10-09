@@ -33,6 +33,7 @@ import { errorMessage } from '../shared/error-message';
 import { watchBattery, type BatteryState } from './battery';
 import { CameraDeviceCapture } from './camera-device-capture';
 import { CameraDeviceClips } from './camera-device-clips';
+import { CameraDeviceControls } from './camera-device-controls';
 import { CameraDevicePreview } from './camera-device-preview';
 import { CameraDeviceSync } from './camera-device-sync';
 import { watchPressure, type PressureReading } from './pressure';
@@ -134,8 +135,10 @@ export const REFUSAL_TEXT: Readonly<Record<Exclude<PairingCheck, 'ok'>, string>>
  * there is time. It never shows the timer and never starts a session of its own. The host's cuts
  * and the clips they make go through `CameraDeviceClips` (T4.2), which each connection is handed
  * to: the clips staged for the session are offered first; and so do the host's sync check of this
- * camera (`CameraDeviceSync`, T4.3: the frames' motion measured and sent) and the live preview
- * (`CameraDevicePreview`, T4.3: the camera's track over the connection while the host asks for it).
+ * camera (`CameraDeviceSync`, T4.3: the frames' motion measured and sent), the live preview
+ * (`CameraDevicePreview`, T4.3: the camera's track over the connection while the host asks for it)
+ * and the camera's controls (`CameraDeviceControls`, T5.2: reported after each hello, set from the
+ * host's panel).
  */
 @Injectable({ providedIn: 'root' })
 export class CameraDeviceService {
@@ -147,6 +150,8 @@ export class CameraDeviceService {
   /** The host's sync check of this camera, and the live preview (T4.3). */
   private readonly syncCheck = inject(CameraDeviceSync);
   private readonly livePreview = inject(CameraDevicePreview);
+  /** The host's changes of this phone's camera controls (T5.2). */
+  private readonly cameraControls = inject(CameraDeviceControls);
   private readonly settings = inject(SettingsService);
   private readonly wakeLock = inject(WakeLockService);
   private readonly diagnostics = inject(DiagnosticsService);
@@ -251,6 +256,8 @@ export class CameraDeviceService {
         if (this.stateSignal() === 'connected' && hello !== this.lastHello) {
           this.lastHello = hello;
           this.link?.trySend(this.hello());
+          // Its controls with it: another camera's, or none (T5.2).
+          this.cameraControls.report();
         }
       });
     });
@@ -521,7 +528,11 @@ export class CameraDeviceService {
       // The host's sync check of this camera, and the live preview when the host asks for it (T4.3).
       this.syncCheck.attach(link),
       this.livePreview.attach(link, transport),
+      // The host's changes of this camera's controls (T5.2).
+      this.cameraControls.attach(link),
     );
+    // The camera's controls, for the host's panel of them (T5.2), once the hellos are exchanged.
+    this.cameraControls.report();
     this.startReporting();
     const facts = {
       host: hello.device.label,

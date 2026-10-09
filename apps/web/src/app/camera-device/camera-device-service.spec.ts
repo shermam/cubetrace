@@ -26,8 +26,10 @@ import {
   FakePerformance,
   FakeTimers,
   FakeWakeLock,
+  mediaError,
   settle,
 } from '../device/fake-browser';
+import { SettingsService } from '../settings/settings-service';
 import { FakePreview, MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { SESSION_A, SESSION_B, testSession } from '../session/session-testing';
@@ -861,5 +863,108 @@ describe('CameraDeviceService', () => {
     await pump(10);
     const later = (await events()).filter((e) => e.kind === 'preview.stopped');
     expect(later.at(-1)?.data['why']).toBe('connection');
+  });
+
+  // ---- T5.2: the camera's controls, set from the host ----
+
+  it("answers the host's set-controls as its own panel would: each control applied and kept, then its controls; Reset to auto; a refusal (T5.2)", async () => {
+    const host = await joined();
+    // Once the hellos are exchanged: its camera's controls.
+    const first = host.of('controls');
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({
+      controls: { focusModes: ['continuous', 'single-shot', 'manual'], torch: true },
+      values: { focusMode: 'continuous', zoom: 1 },
+      applied: {
+        exposureMode: 'continuous',
+        focusMode: 'continuous',
+        whiteBalanceMode: 'continuous',
+      },
+      drift: [],
+    });
+    // Taken as it went, on the phone's clock (the test's: the hellos took a few ms).
+    expect(first[0].remoteMs).toBeGreaterThan(r.perf.hostMs - 100);
+    expect(first[0].remoteMs).toBeLessThanOrEqual(r.perf.hostMs);
+
+    // Manual focus at 0.35 m: applied as the phone's own panel does, kept for the camera, answered.
+    const track = r.media.tracks.at(-1);
+    host.link?.send({ type: 'set-controls', values: { focusMode: 'manual', focusDistance: 0.35 } });
+    await pump(20);
+    expect(track?.applied.slice(-2)).toEqual([
+      { advanced: [{ focusMode: 'manual' }] },
+      { advanced: [{ focusMode: 'manual', focusDistance: 0.35 }] },
+    ]);
+    const settings = TestBed.inject(SettingsService);
+    expect(settings.cameraControlsFor('camera 0, facing back')).toEqual({
+      focusMode: 'manual',
+      focusDistance: 0.35,
+    });
+    const answer = host.of('controls').at(-1);
+    expect(answer?.values).toMatchObject({ focusMode: 'manual', focusDistance: 0.35 });
+    expect(answer?.applied).toMatchObject({ focusMode: 'manual', focusDistance: 0.35 });
+    expect(host.of('controls-failed')).toEqual([]);
+
+    // Reset to auto: the camera opened again, every control automatic, nothing kept.
+    host.link?.send({ type: 'set-controls', reset: true });
+    await pump(20);
+    expect(r.media.tracks.at(-1)).not.toBe(track);
+    expect(r.camera.status()).toBe('on');
+    expect(settings.cameraControlsFor('camera 0, facing back')).toEqual({});
+    expect(host.of('controls').at(-1)?.values).toMatchObject({ focusMode: 'continuous' });
+
+    // A value the camera refuses: controls-failed with its words, then its controls as they stand.
+    const reopened = r.media.tracks.at(-1);
+    if (reopened !== undefined) {
+      reopened.refuseWith = mediaError('OperationError', 'Could not set zoom');
+    }
+    const before = host.of('controls').length;
+    host.link?.send({ type: 'set-controls', values: { zoom: 3 } });
+    await pump(20);
+    expect(host.of('controls-failed')).toEqual([
+      { type: 'controls-failed', message: 'The camera refused the change (Could not set zoom).' },
+    ]);
+    expect(host.of('controls').length).toBe(before + 1);
+
+    // Its camera off: it says so.
+    r.camera.stop();
+    await pump(20);
+    host.link?.send({ type: 'set-controls', values: { zoom: 2 } });
+    await pump(20);
+    expect(host.of('controls-failed').at(-1)?.message).toBe("The phone's camera is not on.");
+  });
+
+  it("reports a mode its camera changed by itself, sets it back with Keep the camera's modes, and leaves it without (T5.2)", async () => {
+    const host = await joined();
+    const track = r.media.tracks.at(-1);
+    track?.drift({ focusMode: 'manual' });
+    await pass(4000);
+    const focus = { name: 'focusMode', expected: 'continuous', actual: 'manual' };
+    // The last of them on their way.
+    await pump(20);
+    // Seen after two readings and set back: its controls say the drift, then its end.
+    expect(host.of('controls').some((message) => message.drift.length === 1)).toBe(true);
+    expect(track?.applied.at(-1)).toEqual({ advanced: [{ focusMode: 'continuous' }] });
+    await pass(2000);
+    await pump(20);
+    expect(host.of('controls').at(-1)?.drift).toEqual([]);
+
+    // Off: said and left.
+    TestBed.inject(SettingsService).setKeepCameraModes(false);
+    track?.drift({ focusMode: 'manual' });
+    await pass(6000);
+    await pump(20);
+    expect(host.of('controls').at(-1)?.drift).toEqual([focus]);
+    expect(host.of('controls').at(-1)?.values.focusMode).toBe('manual');
+    expect(r.camera.driftOutcome()).toMatchObject({ reapplied: false, keep: false });
+    const drifts = (await events()).filter((e) => e.kind === 'controls.drift');
+    expect(drifts.map((e) => [e.data['reapplied'], e.data['keep']])).toEqual([
+      [true, true],
+      [false, false],
+    ]);
+    expect(drifts[0].data).toMatchObject({
+      camera: 'phone-rear',
+      role: 'camera-device',
+      drift: { focusMode: 'continuous → manual' },
+    });
   });
 });

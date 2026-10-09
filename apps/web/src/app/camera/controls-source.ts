@@ -8,6 +8,7 @@ import type {
 } from '@cubetrace/capture';
 
 import { exposureText, focusText, isoText, temperatureText, zoomText } from './camera-format';
+import type { DriftEvent } from './controls-watch';
 
 /**
  * A camera's manual controls as the controls panel (`app-camera-controls`, T2.1) shows and changes
@@ -96,6 +97,22 @@ export function driftSentence(drift: ControlDrift): string {
 /** "The camera keeps setting the focus to manual: set it by hand." */
 export function gaveUpSentence(drift: ControlDrift): string {
   return `The camera keeps setting the ${CONTROL_WORD[drift.name]} to ${controlValueText(drift.name, drift.actual)}: set it by hand.`;
+}
+
+/**
+ * What the device says of a drift its watchdog saw (T5.2), a sentence per control: set back ("Keep
+ * the camera's modes"), given up after three re-applications in a minute, or left (the setting off).
+ */
+export function outcomeSentences(event: DriftEvent): string[] {
+  return event.drift.map((drift) => {
+    if (event.gaveUp) {
+      return gaveUpSentence(drift);
+    }
+    const set = `The camera set the ${CONTROL_WORD[drift.name]} to ${controlValueText(drift.name, drift.actual)} by itself`;
+    return event.reapplied
+      ? `${set}: set back to ${controlValueText(drift.name, drift.expected)}.`
+      : `${set}: left so (Keep the camera's modes is off).`;
+  });
 }
 
 /**

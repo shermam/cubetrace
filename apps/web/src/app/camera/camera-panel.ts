@@ -17,6 +17,7 @@ import { SessionService } from '../session/session-service';
 import { fpsText, framingText, sizeText, trackText } from './camera-format';
 import { CameraControls } from './camera-controls';
 import { CameraService } from './camera-service';
+import { outcomeSentences } from './controls-source';
 import { FramingEditor } from './framing-editor';
 import { PAIRING_BLOCK_TEXT } from './pairing-block';
 import { RecordingPanel } from './recording-panel';
@@ -134,6 +135,16 @@ export class CameraPanel {
     return rect === null || size === null ? '' : framingText(rect, size);
   });
   protected readonly threshold = this.prefs.sharpnessThreshold;
+  /**
+   * What the watchdog of the camera's modes saw last (T5.2): set back (said for a minute), left with
+   * Keep the camera's modes off, or given up; `bad` unless it was set back.
+   */
+  protected readonly driftNotes = computed(() => {
+    const outcome = this.camera.driftOutcome();
+    return outcome === null
+      ? null
+      : { sentences: outcomeSentences(outcome), bad: !outcome.reapplied };
+  });
 
   constructor() {
     // The first time the camera is on (on this device), the settings open by themselves.

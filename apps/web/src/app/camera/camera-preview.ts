@@ -14,6 +14,7 @@ import { SessionService } from '../session/session-service';
 import { SettingsService, type RemotePictures } from '../settings/settings-service';
 import { fpsText, sharpnessText } from './camera-format';
 import { CameraService } from './camera-service';
+import { driftWords } from './controls-source';
 import { RecordingService } from './recording-service';
 import { RemoteCameraRegistry } from './remote-camera-registry';
 import { RemotePreviews } from './remote-previews';
@@ -29,8 +30,8 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
  * a box of 16:9 (the frames fit inside it, a phone's upright ones between black bars), mirrored for
  * a front camera like the Camera settings' picture, with the framing rectangle drawn on it (it is
  * moved and resized in Camera settings), and under it one line: the frame rate measured, the
- * sharpness (green when good, amber when soft), what the recording is doing and how full storage
- * is. It measures the frames for `CameraService` (`watchPreview`), holding the sharpness meter while
+ * sharpness (green when good, amber when soft), what the recording is doing, how full storage
+ * is and, in red, a mode the camera changed by itself (T5.2: "focus went manual"). It measures the frames for `CameraService` (`watchPreview`), holding the sharpness meter while
  * an attempt is armed or solving, so that drawing a frame never delays a move of the solve. Under
  * them, the sync check (T2.5, `SyncCheck`): its countdown and its result are where the solver looks
  * while turning the cube in front of the camera. On a phone with the scramble over the picture
@@ -139,6 +140,10 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
                   <span data-testid="camera-status-storage" [attr.data-level]="storage.level()"
                     >storage {{ percent }}</span
                   >
+                }
+                @for (words of drift(); track words) {
+                  ·
+                  <span class="drift" data-testid="camera-status-drift">{{ words }}</span>
                 }
               </p>
             }
@@ -293,6 +298,10 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
       color: var(--danger);
     }
 
+    .drift {
+      color: var(--danger);
+    }
+
     /* Pinned at the top of a phone's Timer page, the scramble over its lower part (T2.13): the
        frames' proportions rather than 16:9, so that nothing but a phone's upright frames needs bars,
        and the line over the picture, small and on a dark ground of its own. */
@@ -416,6 +425,11 @@ export class CameraPreview {
         return 'stopped';
     }
   });
+  /**
+   * What the camera changed by itself and still differs (T5.2, the watchdog): "focus went manual",
+   * in red, a part per control, as a phone's line says its own.
+   */
+  protected readonly drift = computed(() => this.camera.drift().map((drift) => driftWords(drift)));
   /** "12%": whole percents, down, as the storage meter says it; null while unknown. */
   protected readonly storagePercent = computed(() => {
     const percent = this.storage.percent();

@@ -99,7 +99,33 @@
         with the cube in the rectangle: light helps most.
       </p>
 
-      <app-camera-controls />
+      <app-camera-controls [source]="camera.controlsSource" />
+      @if (driftNotes(); as notes) {
+        @for (sentence of notes.sentences; track sentence) {
+          <p
+            role="status"
+            data-testid="camera-drift"
+            [class.error]="notes.bad"
+            [class.notice]="!notes.bad"
+          >
+            {{ sentence }}
+          </p>
+        }
+      }
+      <label class="switch">
+        <input
+          #keepModesBox
+          type="checkbox"
+          data-testid="camera-panel-keep-modes"
+          [checked]="prefs.keepCameraModes()"
+          (change)="prefs.setKeepCameraModes(keepModesBox.checked)"
+        />
+        Keep the camera's modes
+      </label>
+      <p class="hint">
+        A mode the camera changes by itself (its focus gone manual) is set back within seconds,
+        three times a minute at most; off, it is said and left (Settings → Camera).
+      </p>
     }
 
     <div class="mode" role="group" aria-label="What the camera and the recording are asked for">

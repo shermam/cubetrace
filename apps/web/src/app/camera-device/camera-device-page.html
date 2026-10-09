@@ -92,6 +92,18 @@
         flick one face and back after a second, five times, as the host's screen says.
       </p>
     }
+    @if (driftNotes(); as notes) {
+      @for (sentence of notes.sentences; track sentence) {
+        <p
+          role="status"
+          data-testid="device-drift"
+          [class.problem]="notes.bad"
+          [class.notice]="!notes.bad"
+        >
+          {{ sentence }}
+        </p>
+      }
+    }
     @if (thermalText(); as thermal) {
       <p class="problem" role="status" data-testid="device-thermal">{{ thermal }}</p>
     }
@@ -213,7 +225,22 @@
         helps most. Resolution, frame rate, video quality and the microphone are in Settings →
         Camera, the same as for the Timer page.
       </p>
-      <app-camera-controls />
+      <app-camera-controls [source]="camera.controlsSource" />
+      <label class="switch">
+        <input
+          #keepModesBox
+          type="checkbox"
+          data-testid="device-keep-camera-modes"
+          [checked]="settings.keepCameraModes()"
+          (change)="settings.setKeepCameraModes(keepModesBox.checked)"
+        />
+        Keep the camera's modes
+      </label>
+      <p class="hint">
+        A mode the camera changes by itself (its focus gone manual) is set back within seconds,
+        three times a minute at most; off, it is said here and on the host, and left. The host can
+        set these controls too, from its Cameras section.
+      </p>
     }
   </div>
 </details>

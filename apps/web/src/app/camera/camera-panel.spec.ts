@@ -374,6 +374,18 @@ describe('CameraPanel', () => {
     expect(TestBed.inject(SettingsService).cameraControlsFor('camera 0, facing back')).toEqual({});
   });
 
+  it("has Keep the camera's modes under the controls, on by default (T5.2)", async () => {
+    await render([FAKE_PHONE_REAR], ANDROID);
+    await turnOn();
+    const keep = element('camera-panel-keep-modes') as HTMLInputElement;
+    expect(keep.checked).toBe(true);
+    expect(keep.closest('label')?.textContent.trim()).toBe("Keep the camera's modes");
+    keep.click();
+    await update();
+    expect(TestBed.inject(SettingsService).keepCameraModes()).toBe(false);
+    expect(element('camera-drift')).toBeNull();
+  });
+
   it('says why the camera did not open, or what it did instead', async () => {
     await render([FAKE_FACETIME]);
     media.failures.push(mediaError('NotAllowedError', 'Permission denied'));

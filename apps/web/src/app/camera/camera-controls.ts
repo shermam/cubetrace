@@ -1,7 +1,8 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, input, signal } from '@angular/core';
 import {
   hasControls,
   type CameraControls as Controls,
+  type ControlDrift,
   type ControlName,
   type ControlRange,
   type ControlValues,
@@ -19,7 +20,7 @@ import {
   toSlider,
   zoomText,
 } from './camera-format';
-import { CameraService } from './camera-service';
+import { driftSentence, type ControlsSource } from './controls-source';
 
 /** A control's slider, as shown. */
 interface SliderView {
@@ -51,11 +52,16 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
 };
 
 /**
- * The open camera's manual controls, each shown only when the camera has it (docs/PLAN.md, T2.1):
+ * A camera's manual controls, each shown only when the camera has it (docs/PLAN.md, T2.1):
  * exposure (Auto or Manual, with the exposure time and the ISO), focus (with the distance), white
  * balance (with the colour temperature), zoom, the torch, and "Reset to auto". In automatic mode a
  * slider shows what the camera chose (the exposure time tells whether fast turns will blur), and
- * moving it switches its group to manual. A slider applies its value when it is let go.
+ * moving it switches its group to manual. A slider applies its value when it is let go. Since T5.2 a
+ * view over a `ControlsSource` (`source`): this device's open camera (`CameraService.controlsSource`,
+ * Camera settings and the phone's own Camera page), or a phone's over the connection (the Cameras
+ * section's `RemoteControlsSource`); a change in flight disables the controls (for a phone, until its
+ * answer, 3 s at most), a control the camera changed by itself is said in red, and why a change did
+ * not take. A slider held or moved tells the source (`adjusting`), whose watchdog then waits.
  */
 @Component({
   selector: 'app-camera-controls',
@@ -66,6 +72,14 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
         (a lamp on the cube) is what makes its frames sharp.
       </p>
     } @else {
+      @for (drift of source().drift(); track drift.name) {
+        <p class="drift" role="status" data-testid="camera-controls-drift">
+          {{ sentence(drift) }}
+        </p>
+      }
+      @if (source().error(); as error) {
+        <p class="error" role="alert" data-testid="camera-controls-error">{{ error }}</p>
+      }
       @for (group of groups(); track group.title) {
         <fieldset [attr.data-testid]="'camera-group-' + group.title">
           <legend>{{ group.title }}</legend>
@@ -75,7 +89,7 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
               <select
                 #modeSelect
                 [attr.data-testid]="'control-' + mode.name"
-                [disabled]="camera.busy()"
+                [disabled]="source().busy()"
                 (change)="setMode(mode.name, modeSelect.value)"
               >
                 @for (option of mode.modes; track option) {
@@ -97,7 +111,10 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
                 step="1"
                 [attr.data-testid]="'control-' + slider.name"
                 [value]="slider.position"
-                [disabled]="camera.busy()"
+                [disabled]="source().busy()"
+                (pointerdown)="hold(true)"
+                (pointerup)="hold(false)"
+                (pointercancel)="hold(false)"
                 (input)="preview(slider, range.value)"
                 (change)="apply(slider, range.value)"
               />
@@ -115,7 +132,7 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
             type="checkbox"
             data-testid="control-torch"
             [checked]="torch()"
-            [disabled]="camera.busy()"
+            [disabled]="source().busy()"
             (change)="setTorch(torchBox.checked)"
           />
           Torch
@@ -125,8 +142,8 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
         <button
           type="button"
           data-testid="camera-reset"
-          [disabled]="camera.busy()"
-          (click)="camera.resetControls()"
+          [disabled]="source().busy()"
+          (click)="reset()"
         >
           Reset to auto
         </button>
@@ -181,6 +198,13 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
       font-size: 0.875rem;
     }
 
+    .drift,
+    .error {
+      margin: 0;
+      color: var(--danger);
+      font-size: 0.875rem;
+    }
+
     .reset {
       display: flex;
       flex-wrap: wrap;
@@ -195,24 +219,29 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
   `,
 })
 export class CameraControls {
-  protected readonly camera = inject(CameraService);
+  /** The camera whose controls these are: this device's, or a phone's (T5.2). */
+  readonly source = input.required<ControlsSource>();
   /** Values shown while a slider is moved, before it is let go. */
   private readonly moving = signal<Partial<Record<ControlName, number>>>({});
 
   protected readonly none = computed(() => {
-    const controls = this.camera.controls();
+    const controls = this.source().controls();
     return controls === null || !hasControls(controls);
   });
   protected readonly groups = computed(() =>
-    controlGroups(this.camera.controls(), this.camera.values()),
+    controlGroups(this.source().controls(), this.source().values()),
   );
   /** Whether the torch is on; null when the camera has none. */
   protected readonly torch = computed(() =>
-    this.camera.controls()?.torch === true ? this.camera.values().torch === true : null,
+    this.source().controls()?.torch === true ? this.source().values().torch === true : null,
   );
 
   protected label(mode: MeteringMode): string {
     return modeLabel(mode);
+  }
+
+  protected sentence(drift: ControlDrift): string {
+    return driftSentence(drift);
   }
 
   protected shown(slider: SliderView): string {
@@ -221,21 +250,33 @@ export class CameraControls {
   }
 
   protected setTorch(on: boolean): void {
-    void this.camera.setControl('torch', on);
+    void this.source().set('torch', on);
   }
 
   protected setMode(name: ControlName, mode: string): void {
-    void this.camera.setControl(name, mode as MeteringMode);
+    void this.source().set(name, mode as MeteringMode);
+  }
+
+  protected reset(): void {
+    void this.source().reset();
+  }
+
+  /** A slider held (true) or let go (false): the source's watchdog waits meanwhile (T5.2). */
+  protected hold(active: boolean): void {
+    this.source().adjusting(active);
   }
 
   protected preview(slider: SliderView, position: string): void {
+    this.source().adjusting(true);
     const value = fromSlider(Number(position), slider.range, slider.log);
     this.moving.update((moving) => ({ ...moving, [slider.name]: value }));
   }
 
   protected apply(slider: SliderView, position: string): void {
+    const source = this.source();
+    source.adjusting(false);
     const value = fromSlider(Number(position), slider.range, slider.log);
-    void this.camera.setControl(slider.name, value).finally(() => {
+    void source.set(slider.name, value).finally(() => {
       this.moving.update((moving) => ({ ...moving, [slider.name]: undefined }));
     });
   }
