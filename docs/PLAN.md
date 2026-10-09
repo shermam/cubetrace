@@ -2565,7 +2565,7 @@ sign in the app (issue #67).
 | Id | Task | Depends on | Status |
 |---|---|---|---|
 | T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | ✅ 2026-10-09 (#68) |
-| T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | 🔄 PR #69 |
+| T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | ✅ 2026-10-09 (#69) |
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | – |
 | T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0` | T5.2, T5.3 | – |
 
@@ -2698,6 +2698,36 @@ message, a change sent and in flight, the timeout, Reset). The e2e pair: the fak
 `getCapabilities()` with focus modes and a focus distance and `applyConstraints` bookkeeping (the e2e's
 synthetic camera of T4.3); the host sets manual focus and a distance, the phone's page shows them; Reset
 to auto; a drift injected on the phone is undone and shown on the host. Lint, unit and e2e green.
+
+**Outcome (2026-10-09).** As contracted, PR #69, with these choices. The three messages are the
+contract's, in `@cubetrace/capture`'s vocabulary (`rtc` now depends on the workspace package `capture`
+for the types and the checks; no npm dependency); `decode` bounds the modes, the ranges (a finite `min`
+under `max`, a step above 0), the drift list and the message (500 characters). **The watchdog's
+baseline, where nothing was applied, is the mode the camera opened in, not the automatic mode**: Chrome's
+fake camera opens in manual and would otherwise be "corrected" forever; the owner's phones open in
+continuous. Numbers agree within 5% or one step of the range (cameras round what they are given); an
+expected single-shot accepts manual; the torch is never held; the watchdog never reopens the camera; a
+held slider pauses it (`ControlsSource.adjusting()`). `CameraService` exposes its source as
+`controlsSource` (its `error` means something else) and `setControl` now returns the camera's refusal;
+a change in flight disables the whole panel, one change at a time (the messages have no request id;
+answers are matched by order). "This phone's build has no remote controls" shows when no `controls` come
+within 5 s of the hellos. "Keep the camera's modes" is also a switch on the phone's Camera page and in
+Camera settings. The Reset beside a phone's line on the Timer page shows in the "Same size as mine"
+layout only. `controls.drift` stores the drift as a flat map and carries `controls`, `keep`, `role` and
+`deviceLabel`. The manual test provokes the drift from the phone's console through `chrome://inspect`
+(a change made on the app's own panel is what the app applied, so it is not a drift). Tests: 1,421
+package tests (1,390 before; the round report's included) and 909 app tests (870); the e2e pair
+`remote-controls.spec.ts` (the synthetic camera's track gained `getCapabilities`, `getSettings` and
+`applyConstraints` bookkeeping): the host sets manual focus and a distance, the phone's page shows them,
+Reset to auto, an injected drift undone and shown on the host. Bundle (raw): initial unchanged (265.11
+kB), `camera-device-page` 54.15 kB (51.36), `remote-cameras` 52.08 kB (47.40), the shared chunk with
+`CameraService` and the watchdog 32.60 kB (24.72), the `rtc` chunk 29.52 kB (27.56); all JS +20.8 kB.
+**Open:** whether real phones report a mode their camera changed by itself and whether re-applying it
+takes (the owner's "After T5.2" round); a drift set back shows on the host for about 2 s only (the phone's
+page keeps it a minute); a request id if answers by order ever mismatch. **CI's e2e:cloud flake**
+(`remote-camera.cloud.spec.ts:33`: the peer document `offered` with no answer right after both pages
+connected; main at 2bf67b5 and PR #69's first attempt, never before 2026-10-09, green on a re-run) is
+open, for T5.4.
 
 ### T5.3 — the host's capture latency, measured per attempt (issue #67)
 
