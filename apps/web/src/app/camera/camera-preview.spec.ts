@@ -301,4 +301,86 @@ describe('CameraPreview', () => {
     await update();
     expect(host().classList.contains('shown')).toBe(false);
   });
+
+  it("gives each phone a cell as large as its own with equal pictures (T5.1): its picture and its status line; two or more, the class that sets them side by side; the camera off, the phones' cells alone", async () => {
+    const camera = await render();
+    fixture.componentRef.setInput('pictures', 'equal');
+    await camera.start();
+    await update();
+    expect(host().classList).toContain('equal');
+    expect(host().getAttribute('data-pictures')).toBe('equal');
+    // No phone: one cell, this device's, as before.
+    expect(host().querySelectorAll('[data-testid="camera-cell"]')).toHaveLength(1);
+    expect(host().classList).not.toContain('many');
+    expect(host().querySelector('app-remote-previews')).toBeNull();
+
+    const source = new FakeRemoteSource();
+    TestBed.inject(RemoteCameraRegistry).provide(source);
+    source.cameras.set([
+      remotePhone('x', {
+        report: {
+          recording: true,
+          framing: null,
+          fps: 30,
+          sharpness: 8,
+          battery: { level: 0.5, charging: false },
+          thermal: 'ok',
+          pressure: 'fair',
+          pressureSource: 'cpu',
+          pendingClips: 0,
+        },
+        reportMs: 0,
+        converged: true,
+      }),
+    ]);
+    await update();
+    await update();
+    // The phone's cell beside this device's in the grid, not a tile over its picture.
+    const cells = host().querySelector('[data-testid="camera-cells"]');
+    expect(
+      [
+        ...(cells?.querySelectorAll(
+          '[data-testid="camera-cell"], [data-testid="remote-preview-cell"]',
+        ) ?? []),
+      ].map((cell) => cell.getAttribute('data-testid')),
+    ).toEqual(['camera-cell', 'remote-preview-cell']);
+    expect(element('camera-preview-box')?.querySelector('app-remote-previews')).toBeNull();
+    expect(element('remote-preview-tile')).toBeNull();
+    expect(host().classList).toContain('many');
+    expect(element('remote-status-sharpness')?.getAttribute('data-tone')).toBe('warn');
+    expect(element('remote-status-pressure')?.textContent.trim()).toBe('pressure fair');
+
+    // The camera off: the phone's cell alone, one picture.
+    camera.stop();
+    await update();
+    expect(host().classList.contains('shown')).toBe(true);
+    expect(element('camera-cell')).toBeNull();
+    expect(element('remote-preview-cell')?.getAttribute('data-label')).toBe('phone-rear');
+    expect(host().classList).not.toContain('many');
+    // Tiles chosen: the phone's picture is the main one, as T4.3 had it.
+    fixture.componentRef.setInput('pictures', 'tiles');
+    await update();
+    await update();
+    expect(element('remote-preview-cell')).toBeNull();
+    expect(element('remote-preview-main')?.getAttribute('data-label')).toBe('phone-rear');
+  });
+
+  it("keeps tiles over the picture in a phone's overlay, whatever the pictures asked for (T5.1)", async () => {
+    const camera = await render([FAKE_PHONE_FRONT]);
+    fixture.componentRef.setInput('overlay', true);
+    fixture.componentRef.setInput('pictures', 'equal');
+    await camera.start();
+    const source = new FakeRemoteSource();
+    TestBed.inject(RemoteCameraRegistry).provide(source);
+    source.cameras.set([remotePhone('x')]);
+    await update();
+    await update();
+    expect(host().classList).not.toContain('equal');
+    expect(host().getAttribute('data-pictures')).toBe('tiles');
+    expect(
+      element('camera-preview-box')
+        ?.querySelector('[data-testid="remote-preview-tile"]')
+        ?.getAttribute('data-label'),
+    ).toBe('phone-rear');
+  });
 });

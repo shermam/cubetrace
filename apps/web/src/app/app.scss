@@ -151,6 +151,15 @@ main {
   &:has(> app-timer-page) {
     max-width: 80rem;
   }
+
+  // Wider again where two pictures of the same size stand side by side beside the time (T5.1,
+  // "Pictures from phones", timer-page.ts: from a column of 72rem, which a window of 97rem has at
+  // 120rem); narrower windows keep 80rem, the pictures one under another beside the time.
+  @media (min-width: 97rem) {
+    &:has(> app-timer-page app-camera-preview.many) {
+      max-width: 120rem;
+    }
+  }
 }
 
 .app-footer {

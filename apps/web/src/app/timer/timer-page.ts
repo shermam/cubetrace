@@ -16,7 +16,12 @@ import { ClipViewing } from './clip-viewing';
 import { ScrambleView } from './scramble-view';
 import { SolveList } from './solve-list';
 import { TimerClock } from './timer-clock';
-import { TWO_COLUMNS_QUERY, timerLayout, windowMatches } from './timer-layout';
+import {
+  TWO_COLUMNS_QUERY,
+  remotePicturesLayout,
+  timerLayout,
+  windowMatches,
+} from './timer-layout';
 
 /** The Timer page lists this many solves, the newest; the session's page has them all (T2.7). */
 export const TIMER_SOLVES = 12;
@@ -32,6 +37,10 @@ export const TIMER_SOLVES = 12;
  * under it, the time with the camera's preview beside it (so that the scramble, the time and the
  * picture are in view together), then the two sections; on the right the breakdown, the session's
  * statistics and its last {@link TIMER_SOLVES} solves, with "See all" to the session's page. The
+ * phones paired as cameras show with the preview (T4.3), each picture as large as this device's own
+ * by default on a laptop, under one another beside the time, or two side by side where the column
+ * is wide enough, the page then as wide as 120rem; or as small tiles over it, the default on a phone
+ * and the only layout of its overlay ("Pictures from phones", T5.1). The
  * camera's preview and settings are chunks of their own, loaded after the page (which does not wait
  * for them); they record the clips (T2.4). A solve's clip badge opens its clips in the clip viewer,
  * a chunk of its own too. The keys: `Esc` marks a DNF, `Delete` deletes the last attempt, `N` skips
@@ -65,7 +74,7 @@ export const TIMER_SOLVES = 12;
         </section>
         @if (overlay()) {
           @defer (on immediate) {
-            <app-camera-preview [overlay]="true" />
+            <app-camera-preview [overlay]="true" [pictures]="pictures()" />
           } @placeholder {
             <div class="picture-placeholder"></div>
           }
@@ -78,7 +87,7 @@ export const TIMER_SOLVES = 12;
           </section>
           @if (!overlay()) {
             @defer (on immediate) {
-              <app-camera-preview />
+              <app-camera-preview [pictures]="pictures()" />
             }
           }
         </div>
@@ -225,7 +234,8 @@ export const TIMER_SOLVES = 12;
     }
 
     /* The time and, beside it where the column is wide enough (under it otherwise), the camera's
-       preview: a box of 16:9 that is 15rem (240 px) high at most. */
+       preview: a box of 16:9 that is 15rem (240 px) high at most; the phones' pictures of the same
+       size under it (T5.1), in cells of the same width. */
     .live {
       grid-area: live;
       container: live / inline-size;
@@ -255,6 +265,22 @@ export const TIMER_SOLVES = 12;
       app-camera-preview {
         flex: none;
         width: calc(15rem * 16 / 9);
+      }
+    }
+
+    /* Two pictures or more of the same size (T5.1, "Pictures from phones"), side by side, two to a
+       row, where the column holds two cells beside the clock: the cells' 53.83rem with their gap, the
+       gap of 1rem to the clock, and the clock's 17.17rem (275 px, its section's padding and border
+       included), in which its time at its smallest (3rem) holds "1:02.34" (202 px) and its four
+       buttons take three rows, so that it is about as tall as the pictures with their lines (277
+       against 262 px; four rows under 270 px, 343 px tall). Narrower, the pictures stand one under
+       another beside the clock. A window of 97rem (1,552 px) or more lets the page be up to 120rem
+       wide for them (app.scss), and has them side by side. */
+    @container live (min-width: 72rem) {
+      app-camera-preview.many {
+        --picture-columns: 2;
+        width: calc(2 * 15rem * 16 / 9 + var(--space-2));
+        max-width: none;
       }
     }
 
@@ -316,6 +342,17 @@ export class TimerPage {
     timerLayout(this.wide(), this.settings.cameraOn(), this.settings.scrambleOverPicture()),
   );
   protected readonly overlay = computed(() => this.layout() === 'overlay');
+  /**
+   * How the phones' pictures show (T5.1): "Pictures from phones" as chosen, else this device's
+   * default, tiles in the overlay.
+   */
+  protected readonly pictures = computed(() =>
+    remotePicturesLayout(
+      this.settings.remotePicturesChoice(),
+      this.layout(),
+      this.settings.isPhone,
+    ),
+  );
   private readonly cube = inject(CubeService);
   private readonly dialogs = inject(ConnectDialogService);
   private readonly viewing = inject(ClipViewing);

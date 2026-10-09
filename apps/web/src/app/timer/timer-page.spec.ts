@@ -153,7 +153,11 @@ describe('TimerPage', () => {
     expect(layout()).toBe('stacked');
     expect(stage()).toEqual(['section.scramble']);
     expect(previews()).toBe(1);
-    expect(query(fixture, '.live section.clock + app-camera-preview')?.className).toBe('shown');
+    // The phones' pictures, none here, would be the size of this one (T5.1: this browser says it is
+    // no phone, so the default is a laptop's).
+    expect(query(fixture, '.live section.clock + app-camera-preview')?.className).toBe(
+      'shown equal',
+    );
     expect(query(fixture, '.live > app-sync-check')).toBeNull();
     expect(scrambleView()?.classList).not.toContain('over-picture');
 
@@ -161,12 +165,21 @@ describe('TimerPage', () => {
     settings.setScrambleOverPicture(true);
     await update(fixture);
     expect(layout()).toBe('overlay');
+    // The overlay keeps the phones' pictures as tiles (T5.1).
+    expect(query(fixture, 'app-camera-preview')?.getAttribute('data-pictures')).toBe('tiles');
     wide.set(true);
     await update(fixture);
     expect(layout()).toBe('columns');
     expect(stage()).toEqual(['section.scramble']);
-    expect(query(fixture, '.live section.clock + app-camera-preview')?.className).toBe('shown');
+    expect(query(fixture, '.live section.clock + app-camera-preview')?.className).toBe(
+      'shown equal',
+    );
     expect(previews()).toBe(1);
+    // Pictures from phones: small tiles (T5.1).
+    settings.setRemotePictures('tiles');
+    await update(fixture);
+    expect(query(fixture, '.live section.clock + app-camera-preview')?.className).toBe('shown');
+    expect(query(fixture, 'app-camera-preview')?.getAttribute('data-pictures')).toBe('tiles');
 
     // A phone again, the camera off: the scramble pinned alone.
     wide.set(false);
