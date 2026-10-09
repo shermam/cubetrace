@@ -1028,7 +1028,8 @@ export class RemoteCamerasService {
   /**
    * The `rtc.clock` event: the fit's record, and the window's round trips (T4.2b: their median and
    * 95th percentile, how many it holds and the share kept), which say how the link behaves whether
-   * the fit converged or not.
+   * the fit converged or not; and the phone's last report (T5.1, `reportFacts`), so that the minute's
+   * events give a phone's health over a session.
    */
   private recordClock(peer: Peer, params: RemoteClockParams, why: string): void {
     const window = peer.fit.window;
@@ -1046,6 +1047,7 @@ export class RemoteCamerasService {
       keptShare: window.samples === 0 ? null : round2(window.kept / window.samples),
       rttP50Ms: round1(window.rttP50Ms),
       rttP95Ms: round1(window.rttP95Ms),
+      report: reportFacts(peer.camera, this.timers.now(), this.settings.sharpnessThreshold()),
     });
   }
 
@@ -1250,6 +1252,36 @@ function entryOf(camera: RemoteCamera): RemoteCameraEntry {
     thumbnail: camera.thumbnail?.url ?? null,
     report: camera.report,
     reportMs: camera.reportMs,
+  };
+}
+
+/**
+ * The phone's last report as the `rtc.clock` event carries it (T5.1, docs/DIAGNOSTICS.md): its frame
+ * rate and sharpness (to a tenth), whether that is soft by this host's threshold, whether it records,
+ * its battery (an event's facts nest one level only: the level, to a hundredth, and the charging side
+ * by side), the frame rate's thermal hint, the Compute Pressure state and its source, and how old the
+ * report is; null before the first.
+ */
+export function reportFacts(
+  camera: Pick<RemoteCamera, 'report' | 'reportMs'>,
+  nowMs: number,
+  sharpnessThreshold: number,
+): Record<string, string | number | boolean | null> | null {
+  const report = camera.report;
+  if (report === null) {
+    return null;
+  }
+  return {
+    fps: report.fps === null ? null : round1(report.fps),
+    sharpness: report.sharpness === null ? null : round1(report.sharpness),
+    soft: report.sharpness === null ? null : report.sharpness < sharpnessThreshold,
+    recording: report.recording,
+    batteryLevel: report.battery === null ? null : round2(report.battery.level),
+    batteryCharging: report.battery?.charging ?? null,
+    thermal: report.thermal,
+    pressure: report.pressure,
+    pressureSource: report.pressureSource,
+    ageMs: camera.reportMs === null ? null : Math.round(nowMs - camera.reportMs),
   };
 }
 

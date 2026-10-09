@@ -1363,6 +1363,135 @@ describe('the checklist after T4', () => {
   });
 });
 
+describe('the checklist after T5.1', () => {
+  /**
+   * A day on the rig after T5.1, as the host's minute records of its phones tell it: the ThinkPhone
+   * for 25 minutes, its focus soft for two of them then good again, its pressure from nominal to fair
+   * from its thermals, the frame rate dropped once; the Moto g60 for 5 minutes, unplugged from 18% to
+   * 9%, without the pressure API; and the pictures switched to tiles and back.
+   */
+  function healthDay(): ReportEvent[] {
+    const t0 = NOW - 3 * HOUR;
+    const MIN = 60_000;
+    const minute = (tsMs: number, peer: string, report: Record<string, unknown> | null) =>
+      at(tsMs, 'rtc.clock', {
+        camera: peer === 'ThinkPhone' ? 'phone-rear' : 'phone-rear-2',
+        peer,
+        why: 'minute',
+        converged: true,
+        report,
+      });
+    const events: ReportEvent[] = [
+      // A host of 0.4.0 recorded no report: not evidence.
+      minute(t0 - 10 * MIN, 'ThinkPhone', null),
+    ];
+    for (let m = 0; m <= 25; m++) {
+      events.push(
+        minute(t0 + m * MIN, 'ThinkPhone', {
+          fps: m === 20 ? 22.1 : 29.9,
+          sharpness: m === 5 || m === 6 ? 9.5 : 41.2,
+          soft: m === 5 || m === 6,
+          recording: true,
+          batteryLevel: 0.83,
+          batteryCharging: true,
+          thermal: m === 20 ? 'throttled' : 'ok',
+          pressure: m < 15 ? 'nominal' : 'fair',
+          pressureSource: 'thermals',
+          ageMs: 1200,
+        }),
+      );
+    }
+    for (let m = 0; m <= 5; m++) {
+      events.push(
+        minute(t0 + (30 + m) * MIN, 'Moto g60', {
+          fps: 30,
+          sharpness: 55,
+          soft: false,
+          recording: true,
+          batteryLevel: Math.round((0.18 - m * 0.018) * 1000) / 1000,
+          batteryCharging: false,
+          thermal: 'ok',
+          pressure: null,
+          pressureSource: null,
+          ageMs: 900,
+        }),
+      );
+    }
+    events.push(
+      at(t0 + 40 * MIN, 'settings.changed', { key: 'remotePictures', value: 'tiles' }),
+      at(t0 + 42 * MIN, 'settings.changed', { key: 'remotePictures', value: 'equal' }),
+    );
+    return events;
+  }
+
+  it("ticks the phones' pictures and their health from the host's minute records, and the switch to tiles and back", () => {
+    const results = new Map(evaluate(healthDay(), NOW).map((item) => [item.id, item.result]));
+    const status = (id: string): string | undefined => results.get(id)?.status;
+    const facts = (id: string): string => results.get(id)?.facts ?? '';
+
+    expect(status('5.1.1')).toBe('ok');
+    expect(facts('5.1.1')).toBe(
+      'ThinkPhone: 26 reports, 29.9 fps, sharpness 41.2, battery 83% (medians); Moto g60: 6 reports, 30 fps, sharpness 55, battery 14% (medians)',
+    );
+    expect(status('5.1.2')).toBe('ok');
+    expect(facts('5.1.2')).toBe(
+      'ThinkPhone: soft in 2 of 26 reports (sharpness 9.5 at the least), good again after',
+    );
+    expect(status('5.1.3')).toBe('ok');
+    expect(facts('5.1.3')).toBe('Moto g60: 6 reports unplugged under 20%, 9% at the least');
+    expect(status('5.1.4')).toBe('ok');
+    expect(facts('5.1.4')).toBe(
+      'ThinkPhone: 25 minutes of reports, pressure nominal (15), fair (11) from thermals, the frame rate dropped in 1; Moto g60: 5 minutes of reports, no pressure (the API absent or refused), the frame rate dropped in 0',
+    );
+    expect(status('5.1.5')).toBe('ok');
+    expect(facts('5.1.5')).toBe('1 switch on office-mbp to tiles, 1 back to the same size');
+
+    // Nothing of it without the events, nor from a host of 0.4.0 (no report in its records).
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result.status]));
+    const old = new Map(
+      evaluate(
+        healthDay().map((e) =>
+          e.kind === 'rtc.clock' ? { ...e, data: { ...e.data, report: null } } : e,
+        ),
+        NOW,
+      ).map((item) => [item.id, item.result]),
+    );
+    for (const id of ['5.1.1', '5.1.2', '5.1.3', '5.1.4']) {
+      expect(empty.get(id), id).toBe('none');
+      expect(old.get(id)?.status, id).toBe('none');
+    }
+    expect(old.get('5.1.1')?.facts).toBe("no phone's report in an rtc.clock event");
+    expect(empty.get('5.1.5')).toBe('none');
+
+    // One phone only, its focus never good again, the switch never back: not yet.
+    const resultOf = (events: ReportEvent[], id: string) =>
+      evaluate(events, NOW).find((item) => item.id === id)?.result;
+    const thinkPhone = healthDay().filter((e) => e.data['peer'] !== 'Moto g60');
+    expect(resultOf(thinkPhone, '5.1.1')?.status).toBe('none');
+    expect(resultOf(thinkPhone, '5.1.3')?.facts).toBe('no phone reported under 20% unplugged');
+    const stillSoft = healthDay().filter(
+      (e) =>
+        !(
+          e.kind === 'rtc.clock' &&
+          e.data['peer'] === 'ThinkPhone' &&
+          e.tsMs > NOW - 3 * HOUR + 6 * 60_000
+        ),
+    );
+    expect(resultOf(stillSoft, '5.1.2')).toEqual({
+      status: 'none',
+      facts:
+        'ThinkPhone: soft in 2 of 7 reports (sharpness 9.5 at the least), not good again after',
+    });
+    const stuck = healthDay().filter(
+      (e) => !(e.kind === 'settings.changed' && e.data['value'] === 'equal'),
+    );
+    expect(resultOf(stuck, '5.1.5')).toEqual({
+      status: 'none',
+      facts: 'switched to tiles, never back',
+    });
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });

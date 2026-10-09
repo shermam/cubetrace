@@ -28,6 +28,7 @@ import {
   LEAVE_GRACE_MS,
   RECONNECT_WINDOW_MS,
   RemoteCamerasService,
+  reportFacts,
 } from './remote-cameras-service';
 import { RemoteCameraRegistry } from './remote-camera-registry';
 
@@ -437,12 +438,29 @@ describe('RemoteCamerasService', () => {
     });
     expect(recorded[0].data['windowSamples']).toBe(recorded[0].data['samples']);
 
-    // A minute into the connection, again, with the samples of the window.
+    // No report from the phone yet: none in the event (T5.1).
+    expect(recorded[0].data['report']).toBeNull();
+
+    // A minute into the connection, again, with the samples of the window, and the phone's last
+    // report (T5.1): its health over the session, for the round report.
+    phone.sendState();
     await pass(r.s, CLOCK_RECORD_MS);
     all = await events();
     const again = all.filter((e) => e.kind === 'rtc.clock');
     expect(again).toHaveLength(2);
     expect(again[1].data).toMatchObject({ why: 'minute', converged: true, keptShare: 1 });
+    expect(again[1].data['report']).toEqual({
+      fps: 29.9,
+      sharpness: 41.2,
+      soft: false,
+      recording: true,
+      batteryLevel: 0.83,
+      batteryCharging: true,
+      thermal: 'ok',
+      pressure: 'nominal',
+      pressureSource: 'cpu',
+      ageMs: expect.any(Number),
+    });
     const minute = r.s.service.session()?.clock.cameras['phone-rear'].remote;
     expect(minute?.samples).toBeGreaterThanOrEqual(30);
     expect(minute?.samples).toBe(again[1].data['samples']);
@@ -467,6 +485,61 @@ describe('RemoteCamerasService', () => {
     expect(clocks[0].data['windowSamples']).toBeGreaterThanOrEqual(115);
     expect(clocks[0].data['keptShare']).toBe(1);
     expect(r.s.service.session()?.clock.cameras['phone-rear']).toBeUndefined();
+  });
+
+  it('gives the rtc.clock event the phone’s last report in one level, soft by this host’s threshold (T5.1)', () => {
+    expect(reportFacts({ report: null, reportMs: null }, 5000, 20)).toBeNull();
+    const report = {
+      type: 'state' as const,
+      remoteMs: 1000,
+      recording: false,
+      framing: null,
+      frame: { width: 1080, height: 1920 },
+      fps: 24.444,
+      sharpness: 12.345,
+      battery: { level: 0.1234, charging: false },
+      thermal: 'throttled' as const,
+      pressure: 'serious' as const,
+      pressureSource: 'thermals' as const,
+      pendingClips: 0,
+    };
+    expect(reportFacts({ report, reportMs: 1000 }, 3499.6, 20)).toEqual({
+      fps: 24.4,
+      sharpness: 12.3,
+      soft: true,
+      recording: false,
+      batteryLevel: 0.12,
+      batteryCharging: false,
+      thermal: 'throttled',
+      pressure: 'serious',
+      pressureSource: 'thermals',
+      ageMs: 2500,
+    });
+    // A phone of 0.4.0: no pressure; a browser without a battery or a sharpness yet.
+    expect(
+      reportFacts(
+        {
+          report: {
+            ...report,
+            sharpness: null,
+            battery: null,
+            pressure: null,
+            pressureSource: null,
+          },
+          reportMs: 1000,
+        },
+        1000,
+        10,
+      ),
+    ).toMatchObject({
+      sharpness: null,
+      soft: null,
+      batteryLevel: null,
+      batteryCharging: null,
+      pressure: null,
+      pressureSource: null,
+      ageMs: 0,
+    });
   });
 
   it('keeps the phone’s state and its latest thumbnail', async () => {
@@ -828,6 +901,7 @@ describe('RemoteCamerasService', () => {
         label: 'phone-rear',
         session: r.s.service.session()?.id,
         state: 'connected',
+        sinceMs: r.service.cameras()[0].sinceMs,
         synced: true,
         converged: false,
         recording: true,
@@ -836,8 +910,12 @@ describe('RemoteCamerasService', () => {
         deviceLabel: 'camera 0, facing back',
         preview: track,
         thumbnail: null,
+        // Its last report, for its status line (T5.1).
+        report: r.service.cameras()[0].report,
+        reportMs: r.service.cameras()[0].reportMs,
       },
     ]);
+    expect(registry.cameras()[0].report).toMatchObject({ pressure: 'nominal', fps: 29.9 });
     expect(r.service.cameras()[0].preview).toBe(track);
 
     // Off, then on again: each phone connected is told.

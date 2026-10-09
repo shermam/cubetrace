@@ -394,6 +394,8 @@ const T43 = 'After T4.3';
 const REMOTE_SYNC = 'T4.3 — remote sync check and live preview';
 const T4 = 'After T4';
 const RIG = 'T4.4 — the desk rig';
+const T51 = 'After T5.1';
+const PICTURES = "T5.1 — the phone's picture and its status line";
 
 /** A median of `values` in ms as seconds, to one decimal, or `?` without one. */
 function seconds(values: readonly number[]): string {
@@ -454,9 +456,62 @@ function uploadsWith(q: Query, clips: number): ReportEvent[] {
 }
 
 /**
+ * The phone's report that a host's `rtc.clock` event carries since T5.1 (`report`: the phone's last
+ * `state`, one level of facts), or null: an event of an earlier build, or before the first report.
+ */
+function reportOf(event: ReportEvent): Readonly<Record<string, unknown>> | null {
+  const report = event.data['report'];
+  return isRecord(report) ? report : null;
+}
+
+/** A number of a phone's report, or null. */
+function reportNum(report: Readonly<Record<string, unknown>>, key: string): number | null {
+  const value = report[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The laptops' `rtc.clock` events with a phone's report (T5.1), by the phone's host label, oldest
+ * first: a phone's health over its sessions, a record a minute.
+ */
+function phoneReports(
+  q: Query,
+): Map<string, { event: ReportEvent; report: Readonly<Record<string, unknown>> }[]> {
+  const out = new Map<
+    string,
+    { event: ReportEvent; report: Readonly<Record<string, unknown>> }[]
+  >();
+  for (const event of q.onLaptop('rtc.clock')) {
+    const report = reportOf(event);
+    if (report === null) {
+      continue;
+    }
+    const peer = text(event, 'peer') ?? '?';
+    out.set(peer, [...(out.get(peer) ?? []), { event, report }]);
+  }
+  return out;
+}
+
+/** `ThinkPhone: 24 reports, 29.9 fps, sharpness 41, battery 83% (medians)`. */
+function healthFacts(
+  peer: string,
+  reports: readonly { report: Readonly<Record<string, unknown>> }[],
+): string {
+  const middle = (key: string, scale = 1): string => {
+    const values = reports.flatMap(({ report }) => {
+      const value = reportNum(report, key);
+      return value === null ? [] : [value * scale];
+    });
+    const m = median(values);
+    return m === null ? '?' : round(m, scale === 1 ? 1 : 0);
+  };
+  return `${peer}: ${String(reports.length)} ${reports.length === 1 ? 'report' : 'reports'}, ${middle('fps')} fps, sharpness ${middle('sharpness')}, battery ${middle('batteryLevel', 100)}% (medians)`;
+}
+
+/**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
  * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3, the items after T3.7, T4.1, T4.2 and
- * T4.3, and the desk rig's after T4.
+ * T4.3, the desk rig's after T4, and the items after T5.1.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -3233,6 +3288,143 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         second.length > 0
           ? 'a second camera paired, but no attempt with six clips'
           : 'no second camera paired',
+      );
+    },
+  },
+  // ---- After T5.1: the phone's picture and its status line ----
+  {
+    id: '5.1.1',
+    round: T51,
+    section: PICTURES,
+    title:
+      "The phone's picture as large as the MacBook's, with the ThinkPhone, then with the Moto g60: side by side in the wide window, one under the other once it is narrowed, the phone's status line under its picture",
+    kinds: ['rtc.clock'],
+    eyes: "the two pictures' sizes, side by side and narrowed; the line's words against the phone's Camera page",
+    check: (q) => {
+      const phones = phoneReports(q);
+      const facts = [...phones.entries()]
+        .map(([peer, reports]) => healthFacts(peer, reports))
+        .join('; ');
+      if (phones.size >= 2) {
+        return ok(facts);
+      }
+      return none(phones.size === 0 ? "no phone's report in an rtc.clock event" : facts);
+    },
+  },
+  {
+    id: '5.1.2',
+    round: T51,
+    section: PICTURES,
+    title:
+      "The phone's focus set to manual on its own Camera page and left out of focus for two minutes: the sharpness soft (amber) on the line under its picture, then good again back on automatic",
+    kinds: ['rtc.clock'],
+    eyes: "the amber value on the line, and in the tile's caption",
+    check: (q) => {
+      const found = [...phoneReports(q).entries()].flatMap(([peer, reports]) => {
+        const soft = reports.filter(({ report }) => report['soft'] === true);
+        const back = soft.filter(({ event }) =>
+          reports.some(
+            ({ event: later, report }) => later.tsMs > event.tsMs && report['soft'] === false,
+          ),
+        );
+        const least = Math.min(
+          ...soft.map(({ report }) => reportNum(report, 'sharpness') ?? Infinity),
+        );
+        return soft.length === 0
+          ? []
+          : [
+              {
+                peer,
+                good: back.length > 0,
+                facts: `${peer}: soft in ${String(soft.length)} of ${String(reports.length)} reports (sharpness ${Number.isFinite(least) ? round(least, 1) : '?'} at the least)${back.length > 0 ? ', good again after' : ', not good again after'}`,
+              },
+            ];
+      });
+      const facts = found.map((f) => f.facts).join('; ');
+      return found.some((f) => f.good) ? ok(facts) : none(facts || 'no soft picture reported');
+    },
+  },
+  {
+    id: '5.1.3',
+    round: T51,
+    section: PICTURES,
+    title:
+      "The phone unplugged with its battery under 20%: the line's battery in amber, red under 10%; plugged in again: charging",
+    kinds: ['rtc.clock'],
+    eyes: 'the colours of the battery on the line',
+    check: (q) => {
+      const low = [...phoneReports(q).entries()].flatMap(([peer, reports]) => {
+        const unplugged = reports.filter(
+          ({ report }) =>
+            report['batteryCharging'] === false && (reportNum(report, 'batteryLevel') ?? 1) < 0.2,
+        );
+        const least = Math.min(
+          ...unplugged.map(({ report }) => reportNum(report, 'batteryLevel') ?? 1),
+        );
+        return unplugged.length === 0
+          ? []
+          : [
+              `${peer}: ${String(unplugged.length)} ${unplugged.length === 1 ? 'report' : 'reports'} unplugged under 20%, ${round(least * 100)}% at the least`,
+            ];
+      });
+      return low.length > 0 ? ok(low.join('; ')) : none('no phone reported under 20% unplugged');
+    },
+  },
+  {
+    id: '5.1.4',
+    round: T51,
+    section: PICTURES,
+    title:
+      "Twenty minutes on the rig: the phone's health over them on its line: its pressure word if its Chrome has the Compute Pressure API ('PressureObserver' in window in its console), the frame rate dropped if it did",
+    kinds: ['rtc.clock'],
+    eyes: "the phone's temperature by hand after twenty minutes, and whether 'PressureObserver' is in its window",
+    check: (q) => {
+      const phones = [...phoneReports(q).entries()].map(([peer, reports]) => {
+        const spanMs = (reports.at(-1)?.event.tsMs ?? 0) - (reports[0]?.event.tsMs ?? 0);
+        const states = new Map<string, number>();
+        const sources = new Set<string>();
+        for (const { report } of reports) {
+          const pressure = report['pressure'];
+          if (typeof pressure === 'string') {
+            states.set(pressure, (states.get(pressure) ?? 0) + 1);
+          }
+          const source = report['pressureSource'];
+          if (typeof source === 'string') {
+            sources.add(source);
+          }
+        }
+        const pressure =
+          states.size === 0
+            ? 'no pressure (the API absent or refused)'
+            : `pressure ${[...states.entries()].map(([state, n]) => `${state} (${String(n)})`).join(', ')} from ${[...sources].join(', ')}`;
+        const throttled = reports.filter(({ report }) => report['thermal'] === 'throttled').length;
+        return {
+          long: spanMs >= 20 * MINUTE,
+          facts: `${peer}: ${round(spanMs / MINUTE, 1)} minutes of reports, ${pressure}, the frame rate dropped in ${String(throttled)}`,
+        };
+      });
+      const facts = phones.map((phone) => phone.facts).join('; ');
+      return phones.some((phone) => phone.long) ? ok(facts) : none(facts || "no phone's report");
+    },
+  },
+  {
+    id: '5.1.5',
+    round: T51,
+    section: PICTURES,
+    title:
+      '"Pictures from phones" on small tiles: the phone\'s picture a tile over the MacBook\'s, its caption saying what is wrong in short; then the same size again',
+    kinds: ['settings.changed'],
+    eyes: "the tile's caption",
+    check: (q) => {
+      const changes = q.where('settings.changed', (e) => text(e, 'key') === 'remotePictures');
+      const tiles = changes.filter((e) => text(e, 'value') === 'tiles');
+      const back = tiles.filter((e) =>
+        changes.some((later) => later.tsMs > e.tsMs && text(later, 'value') === 'equal'),
+      );
+      return found(
+        back,
+        `${count(tiles, 'switch')} to tiles, ${String(back.length)} back to the same size`,
+        tiles.length > 0 ? 'switched to tiles, never back' : 'never switched to tiles',
       );
     },
   },
