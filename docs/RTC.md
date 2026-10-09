@@ -8,9 +8,10 @@ the documents' shapes) and `firebase/firestore.rules` (the signaling's rules): t
 data channel, the file transfer, the clock sync, the signaling and the pairing token, and what each
 side does when something fails. The pages that use it came with T4.1 (§8 below: the lifecycle as the host's Cameras section and
 the phone's Camera page run it), the cuts and the clips' transfer with T4.2 (§9), the sync check of
-the phone's camera and the live preview with T4.3 (§10), and the phone's picture at the host's
-picture's size with its status line with T5.1 (§10). `docs/ARCHITECTURE.md` ("Remote cameras")
-places it in the app.
+the phone's camera and the live preview with T4.3 (§10), the phone's picture at the host's
+picture's size with its status line with T5.1 (§10), and the phone's camera controls set from the
+host, with the watchdog of the camera's modes, with T5.2 (§11). `docs/ARCHITECTURE.md` ("Remote
+cameras") places it in the app.
 
 **Stream for control, record locally for data.** One `RTCPeerConnection` between the two devices,
 made with Google's public STUN server (`stun:stun.l.google.com:19302`) and no TURN relay: on one Wi-Fi
@@ -37,7 +38,7 @@ base64-encoded. The protocol is versioned: `PROTOCOL_VERSION` is 1, each side sa
 ignores the fields it does not know, so that a build that adds an optional field still talks to the
 build before it (the two devices run the same deployment, but a phone's installed app may lag a day);
 what a message must carry is checked field by field, with bounds (texts of at most 1,000 characters, a
-file name without a path).
+file name without a path; the remote controls' values as `@cubetrace/capture` defines them, T5.2).
 
 | Message | From | Fields | When |
 |---|---|---|---|
@@ -64,6 +65,9 @@ file name without a path).
 | `sync-meter` | phone | `id`, `meter: {format, path, frameWidth, frameHeight, region, planeWidth, planeHeight, changeLevels}` (how the capture worker reads the frames) | first, and when it changes |
 | `sync-error` | phone | `id`, `message` | the phone cannot measure (it does not record, its recording stopped during the check, its frames cannot be read): the host's check ends as failed |
 | `preview` | host | `on` | after the hellos, and whenever "Live preview from phones" changes (T4.3, §10): whether the phone sends its live picture |
+| `controls` | phone | `controls` (its camera's controls as `@cubetrace/capture`'s `controlsOf` reads them: `exposureModes`, `focusModes`, `whiteBalanceModes` (modes of `continuous`, `single-shot`, `manual`, `none`, each once), `exposureTime`, `iso`, `focusDistance`, `colorTemperature`, `zoom` (each a range `{min, max, step?}`, `min` under `max`, or null), `torch`), `values` (`ControlValues`: what the track's settings say of them), `applied` (`ControlValues`: what the app applied, §11), `drift` (`[{name, expected, actual}]`: what the camera changed by itself and still differs, the watchdog's, at most one per control; empty otherwise), `remoteMs` | after each of the phone's hellos, after each `set-controls` it applied (and after its `controls-failed`), and whenever they change: the watchdog saw a drift or its end, the phone's own panel changed a control (T5.2, §11) |
+| `set-controls` | host | `values` (`ControlValues`, one control or several), or `reset: true` (Reset to auto) | a change on the host's panel of the phone's controls, its Reset to auto, or the Reset beside a drift on the Timer page's line (T5.2, §11) |
+| `controls-failed` | phone | `message` (at most 500 characters) | applying a `set-controls` threw (the camera refused a value), or the phone's camera is not on (T5.2, §11) |
 
 The thumbnail's binary frame is a 13-byte header too: the kind `0x02`, the time as a float64, the
 width and the height as 2 bytes each, then the JPEG. `MessageLink` wraps a transport, decodes each
@@ -74,7 +78,14 @@ additive within version 1: no build before T4.2 cuts. The sync messages and `pre
 additive the same way: a phone of a build before T4.3 drops them as frames that are not messages
 (`onError`), sends no picture, and a check of its camera ends without frames. `state`'s `pressure`
 and `pressureSource` came with T5.1 (0.5.0), additive too: a host reads the `state` of a phone of
-0.4.0, which has neither, with both null (no pressure known), and a host of 0.4.0 ignores them.
+0.4.0, which has neither, with both null (no pressure known), and a host of 0.4.0 ignores them. The
+remote controls' three messages came with T5.2 (0.5.0), additive the same way: a phone of 0.4.0 drops
+`set-controls` (`onError`) and never sends `controls`, which the host says ("this phone's build has
+no remote controls", §11); a host of 0.4.0 drops the phone's `controls`. Their values are
+`@cubetrace/capture`'s vocabulary of a camera's controls (`CameraControls`, `ControlValues`,
+`ControlDrift`): a value is one of its control (`isControlValue`: a mode of the four, a finite
+number, the torch's boolean), and a key that names no control is ignored, as a later build may add
+one.
 
 ## 2. The transport (`transport.ts`, `webrtc.ts`)
 
@@ -360,6 +371,10 @@ first frame.
 | The phone cannot measure during a sync check (it stopped recording, its frames cannot be read) | the check ends as failed with the phone's words (`sync-error`), Retry measures the phone again; nothing is kept | `sync-error`, and it stops measuring |
 | The phone goes during a sync check (Leave, its connection ends) | the check ends as failed (`the phone's connection ended`); the lag the session has stays | the measuring stops with the connection |
 | The live preview does not flow (the setting off, the phone's camera off or changing, a busy network) | the remote track is muted: the tile shows the latest thumbnail, every 2 s, until frames come again | sends nothing, or the camera's new track once it has one |
+| The phone runs a build without remote controls (0.4.0) | no `controls` within 5 s of the hellos: the phone's panel in the Cameras section says "this phone's build has no remote controls" | drops `set-controls` as a frame that is not a message (`onError`); none is sent to it |
+| A change of the phone's controls goes unanswered (the phone's page frozen, the connection gone) | after 3 s the panel says "The phone did not answer." and takes changes again; `remote.controls` says `no-answer` | nothing |
+| The phone's camera refuses a value (`applyConstraints` rejects), or is off | the panel says the phone's words (`controls-failed`); `remote.controls` says `failed` | `controls-failed` with the refusal, then its `controls` as they stand; the value stays kept for the camera, as on its own panel |
+| The phone's camera changes a mode by itself (its focus gone manual, 2026-10-09) | "focus went manual on the phone" in red on the phone's line, with Reset beside it, and in the Cameras list, while the phone's `controls` say it | the watchdog sees it within two readings (4 s): with "Keep the camera's modes" (on by default) sets it back, three times a minute at most, then leaves it and says so; without it, says it and leaves it (§11) |
 | The phone leaves (Leave, the tab closed) | `leave` over the channel when there was time: the camera goes from the list at once (its entry stays in the session), the transport closed and the peer document deleted with its candidates; the clips it has not sent are given up at once (the notes say they are missing), and still taken if it pairs again and offers them | Leave sends `leave` and closes the connection 250 ms later, once the word is out; a page that goes (`pagehide`) sends it and leaves the connection to the browser |
 | The host removes the camera or ends the session | `leave`, the connection closed 250 ms later, the peer document deleted with its candidates; the clips the phone has not sent are given up (the notes say so); at the session's end (New session), a camera with clips of the session still to come is kept until they are stored, refused or given up, 15 s at most, listed as waiting for its last clips (T4.2b), then let go the same way (what is still to come then is noted missing); a host page that goes (`pagehide`) sends `leave` and deletes the documents, as far as there is time | the page says the host let it go, with the reason; without the word (the host's page died), `onClosed('the documents are gone')` ends the transport and the phone calls again for five minutes, then says the host is gone |
 
@@ -623,3 +638,86 @@ phone under it (`docs/PLAN.md` T4.3 and T5.1 have the contracts):
    nearest. The phone's page says it beside the thermal hint (fair: it is warming up; serious: it
    may be hot; critical: let it cool down). The host's `rtc.clock` of each minute carries the last
    report (`report`, `docs/DIAGNOSTICS.md`), the phone's health over a session.
+
+## 11. Remote controls and the watchdog of the camera's modes (T5.2)
+
+How the host sets a phone's camera controls (exposure, focus, white balance, zoom, the torch) while
+the phone sits on its tripod out of reach, and how a mode the camera changes by itself is seen and
+undone (`docs/PLAN.md` T5.2 has the contract). On 2026-10-09 the Moto g60's focus went from
+`continuous` to `manual` by itself at solve 31, and twenty solves were blurred before it was seen.
+
+```
+phone                                                     host
+hello ─▶                                         ◀─ hello
+controls {controls, values, applied, drift: []} ─▶        RemoteControlsSource: the panel under the phone
+                                                ◀─ set-controls {values} | {reset: true}   (in flight, 3 s at most)
+CameraService.setControl / resetControls (kept per camera)
+controls ─▶  (or controls-failed ─▶ then controls ─▶)     the answer: the panel takes changes again
+watchdog: every 2 s, two readings that differ ─▶ set back (Keep the camera's modes) or left
+controls {drift: [{name, expected, actual}]} ─▶           "focus went manual on the phone" in red, Reset
+controls {drift: []} ─▶  (once a reading agrees)          the words go
+```
+
+1. **What the phone reports.** `controls` (§1): the controls its open camera has, as `controlsOf`
+   reads its track's capabilities (the modes include the one its settings say, so the ThinkPhone's
+   front camera, whose focus lists only `manual` while its setting says `continuous`, has an
+   automatic focus to go back to), what its settings say of them (`values`, the snapshot the phone's
+   own panel shows), what the app applied (`applied`, item 4), what its camera changed by itself
+   (`drift`, item 4), and when, on its clock. The phone (`CameraDeviceControls`) sends it once the
+   hellos are exchanged, again after each hello it sends (its camera changed, or went off: then the
+   host shows none), after each `set-controls`, and whenever it changes otherwise (a drift seen or
+   over, a control set on the phone's own panel), never twice the same but for those answers.
+2. **The host's panel.** Camera settings → Cameras: under each phone, "Camera controls" is the
+   controls panel of the host's own camera (`app-camera-controls`, T2.1) over the phone's
+   `RemoteControlsSource` (a `ControlsSource`, as `CameraService.controlsSource` is the host's own),
+   from its last `controls`: the same groups, the same Reset to auto. A change goes as `set-controls`
+   (`values`: the control changed; a slider when it is let go), Reset to auto as `{reset: true}`; it
+   is in flight (the panel's controls disabled) until the phone's next `controls` (its answer) or
+   `controls-failed` (the panel says the phone's words), or 3 s (`SET_CONTROLS_TIMEOUT_MS`: "The phone
+   did not answer."), one change at a time. A phone whose first `controls` does not come within 5 s
+   of the hellos (`CONTROLS_WAIT_MS`) runs a build without remote controls, and its panel says so
+   (the messages are additive, §1); a phone whose camera is off has none to show.
+3. **The phone applies.** `set-controls` goes through `CameraService` as the phone's own panel's
+   changes do (`setControl` for each control, modes before values, in their groups' order: kept for
+   the camera in its Settings, by the browser's name for it; a mode to auto that the camera does not
+   take by a constraint opens it again; `resetControls` for Reset to auto, which forgets the kept
+   controls and opens the camera again, its recording starting again with it), then `controls`; a
+   value the camera refuses (`applyConstraints` rejects) is `controls-failed` with its words, then
+   `controls`; so is a camera that is not on. A value is fitted to the camera first (`fitControls`:
+   a mode it lists, a number in its range and on its steps).
+4. **The watchdog** (`ControlsWatch`, `apps/web/src/app/camera/controls-watch.ts`, run by
+   `CameraService` on the open camera in both roles, the host's own camera too). `applied` is what
+   the app applied: as the camera opens, the mode each group opened in (its own automatic choice:
+   `continuous` on every phone probed; Chrome's fake camera opens in `manual`, which is then no
+   drift) with the controls kept for the camera applied over them, then each control set (a mode to
+   auto replaces its group's values; the torch is never held, as Settings never keep it). Every 2 s
+   (`WATCH_INTERVAL_MS`) while the camera is on, the track's `getSettings()` against it: each mode
+   the camera has, the values of a group in manual (within 5% of the value applied or a step of its
+   range: cameras round), the zoom; a single-shot mode that has done its adjustment may say manual,
+   which is no drift. No reading while a change is in flight or a slider of a controls panel is held
+   or moved, nor for a second after (`ADJUSTING_QUIET_MS`); a reading skipped starts the count again.
+   A difference that holds for two readings in a row is a drift, `{name, expected, actual}`: in
+   `drift` (and the phone's `controls`) until a reading agrees, said on the device (the phone's
+   Camera page: "The camera set the focus to manual by itself: set back to continuous." for a
+   minute; the host's own camera: Camera settings and its line under the preview, "focus went
+   manual" in red) and in the diagnostics (`controls.drift`). With "Keep the camera's modes"
+   (Settings → Camera, the phone's Camera page and the Timer page's Camera settings too, on by
+   default, `keepCameraModes`) the device applies the drifted groups' values again, once per drift,
+   and counts it; a drift that comes back after three re-applications within a minute
+   (`MAX_REAPPLICATIONS`, `REAPPLY_WINDOW_MS`) is left alone and said ("The camera keeps setting the
+   focus to manual: set it by hand."), until a reading agrees or the app applies something else.
+   Without the setting, a drift is said once and left (the device's panel then shows the mode the
+   camera is in). The watchdog only reads and applies constraints: it never opens the camera again,
+   which would start the recording again.
+5. **The drift on the host.** A phone's drift (its last `controls`) is on its status line under its
+   picture on the Timer page (T5.1's line, `remoteStatusLine`): "focus went manual on the phone" in
+   red, a part per control, the mode as the camera calls it (`focus manual` in a tile's caption), and
+   a Reset beside the line that sends `set-controls` with the automatic mode of each drifted group
+   (the zoom and the torch, which have none, back to what was applied); the Cameras list's report says
+   the same, and the panel says "The camera set the focus to manual by itself.". The Timer page reaches
+   the phones through `RemoteCameraRegistry` (`drift` in each entry, `resetDrift`), without the `rtc`
+   chunk.
+6. **Diagnostics** (`docs/DIAGNOSTICS.md`): `remote.controls` on the host for each change sent and
+   its outcome (`ok`, `failed`, `no-answer`); `controls.drift` on the device whose camera drifted (a
+   phone's own, or the host's for its own camera), with what became of it; `settings.changed` names
+   `keepCameraModes`.

@@ -396,6 +396,8 @@ const T4 = 'After T4';
 const RIG = 'T4.4 — the desk rig';
 const T51 = 'After T5.1';
 const PICTURES = "T5.1 — the phone's picture and its status line";
+const T52 = 'After T5.2';
+const CONTROLS = 'T5.2 — remote camera controls and the watchdog';
 
 /** A median of `values` in ms as seconds, to one decimal, or `?` without one. */
 function seconds(values: readonly number[]): string {
@@ -508,10 +510,59 @@ function healthFacts(
   return `${peer}: ${String(reports.length)} ${reports.length === 1 ? 'report' : 'reports'}, ${middle('fps')} fps, sharpness ${middle('sharpness')}, battery ${middle('batteryLevel', 100)}% (medians)`;
 }
 
+/** The controls a host's `remote.controls` set (T5.2): its `set`, a list read as one text. */
+function controlsSet(event: ReportEvent): string[] {
+  return (text(event, 'set') ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
+}
+
+/**
+ * What the laptops' `remote.controls` say of each phone (T5.2): the controls set and answered (`ok`),
+ * and the changes refused or unanswered, by the phone's host label.
+ */
+function controlsByPhone(q: Query): Map<string, { ok: Set<string>; failures: string[] }> {
+  const out = new Map<string, { ok: Set<string>; failures: string[] }>();
+  for (const event of q.onLaptop('remote.controls')) {
+    const peer = text(event, 'peer') ?? '?';
+    const entry = out.get(peer) ?? { ok: new Set<string>(), failures: [] };
+    out.set(peer, entry);
+    const outcome = text(event, 'outcome');
+    if (outcome === 'ok') {
+      for (const name of controlsSet(event)) {
+        entry.ok.add(name);
+      }
+    } else {
+      entry.failures.push(`${controlsSet(event).join(', ')} ${outcome ?? '?'}`);
+    }
+  }
+  return out;
+}
+
+/** The changes item 5.2.1 asks for, each named as `remote.controls` names it. */
+const REMOTE_CHANGES: readonly (readonly [string, (set: ReadonlySet<string>) => boolean])[] = [
+  ['the focus', (set) => set.has('focusMode') || set.has('focusDistance')],
+  ['Reset to auto', (set) => set.has('reset')],
+  ['the zoom', (set) => set.has('zoom')],
+  ['the torch', (set) => set.has('torch')],
+];
+
+/** The phones' own `controls.drift` events (T5.2), as their watchdogs said them. */
+function phoneDrifts(q: Query, pred: (event: ReportEvent) => boolean = () => true): ReportEvent[] {
+  return q.onPhone('controls.drift', (e) => text(e, 'role') === 'camera-device' && pred(e));
+}
+
+/** The controls of a `controls.drift`: `focusMode`, from its map of drifts. */
+function driftNames(event: ReportEvent): string {
+  const drift = event.data['drift'];
+  return isRecord(drift) ? Object.keys(drift).join(', ') : '?';
+}
+
 /**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
  * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3, the items after T3.7, T4.1, T4.2 and
- * T4.3, the desk rig's after T4, and the items after T5.1.
+ * T4.3, the desk rig's after T4, and the items after T5.1 and T5.2.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -3425,6 +3476,115 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         back,
         `${count(tiles, 'switch')} to tiles, ${String(back.length)} back to the same size`,
         tiles.length > 0 ? 'switched to tiles, never back' : 'never switched to tiles',
+      );
+    },
+  },
+  // ---- After T5.2: remote camera controls and the watchdog ----
+  {
+    id: '5.2.1',
+    round: T52,
+    section: CONTROLS,
+    title:
+      "From the MacBook, the Moto g60's controls in Camera settings → Cameras: its focus set to manual and a distance chosen, then Reset to auto, its zoom, its torch; each change answered within a second and seen on the phone's picture",
+    kinds: ['remote.controls'],
+    eyes: "the phone's picture as each change took (blurred and sharp again, zoomed, the torch's light)",
+    check: (q) => {
+      const phones = [...controlsByPhone(q).entries()].map(([peer, { ok: set, failures }]) => {
+        const missing = REMOTE_CHANGES.filter(([, has]) => !has(set)).map(([what]) => what);
+        return {
+          complete: missing.length === 0,
+          failed: failures.length > 0,
+          facts: `${peer}: ${[...set].sort().join(', ') || 'nothing'} answered${missing.length === 0 ? '' : `, not ${missing.join(', ')}`}${failures.length === 0 ? '' : `; ${failures.join('; ')}`}`,
+        };
+      });
+      const facts = phones.map((phone) => phone.facts).join('; ');
+      if (phones.some((phone) => phone.complete)) {
+        return ok(facts);
+      }
+      if (phones.some((phone) => phone.failed)) {
+        return failed(facts);
+      }
+      return none(facts || 'no change of a phone’s controls from the MacBook');
+    },
+  },
+  {
+    id: '5.2.2',
+    round: T52,
+    section: CONTROLS,
+    title:
+      "The drift provoked on the Moto g60 (its focus set to manual behind the app's back, from its console through chrome://inspect) with Keep the camera's modes on: set back within 4 s, said on both devices",
+    kinds: ['controls.drift'],
+    eyes: "the words on the phone's Camera page and the red word flashing on the MacBook's line under its picture",
+    check: (q) => {
+      const back = phoneDrifts(q, (e) => flag(e, 'reapplied') === true);
+      const given = phoneDrifts(q, (e) => flag(e, 'gaveUp') === true);
+      return found(
+        back,
+        `${count(back, 'drift')} set back (${[...new Set(back.map(driftNames))].join('; ')})${given.length === 0 ? '' : `, ${String(given.length)} given up after three in a minute`}`,
+        'no drift set back on a phone',
+      );
+    },
+  },
+  {
+    id: '5.2.3',
+    round: T52,
+    section: CONTROLS,
+    title:
+      'Keep the camera\'s modes off on the phone\'s Camera page, the drift provoked again: said and left; on the MacBook "focus went manual on the phone" in red under its picture, and Reset beside it sets it back',
+    kinds: ['settings.changed', 'controls.drift', 'remote.controls'],
+    eyes: "the red word and the Reset beside it on the MacBook, and the phone's words",
+    check: (q) => {
+      const off = q.onPhone(
+        'settings.changed',
+        (e) => text(e, 'key') === 'keepCameraModes' && e.data['value'] === false,
+      );
+      const left = phoneDrifts(
+        q,
+        (e) => flag(e, 'reapplied') === false && flag(e, 'gaveUp') === false,
+      );
+      const reset = left.filter((drift) =>
+        q
+          .onLaptop('remote.controls', (e) => text(e, 'outcome') === 'ok')
+          .some((e) => e.tsMs > drift.tsMs && text(e, 'peer') === drift.device.label),
+      );
+      const facts = `${count(off, 'switch')} off, ${count(left, 'drift')} left, ${String(reset.length)} reset from the MacBook after`;
+      return off.length > 0 && reset.length > 0 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.2.4',
+    round: T52,
+    section: CONTROLS,
+    title:
+      'The same on the ThinkPhone (its rear camera; and its front camera, whose focus lists only manual)',
+    kinds: ['remote.controls', 'controls.drift'],
+    eyes: "the front camera's focus back to auto from the MacBook (it opens again: its recording starts again)",
+    check: (q) => {
+      const answered = new Set(
+        [...controlsByPhone(q).entries()]
+          .filter(([, { ok: set }]) => set.size > 0)
+          .map(([peer]) => peer),
+      );
+      const drifted = new Set(phoneDrifts(q).map((e) => e.device.label));
+      const both = [...answered].filter((peer) => drifted.has(peer)).sort();
+      const facts = `controls set on ${[...answered].sort().join(', ') || 'no phone'}; drifts on ${[...drifted].sort().join(', ') || 'no phone'}`;
+      return both.length >= 2 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.2.5',
+    round: T52,
+    section: CONTROLS,
+    title:
+      "The host's own camera's watchdog with its own panel: the drift provoked on a host whose camera has controls (the ThinkPhone as the host, its rear camera on): set back, said in its Camera settings and on its line",
+    kinds: ['controls.drift'],
+    eyes: 'the words in Camera settings and on the line under the preview',
+    check: (q) => {
+      const own = q.where('controls.drift', (e) => text(e, 'role') === 'host');
+      return found(
+        own,
+        `${count(own, 'drift')}, ${String(own.filter((e) => flag(e, 'reapplied') === true).length)} set back`,
+        "no drift of a host's own camera",
       );
     },
   },

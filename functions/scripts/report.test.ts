@@ -1492,6 +1492,115 @@ describe('the checklist after T5.1', () => {
   });
 });
 
+describe('the checklist after T5.2', () => {
+  const MOTO = { label: 'Moto g60', platform: 'Android', installed: false };
+
+  /**
+   * An evening of the remote controls after T5.2: the MacBook sets the Moto g60's focus, a distance,
+   * Reset to auto, the zoom and the torch (one change unanswered on the way); the Moto's focus drifts
+   * twice, set back, then left with Keep the camera's modes off and reset from the MacBook; the
+   * ThinkPhone's controls set and a drift of its own; the ThinkPhone as a host, its own camera's
+   * drift set back.
+   */
+  function controlsEvening(): ReportEvent[] {
+    const t0 = NOW - 2 * HOUR;
+    const MIN = 60_000;
+    const change = (tsMs: number, peer: string, set: string, outcome = 'ok') =>
+      at(tsMs, 'remote.controls', {
+        camera: peer === 'Moto g60' ? 'phone-rear' : 'phone-rear-2',
+        peer,
+        set,
+        outcome,
+        message: outcome === 'ok' ? null : 'The phone did not answer.',
+        ms: 40,
+      });
+    const drift = (
+      tsMs: number,
+      device: typeof PHONE,
+      reapplied: boolean,
+      role = 'camera-device',
+    ) =>
+      at(
+        tsMs,
+        'controls.drift',
+        {
+          camera: 'phone-rear',
+          role,
+          deviceLabel: 'camera 0, facing back',
+          drift: { focusMode: 'continuous → manual' },
+          controls: 'focusMode',
+          reapplied,
+          gaveUp: false,
+          keep: reapplied,
+        },
+        device,
+      );
+    return [
+      change(t0, 'Moto g60', 'focusMode'),
+      change(t0 + 10_000, 'Moto g60', 'focusDistance'),
+      change(t0 + 20_000, 'Moto g60', 'zoom', 'no-answer'),
+      change(t0 + 30_000, 'Moto g60', 'reset'),
+      change(t0 + 40_000, 'Moto g60', 'zoom'),
+      change(t0 + 50_000, 'Moto g60', 'torch'),
+      drift(t0 + 2 * MIN, MOTO, true),
+      at(t0 + 3 * MIN, 'settings.changed', { key: 'keepCameraModes', value: false }, MOTO),
+      drift(t0 + 4 * MIN, MOTO, false),
+      change(t0 + 4 * MIN + 5000, 'Moto g60', 'focusMode'),
+      change(t0 + 10 * MIN, 'ThinkPhone', 'focusMode'),
+      drift(t0 + 11 * MIN, PHONE, true),
+      drift(t0 + 20 * MIN, PHONE, true, 'host'),
+    ];
+  }
+
+  it('ticks the controls set from the MacBook, the drifts set back and left, the second phone and a host’s own camera', () => {
+    const results = new Map(evaluate(controlsEvening(), NOW).map((item) => [item.id, item.result]));
+    const status = (id: string): string | undefined => results.get(id)?.status;
+    const facts = (id: string): string => results.get(id)?.facts ?? '';
+
+    expect(status('5.2.1')).toBe('ok');
+    expect(facts('5.2.1')).toBe(
+      'Moto g60: focusDistance, focusMode, reset, torch, zoom answered; zoom no-answer; ThinkPhone: focusMode answered, not Reset to auto, the zoom, the torch',
+    );
+    expect(status('5.2.2')).toBe('ok');
+    expect(facts('5.2.2')).toBe('2 drifts on Moto g60, ThinkPhone set back (focusMode)');
+    expect(status('5.2.3')).toBe('ok');
+    expect(facts('5.2.3')).toBe(
+      '1 switch on Moto g60 off, 1 drift on Moto g60 left, 1 reset from the MacBook after',
+    );
+    expect(status('5.2.4')).toBe('ok');
+    expect(facts('5.2.4')).toBe(
+      'controls set on Moto g60, ThinkPhone; drifts on Moto g60, ThinkPhone',
+    );
+    expect(status('5.2.5')).toBe('ok');
+    expect(facts('5.2.5')).toBe('1 drift on ThinkPhone, 1 set back');
+
+    // Nothing of it without the events.
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result]));
+    for (const id of ['5.2.1', '5.2.2', '5.2.3', '5.2.4', '5.2.5']) {
+      expect(empty.get(id)?.status, id).toBe('none');
+    }
+    expect(empty.get('5.2.1')?.facts).toBe('no change of a phone’s controls from the MacBook');
+
+    // Only unanswered changes: a failure; the drift left but never reset: not yet; one phone: not yet.
+    const resultOf = (events: ReportEvent[], id: string) =>
+      evaluate(events, NOW).find((item) => item.id === id)?.result;
+    const unanswered = controlsEvening().filter(
+      (e) => !(e.kind === 'remote.controls' && e.data['outcome'] === 'ok'),
+    );
+    expect(resultOf(unanswered, '5.2.1')).toEqual({
+      status: 'failed',
+      facts:
+        'Moto g60: nothing answered, not the focus, Reset to auto, the zoom, the torch; zoom no-answer',
+    });
+    const notReset = controlsEvening().filter(
+      (e) => !(e.kind === 'remote.controls' && e.tsMs > NOW - 2 * HOUR + 4 * 60_000),
+    );
+    expect(resultOf(notReset, '5.2.3')?.status).toBe('none');
+    const motoOnly = controlsEvening().filter((e) => e.device.label !== 'ThinkPhone');
+    expect(resultOf(motoOnly, '5.2.4')?.status).toBe('none');
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });
