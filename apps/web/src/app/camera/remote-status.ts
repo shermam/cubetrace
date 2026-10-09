@@ -64,7 +64,10 @@ export interface RemoteStatusInput {
   readonly reportMs: number | null;
   /** The host clock now. */
   readonly nowMs: number;
-  /** Where the camera is, and since when on the host clock (the Cameras list's state). */
+  /**
+   * Where the camera is, and since when on the host clock (the Cameras list's state; a connected
+   * camera's is the start of its connection).
+   */
   readonly state: RemoteCameraPhase;
   readonly sinceMs: number;
   /** The clock sync has converged. */
@@ -122,7 +125,9 @@ export function remoteStatusLine(
       parts.push(connection);
     }
   }
-  const age = input.nowMs - (input.reportMs ?? input.sinceMs);
+  // From the last report, or from the connection's start when that came after it (a phone back from
+  // a drop sends its first report at once: the one before the drop is no measure).
+  const age = input.nowMs - Math.max(input.reportMs ?? input.sinceMs, input.sinceMs);
   if (input.state === 'connected' && age >= STALE_REPORT_MS) {
     const seconds = String(Math.floor(age / 1000));
     parts.push(

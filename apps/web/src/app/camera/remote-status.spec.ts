@@ -157,6 +157,12 @@ describe('remoteStatusLine', () => {
     expect(partOf(at(64_500), 'stale')).toEqual(['no report for 64 s', 'bad']);
     expect(shortParts(at(12_000)).map((part) => part.short)).toEqual(['no report']);
     expect(partOf(at(64_500, { state: 'reconnecting' }), 'stale')).toBeNull();
+    // Back from a drop 3 s ago, its last report from before it: counted from the connection.
+    expect(partOf(at(70_000, { sinceMs: 167_000 }), 'stale')).toBeNull();
+    expect(partOf(at(80_000, { sinceMs: 167_000 }), 'stale')).toEqual([
+      'no report for 13 s',
+      'bad',
+    ]);
     // No report at all since it connected 12 s ago.
     const none = line(null, { reportMs: null, sinceMs: 100_000, nowMs: 112_000 });
     expect(statusText(none)).toBe('no report yet · no report for 12 s');
