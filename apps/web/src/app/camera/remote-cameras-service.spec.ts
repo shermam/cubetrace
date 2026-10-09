@@ -449,7 +449,8 @@ describe('RemoteCamerasService', () => {
     const again = all.filter((e) => e.kind === 'rtc.clock');
     expect(again).toHaveLength(2);
     expect(again[1].data).toMatchObject({ why: 'minute', converged: true, keptShare: 1 });
-    expect(again[1].data['report']).toEqual({
+    const report = again[1].data['report'] as Record<string, unknown> | null;
+    expect({ ...report, ageMs: typeof report?.['ageMs'] }).toEqual({
       fps: 29.9,
       sharpness: 41.2,
       soft: false,
@@ -459,7 +460,7 @@ describe('RemoteCamerasService', () => {
       thermal: 'ok',
       pressure: 'nominal',
       pressureSource: 'cpu',
-      ageMs: expect.any(Number),
+      ageMs: 'number',
     });
     const minute = r.s.service.session()?.clock.cameras['phone-rear'].remote;
     expect(minute?.samples).toBeGreaterThanOrEqual(30);
