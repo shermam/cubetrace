@@ -30,6 +30,21 @@ import { CameraDevicePreview } from './camera-device-preview';
 import { CameraDeviceService, type CameraDeviceState } from './camera-device-service';
 import { CameraDeviceSync } from './camera-device-sync';
 
+/**
+ * What the page says of the phone's Compute Pressure state beyond nominal (T5.1), beside the thermal
+ * hint: a warning (amber) for `fair`, a problem (red) for `serious` and `critical`.
+ */
+export const PRESSURE_TEXT: Readonly<
+  Record<'fair' | 'serious' | 'critical', { readonly text: string; readonly bad: boolean }>
+> = {
+  fair: { text: 'The phone is under fair pressure: it is warming up.', bad: false },
+  serious: { text: 'The phone is under serious pressure: it may be hot.', bad: true },
+  critical: {
+    text: 'The phone is under critical pressure: it is hot. Let it cool down: Live preview from phones off on the host, the screen dimmed, a break.',
+    bad: true,
+  },
+};
+
 /** The connection's state in a word, for the pill. */
 export const STATE_TEXT: Readonly<Record<CameraDeviceState, string>> = {
   idle: 'Not joined',
@@ -49,8 +64,9 @@ export const STATE_TEXT: Readonly<Record<CameraDeviceState, string>> = {
  * same account (Sign in is here when it is not). It turns the camera on (the rear one by default, the
  * controls of Camera settings here too), runs the capture pipeline from the start
  * (`CameraDeviceCapture`), shows the preview with the framing rectangle and the sharpness meter, the
- * host's name, the connection's state, the clock sync as the host measures it, the battery and a
- * thermal hint, the clips cut for the host and not yet in its hands (T4.2), whether it sends the host
+ * host's name, the connection's state, the clock sync as the host measures it, the battery, a
+ * thermal hint and the Compute Pressure state where the browser has one (T5.1: the observer runs while
+ * the page is open), the clips cut for the host and not yet in its hands (T4.2), whether it sends the host
  * its live picture and whether the host's sync check measures it (T4.3), and Leave; it holds the
  * wake lock while joined and asks to keep the screen on and the phone plugged in
  * (`CameraDeviceService`). It never shows the timer and never starts a session
@@ -111,6 +127,19 @@ export class CameraDevicePage {
       ? 'The frame rate dropped under 80% of what the camera promised: the phone may be hot.'
       : null,
   );
+  /** The pressure and its source (T5.1): "nominal (thermals)"; null where the browser has none. */
+  protected readonly pressureText = computed(() => {
+    const pressure = this.service.pressure();
+    if (pressure === null) {
+      return null;
+    }
+    return `${pressure.state} (${pressure.source === 'cpu' ? 'CPU' : 'thermals'})`;
+  });
+  /** The warning beside the thermal hint, from fair pressure up; null otherwise. */
+  protected readonly pressureWarning = computed(() => {
+    const state = this.service.pressure()?.state;
+    return state === undefined || state === 'nominal' ? null : PRESSURE_TEXT[state];
+  });
   protected readonly wakeLockText = computed(() => WAKE_LOCK_TEXT[this.wakeLock.status()]);
   /** The live picture the host gets (T4.3): sent, or not asked for. */
   protected readonly previewText = computed(() => {
@@ -162,6 +191,8 @@ export class CameraDevicePage {
       }
     });
     this.capture.setWanted(true);
+    // The phone's pressure, for this page and the host (T5.1), while the page is open.
+    const stopPressure = this.service.observePressure();
     // The QR's URL, or a link pasted into the address bar: joined unless it is joined already.
     const params = this.route.snapshot.queryParamMap;
     const sessionId = params.get('session');
@@ -202,6 +233,7 @@ export class CameraDevicePage {
       });
     });
     inject(DestroyRef).onDestroy(() => {
+      stopPressure();
       this.stopTicking();
       this.service.leave();
       this.capture.setWanted(false);

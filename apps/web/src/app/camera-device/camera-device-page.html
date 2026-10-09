@@ -67,6 +67,12 @@
         <dt>Battery</dt>
         <dd data-testid="device-battery">{{ battery }}</dd>
       }
+      @if (pressureText(); as pressure) {
+        <dt>Pressure</dt>
+        <dd data-testid="device-pressure" [attr.data-state]="service.pressure()?.state">
+          {{ pressure }}
+        </dd>
+      }
       <dt>Screen</dt>
       <dd data-testid="device-wake-lock">{{ wakeLockText().label }}</dd>
       <dt>Clips</dt>
@@ -88,6 +94,16 @@
     }
     @if (thermalText(); as thermal) {
       <p class="problem" role="status" data-testid="device-thermal">{{ thermal }}</p>
+    }
+    @if (pressureWarning(); as warning) {
+      <p
+        role="status"
+        data-testid="device-pressure-warning"
+        [class.problem]="warning.bad"
+        [class.notice]="!warning.bad"
+      >
+        {{ warning.text }}
+      </p>
     }
     <p class="hint">
       Keep the screen on and the phone plugged in: the recording runs as long as this page is in

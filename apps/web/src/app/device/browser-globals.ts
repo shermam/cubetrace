@@ -34,6 +34,11 @@ export interface BrowserGlobals {
   readonly URL?: Pick<typeof URL, 'createObjectURL' | 'revokeObjectURL'>;
   /** Streams of tracks, for a remote camera's live preview (T4.3). */
   readonly MediaStream?: typeof MediaStream;
+  /**
+   * The Compute Pressure API's observer (Chrome 125+; TypeScript's DOM library has none), for a camera
+   * device's pressure in its `state` messages (T5.1, camera-device/pressure.ts).
+   */
+  readonly PressureObserver?: unknown;
   /** Whether the tab is visible, for the cube connection (`document`). */
   readonly document?: PageVisibility;
   /** Timers on the host clock, such as the cube's idle disconnection; the unit tests fake them. */
