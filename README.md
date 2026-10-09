@@ -222,10 +222,18 @@ Each phone has a sync check of its own (T4.3): its line under the Timer page's p
 laptop's check on the phone's camera (draw the phone's framing rectangle around the cube first, on
 its Camera page), and its lag goes into the session for its later clips, as the laptop's does. And
 each phone sends a small live picture of its camera (a fifth of its resolution, at most 300 kbps;
-its recording is not touched), shown as a tile in the top right corner of the Timer page's preview:
-tap it to make it the main picture, and the laptop's tile to swap back; without the laptop's camera
-the phone's picture is the main one. Camera settings → Cameras → "Live preview from phones" (on by
-default) turns it off.
+its recording is not touched), shown on the Timer page as large as the laptop's own preview (T5.1):
+beside it, under it in a narrower window, with the phone's framing rectangle, and under it the
+phone's status line, the twin of the laptop's own: its frame rate, its sharpness (green good, amber
+soft, by the laptop's threshold), recording or not, its battery (amber under 20% and unplugged, red
+under 10%), whether it runs hot (its frame rate dropped; its Compute Pressure state where its Chrome
+has the API, `fair` in amber, `serious` and `critical` in red: the web has no temperature reading),
+`reconnecting…`, and `no report for N s` in red when it stops reporting. Camera settings → Cameras →
+"Pictures from phones" chooses that ("Same size as mine", a laptop's default) or "Small tiles" (a
+phone's default): a tile in the top right corner of the preview, its caption saying in short what is
+wrong; tap it to make it the main picture, and the laptop's tile to swap back; without the laptop's
+camera the phone's picture is the main one. A phone's Timer page with the scramble over its picture
+always has tiles. "Live preview from phones" (on by default) turns the live picture off.
 
 ## The desk rig
 
@@ -259,10 +267,16 @@ camera does not have: from above, which sees every face as it turns, or from the
 which sees the hands' grip; mark the stand's place on the desk, so that the next sessions look the
 same. On the phone's Camera page, Camera settings → Edit the framing: drag its framing rectangle
 around the cube and the hands, as on the MacBook (its sharpness meter measures inside it, and its
-sync check watches it). The phone's picture is a tile in the top right corner of the MacBook's
-preview on the Timer page ("Live preview from phones", on by default): keep the cube inside the
-rectangle on both pictures while scrambling and solving. A tap on the tile makes the phone's picture
-the main one, and a tap on the MacBook's tile swaps them back.
+sync check watches it). The phone's picture is beside the MacBook's preview on the Timer page, the
+same size, with its framing rectangle ("Live preview from phones" on and "Pictures from phones" on
+the same size, both the MacBook's defaults): side by side in a window of 1,552 px or more, one under
+the other in a narrower one; keep the cube inside the rectangle on both pictures while scrambling and
+solving. The line under the phone's picture is the phone's state from 2 s ago: a sharpness gone
+amber (soft) is a focus to fix on the phone (Camera settings there: the focus back to auto), a
+battery in amber or red a charger to plug in, `hot: the frame rate dropped` or a pressure in amber
+or red a phone to let cool (the live preview off, the screen dimmed, a break between sets), and
+`no report for N s` in red a phone that stopped talking (its page in front again, or Leave and pair
+again).
 
 **The lamp.** Light makes sharp frames: in a bright scene the camera exposes each frame for less
 time, so a fast turn blurs less. A desk lamp with a diffuser, aimed at the cube and the hands from
@@ -311,8 +325,8 @@ get. Leave on the phone, or Remove on the MacBook, part them at once; a connecti
 again by itself within five minutes, without a new code.
 
 **A second phone**, with a name of its own (Before pairing, above), pairs with a second Add camera
-while the first is connected: it is listed as `phone-rear-2`, with a tile of its own over the
-preview and a sync check of its own, and each attempt then has six clips and uploads fourteen files
+while the first is connected: it is listed as `phone-rear-2`, with a picture of its own beside the
+preview (three pictures, two to a row in a wide window) and a sync check of its own, and each attempt then has six clips and uploads fourteen files
 (with `gyro.json`).
 
 **What the records hold.** A phone's camera is a camera of the session like the MacBook's: its entry
@@ -354,6 +368,10 @@ Open in [`docs/PLAN.md`](docs/PLAN.md)'s follow-ups, or waiting for measurements
 - Measurements still to come from that round (`docs/DEVICES.md`, Remote cameras): the Wi-Fi's round
   trips since T4.2b, a phone camera's lag, the transfer of the clips, what the live preview costs the
   ThinkPhone's recording, and its warmth after twenty minutes.
+- A phone's warmth is only what its browser says: the Compute Pressure API's state where its Chrome
+  has it (whether the ThinkPhone's and the Moto g60's do is the "After T5.1" round's to tell:
+  `'PressureObserver' in window` in the phone's console), and the frame rate dropping under 80% of
+  its camera's (T4.1); no temperature reading exists in the web platform.
 
 ## Cloud
 
