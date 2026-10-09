@@ -44,7 +44,7 @@ file name without a path).
 | `ping` | host | `t1`, the host clock | every 500 ms until the clock sync converges, for a minute at most, then every 2 s (`PING_INTERVAL_MS`, §4) |
 | `pong` | phone | `t1` back, `t2` (when the ping came) and `t3` (when the answer goes), on the phone's clock | at once, for each ping |
 | `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
-| `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
+| `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pressure` (`nominal`, `fair`, `serious`, `critical`: the Compute Pressure API's state, null where the browser has none) and `pressureSource` (`thermals`, `cpu`, null) since T5.1 (0.5.0; additive within version 1), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
 | `thumbnail` | phone | `remoteMs`, `width`, `height`, `jpeg` (a JPEG of at most 320 px on its longer side) | every 2 s (binary) |
 | `cut` | host | `attempt`, `scrambleShown` (the attempt's, on the host clock: an attempt begun again with the same index has another), `segment` (`scramble`, `solve`), `fromRemoteMs`, `toRemoteMs` (the window in the phone's clock, through the host's clock estimate and widened by its margin on each side, §9), `reason` (the timer's milestone: `armed`, `ended`), `camera` (the label the session gives the phone's camera: its files' first name) | when the host cuts its own camera; sent again as it was over a new connection while unanswered |
 | `cut-done` | phone | `attempt`, `scrambleShown`, `segment`, `files: [{name, bytes, kind}]` (the frames file first), `clip` (what the capture said of it: `codec`, `audio`, `width`, `height`, `fpsNominal`, `frames`, `crop`, `truncatedStart`, `lateMs`, `bufferSeconds`, `audioMissing`) | the clip is muxed and staged; offered again over each connection until the host's `clip-ack` |
@@ -71,7 +71,9 @@ is not a message (`onError`) and drops it, and sends messages encoded (`link.sen
 which does nothing on a closed transport). The fields of the cuts and `clip-ack` came with T4.2,
 additive within version 1: no build before T4.2 cuts. The sync messages and `preview` came with T4.3,
 additive the same way: a phone of a build before T4.3 drops them as frames that are not messages
-(`onError`), sends no picture, and a check of its camera ends without frames.
+(`onError`), sends no picture, and a check of its camera ends without frames. `state`'s `pressure`
+and `pressureSource` came with T5.1 (0.5.0), additive too: a host reads the `state` of a phone of
+0.4.0, which has neither, with both null (no pressure known), and a host of 0.4.0 ignores them.
 
 ## 2. The transport (`transport.ts`, `webrtc.ts`)
 

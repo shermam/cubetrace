@@ -64,6 +64,21 @@ export interface Pong {
  */
 export type ThermalHint = 'ok' | 'throttled' | null;
 
+/**
+ * The camera device's state in the Compute Pressure API (T5.1, `PressureObserver`): how hard the
+ * device is pressed, and how hot it runs where the browser reads its thermals, as the browser rates
+ * it: `nominal` (no adverse effect), `fair` (slightly elevated: warm, a fan audible), `serious`
+ * (consistently high: the system may throttle), `critical` (it must cool down). The web platform has
+ * no temperature reading; this is the nearest to one.
+ */
+export type PressureState = 'nominal' | 'fair' | 'serious' | 'critical';
+
+/** The pressure states, from the least to the most. */
+export const PRESSURE_STATES: readonly PressureState[] = ['nominal', 'fair', 'serious', 'critical'];
+
+/** Where a pressure state comes from: the device's thermals, where the browser reads them, or its CPU. */
+export type PressureSource = 'cpu' | 'thermals';
+
 /** The camera device's state, sent every 2 s and at each change the host should see at once. */
 export interface CameraState {
   type: 'state';
@@ -82,6 +97,14 @@ export interface CameraState {
   /** The phone's battery, 0 to 1, and whether it charges; null when the browser does not say. */
   battery: { level: number; charging: boolean } | null;
   thermal: ThermalHint;
+  /**
+   * The Compute Pressure API's state (T5.1), of `pressureSource`; null where the browser has no
+   * `PressureObserver`, no source it can observe, or refuses, and from a build before T5.1, whose
+   * `state` has neither field (read as null).
+   */
+  pressure: PressureState | null;
+  /** The source of `pressure`; null with it. */
+  pressureSource: PressureSource | null;
   /** Clips cut and staged on the phone that the host has not acknowledged yet. */
   pendingClips: number;
 }
@@ -668,6 +691,9 @@ function state(json: Json): CameraState {
       json['thermal'] === null || json['thermal'] === undefined
         ? null
         : oneOf(json, 'thermal', ['ok', 'throttled']),
+    // T5.1, additive: a build before it sends neither.
+    pressure: nullable(json, 'pressure', (j, k) => oneOf(j, k, PRESSURE_STATES)),
+    pressureSource: nullable(json, 'pressureSource', (j, k) => oneOf(j, k, ['cpu', 'thermals'])),
     pendingClips: int(json, 'pendingClips', 0),
   };
 }

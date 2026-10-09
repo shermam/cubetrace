@@ -57,7 +57,23 @@ const MESSAGES: Message[] = [
     sharpness: 41.2,
     battery: { level: 0.83, charging: true },
     thermal: 'ok',
+    pressure: 'fair',
+    pressureSource: 'thermals',
     pendingClips: 2,
+  },
+  {
+    type: 'state',
+    remoteMs: 1_790_000_003_000,
+    recording: true,
+    framing: null,
+    frame: { width: 1080, height: 1920 },
+    fps: 30,
+    sharpness: 12.5,
+    battery: { level: 0.09, charging: false },
+    thermal: 'throttled',
+    pressure: 'critical',
+    pressureSource: 'cpu',
+    pendingClips: 0,
   },
   {
     type: 'state',
@@ -69,6 +85,8 @@ const MESSAGES: Message[] = [
     sharpness: null,
     battery: null,
     thermal: null,
+    pressure: null,
+    pressureSource: null,
     pendingClips: 0,
   },
   {
@@ -335,7 +353,30 @@ describe('the protocol', () => {
       sharpness: null,
       battery: null,
       thermal: null,
+      pressure: null,
+      pressureSource: null,
       pendingClips: 0,
+    });
+    // A build before T5.1 sends its state without the pressure: the host reads it as unknown.
+    const before = JSON.stringify({
+      type: 'state',
+      remoteMs: 7,
+      recording: true,
+      framing: null,
+      frame: { width: 1920, height: 1080 },
+      fps: 29.9,
+      sharpness: 41.2,
+      battery: { level: 0.5, charging: false },
+      thermal: 'ok',
+      pendingClips: 1,
+    });
+    expect(decode(before)).toMatchObject({
+      type: 'state',
+      fps: 29.9,
+      thermal: 'ok',
+      pressure: null,
+      pressureSource: null,
+      pendingClips: 1,
     });
   });
 
@@ -515,6 +556,30 @@ describe('the protocol', () => {
         thermal: 'melting',
       }),
       /thermal must be one of ok, throttled/,
+    ],
+    [
+      'a state whose pressure is unknown',
+      JSON.stringify({
+        type: 'state',
+        remoteMs: 1,
+        recording: true,
+        pendingClips: 0,
+        pressure: 'hot',
+        pressureSource: 'cpu',
+      }),
+      /pressure must be one of nominal, fair, serious, critical/,
+    ],
+    [
+      'a state whose pressure comes from an unknown source',
+      JSON.stringify({
+        type: 'state',
+        remoteMs: 1,
+        recording: true,
+        pendingClips: 0,
+        pressure: 'fair',
+        pressureSource: 'gpu',
+      }),
+      /pressureSource must be one of cpu, thermals/,
     ],
     [
       'a state whose framing has no height',

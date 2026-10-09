@@ -137,6 +137,8 @@ class Phone {
       sharpness: 41.2,
       battery: { level: 0.83, charging: true },
       thermal: 'ok',
+      pressure: 'nominal',
+      pressureSource: 'cpu',
       pendingClips: 0,
     });
   }

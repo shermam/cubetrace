@@ -207,6 +207,8 @@ describe('RemoteCameras', () => {
       sharpness: 41.2,
       battery: { level: 0.83, charging: true },
       thermal: 'throttled',
+      pressure: null,
+      pressureSource: null,
       pendingClips: 0,
     });
     await pump(10);
@@ -224,6 +226,8 @@ describe('RemoteCameras', () => {
       sharpness: null,
       battery: null,
       thermal: null,
+      pressure: null,
+      pressureSource: null,
       pendingClips: 2,
     });
     await pump(10);

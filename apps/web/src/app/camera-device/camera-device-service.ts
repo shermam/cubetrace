@@ -722,6 +722,8 @@ export class CameraDeviceService {
       sharpness: this.camera.sharpness(),
       battery: this.batterySignal(),
       thermal: this.thermal(),
+      pressure: null,
+      pressureSource: null,
       pendingClips: this.clips.pending(),
     });
     if (sent) {
