@@ -18,7 +18,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ✅ 0.3.0 (2026-10-02: T3.0–T3.6 merged and deployed; the tag from the GitHub UI on 2896591 or later). Follow-ups T3.6–T3.9 merged the same day (the installed app's sign-in, the cube's whole record, the 3D cube in the clip viewer, the diagnostics events), for 0.4.0 |
 | 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ✅ 0.4.0 (2026-10-04: T4.0–T4.4, T4.2a and T4.2b merged and deployed; the tag from the GitHub UI on 16ad587). Open: #61 closes when a pairing stays converged for 20 minutes; the measured cells of `docs/DEVICES.md` |
 | 5. The rig's eyes and hands | The phone's picture at full size with its health, remote camera controls from the laptop, the host's capture latency measured per attempt. | in progress (2026-10-09: the board below, T5.1–T5.4; issue #67) |
-| 5. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
+| 6. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
 ## Phase 1 task board
 
