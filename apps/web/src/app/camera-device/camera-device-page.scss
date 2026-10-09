@@ -188,3 +188,11 @@ details[open] summary {
 .picker select {
   max-width: 100%;
 }
+
+// "Keep the camera's modes" (T5.2): the box and its words on one line.
+.switch {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: 0.875rem;
+}

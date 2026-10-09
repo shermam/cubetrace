@@ -7,13 +7,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { CameraChoice, ControlValues, JsonObject } from './index';
 import {
+  CONTROL_NAMES,
   FrameRateMeter,
+  METERING_MODES,
   applyControls,
   autoModeOf,
   buildConstraints,
   cameraInfo,
   cameraLabel,
   controlConstraints,
+  controlGroupOf,
   controlValuesOf,
   controlsOf,
   facingFromLabel,
@@ -21,6 +24,9 @@ import {
   fallbackChoice,
   fitControls,
   hasControls,
+  isControlValue,
+  modeControlOf,
+  modesOf,
   snapToRange,
   snapshot,
   watchFrames,
@@ -356,6 +362,37 @@ describe('control values', () => {
 
     const refuse = vi.fn(() => Promise.reject(new DOMException('no', 'OverconstrainedError')));
     await expect(applyControls({ applyConstraints: refuse }, { zoom: 3 })).rejects.toThrow('no');
+  });
+
+  it('names the controls, their groups and the mode of each group (T5.2: the remote controls)', () => {
+    expect(CONTROL_NAMES).toEqual([
+      'exposureMode',
+      'exposureTime',
+      'iso',
+      'focusMode',
+      'focusDistance',
+      'whiteBalanceMode',
+      'colorTemperature',
+      'zoom',
+      'torch',
+    ]);
+    expect(METERING_MODES).toEqual(['continuous', 'single-shot', 'manual', 'none']);
+    expect(controlGroupOf('focusDistance')).toEqual(['focusMode', 'focusDistance']);
+    expect(controlGroupOf('iso')).toEqual(['exposureMode', 'exposureTime', 'iso']);
+    expect(controlGroupOf('zoom')).toEqual(['zoom']);
+    expect(modeControlOf('focusDistance')).toBe('focusMode');
+    expect(modeControlOf('colorTemperature')).toBe('whiteBalanceMode');
+    expect(modeControlOf('exposureMode')).toBe('exposureMode');
+    expect(modeControlOf('zoom')).toBeNull();
+    expect(modeControlOf('torch')).toBeNull();
+    const rear = controlsOf(PHONE_REAR.capabilities, PHONE_REAR.settings);
+    expect(modesOf(rear, 'focusMode')).toEqual(['continuous', 'single-shot', 'manual']);
+    expect(modesOf(front, 'focusMode')).toEqual(['continuous', 'manual']);
+    expect(modesOf(front, 'exposureMode')).toEqual(['continuous', 'manual']);
+    expect(isControlValue('focusMode', 'manual')).toBe(true);
+    expect(isControlValue('focusMode', 'auto')).toBe(false);
+    expect(isControlValue('zoom', Number.NaN)).toBe(false);
+    expect(isControlValue('torch', 1)).toBe(false);
   });
 });
 

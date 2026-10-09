@@ -141,6 +141,32 @@
           <button type="button" data-testid="remove-camera" (click)="remove(camera.id)">
             Remove
           </button>
+          <details class="controls" data-testid="remote-camera-controls">
+            <summary>Camera controls</summary>
+            @if (service.controlsOf(camera.id); as source) {
+              @switch (source.state()) {
+                @case ('ready') {
+                  <app-camera-controls [source]="source" />
+                }
+                @case ('waiting') {
+                  <p class="muted" data-testid="remote-controls-waiting">
+                    Waiting for the phone's controls…
+                  </p>
+                }
+                @case ('unsupported') {
+                  <p class="muted" data-testid="remote-controls-unsupported">
+                    This phone's build has no remote controls: update cubetrace on it, then pair it
+                    again.
+                  </p>
+                }
+                @case ('no-camera') {
+                  <p class="muted" data-testid="remote-controls-no-camera">
+                    The phone's camera is off.
+                  </p>
+                }
+              }
+            }
+          </details>
         </li>
       }
     </ul>

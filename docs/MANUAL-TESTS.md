@@ -1093,3 +1093,54 @@ last report); write down what they cannot show, next to the item, with the devic
   top right corner of the MacBook's preview, its caption the label and, in short, what is wrong (`15%`,
   `soft`, `pressure fair`), a tap swapping it with the main picture as before; then "Same size as
   mine" again: the two pictures side by side again.
+
+## After T5.2 — the phone's camera controls from the MacBook, and the watchdog
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T5.2, the MacBook as the
+host (its FaceTime camera on, the GAN 12 ui, signed in) and the Moto g60 paired as its camera as in
+"After T4" (then the ThinkPhone), on its tripod, "Live preview from phones" on and "Pictures from
+phones" on "Same size as mine". The events say most of it (`docs/DIAGNOSTICS.md`, "After T5.2": the
+MacBook's `remote.controls` for each change, the phone's `controls.drift` for each drift); write
+down what they cannot show, next to the item, with the device and what happened.
+
+A drift is a mode the camera changes by itself: a change made on the app's own panel (the phone's
+Camera page, or the MacBook's panel of the phone) is what the app applied, and the watchdog holds
+the camera to it. To provoke one behind the app's back, as the Moto g60's focus went manual by
+itself on 2026-10-09: plug the phone into the MacBook by USB (USB debugging on), open
+`chrome://inspect` on the MacBook, inspect the phone's cubetrace tab, and type in its console:
+
+```js
+document.querySelector('[data-testid="device-preview"]').srcObject.getVideoTracks()[0].applyConstraints({advanced: [{focusMode: 'manual'}]})
+```
+
+(on a host's own camera, its Timer page: `[data-testid="camera-preview"]` instead). The watchdog
+reads the camera every 2 s and calls a difference that holds for two readings a drift.
+
+- [ ] The Moto g60's controls from the MacBook: Camera settings → Cameras → the phone's "Camera
+  controls": its Focus group (and Exposure, White balance, Zoom, the Torch as its camera lists them).
+  Focus → Manual, then the Distance slider moved until the cube blurs on the phone's picture under
+  the time, then back until it is sharp: each change takes within a second (the panel's controls
+  are grey meanwhile), and the phone's own Camera page (Camera settings there) shows the same values.
+  Reset to auto: the phone's camera opens again (its picture blinks), every control automatic. The
+  Zoom slider: the phone's picture zooms; the Torch: its light. Write how long each change took to
+  show on the phone's picture, and anything the panel said in red.
+- [ ] A drift with "Keep the camera's modes" on (the default): the console line above on the Moto
+  g60. Within 4 s the phone sets its focus back and its Camera page says "The camera set the focus
+  to manual by itself: set back to continuous." (for a minute); the MacBook's line under the phone's
+  picture says "focus went manual on the phone" in red for a moment (two seconds or so), then not.
+  Write what each device said, and when.
+- [ ] Then off: on the phone's Camera page, Camera settings → "Keep the camera's modes" off, and the
+  console line again. The phone says "… by itself: left so (Keep the camera's modes is off)." and
+  its panel shows Manual; the MacBook's line under the phone's picture says "focus went manual on the
+  phone" in red with Reset beside it, and the Cameras list's report says it too. Reset on the
+  MacBook's line: the focus back to auto, the red word gone, on both devices. Then "Keep the
+  camera's modes" on again on the phone.
+- [ ] The same on the ThinkPhone (its rear camera), and once on its front camera, whose focus lists
+  only manual: its focus back to auto from the MacBook opens the camera again (its recording starts
+  again with it), which the phone's own panel does too.
+- [ ] The host's own camera's watchdog, with its own panel: the MacBook's FaceTime camera has no
+  controls, so on the ThinkPhone as the host (its Timer page, its rear camera on, Camera settings
+  open): the console line on its Timer page's preview (`camera-preview`). Within 4 s its focus is set
+  back and Camera settings says so; with "Keep the camera's modes" off (Camera settings has it too),
+  its line under the preview says "focus went manual" in red, and Focus → Auto on its panel puts it
+  back.

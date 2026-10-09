@@ -1,10 +1,13 @@
 // A phone's status line (docs/PLAN.md T5.1): the words and colours of what a remote camera reports in
 // its `state` messages, the twin of the host's own line under its preview (`CameraPreview`), from one
 // pure function, so that the Timer page's line under a phone's picture, a tile's caption (in short)
-// and the Cameras list's report never disagree.
+// and the Cameras list's report never disagree. Since T5.2 it says, in red, a mode the phone's camera
+// changed by itself (its `controls`' drift).
+import type { ControlDrift } from '@cubetrace/capture';
 import type { CameraState } from '@cubetrace/rtc';
 
 import { fpsText, sharpnessText } from './camera-format';
+import { CONTROL_WORD, controlValueText, driftWords } from './controls-source';
 import type { RemoteCameraPhase } from './remote-camera-registry';
 
 /** What the line reads of a phone's last `state` (docs/RTC.md §1). */
@@ -24,11 +27,12 @@ export type RemoteReport = Pick<
 /**
  * How a part reads: `ok` (green: the sharpness good), `warn` (amber: soft, a battery under 20% and
  * not charging, the frame rate dropped, fair pressure, reconnecting), `bad` (red: a battery under 10%
- * and not charging, serious or critical pressure, not recording, no report), `plain` (muted).
+ * and not charging, serious or critical pressure, not recording, no report, a mode the camera changed
+ * by itself), `plain` (muted).
  */
 export type StatusTone = 'ok' | 'warn' | 'bad' | 'plain';
 
-/** The parts of the line, in their order. */
+/** The parts of the line, in their order; a drift's part is named after its control (T5.2). */
 export type StatusKey =
   | 'report'
   | 'fps'
@@ -38,6 +42,7 @@ export type StatusKey =
   | 'battery'
   | 'thermal'
   | 'pressure'
+  | `drift-${ControlDrift['name']}`
   | 'clips'
   | 'connection'
   | 'stale';
@@ -74,6 +79,11 @@ export interface RemoteStatusInput {
   readonly converged: boolean;
   /** The host's sharpness threshold (Settings → Camera): good from it up. */
   readonly sharpnessThreshold: number;
+  /**
+   * What the phone's camera changed by itself and still differs, as its last `controls` says (T5.2,
+   * its watchdog): a part each, in red; none when absent.
+   */
+  readonly drift?: readonly ControlDrift[];
 }
 
 /**
@@ -119,6 +129,9 @@ export function remoteStatusLine(
     report === null
       ? [part('report', '', 'no report yet', 'plain', null, 'The phone has sent no report yet.')]
       : reportParts(report, input.sharpnessThreshold, form);
+  for (const drift of input.drift ?? []) {
+    parts.splice(clipsIndex(parts), 0, driftPart(drift));
+  }
   if (form === 'line') {
     const connection = connectionPart(input);
     if (connection !== null) {
@@ -253,6 +266,26 @@ function reportParts(report: RemoteReport, threshold: number, form: StatusForm):
     );
   }
   return parts;
+}
+
+/** Where a drift's part goes: before the clips still to send (the list's last part), else last. */
+function clipsIndex(parts: readonly StatusPart[]): number {
+  const clips = parts.findIndex((p) => p.key === 'clips');
+  return clips === -1 ? parts.length : clips;
+}
+
+/** "focus went manual on the phone", in red; "focus manual" in a tile's caption (T5.2). */
+function driftPart(drift: ControlDrift): StatusPart {
+  const word = CONTROL_WORD[drift.name];
+  const actual = controlValueText(drift.name, drift.actual);
+  return part(
+    `drift-${drift.name}`,
+    '',
+    driftWords(drift, 'on the phone'),
+    'bad',
+    `${word} ${actual}`,
+    `The phone's camera set its ${word} to ${actual} by itself (${controlValueText(drift.name, drift.expected)} was applied). Reset sets the automatic mode again; on the phone, Keep the camera's modes sets it back by itself.`,
+  );
 }
 
 function sharpnessPart(value: number | null, threshold: number): StatusPart {

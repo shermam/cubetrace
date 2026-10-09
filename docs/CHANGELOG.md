@@ -32,6 +32,25 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   rate, sharpness and whether it is soft, recording, battery, thermal hint, pressure), a phone's
   health over a session; `settings.changed` names `remotePictures`; the round report's "After T5.1"
   items read them.
+- The phone's camera controls from the laptop (T5.2; `docs/RTC.md` §11): Camera settings → Cameras
+  has, under each phone, "Camera controls": the panel of the laptop's own camera over the phone's
+  (exposure, focus, white balance, zoom, the torch, Reset to auto), its changes applied on the phone
+  as its own panel applies them (kept for its camera), each in flight until the phone answers, 3 s at
+  most ("The phone did not answer."), the camera's refusals said; a phone of 0.4.0 has none ("this
+  phone's build has no remote controls"). Three messages, additive within protocol version 1:
+  `controls`, `set-controls`, `controls-failed`.
+- The watchdog of the camera's modes (T5.2): every 2 s each device reads its open camera's settings
+  against what the app applied (the modes it opened in, the controls kept and set); a mode the camera
+  changes by itself, as the Moto g60's focus went manual at solve 31 on 2026-10-09 and blurred twenty
+  solves, is a drift after two readings: said on the device (the phone's Camera page, the laptop's
+  own Camera settings and line), on the phone's status line on the laptop's Timer page ("focus went
+  manual on the phone" in red, with Reset beside it) and in its Cameras list; and, with "Keep the
+  camera's modes" (Settings → Camera, the phone's Camera page and Camera settings too, on by
+  default), set back, three times a minute at most, then left and said ("The camera keeps setting
+  the focus to manual: set it by hand.").
+- Diagnostics: `remote.controls` (each change of a phone's controls from the laptop, and its
+  outcome) and `controls.drift` (each drift, set back, given up or left); `settings.changed` names
+  `keepCameraModes`; the round report's "After T5.2" items read them.
 
 ## 0.4.0 — 2026-10-04
 

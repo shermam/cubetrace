@@ -159,3 +159,17 @@ p {
 .camera[data-converged='true'] .sync {
   color: var(--ok);
 }
+
+// The phone's camera controls (T5.2), under its row, the width of the row.
+.controls {
+  flex: 1 1 100%;
+  font-size: 0.875rem;
+
+  summary {
+    cursor: pointer;
+  }
+
+  &[open] summary {
+    margin-bottom: var(--space-2);
+  }
+}

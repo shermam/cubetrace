@@ -192,9 +192,10 @@ export const STATUS_TICK_MS = 1000;
  * - `equal`: each phone's picture in a cell as large as the host's own (a box of 16:9, a phone's
  *   upright frames between bars, its framing rectangle drawn as on the host's), its label over the
  *   corner, and under it its status line, the twin of the host's own (`remoteStatusLine`: the frame
- *   rate, the sharpness against this device's threshold, the recording, the battery, the health, the
- *   connection, a report that stopped), so that a soft focus, a dropped frame rate, a low battery or
- *   a hot phone is seen at a glance. The host is `display: contents`: its cells are items of
+ *   rate, the sharpness against this device's threshold, the recording, the battery, the health, a
+ *   mode its camera changed by itself in red with Reset beside it (T5.2), the connection, a report
+ *   that stopped), so that a soft focus, a dropped frame rate, a low battery or a hot phone is seen
+ *   at a glance. The host is `display: contents`: its cells are items of
  *   `CameraPreview`'s grid, beside the host's own, which the Timer page sets side by side where it is
  *   wide enough (issue: the owner's phone was "a tiny picture-in-picture image" on 2026-10-09).
  * - `tiles` (T4.3, issue #60), over the host's preview: a small tile per phone in the picture's top
@@ -220,6 +221,19 @@ export const STATUS_TICK_MS = 1000;
           </div>
           <p class="status" data-testid="remote-status" [attr.data-label]="camera.label">
             <app-status-parts [parts]="lineOf(camera)" testId="remote-status" />
+            @if (camera.drift.length > 0) {
+              <button
+                type="button"
+                class="reset"
+                data-testid="remote-drift-reset"
+                [attr.aria-label]="
+                  'Reset what the camera of ' + camera.label + ' changed by itself'
+                "
+                (click)="resetDrift(camera.id)"
+              >
+                Reset
+              </button>
+            }
           </p>
         </div>
       }
@@ -309,6 +323,14 @@ export const STATUS_TICK_MS = 1000;
       color: var(--text-muted);
       font-size: 0.8125rem;
       font-variant-numeric: tabular-nums;
+    }
+
+    /* Beside a drift on the line (T5.2): the host's pointer-events are off, the button's on. */
+    .reset {
+      margin-left: var(--space-2);
+      padding: 0 var(--space-2);
+      font-size: 0.75rem;
+      pointer-events: auto;
     }
 
     .main {
@@ -439,6 +461,7 @@ export class RemotePreviews {
           sinceMs: camera.sinceMs,
           converged: camera.converged,
           sharpnessThreshold,
+          drift: camera.drift,
         }),
       ]),
     );
@@ -470,6 +493,14 @@ export class RemotePreviews {
         }
       });
     });
+  }
+
+  /**
+   * The Reset beside a phone's line (T5.2): what its camera changed by itself back to the automatic
+   * modes of their groups, sent to the phone (`set-controls`).
+   */
+  protected resetDrift(id: string): void {
+    this.registry.resetDrift(id);
   }
 
   /** A tap: the phone `id` as the main picture, or this device's own (null). */

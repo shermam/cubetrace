@@ -338,6 +338,21 @@ describe('SettingsPage', () => {
     });
   });
 
+  it("keeps Keep the camera's modes, a switch of the Camera section, on by default (T5.2)", async () => {
+    const fixture = await render();
+    const box = input(fixture, '[data-testid="keep-camera-modes"]');
+    expect(box.closest('section')?.getAttribute('aria-labelledby')).toBe('camera-heading');
+    expect(box.closest('label')?.textContent.trim()).toBe("Keep the camera's modes");
+    expect(box.checked).toBe(true);
+
+    box.click();
+    await update(fixture);
+    expect(TestBed.inject(SettingsService).keepCameraModes()).toBe(false);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
+      keepCameraModes: false,
+    });
+  });
+
   it('keeps Scramble over the picture, a switch of the Timer section, on by default', async () => {
     const fixture = await render();
     const box = input(fixture, '[data-testid="scramble-over-picture"]');

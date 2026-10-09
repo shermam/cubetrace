@@ -8,6 +8,7 @@ import {
   answerPings,
   hashToken,
   type Clock,
+  type ControlsReport,
   type Message,
 } from '@cubetrace/rtc';
 
@@ -15,8 +16,13 @@ import { ACCOUNT_LOADER } from '../auth/account-backend';
 import { ACCOUNT_STORAGE_KEY, AuthService } from '../auth/auth-service';
 import { ADA, FakeAccountBackend } from '../auth/fake-account';
 import { bluetoothNavigator } from '../cube/cube-testing';
-import { FakeLocalStorage, settle } from '../device/fake-browser';
-import type { ClapperboardFrame, MotionMeterInfo } from '@cubetrace/capture';
+import { FAKE_PHONE_REAR, FakeLocalStorage, settle } from '../device/fake-browser';
+import {
+  controlValuesOf,
+  controlsOf,
+  type ClapperboardFrame,
+  type MotionMeterInfo,
+} from '@cubetrace/capture';
 
 import { FakePreview, MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
@@ -31,6 +37,11 @@ import {
   reportFacts,
 } from './remote-cameras-service';
 import { RemoteCameraRegistry } from './remote-camera-registry';
+import {
+  CONTROLS_WAIT_MS,
+  NO_ANSWER_TEXT,
+  SET_CONTROLS_TIMEOUT_MS,
+} from './remote-controls-source';
 
 /** The phone's rear camera, as its own session.json would describe it. */
 const PHONE_CAMERA: CameraInfo = {
@@ -141,6 +152,23 @@ class Phone {
       pressure: 'nominal',
       pressureSource: 'cpu',
       pendingClips: 0,
+    });
+  }
+
+  /** Its camera's controls (T5.2): the rear camera's, with `changes`. */
+  sendControls(changes: Partial<ControlsReport> = {}): void {
+    this.link?.send({
+      type: 'controls',
+      controls: controlsOf(FAKE_PHONE_REAR.capabilities, FAKE_PHONE_REAR.settings),
+      values: controlValuesOf(FAKE_PHONE_REAR.settings),
+      applied: {
+        exposureMode: 'continuous',
+        focusMode: 'continuous',
+        whiteBalanceMode: 'continuous',
+      },
+      drift: [],
+      remoteMs: this.r.s.perf.hostMs + this.offsetMs,
+      ...changes,
     });
   }
 
@@ -914,6 +942,8 @@ describe('RemoteCamerasService', () => {
         // Its last report, for its status line (T5.1).
         report: r.service.cameras()[0].report,
         reportMs: r.service.cameras()[0].reportMs,
+        // What its camera changed by itself (T5.2): nothing.
+        drift: [],
       },
     ]);
     expect(registry.cameras()[0].report).toMatchObject({ pressure: 'nominal', fps: 29.9 });
@@ -1024,5 +1054,105 @@ describe('RemoteCamerasService', () => {
         () => undefined,
       ),
     ).toBe(null);
+  });
+
+  // ---- T5.2: the phone's camera controls ----
+
+  it('gives each phone its controls: a change sent and in flight until answered, refused, unanswered, each said in the diagnostics; the drift on its entry, reset from the Timer page (T5.2)', async () => {
+    const phone = await paired();
+    const id = r.service.cameras()[0].id;
+    const source = r.service.controlsOf(id);
+    expect(source).not.toBeNull();
+    expect(source?.state()).toBe('waiting');
+    phone.sendControls();
+    await pump(r.s, 10);
+    expect(source?.state()).toBe('ready');
+    expect(source?.controls()?.focusModes).toEqual(['continuous', 'single-shot', 'manual']);
+    expect(source?.values().focusMode).toBe('continuous');
+
+    // Manual focus: sent, in flight until the phone's controls say it.
+    const manual = source?.set('focusMode', 'manual');
+    expect(source?.busy()).toBe(true);
+    await pump(r.s, 10);
+    expect(phone.of('set-controls')).toEqual([
+      { type: 'set-controls', values: { focusMode: 'manual' } },
+    ]);
+    phone.sendControls({
+      values: { ...controlValuesOf(FAKE_PHONE_REAR.settings), focusMode: 'manual' },
+    });
+    await pump(r.s, 10);
+    await manual;
+    expect(source?.busy()).toBe(false);
+    expect(source?.values().focusMode).toBe('manual');
+
+    // A value refused: the phone's words.
+    void source?.set('zoom', 3);
+    await pump(r.s, 10);
+    phone.link?.send({ type: 'controls-failed', message: 'The camera refused the change (no).' });
+    await pump(r.s, 10);
+    expect(source?.error()).toBe('The camera refused the change (no).');
+    expect(source?.busy()).toBe(false);
+
+    // Reset to auto without an answer: given up after 3 s.
+    void source?.reset();
+    await pass(r.s, SET_CONTROLS_TIMEOUT_MS);
+    expect(phone.of('set-controls').at(-1)).toEqual({ type: 'set-controls', reset: true });
+    expect(source?.error()).toBe(NO_ANSWER_TEXT);
+    expect(source?.busy()).toBe(false);
+
+    // The phone's camera set its focus to manual by itself: on its entry and the Timer page's, and
+    // Reset there sends the automatic mode.
+    const focus = { name: 'focusMode', expected: 'continuous', actual: 'manual' } as const;
+    phone.sendControls({ drift: [focus] });
+    await pump(r.s, 10);
+    expect(r.service.cameras()[0].drift).toEqual([focus]);
+    const registry = TestBed.inject(RemoteCameraRegistry);
+    expect(registry.cameras()[0].drift).toEqual([focus]);
+    registry.resetDrift(id);
+    await pump(r.s, 10);
+    expect(phone.of('set-controls').at(-1)).toEqual({
+      type: 'set-controls',
+      values: { focusMode: 'continuous' },
+    });
+    phone.sendControls();
+    await pump(r.s, 10);
+    expect(registry.cameras()[0].drift).toEqual([]);
+
+    // Its camera off (a hello without one): no controls to show.
+    phone.link?.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      role: 'camera',
+      device: { label: 'ThinkPhone', platform: 'Android' },
+      app: { version: '0.4.0', commit: 'abc1234' },
+      camera: null,
+    });
+    await pump(r.s, 10);
+    expect(source?.state()).toBe('no-camera');
+    expect(source?.controls()).toBeNull();
+
+    const all = await events();
+    expect(
+      all
+        .filter((event) => event.kind === 'remote.controls')
+        .map((event) => [event.data['set'], event.data['outcome'], event.data['message']]),
+    ).toEqual([
+      ['focusMode', 'ok', null],
+      ['zoom', 'failed', 'The camera refused the change (no).'],
+      ['reset', 'no-answer', NO_ANSWER_TEXT],
+      ['focusMode', 'ok', null],
+    ]);
+    expect(all.find((event) => event.kind === 'remote.controls')?.data).toMatchObject({
+      camera: 'phone-rear',
+      peer: 'ThinkPhone',
+    });
+  });
+
+  it("says a phone's build has no remote controls when it sends none within 5 s of the hellos (T5.2)", async () => {
+    await paired();
+    const source = r.service.controlsOf(r.service.cameras()[0].id);
+    await pass(r.s, CONTROLS_WAIT_MS);
+    expect(source?.state()).toBe('unsupported');
+    expect(r.service.controlsOf('nobody')).toBeNull();
   });
 });

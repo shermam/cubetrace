@@ -4,7 +4,20 @@
 // says its version in `hello`, and a side that gets another version leaves. Within a version, a
 // reader ignores the fields it does not know, so that a build that adds an optional field still
 // talks to the build before it; what a message must carry is checked, and a frame that is not a
-// message of this protocol is refused with a ProtocolError. Plain TypeScript: no browser API.
+// message of this protocol is refused with a ProtocolError. Plain TypeScript: no browser API. The
+// remote controls' messages (T5.2) carry @cubetrace/capture's vocabulary of a camera's controls.
+import {
+  CONTROL_NAMES,
+  METERING_MODES,
+  isControlValue,
+  type CameraControls,
+  type ControlDrift,
+  type ControlName,
+  type ControlRange,
+  type ControlValue,
+  type ControlValues,
+  type MeteringMode,
+} from '@cubetrace/capture';
 import {
   RecordError,
   parseCameraInfo,
@@ -388,6 +401,39 @@ export interface Preview {
   on: boolean;
 }
 
+/**
+ * The phone's camera controls (T5.2, docs/RTC.md §11), for the host's panel of them: the controls
+ * its open camera has (`@cubetrace/capture`'s `controlsOf`: the modes and the ranges), what its
+ * track's settings say of them now (`values`), what the app applied to it (`applied`: the controls
+ * kept for the camera in its Settings and those set since, the mode each other group opened in), the
+ * controls the camera changed by itself (`drift`, the watchdog's: empty when none), and when it was
+ * taken, on the phone's clock. Sent after the phone's `hello` (again with each `hello`: its camera
+ * changed), after each `set-controls` it applied, and whenever the watchdog sees a change.
+ */
+export interface ControlsReport {
+  type: 'controls';
+  controls: CameraControls;
+  values: ControlValues;
+  applied: ControlValues;
+  drift: ControlDrift[];
+  remoteMs: number;
+}
+
+/**
+ * The host changes the phone's camera controls (T5.2): `values`, one control or several, which the
+ * phone applies as its own panel does (persisted for its camera), or `reset` (Reset to auto: the
+ * camera opened again with every control automatic, the kept ones forgotten). The phone answers with
+ * `controls`, or `controls-failed`.
+ */
+export type SetControls =
+  { type: 'set-controls'; values: ControlValues } | { type: 'set-controls'; reset: true };
+
+/** The phone could not apply a `set-controls` (a value its camera refuses, its camera gone or off). */
+export interface ControlsFailed {
+  type: 'controls-failed';
+  message: string;
+}
+
 /** Every message of the protocol. */
 export type Message =
   | Hello
@@ -412,7 +458,10 @@ export type Message =
   | SyncMotion
   | SyncMeter
   | SyncError
-  | Preview;
+  | Preview
+  | ControlsReport
+  | SetControls
+  | ControlsFailed;
 
 /** The messages that go as JSON text. */
 export type ControlMessage = Exclude<Message, FileChunk | Thumbnail>;
@@ -432,6 +481,9 @@ export const THUMBNAIL_HEADER_BYTES = 13;
 
 /** The most characters of the texts a message carries. */
 const MAX_TEXT = 1000;
+
+/** The most characters of `controls-failed`'s message (T5.2): a camera's refusal in a sentence. */
+export const MAX_CONTROLS_MESSAGE = 500;
 
 /** A file's name: a plain name, no path (docs/DATA-MODEL.md §5 names the clips' files). */
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/u;
@@ -646,6 +698,27 @@ function decodeControl(text: string): ControlMessage {
       return { type, id: int(json, 'id', 0), message: text_(json, 'message') };
     case 'preview':
       return { type, on: bool(json, 'on') };
+    case 'controls':
+      return {
+        type,
+        controls: cameraControls(field(json, 'controls')),
+        values: controlValues(field(json, 'values'), 'values'),
+        applied: controlValues(field(json, 'applied'), 'applied'),
+        drift: drift(list(json, 'drift')),
+        remoteMs: num(json, 'remoteMs'),
+      };
+    case 'set-controls': {
+      if (json['reset'] === true) {
+        return { type, reset: true };
+      }
+      const values = controlValues(field(json, 'values'), 'values');
+      if (Object.keys(values).length === 0) {
+        throw new ProtocolError('values must hold one control or more, got none.');
+      }
+      return { type, values };
+    }
+    case 'controls-failed':
+      return { type, message: text_(json, 'message', MAX_CONTROLS_MESSAGE) };
     case 'file-chunk':
     case 'thumbnail':
       throw new ProtocolError(`A ${type} message as text: it goes as a binary frame.`);
@@ -797,6 +870,108 @@ function motionMeter(json: Json): SyncMeter['meter'] {
   };
 }
 
+/** The controls a camera has (`controls`'s `controls`), checked: modes it may list, finite ranges. */
+function cameraControls(json: Json): CameraControls {
+  return {
+    exposureModes: modes(json, 'exposureModes'),
+    exposureTime: range(json, 'exposureTime'),
+    iso: range(json, 'iso'),
+    focusModes: modes(json, 'focusModes'),
+    focusDistance: range(json, 'focusDistance'),
+    whiteBalanceModes: modes(json, 'whiteBalanceModes'),
+    colorTemperature: range(json, 'colorTemperature'),
+    zoom: range(json, 'zoom'),
+    torch: bool(json, 'torch'),
+  };
+}
+
+/** A list of metering modes, each once. */
+function modes(json: Json, key: string): MeteringMode[] {
+  const value = list(json, key);
+  if (
+    value.length > METERING_MODES.length ||
+    value.some(
+      (mode, k) => !METERING_MODES.includes(mode as MeteringMode) || value.indexOf(mode) !== k,
+    )
+  ) {
+    throw new ProtocolError(
+      `${key} must list modes of ${METERING_MODES.join(', ')}, each once, got ${show(value)}.`,
+    );
+  }
+  return value as MeteringMode[];
+}
+
+/** A control's range, `{min, max, step?}` with `min` under `max` and a step above 0; or null. */
+function range(json: Json, key: string): ControlRange | null {
+  const value = json[key];
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const object = field(json, key);
+  const min = num(object, 'min');
+  const max = num(object, 'max', min);
+  if (max === min) {
+    throw new ProtocolError(`${key}.max must be above its min, got ${show(value)}.`);
+  }
+  const step = object['step'];
+  if (step === undefined || step === null) {
+    return { min, max };
+  }
+  const checked = num(object, 'step', 0);
+  if (checked === 0) {
+    throw new ProtocolError(`${key}.step must be above 0, got ${show(value)}.`);
+  }
+  return { min, max, step: checked };
+}
+
+/**
+ * The values of a camera's controls (`ControlValues`): each control named is a value of it (a mode
+ * of the protocol, a finite number, the torch's boolean); a key that names no control is ignored, as
+ * a later build may add one.
+ */
+function controlValues(json: Json, key: string): ControlValues {
+  const values: Partial<Record<ControlName, ControlValue>> = {};
+  for (const name of CONTROL_NAMES) {
+    const value = json[name];
+    if (value === undefined) {
+      continue;
+    }
+    if (!isControlValue(name, value)) {
+      throw new ProtocolError(`${key}.${name} is not a value of ${name}, got ${show(value)}.`);
+    }
+    values[name] = value as ControlValue;
+  }
+  return values as ControlValues;
+}
+
+/** The controls the camera changed by itself (`controls`'s `drift`): each a control, at most once. */
+function drift(value: unknown[]): ControlDrift[] {
+  if (value.length > CONTROL_NAMES.length) {
+    throw new ProtocolError(
+      `drift must hold at most ${String(CONTROL_NAMES.length)} controls, got ${String(value.length)}.`,
+    );
+  }
+  const seen = new Set<string>();
+  return value.map((item) => {
+    if (!isObject(item)) {
+      throw new ProtocolError(`A drift that is not an object: ${show(item)}.`);
+    }
+    const name = oneOf(item, 'name', CONTROL_NAMES);
+    if (seen.has(name)) {
+      throw new ProtocolError(`drift names ${name} twice.`);
+    }
+    seen.add(name);
+    const expected = item['expected'];
+    const actual = item['actual'];
+    if (!isControlValue(name, expected) || !isControlValue(name, actual)) {
+      throw new ProtocolError(
+        `A drift of ${name} whose values are not values of it: ${show(expected)}, ${show(actual)}.`,
+      );
+    }
+    return { name, expected: expected as ControlValue, actual: actual as ControlValue };
+  });
+}
+
 function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -842,11 +1017,11 @@ function bool(json: Json, key: string): boolean {
   return value;
 }
 
-function text_(json: Json, key: string): string {
+function text_(json: Json, key: string, max = MAX_TEXT): string {
   const value = json[key];
-  if (typeof value !== 'string' || value.length > MAX_TEXT) {
+  if (typeof value !== 'string' || value.length > max) {
     throw new ProtocolError(
-      `${key} must be a string of at most ${String(MAX_TEXT)} characters, got ${show(value)}.`,
+      `${key} must be a string of at most ${String(max)} characters, got ${show(value)}.`,
     );
   }
   return value;

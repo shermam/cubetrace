@@ -147,6 +147,7 @@ describe('SettingsService', () => {
     settings.setRecordRemoteCameras(false);
     settings.setLivePreviewFromPhones(false);
     settings.setRemotePictures('tiles');
+    settings.setKeepCameraModes(false);
 
     expect(stored()).toEqual({
       version: 2,
@@ -185,8 +186,10 @@ describe('SettingsService', () => {
       recordRemoteCameras: false,
       livePreviewFromPhones: false,
       remotePictures: 'tiles',
+      keepCameraModes: false,
     });
     const reloaded = load();
+    expect(reloaded.keepCameraModes()).toBe(false);
     expect(reloaded.uploadSessions()).toBe(false);
     expect(reloaded.diagnostics()).toBe(false);
     expect(reloaded.recordRemoteCameras()).toBe(false);
@@ -558,6 +561,24 @@ describe('SettingsService', () => {
     // A value that is not a choice: the default.
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ remotePictures: 'huge' }));
     expect(load().remotePicturesChoice()).toBeNull();
+  });
+
+  it("keeps the camera's modes by default, and as switched; the settings before T5.2 as on (T5.2)", () => {
+    // What T5.1 stored: no such switch.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ version: 2, cameraOn: true, remotePictures: 'tiles' }),
+    );
+    const settings = load();
+    expect(settings.keepCameraModes()).toBe(true);
+    expect(settings.remotePictures()).toBe('tiles');
+
+    settings.setKeepCameraModes(false);
+    expect(stored()).toMatchObject({ keepCameraModes: false, remotePictures: 'tiles' });
+    expect(load().keepCameraModes()).toBe(false);
+
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ keepCameraModes: 'off' }));
+    expect(load().keepCameraModes()).toBe(true);
   });
 
   it('reads the settings stored before the microphone setting existed as Raw, the rest as stored', () => {

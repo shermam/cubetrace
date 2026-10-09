@@ -188,6 +188,16 @@ adds items; the owner ticks them when done (date and any detail that others need
   its console, through `chrome://inspect` on the MacBook with the phone on USB), tiles chosen and
   back. Write down what the items ask beside the events; the coordinator reads the rest from the
   MacBook's `rtc.clock` records (`npm run round-report`).
+- [ ] **The "After T5.2" items (the phone's camera controls from the MacBook, and the watchdog)**,
+  once T5.2 is merged and the deployed footer names a commit after it: the Moto g60 and then the
+  ThinkPhone paired to the MacBook as in "After T4", and go through "After T5.2" in
+  `docs/MANUAL-TESTS.md`: each phone's focus set to manual and a distance, Reset to auto, the zoom and
+  the torch from Camera settings → Cameras on the MacBook; a drift provoked on each phone from its
+  console through `chrome://inspect` (the item gives the line), with "Keep the camera's modes" on
+  (set back within 4 s) and off (left, red on the MacBook's line, Reset there); and once the
+  ThinkPhone as the host, its own camera's drift. Write down what the items ask beside the events;
+  the coordinator reads the rest from the MacBook's `remote.controls` and the phones' `controls.drift`
+  (`npm run round-report`).
 
 ## Later
 

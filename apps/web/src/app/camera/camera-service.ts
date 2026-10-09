@@ -9,14 +9,15 @@ import {
   untracked,
 } from '@angular/core';
 import {
-  CONTROL_GROUPS,
   FrameRateMeter,
   applyControls,
+  autoModeOf,
   browserLumaSampler,
   buildConstraints,
   cameraInfo,
   cameraLabel,
   clampFraming,
+  controlGroupOf,
   controlValuesOf,
   controlsOf,
   facingFromLabel,
@@ -25,21 +26,25 @@ import {
   fitControls,
   framingFor,
   isFullFrame,
+  modeControlOf,
+  modesOf,
   snapshot,
   watchFrames,
   type CameraChoice,
+  type CameraControls,
   type CameraFacing,
   type ControlName,
+  type ControlValue,
   type ControlValues,
   type FrameSize,
   type FramingRect,
   type JsonObject,
   type LumaSampler,
-  type MeteringMode,
+  type ModeControl,
 } from '@cubetrace/capture';
 import type { CameraIdentity, CameraInfo } from '@cubetrace/core';
 
-import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
+import { BROWSER_GLOBALS, hostNow, type BrowserGlobals } from '../device/browser-globals';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import {
   CAMERA_RESOLUTION_SIZE,
@@ -54,6 +59,8 @@ import {
   describeCameraError,
   describeFallback,
 } from './camera-errors';
+import { driftFacts, type ControlsSource } from './controls-source';
+import { ControlsWatch, type DriftEvent } from './controls-watch';
 import { SharpnessSchedule } from './sharpness-schedule';
 
 /**
@@ -89,7 +96,38 @@ const BUSY_RETRY_MS = 500;
 const FPS_UPDATE_SECONDS = 0.5;
 
 /** The controls that set a group's mode (see @cubetrace/capture's CONTROL_GROUPS). */
-const MODE_CONTROLS: readonly ControlName[] = ['exposureMode', 'focusMode', 'whiteBalanceMode'];
+const MODE_CONTROLS: readonly ModeControl[] = ['exposureMode', 'focusMode', 'whiteBalanceMode'];
+
+/**
+ * A slider let go (or a value changed by the keyboard) holds the watchdog's readings this long
+ * after, ms (T5.2): the change is on its way to the camera.
+ */
+export const ADJUSTING_QUIET_MS = 1000;
+
+/**
+ * What the app applied to a camera as it opened (T5.2): the mode each group opened in (its
+ * automatic choice: `continuous` on every phone probed; Chrome's fake camera opens in `manual`), or
+ * the group's automatic mode where the settings say none, with the controls kept for the camera
+ * applied over them (fitted to it; never the torch, which Settings never keep).
+ */
+export function openingApplied(
+  controls: CameraControls,
+  opening: object,
+  kept: ControlValues,
+): ControlValues {
+  const values: Partial<Record<ControlName, ControlValue>> = {};
+  const settings = controlValuesOf(opening);
+  for (const mode of MODE_CONTROLS) {
+    const modes = modesOf(controls, mode);
+    const opened = settings[mode] ?? autoModeOf(modes);
+    if (modes.length > 0 && opened !== null) {
+      values[mode] = opened;
+    }
+  }
+  const fitted: Partial<Record<ControlName, ControlValue>> = { ...fitControls(kept, controls) };
+  delete fitted.torch;
+  return { ...values, ...fitted } as ControlValues;
+}
 
 /**
  * The role this device's camera plays (T4.1): the host's own camera on the Timer page, or the camera
@@ -185,6 +223,13 @@ export class CameraService {
   private readonly busySignal = signal(false);
   private readonly framingEditingSignal = signal(false);
   private readonly roleSignal = signal<CameraRole>('host');
+  /** What the app applied to the open camera (T5.2): `openingApplied`, then each change. */
+  private readonly appliedSignal = signal<ControlValues>({});
+  /** The watchdog of the open camera's modes (T5.2), which runs while it is on. */
+  private readonly watch = new ControlsWatch();
+  /** A slider of a controls panel is held (T5.2); and when one last moved, on the host clock. */
+  private adjustingHeld = false;
+  private adjustedAtMs = Number.NEGATIVE_INFINITY;
 
   /** The browser's name of the camera on, for `camera.on`, `camera.switched` and `camera.off`; null while off. */
   private onLabel: string | null = null;
@@ -229,6 +274,40 @@ export class CameraService {
   readonly busy = this.busySignal.asReadonly();
   /** The role the camera plays (T4.1): the host's own, or a camera device's. */
   readonly role = this.roleSignal.asReadonly();
+  /**
+   * What the app applied to the open camera (T5.2): as it opened, the mode each group opened in with
+   * the controls kept for it applied over them (`openingApplied`), then each control set
+   * (`setControl`: a mode to auto forgets its group's values); empty while none is open. The
+   * watchdog holds the camera to it, and a phone reports it in its `controls` messages.
+   */
+  readonly applied = this.appliedSignal.asReadonly();
+  /**
+   * The controls the open camera changed by itself and that still differ from `applied`, as the
+   * watchdog (`ControlsWatch`, T5.2) sees them every 2 s: the focus that went manual on 2026-10-09.
+   */
+  readonly drift = this.watch.drift;
+  /** The last drift the watchdog saw and what became of it (set back, given up, left), for the words. */
+  readonly driftOutcome = this.watch.last;
+  /**
+   * The open camera's controls as the controls panel takes them (T5.2: the panel is a view over a
+   * `ControlsSource`, this device's camera here, a phone's in the Cameras section); its error is
+   * always null, since `notice` already says what the camera refused.
+   */
+  readonly controlsSource: ControlsSource = {
+    controls: this.controls,
+    values: this.values,
+    applied: this.applied,
+    drift: this.drift,
+    busy: this.busy,
+    error: signal<string | null>(null).asReadonly(),
+    set: async (name, value) => {
+      await this.setControl(name, value);
+    },
+    reset: () => this.resetControls(),
+    adjusting: (active) => {
+      this.adjusting(active);
+    },
+  };
   /**
    * Under which name Settings keep the camera chosen: the host label for the host's own camera, and
    * the host label marked for the camera device, whose choice is its own (the rear camera, where the
@@ -414,19 +493,21 @@ export class CameraService {
    * mode forgets the group's kept values. A value (an exposure time, a distance…) switches its
    * group to manual. When the camera does not go back to an automatic mode by a constraint (the
    * ThinkPhone's front camera lists only manual focus), it is reopened: a new capture starts in the
-   * camera's automatic modes, with the other choices kept for it applied again.
+   * camera's automatic modes, with the other choices kept for it applied again. Resolves with why
+   * the camera refused the change (also in `notice`), or null when it took it, or while no camera
+   * is on (nothing is done then).
    */
-  async setControl(name: ControlName, value: MeteringMode | number | boolean): Promise<void> {
+  async setControl(name: ControlName, value: ControlValue): Promise<string | null> {
     const track = this.track;
     const controls = this.controls();
     if (track === null || controls === null || this.statusSignal() !== 'on') {
-      return;
+      return null;
     }
-    const group = CONTROL_GROUPS.find((names) => names.includes(name)) ?? [name];
-    const modeName = group.find((member) => MODE_CONTROLS.includes(member));
+    const group = controlGroupOf(name);
+    const modeName = modeControlOf(name);
     // What the camera takes: its modes, and numbers in their ranges and on their steps.
     const change = fitControls(
-      modeName === undefined || modeName === name
+      modeName === null || modeName === name
         ? { [name]: value }
         : { [modeName]: 'manual', [name]: value },
       controls,
@@ -439,6 +520,8 @@ export class CameraService {
       ...(Object.fromEntries(kept) as ControlValues),
       ...(toAuto ? {} : change),
     });
+    this.appliedSignal.set(appliedAfter(this.appliedSignal(), group, change, toAuto));
+    let refused: string | null = null;
     this.busySignal.set(true);
     try {
       await this.serially(async () => {
@@ -448,7 +531,8 @@ export class CameraService {
         try {
           await applyControls(track, change);
         } catch (error: unknown) {
-          this.noticeSignal.set(`The camera refused the change (${errorMessage(error)}).`);
+          refused = `The camera refused the change (${errorMessage(error)}).`;
+          this.noticeSignal.set(refused);
         }
         if (track !== this.track) {
           return;
@@ -461,6 +545,16 @@ export class CameraService {
     } finally {
       this.busySignal.set(false);
     }
+    return refused;
+  }
+
+  /**
+   * A slider of a controls panel is held or moved (true), or let go (false) (T5.2): the watchdog
+   * reads nothing meanwhile, nor for {@link ADJUSTING_QUIET_MS} after the last of these calls.
+   */
+  adjusting(active: boolean): void {
+    this.adjustingHeld = active;
+    this.adjustedAtMs = hostNow(this.globals);
   }
 
   /** Forgets the manual controls kept for the open camera and reopens it, all automatic. */
@@ -649,6 +743,90 @@ export class CameraService {
     return sameLabel?.deviceId ?? pick.deviceId;
   }
 
+  /**
+   * Whether the watchdog waits (T5.2): a change in flight, or a slider held or moved within the last
+   * {@link ADJUSTING_QUIET_MS}.
+   */
+  private watchPaused(): boolean {
+    return (
+      this.busySignal() ||
+      this.adjustingHeld ||
+      hostNow(this.globals) - this.adjustedAtMs < ADJUSTING_QUIET_MS
+    );
+  }
+
+  /**
+   * Watches the modes of the camera open on `track` (T5.2, `ControlsWatch`): every 2 s its settings
+   * against `applied`; a drift is said (`controls.drift`), and with "Keep the camera's modes" applied
+   * again.
+   */
+  private startWatch(track: MediaStreamTrack): void {
+    this.watch.start(track, this.appliedSignal, {
+      controls: () => this.controls(),
+      keep: () => this.prefs.keepCameraModes(),
+      paused: () => this.watchPaused(),
+      reapply: (values) => this.reapply(track, values),
+      onDrift: (event) => {
+        this.drifted(track, event);
+      },
+      timers: {
+        now: () => hostNow(this.globals),
+        setTimeout: (callback, ms) =>
+          this.globals.setTimeout === undefined
+            ? setTimeout(callback, ms)
+            : this.globals.setTimeout(callback, ms),
+        clearTimeout: (handle) => {
+          if (this.globals.clearTimeout === undefined) {
+            clearTimeout(handle as ReturnType<typeof setTimeout>);
+          } else {
+            this.globals.clearTimeout(handle as number);
+          }
+        },
+      },
+    });
+  }
+
+  /**
+   * The watchdog saw a drift: the snapshot taken again when it is left (the panel then shows the
+   * mode the camera is in, not the one it opened in), and `controls.drift` (docs/DIAGNOSTICS.md).
+   */
+  private drifted(track: MediaStreamTrack, event: DriftEvent): void {
+    if (track !== this.track) {
+      return;
+    }
+    if (!event.reapplied) {
+      this.takeSnapshot(track);
+    }
+    this.diagnostics.record('controls.drift', {
+      camera: this.identity()?.label ?? null,
+      role: this.roleSignal(),
+      deviceLabel: track.label,
+      drift: driftFacts(event.drift),
+      controls: event.drift.map((drift) => drift.name),
+      reapplied: event.reapplied,
+      gaveUp: event.gaveUp,
+      keep: event.keep,
+    });
+  }
+
+  /** Applies `values` again to the camera open on `track` (the watchdog's re-application). */
+  private async reapply(track: MediaStreamTrack, values: ControlValues): Promise<void> {
+    await this.serially(async () => {
+      const controls = this.controls();
+      if (track !== this.track || controls === null) {
+        return;
+      }
+      try {
+        await applyControls(track, fitControls(values, controls));
+      } catch (error: unknown) {
+        this.noticeSignal.set(`The camera refused its modes again (${errorMessage(error)}).`);
+      }
+      if (track === this.track) {
+        this.takeSnapshot(track);
+      }
+    });
+  }
+
   /** Takes an open stream: applies the controls kept for its camera and shows it. */
   private async adopt(
     generation: number,
@@ -685,6 +863,7 @@ export class CameraService {
     const messages = [...notes];
     const kept = this.prefs.cameraControlsFor(track.label);
     const controls = this.controls();
+    const opening = this.openingSettingsSignal() ?? {};
     if (controls !== null && Object.keys(kept).length > 0) {
       try {
         await applyControls(track, fitControls(kept, controls));
@@ -696,10 +875,12 @@ export class CameraService {
       }
       this.takeSnapshot(track);
     }
+    this.appliedSignal.set(controls === null ? {} : openingApplied(controls, opening, kept));
     this.streamSignal.set(stream);
     this.statusSignal.set('on');
     this.noticeSignal.set(messages.length > 0 ? messages.join(' ') : null);
     this.announce(track, choice, messages.length);
+    this.startWatch(track);
     void this.refreshDevices();
   }
 
@@ -739,6 +920,8 @@ export class CameraService {
 
   /** Closes the camera that is open, and forgets what was measured on it. */
   private close(): void {
+    this.watch.stop();
+    this.appliedSignal.set({});
     this.forgetTrack?.();
     this.forgetTrack = null;
     if (this.opened !== null) {
@@ -785,6 +968,27 @@ export class CameraService {
       setTimer(resolve, ms);
     });
   }
+}
+
+/**
+ * `applied` once `change` is set on `group` (T5.2): a mode to auto (`toAuto`) replaces the group's
+ * values with the mode alone; anything else goes over them. The torch is never kept.
+ */
+function appliedAfter(
+  applied: ControlValues,
+  group: readonly ControlName[],
+  change: ControlValues,
+  toAuto: boolean,
+): ControlValues {
+  const next: Partial<Record<ControlName, ControlValue>> = { ...applied };
+  if (toAuto) {
+    for (const name of group) {
+      Reflect.deleteProperty(next, name);
+    }
+  }
+  Object.assign(next, change);
+  delete next.torch;
+  return next as ControlValues;
 }
 
 /** `navigator.mediaDevices` when it can list and open cameras; null otherwise. */

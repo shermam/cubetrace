@@ -43,7 +43,8 @@ apps/web (Angular, PWA)
                                signed URLs, retried, throttled, its state in uploads.json; clips deleted by policy
   ──uses──▶ packages/rtc       (phase 4) the connection to a remote camera: the data channel's protocol · the file
                                transfer (paced, resumable, checked) · the clock sync's pings · the pairing token ·
-                               the signaling over Firestore · WebRtcTransport; fakes of the transport and the signaling
+                               the signaling over Firestore · WebRtcTransport; fakes of the transport and the signaling;
+                               the remote controls' messages in packages/capture's vocabulary of a camera's controls (T5.2)
 ```
 
 `packages/*` are plain TypeScript, tested in Node with Vitest, and never import Angular.
@@ -279,6 +280,31 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   whose square flips when the test says) and turns the demo cube through the dev server's `ng`
   debugging API, so that nothing of it is in the app.
 
+**The remote controls and the watchdog of the camera's modes (T5.2; `docs/RTC.md` §11).**
+
+- The controls panel (`CameraControls`, T2.1) is a view over a `ControlsSource`
+  (`apps/web/src/app/camera/controls-source.ts`: the controls, the values, what was applied, the
+  drift, a change in flight, why one did not take; `set`, `reset`, and `adjusting` for a slider
+  held): `CameraService.controlsSource` for this device's camera (Camera settings, the phone's own
+  Camera page), a phone's `RemoteControlsSource` under it in the Cameras section.
+- `ControlsWatch` (`controls-watch.ts`, signals and nothing else of Angular) is the watchdog that
+  `CameraService` runs on the open camera in both roles: every 2 s the track's settings against
+  `CameraService.applied` (the modes the camera opened in, the controls kept for it and those set
+  since), a drift after two readings, set back with "Keep the camera's modes"
+  (`SettingsService.keepCameraModes`, on by default) three times a minute at most, `controls.drift`.
+- The phone: `CameraDeviceControls` (`camera-device/camera-device-controls.ts`), which
+  `CameraDeviceService` hands each connection, answers `set-controls` through `CameraService`
+  (`setControl`, `resetControls`: the same path as the phone's own panel) and sends `controls` after
+  each hello, each answer and each change of them.
+- The host: `RemoteCamerasService` keeps a `RemoteControlsSource` per phone
+  (`camera/remote-controls-source.ts`: its last `controls`, a change in flight until the answer or 3
+  s, `remote.controls`, "no remote controls" after 5 s without any), attached to each connection;
+  the phone's drift goes into its entry, and through `RemoteCameraRegistry` (`drift`, `resetDrift`)
+  onto its status line on the Timer page, with a Reset beside it.
+- The end-to-end pair's synthetic camera has a focus (its tracks' capabilities, settings and
+  `applyConstraints`), which the suite reads and changes behind the app's back
+  (`syntheticControls`, `driftCamera`).
+
 ## The clip viewer
 
 The solve lists' clip badges open the viewer (`apps/web/src/app/timer/clip-viewer.ts`, a modal
@@ -513,6 +539,8 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
     clock / failed; RemoteCutsService: remote.cut, remote.clip, remote.clip.late / missing; on the phone:
     CameraDeviceService: rtc.paired / connected / disconnected / failed; CameraDeviceCapture: recording.*;
     CameraDeviceClips: remote.cut (failed); CameraDevicePreview: preview.started / stopped
+  the remote controls (T5.2): on the host, RemoteCamerasService: remote.controls; on either device,
+    CameraService (its watchdog of the open camera's modes): controls.drift
 the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the
   router), settings.changed (the settings the checklists name), wake.lock, storage.persistence, network.changed
 ```

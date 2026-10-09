@@ -1,5 +1,10 @@
 import { Injectable, computed, signal, type Signal } from '@angular/core';
-import type { ClapperboardFrame, FrameSize, MotionMeterInfo } from '@cubetrace/capture';
+import type {
+  ClapperboardFrame,
+  ControlDrift,
+  FrameSize,
+  MotionMeterInfo,
+} from '@cubetrace/capture';
 import type { CropRect, RemoteClockRecord } from '@cubetrace/core';
 
 import type { RemoteReport } from './remote-status';
@@ -9,8 +14,8 @@ export type RemoteCameraPhase = 'connecting' | 'connected' | 'reconnecting' | 'f
 
 /**
  * A remote camera as the Timer page's preview area and the sync check see it (T4.3): its names, its
- * state, what it reports of its picture, its live preview's track, and its last report for its status
- * line (T5.1).
+ * state, what it reports of its picture, its live preview's track, its last report for its status
+ * line (T5.1), and what its camera changed by itself (T5.2).
  */
 export interface RemoteCameraEntry {
   /** Its id in the Cameras list, kept across its reconnections. */
@@ -43,6 +48,11 @@ export interface RemoteCameraEntry {
   readonly report: RemoteReport | null;
   /** When it came, on the host clock; null before the first. */
   readonly reportMs: number | null;
+  /**
+   * What the phone's camera changed by itself and still differs (T5.2, its watchdog's, from its last
+   * `controls`): "focus went manual on the phone" on its line, with Reset; empty when nothing.
+   */
+  readonly drift: readonly ControlDrift[];
 }
 
 /** What gives the registry its cameras and measures their motion: the Cameras section's service. */
@@ -62,6 +72,11 @@ export interface RemoteCameraSource {
   ): (() => void) | null;
   /** The record of the clock estimate that places camera `id`'s frame times now; null without one. */
   clockRecord(id: string): RemoteClockRecord | null;
+  /**
+   * Resets what camera `id`'s camera changed by itself (T5.2, the Reset beside its line): the
+   * automatic modes of the drifted groups, sent to the phone (`set-controls`).
+   */
+  resetDrift(id: string): void;
 }
 
 /**
@@ -101,5 +116,10 @@ export class RemoteCameraRegistry {
   /** See {@link RemoteCameraSource.clockRecord}. */
   clockRecord(id: string): RemoteClockRecord | null {
     return this.source()?.clockRecord(id) ?? null;
+  }
+
+  /** See {@link RemoteCameraSource.resetDrift}: nothing without the Cameras section. */
+  resetDrift(id: string): void {
+    this.source()?.resetDrift(id);
   }
 }

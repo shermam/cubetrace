@@ -272,7 +272,10 @@ same size, with its framing rectangle ("Live preview from phones" on and "Pictur
 the same size, both the MacBook's defaults): side by side in a window of 1,552 px or more, one under
 the other in a narrower one; keep the cube inside the rectangle on both pictures while scrambling and
 solving. The line under the phone's picture is the phone's state from 2 s ago: a sharpness gone
-amber (soft) is a focus to fix on the phone (Camera settings there: the focus back to auto), a
+amber (soft) is a focus to fix (from the MacBook: Camera settings → Cameras → the phone's Camera
+controls, the focus back to auto; a mode the phone's camera changed by itself is said in red on the
+line, "focus went manual on the phone", with Reset beside it, and the phone sets it back by itself
+while its "Keep the camera's modes" is on, `docs/RTC.md` §11), a
 battery in amber or red a charger to plug in, `hot: the frame rate dropped` or a pressure in amber
 or red a phone to let cool (the live preview off, the screen dimmed, a break between sets), and
 `no report for N s` in red a phone that stopped talking (its page in front again, or Leave and pair

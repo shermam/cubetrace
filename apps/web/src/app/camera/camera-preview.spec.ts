@@ -4,12 +4,15 @@ import { LumaSampler, type Canvas2D } from '@cubetrace/capture';
 import { bluetoothNavigator } from '../cube/cube-testing';
 import {
   FAKE_PHONE_FRONT,
+  FAKE_PHONE_REAR,
   FAKE_WEBCAM,
   FakeMediaDevices,
   FakeVideoFrames,
   settle,
   type FakeCamera,
+  type FakeVideoTrack,
 } from '../device/fake-browser';
+import { SettingsService } from '../settings/settings-service';
 import { StorageService } from '../device/storage-service';
 import { ready, setup, turn, type Setup } from '../session/session-harness';
 import { CameraPreview } from './camera-preview';
@@ -270,6 +273,20 @@ describe('CameraPreview', () => {
     starter.last.emitError({ message: 'The video encoder failed: EncodingError', fatal: true });
     await update();
     expect(text('camera-status-recording')).toBe('stopped');
+  });
+
+  it('says in red on its line a mode its camera changed by itself, as a phone’s line does (T5.2)', async () => {
+    const camera = await render([FAKE_PHONE_REAR]);
+    TestBed.inject(SettingsService).setKeepCameraModes(false);
+    await camera.start();
+    await update();
+    expect(element('camera-status-drift')).toBeNull();
+    const track = camera.stream()?.getVideoTracks()[0] as FakeVideoTrack | undefined;
+    track?.drift({ focusMode: 'manual' });
+    s.timers.advance(4000);
+    await update();
+    expect(text('camera-status-drift')).toBe('focus went manual');
+    expect(text('camera-status')).toMatch(/ · focus went manual$/);
   });
 
   it("shows the phones paired over its picture once one has a camera, and a phone's picture with the camera off (T4.3)", async () => {

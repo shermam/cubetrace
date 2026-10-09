@@ -276,6 +276,40 @@ describe('CameraDevicePage', () => {
     expect(text('device-again')).toBe('Try another code');
   });
 
+  it("says what its camera changed by itself and whether it was set back, and switches Keep the camera's modes (T5.2)", async () => {
+    const prepared = prepare();
+    const { token } = await host();
+    await render({ query: { session: SESSION_A, token }, prepared });
+    await pump(20);
+    expect(element('device-drift')).toBeNull();
+    const track = media.tracks.at(-1);
+    // The focus went manual by itself: set back within two readings, and said for a minute.
+    track?.drift({ focusMode: 'manual' });
+    await pump(4000, 8);
+    expect(text('device-drift')).toBe(
+      'The camera set the focus to manual by itself: set back to continuous.',
+    );
+    expect(element('device-drift')?.classList.contains('notice')).toBe(true);
+    await pump(60_000, 30);
+    expect(element('device-drift')).toBeNull();
+
+    // Keep the camera's modes off, on the page's own switch: said and left.
+    (element('device-camera-settings') as HTMLDetailsElement).open = true;
+    await pump(0);
+    const keep = element('device-keep-camera-modes') as HTMLInputElement;
+    expect(keep.checked).toBe(true);
+    keep.click();
+    await pump(0);
+    expect(TestBed.inject(SettingsService).keepCameraModes()).toBe(false);
+    track?.drift({ focusMode: 'manual' });
+    await pump(4000, 8);
+    expect(text('device-drift')).toBe(
+      "The camera set the focus to manual by itself: left so (Keep the camera's modes is off).",
+    );
+    expect(element('device-drift')?.classList.contains('problem')).toBe(true);
+    expect(text('camera-controls-drift')).toBe('The camera set the focus to manual by itself.');
+  });
+
   it('leaves the camera as it found it when the page goes: the host’s role, and off if it was off', async () => {
     await render();
     const camera = TestBed.inject(CameraService);

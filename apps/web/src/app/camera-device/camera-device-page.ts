@@ -18,6 +18,7 @@ import { AuthService } from '../auth/auth-service';
 import { CameraControls } from '../camera/camera-controls';
 import { fpsText, sharpnessText, sizeText } from '../camera/camera-format';
 import { CameraService } from '../camera/camera-service';
+import { outcomeSentences } from '../camera/controls-source';
 import { FramingEditor } from '../camera/framing-editor';
 import { SharpnessMeter } from '../camera/sharpness-meter';
 import { showStream } from '../camera/video';
@@ -67,7 +68,9 @@ export const STATE_TEXT: Readonly<Record<CameraDeviceState, string>> = {
  * host's name, the connection's state, the clock sync as the host measures it, the battery, a
  * thermal hint and the Compute Pressure state where the browser has one (T5.1: the observer runs while
  * the page is open), the clips cut for the host and not yet in its hands (T4.2), whether it sends the host
- * its live picture and whether the host's sync check measures it (T4.3), and Leave; it holds the
+ * its live picture and whether the host's sync check measures it (T4.3), what its camera changed by
+ * itself and whether it was set back (T5.2: "Keep the camera's modes", a switch of its Camera
+ * settings too, since Settings would leave this page; the host sets its controls too), and Leave; it holds the
  * wake lock while joined and asks to keep the screen on and the phone plugged in
  * (`CameraDeviceService`). It never shows the timer and never starts a session
  * of its own; leaving the page leaves the session, and the camera goes back to what it was.
@@ -87,7 +90,7 @@ export class CameraDevicePage {
   protected readonly livePreview = inject(CameraDevicePreview);
   protected readonly auth = inject(AuthService);
   protected readonly wakeLock = inject(WakeLockService);
-  private readonly settings = inject(SettingsService);
+  protected readonly settings = inject(SettingsService);
   private readonly route = inject(ActivatedRoute);
   private readonly timers = inject(RTC_TIMERS);
   private readonly preview = viewChild<ElementRef<HTMLVideoElement>>('preview');
@@ -141,6 +144,16 @@ export class CameraDevicePage {
     return state === undefined || state === 'nominal' ? null : PRESSURE_TEXT[state];
   });
   protected readonly wakeLockText = computed(() => WAKE_LOCK_TEXT[this.wakeLock.status()]);
+  /**
+   * What the watchdog of this camera's modes saw last (T5.2), a sentence per control: set back (for
+   * a minute), or left, or given up (while it stands); `bad` unless it was set back.
+   */
+  protected readonly driftNotes = computed(() => {
+    const outcome = this.camera.driftOutcome();
+    return outcome === null
+      ? null
+      : { sentences: outcomeSentences(outcome), bad: !outcome.reapplied };
+  });
   /** The live picture the host gets (T4.3): sent, or not asked for. */
   protected readonly previewText = computed(() => {
     if (this.livePreview.sending()) {

@@ -1,8 +1,10 @@
+import type { CameraControls } from '@cubetrace/capture';
 import type { CameraInfo } from '@cubetrace/core';
 import { describe, expect, it } from 'vitest';
 
 import {
   CHUNK_HEADER_BYTES,
+  MAX_CONTROLS_MESSAGE,
   PROTOCOL_VERSION,
   ProtocolError,
   THUMBNAIL_HEADER_BYTES,
@@ -24,6 +26,47 @@ const CAMERA: CameraInfo = {
   mode: 'full',
   microphone: null,
 };
+
+/** The ThinkPhone's rear camera's controls, as `controlsOf` reads its probe (docs/devices/). */
+const REAR_CONTROLS: CameraControls = {
+  exposureModes: ['continuous', 'manual'],
+  exposureTime: { min: 0.832, max: 2880, step: 0.1 },
+  iso: { min: 100, max: 1594, step: 1 },
+  focusModes: ['continuous', 'single-shot', 'manual'],
+  focusDistance: { min: 0.10000000149011612, max: 8.156450271606445, step: 0.009999999776482582 },
+  whiteBalanceModes: ['continuous', 'manual'],
+  colorTemperature: { min: 2850, max: 7000, step: 50 },
+  zoom: { min: 1, max: 8, step: 0.1 },
+  torch: true,
+};
+
+/** The MacBook's FaceTime camera: no control at all. */
+const NO_CONTROLS: CameraControls = {
+  exposureModes: [],
+  exposureTime: null,
+  iso: null,
+  focusModes: [],
+  focusDistance: null,
+  whiteBalanceModes: [],
+  colorTemperature: null,
+  zoom: null,
+  torch: false,
+};
+
+/** A `controls` message of the phone's rear camera, its focus gone manual by itself. */
+const CONTROLS = JSON.stringify({
+  type: 'controls',
+  controls: REAR_CONTROLS,
+  values: { focusMode: 'manual', focusDistance: 0.35, zoom: 1, torch: false },
+  applied: { exposureMode: 'continuous', focusMode: 'continuous', whiteBalanceMode: 'continuous' },
+  drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual' }],
+  remoteMs: 1_790_000_003_000,
+});
+
+/** {@link CONTROLS} with `change` made to it (a field set, or removed when undefined). */
+function controlsWith(change: Record<string, unknown>): string {
+  return JSON.stringify({ ...(JSON.parse(CONTROLS) as Record<string, unknown>), ...change });
+}
 
 /** One message of every type, as each side would send it. */
 const MESSAGES: Message[] = [
@@ -254,6 +297,47 @@ const MESSAGES: Message[] = [
   { type: 'sync-error', id: 3, message: 'the phone is not recording' },
   { type: 'preview', on: true },
   { type: 'preview', on: false },
+  {
+    type: 'controls',
+    controls: REAR_CONTROLS,
+    values: {
+      exposureMode: 'continuous',
+      exposureTime: 48.77393,
+      iso: 100,
+      focusMode: 'manual',
+      focusDistance: 0.35,
+      whiteBalanceMode: 'continuous',
+      colorTemperature: 0,
+      zoom: 1,
+      torch: false,
+    },
+    applied: {
+      exposureMode: 'continuous',
+      focusMode: 'continuous',
+      whiteBalanceMode: 'continuous',
+    },
+    drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual' }],
+    remoteMs: 1_790_000_003_000,
+  },
+  {
+    type: 'controls',
+    controls: { ...REAR_CONTROLS, exposureTime: { min: 1, max: 100 } },
+    values: { zoom: 2.5, torch: true },
+    applied: { focusMode: 'manual', focusDistance: 0.4, zoom: 2.5 },
+    drift: [
+      { name: 'zoom', expected: 2.5, actual: 1 },
+      { name: 'torch', expected: true, actual: false },
+    ],
+    remoteMs: 0,
+  },
+  { type: 'controls', controls: NO_CONTROLS, values: {}, applied: {}, drift: [], remoteMs: 1 },
+  { type: 'set-controls', values: { focusMode: 'manual', focusDistance: 0.35 } },
+  { type: 'set-controls', values: { torch: true } },
+  { type: 'set-controls', reset: true },
+  {
+    type: 'controls-failed',
+    message: 'The camera refused the change (OverconstrainedError: focusDistance).',
+  },
 ];
 
 describe('the protocol', () => {
@@ -378,6 +462,29 @@ describe('the protocol', () => {
       pressureSource: null,
       pendingClips: 1,
     });
+    // T5.2's controls: a control a later build may add, and fields of a drift, are left out.
+    const later = controlsWith({
+      controls: { ...REAR_CONTROLS, pointsOfInterest: true },
+      values: { focusMode: 'manual', exposureCompensation: 0.5 },
+      drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual', seenMs: 4 }],
+      sequence: 12,
+    });
+    expect(decode(later)).toEqual({
+      type: 'controls',
+      controls: REAR_CONTROLS,
+      values: { focusMode: 'manual' },
+      applied: {
+        exposureMode: 'continuous',
+        focusMode: 'continuous',
+        whiteBalanceMode: 'continuous',
+      },
+      drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual' }],
+      remoteMs: 1_790_000_003_000,
+    });
+    // A reset with values too is a reset; its values are not read.
+    expect(
+      decode(JSON.stringify({ type: 'set-controls', reset: true, values: { zoom: 'x' } })),
+    ).toEqual({ type: 'set-controls', reset: true });
   });
 
   it.each([
@@ -661,6 +768,115 @@ describe('the protocol', () => {
       /region must be an object/,
     ],
     ['a preview whose on is text', '{"type": "preview", "on": "yes"}', /on must be true or false/],
+    [
+      'a controls without its controls',
+      controlsWith({ controls: undefined }),
+      /controls must be an object/,
+    ],
+    [
+      'a controls whose modes are not the protocol’s',
+      controlsWith({ controls: { ...REAR_CONTROLS, focusModes: ['auto', 'manual'] } }),
+      /focusModes must list modes of continuous, single-shot, manual, none, each once/,
+    ],
+    [
+      'a controls that lists a mode twice',
+      controlsWith({ controls: { ...REAR_CONTROLS, exposureModes: ['manual', 'manual'] } }),
+      /exposureModes must list modes/,
+    ],
+    [
+      'a controls whose range is upside down',
+      controlsWith({ controls: { ...REAR_CONTROLS, zoom: { min: 8, max: 1 } } }),
+      /max must be a number ≥ 8/,
+    ],
+    [
+      'a controls whose range holds one value',
+      controlsWith({ controls: { ...REAR_CONTROLS, iso: { min: 100, max: 100 } } }),
+      /iso.max must be above its min/,
+    ],
+    [
+      'a controls whose range steps by nothing',
+      controlsWith({ controls: { ...REAR_CONTROLS, zoom: { min: 1, max: 8, step: 0 } } }),
+      /zoom.step must be above 0/,
+    ],
+    [
+      'a controls whose range is not finite (JSON makes it null)',
+      controlsWith({ controls: { ...REAR_CONTROLS, iso: { min: 100, max: Infinity } } }),
+      /max must be a number/,
+    ],
+    [
+      'a controls whose torch is text',
+      controlsWith({ controls: { ...REAR_CONTROLS, torch: 'on' } }),
+      /torch must be true or false/,
+    ],
+    [
+      'a controls whose values hold a mode of no protocol',
+      controlsWith({ values: { focusMode: 'auto' } }),
+      /values.focusMode is not a value of focusMode, got "auto"/,
+    ],
+    [
+      'a controls whose values hold a number that is not one',
+      controlsWith({ values: { zoom: null } }),
+      /values.zoom is not a value of zoom, got null/,
+    ],
+    [
+      'a controls whose applied values are not an object',
+      controlsWith({ applied: [] }),
+      /applied must be an object/,
+    ],
+    ['a controls whose drift is not a list', controlsWith({ drift: {} }), /drift must be an array/],
+    [
+      'a controls whose drift names no control',
+      controlsWith({ drift: [{ name: 'brightness', expected: 1, actual: 2 }] }),
+      /name must be one of exposureMode, exposureTime, iso, focusMode/,
+    ],
+    [
+      'a controls whose drift holds a value of another control',
+      controlsWith({ drift: [{ name: 'focusMode', expected: 'continuous', actual: 0.35 }] }),
+      /A drift of focusMode whose values are not values of it/,
+    ],
+    [
+      'a controls whose drift names a control twice',
+      controlsWith({
+        drift: [
+          { name: 'zoom', expected: 2, actual: 1 },
+          { name: 'zoom', expected: 2, actual: 3 },
+        ],
+      }),
+      /drift names zoom twice/,
+    ],
+    [
+      'a controls whose drift is longer than the controls',
+      controlsWith({
+        drift: Array.from({ length: 10 }, () => ({ name: 'zoom', expected: 2, actual: 1 })),
+      }),
+      /drift must hold at most 9 controls, got 10/,
+    ],
+    [
+      'a controls without its time',
+      controlsWith({ remoteMs: undefined }),
+      /remoteMs must be a number/,
+    ],
+    ['a set-controls of nothing', '{"type": "set-controls"}', /values must be an object/],
+    [
+      'a set-controls whose reset is not true',
+      '{"type": "set-controls", "reset": false}',
+      /values must be an object/,
+    ],
+    [
+      'a set-controls of no control',
+      '{"type": "set-controls", "values": {"brightness": 3}}',
+      /values must hold one control or more, got none/,
+    ],
+    [
+      'a set-controls of a value the control does not take',
+      '{"type": "set-controls", "values": {"torch": "on"}}',
+      /values.torch is not a value of torch/,
+    ],
+    [
+      'a controls-failed of a message too long',
+      JSON.stringify({ type: 'controls-failed', message: 'x'.repeat(MAX_CONTROLS_MESSAGE + 1) }),
+      /message must be a string of at most 500 characters/,
+    ],
   ])('refuses %s', (_, text, message) => {
     expect(() => decode(text)).toThrow(ProtocolError);
     expect(() => decode(text)).toThrow(message);

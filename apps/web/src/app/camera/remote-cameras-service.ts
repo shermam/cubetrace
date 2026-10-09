@@ -8,7 +8,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import type { ClapperboardFrame, MotionMeterInfo } from '@cubetrace/capture';
+import type { ClapperboardFrame, ControlDrift, MotionMeterInfo } from '@cubetrace/capture';
 import {
   RemoteClockFit,
   type AppBuild,
@@ -49,6 +49,7 @@ import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import type { PairingBlock } from './pairing-block';
 import { RemoteCameraRegistry, type RemoteCameraEntry } from './remote-camera-registry';
+import { RemoteControlsSource } from './remote-controls-source';
 import { RemoteCutsService, type CutCamera } from './remote-cuts-service';
 import { clockEstimate } from './remote-estimate';
 
@@ -123,6 +124,11 @@ export interface RemoteCamera {
    * sends it: muted while it does not.
    */
   readonly preview: MediaStreamTrack | null;
+  /**
+   * What the phone's camera changed by itself, as its last `controls` says (T5.2, its watchdog):
+   * "focus went manual on the phone" on its line; empty when nothing.
+   */
+  readonly drift: readonly ControlDrift[];
 }
 
 /** A pairing the host shows: the token, the QR's URL and until when the token is taken. */
@@ -190,6 +196,8 @@ interface Peer {
   recordTimer: unknown;
   /** While `finishing`: the end of the wait, and what stops watching its clips still to come. */
   finishing: { timer: unknown; off: () => void } | null;
+  /** The phone's camera controls (T5.2), its panel's source in the Cameras section. */
+  readonly controls: RemoteControlsSource;
 }
 
 /**
@@ -278,6 +286,9 @@ export class RemoteCamerasService {
       cameras: computed(() => this.camerasSignal().map(entryOf)),
       watchMotion: (id, onSample, onError, onMeter) =>
         this.watchMotion(id, onSample, onError, onMeter),
+      resetDrift: (id) => {
+        void this.peers.get(id)?.controls.resetDrift();
+      },
       clockRecord: (id) => {
         const fit = this.peers.get(id)?.fit;
         const estimate = fit === undefined ? null : clockEstimate(fit);
@@ -396,6 +407,14 @@ export class RemoteCamerasService {
     this.end(peer, 'removed by the host', 'The host removed this camera.', LEAVE_GRACE_MS);
   }
 
+  /**
+   * The camera controls of the phone `id` (T5.2), for its panel in the Cameras section; null when it
+   * is not listed.
+   */
+  controlsOf(id: string): RemoteControlsSource | null {
+    return this.peers.get(id)?.controls ?? null;
+  }
+
   /** Resolves once the operations under way (pairings, connections) have settled, for the tests. */
   async whenIdle(): Promise<void> {
     let last: Promise<unknown> | null = null;
@@ -507,6 +526,7 @@ export class RemoteCamerasService {
         clipsLeft: 0,
         session: sessionId,
         preview: null,
+        drift: [],
       },
       sessionId,
       fit: new RemoteClockFit(),
@@ -520,6 +540,24 @@ export class RemoteCamerasService {
       removalTimer: null,
       recordTimer: null,
       finishing: null,
+      controls: new RemoteControlsSource({
+        timers: this.timers,
+        onOutcome: (outcome) => {
+          this.diagnostics.record('remote.controls', {
+            camera: peer.camera.label,
+            peer: peer.camera.device.label,
+            set: outcome.set,
+            outcome: outcome.outcome,
+            message: outcome.message,
+            ms: outcome.ms,
+          });
+        },
+        onReport: (report) => {
+          if (JSON.stringify(report.drift) !== JSON.stringify(peer.camera.drift)) {
+            this.patch(peer, { drift: report.drift });
+          }
+        },
+      }),
     };
     this.peers.set(peer.camera.id, peer);
     this.camerasSignal.update((cameras) => [...cameras, peer.camera]);
@@ -635,6 +673,11 @@ export class RemoteCamerasService {
         if (message.v === PROTOCOL_VERSION) {
           this.patch(peer, { device: message.device, app: message.app, camera: message.camera });
           this.putEntry(peer);
+          // Another camera, or none: its controls come with it (T5.2).
+          peer.controls.cameraChanged(message.camera !== null);
+          if (message.camera === null && peer.camera.drift.length > 0) {
+            this.patch(peer, { drift: [] });
+          }
         }
       }),
       link.on('state', (message) => {
@@ -654,6 +697,8 @@ export class RemoteCamerasService {
           this.disconnected(peer, generation, reason ?? state);
         }
       }),
+      // The phone's camera controls (T5.2): its `controls`, and its answers to the panel's changes.
+      peer.controls.attach(link, hello.camera !== null),
     );
     const pinger = new ClockPinger(link, peer.fit, { timers: this.timers });
     peer.pinger = pinger;
@@ -1252,6 +1297,7 @@ function entryOf(camera: RemoteCamera): RemoteCameraEntry {
     thumbnail: camera.thumbnail?.url ?? null,
     report: camera.report,
     reportMs: camera.reportMs,
+    drift: camera.drift,
   };
 }
 
