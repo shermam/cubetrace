@@ -4,7 +4,8 @@ import type { Page } from '@playwright/test';
 // suite bends in a phone's page (`window.cubetraceE2eRemote`, src/app/rtc/e2e-remote.ts, development
 // builds only), the files of a session read from the host's origin private file system, the phone's
 // pill as a failure should read it; and, for the remote sync check (T4.3), a phone camera whose
-// motion the suite schedules, and the demo cube's turns at given times.
+// motion the suite schedules, and the demo cube's turns at given times; and, for the remote controls
+// (T5.2), that camera's focus controls, which the suite reads and changes behind the app's back.
 
 /** The window property the app reads in development builds (src/app/rtc/e2e-remote.ts). */
 const E2E_REMOTE = 'cubetraceE2eRemote';
@@ -132,7 +133,22 @@ export const SYNTHETIC_CAMERA = {
   height: 360,
   /** The square, in the frame's pixels: a sixth of the frame's area. */
   square: { x: 220, y: 80, w: 200, h: 200 },
+  /**
+   * Its focus (T5.2): the modes and the distance its tracks list in `getCapabilities()`, and what
+   * each new track's settings say as it opens (a phone's camera opens in continuous focus).
+   */
+  focus: {
+    modes: ['continuous', 'manual'],
+    distance: { min: 0.1, max: 8.1, step: 0.01 },
+    opening: { focusMode: 'continuous', focusDistance: 0.5 },
+  },
 } as const;
+
+/** The focus of the synthetic camera's current track, and the constraints the app applied to it. */
+export interface SyntheticControls {
+  readonly settings: { readonly focusMode: string; readonly focusDistance: number };
+  readonly applied: readonly unknown[];
+}
 
 /**
  * On every load of `page` from now on, the camera the page opens is a synthetic one (T4.3): a canvas
@@ -141,6 +157,10 @@ export const SYNTHETIC_CAMERA = {
  * ({@link flipAt}); nothing else in it ever changes, so that a sync check sees motion at those times
  * only. Any request with video gets a new track of it (the microphone, when asked for too, is the
  * browser's own). Chrome's fake camera cannot serve there: its test pattern jumps at its own pace.
+ * Since T5.2 each track has a focus, as a phone's camera has (`getCapabilities()` lists its modes and
+ * its distance's range, `getSettings()` says them, `applyConstraints` sets the advanced sets it can
+ * take and keeps what it was given): {@link syntheticControls} reads it, and {@link driftCamera}
+ * changes it as a camera that changes its focus by itself would.
  */
 export async function syntheticCamera(page: Page): Promise<void> {
   await page.addInitScript(
@@ -148,6 +168,56 @@ export async function syntheticCamera(page: Page): Promise<void> {
       const media = navigator.mediaDevices;
       const getUserMedia = media.getUserMedia.bind(media);
       let source: MediaStreamTrack | null = null;
+      /** The tracks handed out, with their focus and the constraints applied to them. */
+      const opened: {
+        track: MediaStreamTrack;
+        settings: Record<string, unknown>;
+        applied: unknown[];
+      }[] = [];
+      const focus = size.focus;
+      const takes = (name: string, value: unknown): boolean =>
+        name === 'focusMode'
+          ? (focus.modes as readonly unknown[]).includes(value)
+          : name === 'focusDistance' &&
+            typeof value === 'number' &&
+            value >= focus.distance.min &&
+            value <= focus.distance.max;
+      /** `track` with the synthetic camera's focus (T5.2), as a phone's camera track has one. */
+      const withFocus = (track: MediaStreamTrack): MediaStreamTrack => {
+        const entry = {
+          track,
+          settings: { ...focus.opening } as Record<string, unknown>,
+          applied: [] as unknown[],
+        };
+        opened.push(entry);
+        const getSettings = track.getSettings.bind(track);
+        const getCapabilities = track.getCapabilities.bind(track);
+        // Image Capture's keys, which TypeScript's DOM types do not have: plain objects.
+        Object.defineProperty(track, 'getSettings', {
+          value: (): Record<string, unknown> => ({ ...getSettings(), ...entry.settings }),
+        });
+        Object.defineProperty(track, 'getCapabilities', {
+          value: (): Record<string, unknown> => ({
+            ...getCapabilities(),
+            focusMode: [...focus.modes],
+            focusDistance: { ...focus.distance },
+          }),
+        });
+        Object.defineProperty(track, 'applyConstraints', {
+          value: (constraints?: MediaTrackConstraints): Promise<void> => {
+            entry.applied.push(JSON.parse(JSON.stringify(constraints ?? {})) as unknown);
+            for (const set of constraints?.advanced ?? []) {
+              const values = Object.entries(set) as [string, unknown][];
+              if (values.every(([name, value]) => takes(name, value))) {
+                Object.assign(entry.settings, Object.fromEntries(values));
+              }
+            }
+            return Promise.resolve();
+          },
+        });
+        return track;
+      };
+      const live = () => opened.filter((entry) => entry.track.readyState === 'live');
       const open = (): MediaStreamTrack => {
         if (source !== null) {
           return source;
@@ -189,6 +259,17 @@ export async function syntheticCamera(page: Page): Promise<void> {
             }
           },
           flips: (): number[] => [...flips],
+          controls: () => {
+            const entry = live().at(-1);
+            return entry === undefined
+              ? null
+              : { settings: { ...entry.settings }, applied: [...entry.applied] };
+          },
+          drift: (values: Record<string, unknown>): void => {
+            for (const entry of live()) {
+              Object.assign(entry.settings, values);
+            }
+          },
         });
         const [track] = canvas.captureStream(30).getVideoTracks();
         source = track;
@@ -198,7 +279,7 @@ export async function syntheticCamera(page: Page): Promise<void> {
         if (constraints?.video === undefined || constraints.video === false) {
           return getUserMedia(constraints);
         }
-        const stream = new MediaStream([open().clone()]);
+        const stream = new MediaStream([withFocus(open().clone())]);
         if (constraints.audio !== undefined && constraints.audio !== false) {
           for (const track of (await getUserMedia({ audio: constraints.audio })).getAudioTracks()) {
             stream.addTrack(track);
@@ -229,6 +310,36 @@ export async function flipAt(page: Page, times: readonly number[]): Promise<void
       (flip as (times: number[]) => void)([...times]);
     },
     { key: CAMERA, times },
+  );
+}
+
+/** The focus of the synthetic camera's current track in `page` (T5.2); null before it opens. */
+export async function syntheticControls(page: Page): Promise<SyntheticControls | null> {
+  return page.evaluate((key) => {
+    const camera: unknown = Reflect.get(window, key);
+    const read: unknown =
+      typeof camera === 'object' && camera !== null ? Reflect.get(camera, 'controls') : undefined;
+    return typeof read === 'function' ? (read as () => SyntheticControls | null)() : null;
+  }, CAMERA);
+}
+
+/**
+ * The synthetic camera of `page` changes `values` of its focus by itself (T5.2: the Moto g60's focus
+ * that went manual at solve 31 on 2026-10-09), behind the app's back: its tracks' settings say them
+ * from now on.
+ */
+export async function driftCamera(page: Page, values: Record<string, unknown>): Promise<void> {
+  await page.evaluate(
+    ({ key, values }) => {
+      const camera: unknown = Reflect.get(window, key);
+      const drift: unknown =
+        typeof camera === 'object' && camera !== null ? Reflect.get(camera, 'drift') : undefined;
+      if (typeof drift !== 'function') {
+        throw new Error('the synthetic camera is not open on this page');
+      }
+      (drift as (values: Record<string, unknown>) => void)(values);
+    },
+    { key: CAMERA, values },
   );
 }
 
