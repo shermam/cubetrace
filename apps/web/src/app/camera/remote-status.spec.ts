@@ -194,5 +194,41 @@ describe('remoteStatusLine', () => {
     expect(list({ framing: null, pendingClips: 1 }, { state: 'reconnecting' })).toBe(
       '29.9 fps · sharpness 41 · recording · full frame · battery 83%, charging · 1 clip to send',
     );
+    // What its camera changed by itself (T5.2), before the clips to send.
+    expect(
+      list(
+        { pendingClips: 1 },
+        { drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual' }] },
+      ),
+    ).toBe(
+      '29.9 fps · sharpness 41 · recording · framing 800×600 · battery 83%, charging · focus went manual on the phone · 1 clip to send',
+    );
+  });
+
+  it('says in red, a part per control, a mode the phone’s camera changed by itself (T5.2)', () => {
+    const parts = line(
+      { pressure: 'fair', pressureSource: 'cpu' },
+      {
+        converged: false,
+        drift: [
+          { name: 'focusMode', expected: 'continuous', actual: 'manual' },
+          { name: 'zoom', expected: 2.5, actual: 1 },
+        ],
+      },
+    );
+    expect(statusText(parts)).toBe(
+      '29.9 fps · sharpness 41 · recording · battery 83%, charging · pressure fair · focus went manual on the phone · zoom went 1.0× on the phone · clock syncing…',
+    );
+    expect(partOf(parts, 'drift-focusMode')).toEqual(['focus went manual on the phone', 'bad']);
+    expect(shortParts(parts).map((part) => part.short)).toEqual([
+      'pressure fair',
+      'focus manual',
+      'zoom 1.0×',
+    ]);
+    expect(parts.find((part) => part.key === 'drift-focusMode')?.title).toBe(
+      "The phone's camera set its focus to manual by itself (continuous was applied). Reset sets the automatic mode again; on the phone, Keep the camera's modes sets it back by itself.",
+    );
+    // Nothing drifted: no such part.
+    expect(line({}, { drift: [] }).some((part) => part.key.startsWith('drift'))).toBe(false);
   });
 });

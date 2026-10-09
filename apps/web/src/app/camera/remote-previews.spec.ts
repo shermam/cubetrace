@@ -56,18 +56,22 @@ function camera(id: string, changes: Partial<RemoteCameraEntry> = {}): RemoteCam
     thumbnail: null,
     report: null,
     reportMs: null,
+    drift: [],
     ...changes,
   };
 }
 
 describe('RemotePreviews', () => {
   const cameras = signal<readonly RemoteCameraEntry[]>([]);
+  /** The cameras whose drift the Reset beside their line reset (T5.2), in order. */
+  let resets: string[] = [];
   let perf: FakePerformance;
   let timers: FakeTimers;
 
   beforeEach(() => {
     perf = new FakePerformance();
     timers = new FakeTimers(perf);
+    resets = [];
   });
 
   async function render(local: MediaStream | null, layout: 'equal' | 'tiles' = 'tiles') {
@@ -82,6 +86,9 @@ describe('RemotePreviews', () => {
       cameras,
       watchMotion: () => null,
       clockRecord: () => null,
+      resetDrift: (id) => {
+        resets.push(id);
+      },
     };
     TestBed.inject(RemoteCameraRegistry).provide(source);
     const fixture = TestBed.createComponent(RemotePreviews);
@@ -324,6 +331,38 @@ describe('RemotePreviews', () => {
       cameras.set([]);
       await refresh();
       expect(timers.pending).toBe(0);
+    });
+
+    it('says in red what the phone’s camera changed by itself, with Reset beside the line (T5.2)', async () => {
+      cameras.set([camera('a', { report: REPORT, reportMs: perf.hostMs })]);
+      const { element, refresh } = await render(null, 'equal');
+      const reset = (): HTMLButtonElement | null =>
+        cells(element)[0].querySelector('[data-testid="remote-drift-reset"]');
+      expect(reset()).toBeNull();
+      cameras.set([
+        camera('a', {
+          report: REPORT,
+          reportMs: perf.hostMs,
+          drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual' }],
+        }),
+      ]);
+      await refresh();
+      const drift = cells(element)[0].querySelector(
+        '[data-testid="remote-status-drift-focusMode"]',
+      );
+      expect(drift?.textContent.trim()).toBe('focus went manual on the phone');
+      expect(drift?.getAttribute('data-tone')).toBe('bad');
+      expect(line(cells(element)[0])).toMatch(/ · focus went manual on the phone Reset$/);
+      reset()?.click();
+      expect(resets).toEqual(['a']);
+      // In a tile, in short.
+      TestBed.resetTestingModule();
+      const tiles = await render(null, 'tiles');
+      expect(
+        tiles.element
+          .querySelector('[data-testid="remote-caption"]')
+          ?.textContent.replace(/\s+/g, ' '),
+      ).toContain('focus manual');
     });
   });
 });

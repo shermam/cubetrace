@@ -1,4 +1,5 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { controlValuesOf, controlsOf } from '@cubetrace/capture';
 import type { CameraInfo } from '@cubetrace/core';
 import type { FakeCube } from '@cubetrace/gan';
 import {
@@ -13,13 +14,14 @@ import { ACCOUNT_LOADER } from '../auth/account-backend';
 import { ACCOUNT_STORAGE_KEY, AuthService } from '../auth/auth-service';
 import { ADA, FakeAccountBackend } from '../auth/fake-account';
 import { bluetoothNavigator } from '../cube/cube-testing';
-import { FakeLocalStorage, settle } from '../device/fake-browser';
+import { FAKE_PHONE_REAR, FakeLocalStorage, settle } from '../device/fake-browser';
 import { MemoryConnector, rtcTimers } from '../rtc/rtc-testing';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
 import { SettingsService } from '../settings/settings-service';
 import { RemoteCameras, tokenText } from './remote-cameras';
 import { RemoteCamerasService } from './remote-cameras-service';
+import { CONTROLS_WAIT_MS } from './remote-controls-source';
 
 const PHONE_CAMERA: CameraInfo = {
   label: 'phone-rear',
@@ -316,5 +318,48 @@ describe('RemoteCameras', () => {
     const row = element('remote-camera');
     expect(row?.getAttribute('data-state')).toBe('finishing');
     expect(text('remote-camera-state')).toBe("waiting for the phone's last clips (2)");
+  });
+
+  it("puts the phone's camera controls under it: waiting, then the panel over the phone's, its drift on the report; none from a build without them (T5.2)", async () => {
+    await render();
+    element('add-camera')?.click();
+    await pump(0);
+    const link = await joinPhone();
+    const controls = element('remote-camera-controls') as HTMLDetailsElement;
+    expect(controls.querySelector('summary')?.textContent.trim()).toBe('Camera controls');
+    expect(text('remote-controls-waiting')).toBe("Waiting for the phone's controls…");
+    link.send({
+      type: 'controls',
+      controls: controlsOf(FAKE_PHONE_REAR.capabilities, FAKE_PHONE_REAR.settings),
+      values: controlValuesOf(FAKE_PHONE_REAR.settings),
+      applied: { focusMode: 'continuous' },
+      drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual' }],
+      remoteMs: s.perf.hostMs,
+    });
+    await pump(10);
+    expect(element('remote-controls-waiting')).toBeNull();
+    const legends = Array.from(controls.querySelectorAll('legend'), (legend) =>
+      legend.textContent.trim(),
+    );
+    expect(legends).toEqual(['Exposure', 'Focus', 'White balance', 'Zoom']);
+    expect(text('camera-controls-drift')).toBe('The camera set the focus to manual by itself.');
+    expect(text('remote-camera-report')).toBe('no report yet · focus went manual on the phone');
+    // The panel's change goes to the phone.
+    const sent: unknown[] = [];
+    link.on('set-controls', (message) => {
+      sent.push(message);
+    });
+    const torch = element('control-torch') as HTMLInputElement;
+    torch.click();
+    await pump(10);
+    expect(sent).toEqual([{ type: 'set-controls', values: { torch: true } }]);
+    // A phone of a build without remote controls: said after 5 s.
+    element('add-camera')?.click();
+    await pump(0);
+    await joinPhone('Pixel');
+    await pump(CONTROLS_WAIT_MS, 5);
+    expect(text('remote-controls-unsupported')).toBe(
+      "This phone's build has no remote controls: update cubetrace on it, then pair it again.",
+    );
   });
 });

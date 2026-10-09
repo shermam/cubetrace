@@ -227,6 +227,13 @@ export class FakeRemoteSource implements RemoteCameraSource {
     return this.clock;
   }
 
+  /** The cameras whose drift was reset (T5.2), in order. */
+  readonly resets: string[] = [];
+
+  resetDrift(id: string): void {
+    this.resets.push(id);
+  }
+
   /** The frames of the check under way go to its watch. */
   readonly sink = (sample: ClapperboardFrame): void => {
     this.watches.at(-1)?.onSample(sample);
@@ -260,6 +267,7 @@ export function remotePhone(
     thumbnail: null,
     report: null,
     reportMs: null,
+    drift: [],
     ...changes,
   };
 }

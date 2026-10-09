@@ -8,6 +8,7 @@ import {
   SettingsService,
   type RemotePictures,
 } from '../settings/settings-service';
+import { CameraControls } from './camera-controls';
 import { qrCode, qrSvgPath } from './qr-code';
 import { PAIRING_BLOCK_TEXT } from './pairing-block';
 import {
@@ -38,13 +39,15 @@ export function tokenText(token: string): string {
  * are asked of the phones; and "Live preview from phones" (T4.3, on by default): whether they send a
  * small live picture, shown on the Timer page (`RemotePreviews`), the thumbnail here staying the
  * pairing's state; and "Pictures from phones" (T5.1): each phone's picture as large as this device's
- * own, with its status line under it, or a small tile over it. The panel loads it only when Add camera is pressed (`@defer (when
+ * own, with its status line under it, or a small tile over it; and under each phone its camera's
+ * controls (T5.2: the controls panel of Camera settings over the phone's `RemoteControlsSource`, with
+ * Reset to auto; "this phone's build has no remote controls" for a phone that sends none). The panel loads it only when Add camera is pressed (`@defer (when
  * addRequests() > 0)`), and counts the presses in `addRequests`, so that the first pairing starts as
  * the section appears.
  */
 @Component({
   selector: 'app-remote-cameras',
-  imports: [StatusParts],
+  imports: [CameraControls, StatusParts],
   templateUrl: './remote-cameras.html',
   styleUrl: './remote-cameras.scss',
 })
@@ -175,6 +178,7 @@ export class RemoteCameras {
         sinceMs: camera.sinceMs,
         converged: camera.sync?.converged ?? false,
         sharpnessThreshold: this.settings.sharpnessThreshold(),
+        drift: camera.drift,
       },
       'list',
     );
