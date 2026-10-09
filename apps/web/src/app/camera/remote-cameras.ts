@@ -2,7 +2,12 @@ import { Component, DestroyRef, computed, effect, inject, input, signal } from '
 
 import { durationText, msText } from '../rtc/device-info';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
-import { SettingsService } from '../settings/settings-service';
+import {
+  REMOTE_PICTURES,
+  REMOTE_PICTURES_TEXT,
+  SettingsService,
+  type RemotePictures,
+} from '../settings/settings-service';
 import { qrCode, qrSvgPath } from './qr-code';
 import { PAIRING_BLOCK_TEXT } from './pairing-block';
 import {
@@ -31,8 +36,9 @@ export function tokenText(token: string): string {
  * sharpness, recording, battery, the frame rate dropped, the pressure, a report that stopped; and
  * here the framing and the clips it still has to send) and Remove; and "Record remote cameras" (T4.2, on by default): whether each attempt's clips
  * are asked of the phones; and "Live preview from phones" (T4.3, on by default): whether they send a
- * small live picture, shown over the Timer page's preview (`RemotePreviews`), the thumbnail here
- * staying the pairing's state. The panel loads it only when Add camera is pressed (`@defer (when
+ * small live picture, shown on the Timer page (`RemotePreviews`), the thumbnail here staying the
+ * pairing's state; and "Pictures from phones" (T5.1): each phone's picture as large as this device's
+ * own, with its status line under it, or a small tile over it. The panel loads it only when Add camera is pressed (`@defer (when
  * addRequests() > 0)`), and counts the presses in `addRequests`, so that the first pairing starts as
  * the section appears.
  */
@@ -48,6 +54,10 @@ export class RemoteCameras {
 
   protected readonly service = inject(RemoteCamerasService);
   protected readonly settings = inject(SettingsService);
+  protected readonly pictureChoices = REMOTE_PICTURES.map((value) => ({
+    value,
+    label: REMOTE_PICTURES_TEXT[value],
+  }));
   private readonly timers = inject(RTC_TIMERS);
   /** The host clock, once a second while a camera is listed or a pairing shown: the durations. */
   private readonly now = signal(this.timers.now());
@@ -111,6 +121,13 @@ export class RemoteCameras {
 
   protected remove(id: string): void {
     this.service.remove(id);
+  }
+
+  protected setPictures(value: string): void {
+    const choice = REMOTE_PICTURES.find((known): known is RemotePictures => known === value);
+    if (choice !== undefined) {
+      this.settings.setRemotePictures(choice);
+    }
   }
 
   /**

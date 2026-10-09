@@ -37,6 +37,15 @@ p {
   font-size: 0.875rem;
 }
 
+// "Pictures from phones": the words and the choice on one line.
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: 0.875rem;
+}
+
 .bar {
   display: flex;
   flex-wrap: wrap;

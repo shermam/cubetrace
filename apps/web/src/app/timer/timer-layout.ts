@@ -1,6 +1,7 @@
 import { DestroyRef, inject, signal, type Signal } from '@angular/core';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
+import { remotePicturesDefault, type RemotePictures } from '../settings/settings-service';
 
 /**
  * How the Timer page lays out the scramble, the time and the camera's picture (docs/PLAN.md, T2.7
@@ -36,6 +37,25 @@ export function timerLayout(
     return 'stacked';
   }
   return cameraOn ? 'overlay' : 'pinned';
+}
+
+/**
+ * How the Timer page shows the phones' pictures (T5.1): "Pictures from phones" as `chosen` in Camera
+ * settings → Cameras, else this device's default (small tiles on a `phone`, the same size as its own
+ * picture elsewhere), in the Timer page's `layout`: always tiles in a phone's `overlay` (T2.13), whose
+ * picture is pinned at the top of the window, under the scramble, as wide as the screen. The width of
+ * the window decides that layout (`timerLayout`); within `columns`, whether the cells of `equal`
+ * stand side by side or under one another is the page's container query (`timer-page.ts`).
+ */
+export function remotePicturesLayout(
+  chosen: RemotePictures | null,
+  layout: TimerLayout,
+  phone: boolean,
+): RemotePictures {
+  if (layout === 'overlay') {
+    return 'tiles';
+  }
+  return chosen ?? remotePicturesDefault(phone);
 }
 
 /**

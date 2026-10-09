@@ -267,6 +267,25 @@ describe('RemoteCameras', () => {
     expect(settings.recordRemoteCameras()).toBe(true);
   });
 
+  it('Pictures from phones is the same size by default on a laptop, and its choice switches the setting (T5.1)', async () => {
+    await render();
+    const select = element('remote-pictures') as HTMLSelectElement;
+    const settings = TestBed.inject(SettingsService);
+    expect(select.value).toBe('equal');
+    expect([...select.options].map((option) => option.textContent.trim())).toEqual([
+      'Same size as mine',
+      'Small tiles',
+    ]);
+    select.value = 'tiles';
+    select.dispatchEvent(new Event('change'));
+    await pump(0);
+    expect(settings.remotePictures()).toBe('tiles');
+    select.value = 'equal';
+    select.dispatchEvent(new Event('change'));
+    await pump(0);
+    expect(settings.remotePicturesChoice()).toBe('equal');
+  });
+
   it('shows a phone whose connection dropped as reconnecting', async () => {
     await render();
     element('add-camera')?.click();

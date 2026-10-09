@@ -47,9 +47,29 @@
   </label>
   <p class="hint" id="live-preview-from-phones-hint">
     Each phone sends a small live picture of its camera (a fifth of its resolution, at most 300 kbps
-    and 15 frames a second), shown over this device's preview on the Timer page: tap it to swap it
-    with the main picture. Its recording is not touched. Off, the phones send none, and the picture
-    below comes every 2 s.
+    and 15 frames a second), shown beside this device's preview on the Timer page. Its recording is
+    not touched. Off, the phones send none, and the picture below comes every 2 s.
+  </p>
+  <label class="choice">
+    Pictures from phones
+    <select
+      #picturesSelect
+      data-testid="remote-pictures"
+      aria-describedby="remote-pictures-hint"
+      (change)="setPictures(picturesSelect.value)"
+    >
+      @for (choice of pictureChoices; track choice.value) {
+        <option [value]="choice.value" [selected]="choice.value === settings.remotePictures()">
+          {{ choice.label }}
+        </option>
+      }
+    </select>
+  </label>
+  <p class="hint" id="remote-pictures-hint">
+    On the Timer page, each phone's picture as large as this device's own, with what the phone
+    reports under it (its frame rate, sharpness, battery, whether it runs hot); or a small tile over
+    this device's picture, which a tap swaps with it, its caption saying only what is wrong. A
+    phone's Timer page with the scramble over the picture keeps tiles.
   </p>
   @if (service.pairingError(); as error) {
     <p class="error" role="alert" data-testid="pairing-error">{{ error }}</p>
