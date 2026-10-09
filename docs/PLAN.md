@@ -17,6 +17,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ✅ 0.2.0 (2026-10-01: the fixes from the owner's first recordings, T2.8–T2.13, merged; the full round 2 skipped by the owner's decision; the tag from the GitHub UI pending) |
 | 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ✅ 0.3.0 (2026-10-02: T3.0–T3.6 merged and deployed; the tag from the GitHub UI on 2896591 or later). Follow-ups T3.6–T3.9 merged the same day (the installed app's sign-in, the cube's whole record, the 3D cube in the clip viewer, the diagnostics events), for 0.4.0 |
 | 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ✅ 0.4.0 (2026-10-04: T4.0–T4.4, T4.2a and T4.2b merged and deployed; the tag from the GitHub UI on 16ad587). Open: #61 closes when a pairing stays converged for 20 minutes; the measured cells of `docs/DEVICES.md` |
+| 5. The rig's eyes and hands | The phone's picture at full size with its health, remote camera controls from the laptop, the host's capture latency measured per attempt. | in progress (2026-10-09: the board below, T5.1–T5.4; issue #67) |
 | 5. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
 ## Phase 1 task board
@@ -2527,9 +2528,202 @@ T4" (ten items, a second phone if at hand) with items 4.4.1–4.4.10 in the roun
 the release and the round in `docs/USER-ACTIONS.md`. One change to the app: the clip viewer's
 Download line counted four clips as "both clips".
 
-## Phase 5
+## Phase 5 task board — the rig's eyes and hands
 
-Outline only, written into a board when phase 4 ends: **Community** — the versioned consent flow
+**What phase 5 delivers.** The owner runs the desk rig alone, the phone on a tripod out of reach:
+everything he needs to see of the phone (its picture at full size, its sharpness, its frame rate, its
+battery, whether it is hot) is on the Timer page in front of him, and everything he needs to change on
+it (focus, exposure, white balance, zoom, the torch) is changed from the laptop. The two sessions of
+2026-10-09 are the brief: a phone whose focus went manual by itself at solve 31 blurred twenty solves
+before it was seen in a tile the size of a stamp; a phone that ran hot; and, found in the data
+afterwards, the laptop's own capture latency rising by 75 ms from attempt 38 on in both sessions with no
+sign in the app (issue #67).
+
+**Decisions.**
+
+- **Same protocol version.** New messages and fields are additive within version 1, as T4.2's and
+  T4.3's were (`docs/RTC.md` §1): a phone on an older build drops what it does not know (`onError`),
+  and the host says so where a control is missing.
+- **The phone keeps its own controls panel; the host's is the same component over messages.** The
+  truth about a phone's controls is its track (`getCapabilities()`, `getSettings()`): the host shows
+  what the phone reports and sends what to change; the phone applies it through `CameraService`
+  exactly as its own panel does (persisted per camera as today), and reports the outcome. A mode the
+  camera changes on its own (the focus of 2026-10-09) is a *drift*: seen on both devices and undone
+  by the device that owns the camera.
+- **The picture first.** A phone's live preview is shown at the host's own picture's size by default
+  ("Pictures from phones", Camera settings → Cameras: same size, or small tiles; a phone host keeps
+  tiles), and under it a status line that is the twin of the host's own, from the `state` messages.
+- **No temperature API exists in the web platform.** The app reports what the browser gives: the
+  Battery Status API (level, charging; already in `state`), the Compute Pressure API's state where the
+  browser has it (`PressureObserver`, launched in Chrome 125; the sources `cpu` and, where listed,
+  `thermals`; feature-detected, null elsewhere), and the frame-rate drop the phone already detects.
+  These are the phone's "health" on the host: in the status line and in the events.
+- **The host's capture latency is measured, not assumed.** A latency meter in the pipeline and a
+  per-attempt lag estimate from the motion around the cube's moves, recorded per clip beside the sync
+  check's number, with a warning when they drift (issue #67).
+
+| Id | Task | Depends on | Status |
+|---|---|---|---|
+| T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | – |
+| T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | – |
+| T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | – |
+| T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0` | T5.2, T5.3 | – |
+
+Waves: T5.1 → T5.2 → T5.3 → T5.4, one agent at a time.
+
+### T5.1 — the phone's picture at full size, and its status line
+
+**Goal.** On the Timer page the host sees a phone's picture as large as its own, and under it what the
+phone reports, so that a soft focus, a dropped frame rate, a low battery or a hot phone is seen at a
+glance, not in Camera settings.
+
+**Scope.** (1) **The layout.** `RemotePreviews` (T4.3) gains a second layout, `equal`: the host's own
+picture and each phone's in a cell of its own, each cell the size the single picture has today (16:9, a
+phone's upright frames between bars, the framing rectangle drawn), stacked under one another at the
+preview's width in the Timer page's `columns` layout (the clock beside the stack), side by side when
+the window is wide enough for two cells beside the clock (the agent measures and picks the breakpoint;
+`timer-page.ts`'s `app-camera-preview` width rules and the `live` container query adjusted); T4.3's
+tiles with the tap-to-swap stay as the layout `tiles`. The setting "Pictures from phones" (Camera
+settings → Cameras, `SettingsService`): "same size as mine" (the default on a host that is not a phone)
+or "small tiles" (the default on a phone host; the only layout in T2.13's overlay). A `settings.changed`
+event names it. (2) **The status line.** Under each phone's picture (and in its tile's caption, in short),
+the twin of `CameraPreview`'s line, from the phone's last `state`: the frame rate (`fpsText`), the
+sharpness with the host's threshold and the same good (green) and soft (amber) colouring, the recording
+word (recording, not recording, in the host's `rec` style), the battery (`83%`, `charging`; amber under
+20% and not charging, red under 10%), the health word (T4.1's `hot: the frame rate dropped` in amber; the
+pressure state when the phone reports one: `pressure fair` in amber, `serious` and `critical` in red),
+the connection when it is not plainly connected (`reconnecting…`, `clock syncing…`), and `no report for
+10 s` in red when the state messages stop while connected. (3) **The pressure.** The phone's `state`
+gains `pressure: 'nominal' | 'fair' | 'serious' | 'critical' | null` and `pressureSource: 'cpu' |
+'thermals' | null`, from a `PressureObserver` (the source `thermals` when `PressureObserver.knownSources`
+lists it, else `cpu`; `sampleInterval` 2 s; feature-detected; null where the browser has none or
+refuses); `protocol.ts`'s decoding takes a `state` without them (an older build's); the phone's own
+page shows the state beside the thermal hint ("the phone is under serious pressure: it may be hot").
+(4) **The events.** The host's minute `rtc.clock` event of each phone (T4.2b) gains `report: {fps,
+sharpness, battery, thermal, pressure}` from the phone's last state, so that the round report and
+`docs/DEVICES.md` have a phone's health over a session; `docs/DIAGNOSTICS.md` says so, and the round
+report's "After T5.1" items read them (the status line's facts beside the item). (5) **Docs.**
+`docs/RTC.md` §1 (`state`'s new fields) and §10 (the layout); `docs/USER-ACTIONS.md`; `README.md`'s rig
+section; `docs/MANUAL-TESTS.md` "After T5.1": the equal layout on the MacBook with the ThinkPhone and
+with the Moto g60 (the two pictures the same size; the window narrowed: stacked), the line's words when
+the phone's focus is set to manual on its own panel (sharpness soft), when the phone is unplugged and
+low, when it is hot (after twenty minutes: the pressure word, if the phone's Chrome has the API: write
+`'PressureObserver' in window` from the phone's console if unsure), tiles chosen and back.
+
+**Acceptance.** Unit tests: the layout decision (host or phone, the setting, the width), the status
+line's words and colours from a `state` (the battery levels, the pressure states, the thermal hint, a
+stale report, a reconnecting phone), the `state`'s encoding and decoding with and without the new
+fields, the pressure observer behind a fake (`PressureObserver` absent, present with `cpu` only, with
+`thermals`, refusing). The e2e pair: in the equal layout two pictures of the same size (their bounding
+boxes within 2 px), the phone's line reads its fake camera's state, the setting switches to tiles and
+back, the preview's encoding parameters are T4.3's (the picture's size on the host changes nothing on
+the phone). Lint, unit and e2e green; the bundle's chunks noted in the Outcome.
+
+### T5.2 — remote camera controls
+
+**Goal.** The phone's exposure, focus, white balance, zoom and torch are set from the laptop while the
+phone sits on its tripod, and a mode the phone's camera changes on its own is seen and undone.
+
+**Scope.** (1) **`rtc`**, three messages, additive within version 1 (`docs/RTC.md` §1, and a §11): `controls`
+from the phone: `controls` (`@cubetrace/capture`'s `CameraControls` as `controlsOf` gives them: the
+modes and the ranges), `values` (`ControlValues`: what the track's settings say now), `applied`
+(`ControlValues`: what the app last set, the persisted ones included), `drift` (below; an empty list
+otherwise), `remoteMs`; sent after `hello` (and again with a new hello when the camera changes), after
+each `set-controls` it applied, and whenever the watchdog sees a change; `set-controls` from the host:
+`values` (the `ControlValues` to change; one or several), or `reset: true` (Reset to auto); `controls-failed`
+from the phone: `message`, when applying throws (a value the camera refuses, a camera gone). Bounds and
+`decode` checks as the others'. (2) **The phone.** `CameraDeviceService` answers `set-controls` through
+`CameraService.setControl` and `resetControls` (the same path as its own panel: persisted per camera
+label in Settings as today), then sends `controls`. **The watchdog** (`ControlsWatch`, in `web`, used by
+both roles): every 2 s while the camera is on and no slider is being moved, the track's `getSettings()`
+modes and values against what the app applied (or against the automatic mode of each group where
+nothing was applied); a difference that holds for two readings is a drift, `{name, expected, actual}`
+per control, reported (`controls` with `drift`, and the phone's page: "the camera set the focus to manual
+by itself"); with the setting "Keep the camera's modes" (Settings → Camera, on by default, both roles)
+the device re-applies its values once per drift and counts it; a drift that returns after three
+re-applications within a minute is left alone and said ("the camera keeps setting the focus to manual:
+set it by hand"). (3) **The host.** `CameraControls` (T2.1) made a view over a `ControlsSource`
+(the open camera's `CameraService` today; a `RemoteControlsSource` per phone over its last `controls` and
+`set-controls`), shown under each phone in the Cameras section (Camera settings → Cameras) with "Reset
+to auto"; a change in flight (sent, the `controls` answer not yet in, 3 s at most, then "the phone did
+not answer") disables the group; a phone that never sends `controls` shows "this phone's build has no
+remote controls"; a drift on a phone on its status line of the Timer page (T5.1: "focus went manual on
+the phone" in red, with Reset, which sends `set-controls` with the automatic modes) and in the Cameras
+list. (4) **Diagnostics.** `remote.controls` (the host: `camera`, `peer`, `set` (the names), `outcome`
+`ok`, `failed`, `no-answer`), `controls.drift` (either side: `camera`, `drift`, `reapplied`, `gaveUp`),
+in `docs/DIAGNOSTICS.md`; the round report's "After T5.2" items. (5) **Docs.** `docs/RTC.md` §1 and §11;
+`docs/USER-ACTIONS.md`; `docs/MANUAL-TESTS.md` "After T5.2": from the MacBook, the Moto g60's focus set to
+manual and a distance chosen, back to auto, the zoom, the torch; the drift provoked (the focus set to
+manual on the phone's own panel while Keep the camera's modes is on: undone within 4 s and said on both
+devices; then off: said and left); the same on the ThinkPhone; the host's own camera's watchdog with its
+own panel.
+
+**Acceptance.** Unit tests: the messages' encode and decode and their bounds; the phone's handling
+(`set-controls` → `setControl` calls → the `controls` answer; `reset`; a throw → `controls-failed`); the
+watchdog (a drift after two readings, not one; none while a slider moves; the re-application; the give-up
+after three in a minute; the setting off); the host's source (the panel's groups from a `controls`
+message, a change sent and in flight, the timeout, Reset). The e2e pair: the fake camera's track gains
+`getCapabilities()` with focus modes and a focus distance and `applyConstraints` bookkeeping (the e2e's
+synthetic camera of T4.3); the host sets manual focus and a distance, the phone's page shows them; Reset
+to auto; a drift injected on the phone is undone and shown on the host. Lint, unit and e2e green.
+
+### T5.3 — the host's capture latency, measured per attempt (issue #67)
+
+**Goal.** The lag of the host's own camera is known for every attempt and not only at the sync check,
+the latency growth of 2026-10-09 is seen as it happens, and its cause is found and fixed, or
+mitigated.
+
+**Scope.** (1) **The evidence** is issue #67's: the MacBook's frames arrived about 75 ms later relative
+to the cube from attempt 38 on in both sessions of the day (the lag 58 → 133 ms, the frame cadence 30.3
+→ 29.3 fps, no gaps, no event), and recovered once in the evening when the phone's sync checks ran; the
+phones' frames were unaffected; the same effect probably sits in the 2026-10-05 session. (2) **A latency
+meter** in the capture pipeline (`packages/capture`): per frame, the delay from the camera's own timestamp
+(`VideoFrame.timestamp`) to the host time the pipeline stamps the frame with, and from that to its encode;
+their p50 and p95 per attempt in the clip's `video[]` entry (`captureLatencyMs: {p50, p95}`,
+`encodeLatencyMs`; schema 2, additive, `docs/DATA-MODEL.md`) and in `clip.saved`; a `recording.latency`
+event when the p50 drifts by more than 30 ms from its value at the camera's last sync check, and the word
+`latency +75 ms` in amber on the preview's status line (the phone's own pipeline the same, reported in
+`state`'s `latencyMs`, shown on the host's line of T5.1). (3) **A lag estimate from the motion, per attempt
+and camera**: the capture worker measures each frame's motion inside the framing rectangle for the sync
+check already (T4.3's meter); for every solve the host runs the same estimator over the solve's turns
+(the cube's moves are the clapperboard: `clapperboard.ts`'s centroid estimator and trimmed spread of
+T2.11 over all of them, or the motion-energy peak around the onsets if the estimator wants more
+separated turns) and records `motionLagMs` and its spread in the clip's entry, for the laptop's clips in
+this task and for a phone's where its `sync-motion` series over the solve is cheap enough (else noted
+as a follow-up); the Timer page says when a camera's `motionLagMs` sits more than 30 ms from its
+`syncResidualMs`. (4) **The cause**, as far as the meter on the MacBook shows it over forty attempts
+(the ring buffer's eviction, the encoder's queue, the OPFS writes of an attempt's files, the remote
+clips' transfer, GC): the fix if it is in the app (a bounded queue that drops a frame rather than
+delays it; a stage moved off the capture worker), or a mitigation (a restart of the pipeline between
+attempts when the latency has drifted, said on the status line), with the measurement in the Outcome.
+(5) **Docs.** `docs/DATA-MODEL.md`, `docs/DIAGNOSTICS.md`, `docs/DEVICES.md` (the MacBook's latency over a
+session, once measured), `docs/MANUAL-TESTS.md` "After T5.3": forty solves on the rig with the meter,
+the words on the line, the recorded `motionLagMs` against the sync check's number.
+
+**Acceptance.** Unit tests of the meter's statistics and the drift rule, and of the motion estimator on
+synthetic frames with a known delay (a planted motion a known number of frames after each turn); the
+e2e's recording has the fields; the forty-attempt run is the owner's, in the "After T5" round (T5.4).
+
+### T5.4 — docs, "After T5", `0.5.0`
+
+**Goal.** The rig's new eyes and hands documented and tried once, as a release.
+
+**Scope.** `README.md` ("The desk rig": the equal pictures, the remote controls, the health line, what
+to do when a phone runs hot: the live preview off, the screen dim, a stand away from the lamp, a break
+between sets); `docs/USER-ACTIONS.md`; `docs/CHANGELOG.md` `0.5.0` and `package.json`; `docs/MANUAL-TESTS.md`
+"After T5" (the whole rig once with the ThinkPhone and the Moto g60: the pictures, the controls from the
+MacBook, a provoked drift, the health line over twenty minutes, the latency meter's words over forty
+solves); the round report's checklist for T5.1–T5.3 (`functions/scripts/report.mts`, `docs/DIAGNOSTICS.md`
+"After T5"); `docs/DEVICES.md`: the Moto g60's row (its camera, 1080 × 1920 at 60 nominal and 30
+measured, about 5 Mbps; its lag about 30 ms by the video against 37 to 92 ms by its remote checks on
+2026-10-09, the check matching 5 to 7 turns of 10 on it), and the MacBook's latency over a session.
+
+**Acceptance.** Lint, unit, e2e and cloud suites green; the deployed footer reads `cubetrace 0.5.0`; the
+tag by the owner.
+
+## Phase 6
+
+Outline only, written into a board when phase 5 ends: **Community** — the versioned consent flow
 (the TCLE and Plataforma Brasil's approval first), per-account quotas, delete-my-data (files and
 index entries), community mode, audio opt-in for others, the face-in-frame warning, pseudonymous
 ids, the dataset's license as a separate opt-in (§12 of the private design). The decisions of
