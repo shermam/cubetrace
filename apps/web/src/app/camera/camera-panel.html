@@ -101,7 +101,7 @@
 
       <app-camera-controls [source]="camera.controlsSource" />
       @if (driftNotes(); as notes) {
-        @for (sentence of notes.sentences; track sentence) {
+        @for (sentence of notes.sentences; track $index) {
           <p
             role="status"
             data-testid="camera-drift"

@@ -93,7 +93,7 @@
       </p>
     }
     @if (driftNotes(); as notes) {
-      @for (sentence of notes.sentences; track sentence) {
+      @for (sentence of notes.sentences; track $index) {
         <p
           role="status"
           data-testid="device-drift"

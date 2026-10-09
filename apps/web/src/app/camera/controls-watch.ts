@@ -74,11 +74,16 @@ export interface ControlsWatchOptions {
   readonly intervalMs?: number;
 }
 
-/** One control's watch: the readings in a row that disagree, the drift said, its re-applications. */
+/** What became of a drift: set back, given up, or said and left (the setting off). */
+type Outcome = 'reapplied' | 'gave-up' | 'left';
+
+/**
+ * One control's watch: the readings in a row that disagree, what was said of its drift (null while
+ * it has none: a drift is listed from what is said of it until a reading agrees), its re-applications.
+ */
 interface ControlState {
   disagree: number;
-  drifting: boolean;
-  gaveUp: boolean;
+  said: Outcome | null;
   reapplied: number[];
 }
 
@@ -176,7 +181,7 @@ export class ControlsWatch {
     }
     const now = options.timers.now();
     const keep = options.keep();
-    const outcomes = new Map<'reapplied' | 'gave-up' | 'left', ControlDrift[]>();
+    const outcomes = new Map<Outcome, ControlDrift[]>();
     const current: ControlDrift[] = [];
     for (const [name, expected] of expectedEntries(applied, controls)) {
       const actual = settings[name];
@@ -184,13 +189,12 @@ export class ControlsWatch {
       if (actual === undefined || agrees(name, expected, actual, controls)) {
         if (state !== undefined) {
           state.disagree = 0;
-          state.drifting = false;
-          state.gaveUp = false;
+          state.said = null;
         }
         continue;
       }
       if (state === undefined) {
-        state = { disagree: 0, drifting: false, gaveUp: false, reapplied: [] };
+        state = { disagree: 0, said: null, reapplied: [] };
         run.states.set(name, state);
       }
       const drift: ControlDrift = { name, expected, actual };
@@ -202,7 +206,7 @@ export class ControlsWatch {
           outcomes.set(outcome, [...(outcomes.get(outcome) ?? []), drift]);
         }
       }
-      if (state.drifting) {
+      if (state.said !== null) {
         current.push(drift);
       }
     }
@@ -246,29 +250,30 @@ export class ControlsWatch {
   }
 }
 
-/** What a control's drift becomes: set back, given up, said and left, or nothing new (null). */
-function decide(
-  state: ControlState,
-  now: number,
-  keep: boolean,
-): 'reapplied' | 'gave-up' | 'left' | null {
+/**
+ * What a control's drift, seen again, becomes: set back (once more), given up, said and left, or
+ * nothing new (null: it was said so already). Without the setting it is left, said once (also after a
+ * re-application the camera undid before a reading agreed); with it, set back until a fourth time
+ * within the minute, which gives it up, said once.
+ */
+function decide(state: ControlState, now: number, keep: boolean): Outcome | null {
   if (!keep) {
-    if (state.drifting) {
+    if (state.said === 'left') {
       return null;
     }
-    state.drifting = true;
+    state.said = 'left';
     return 'left';
   }
-  if (state.gaveUp) {
+  if (state.said === 'gave-up') {
     return null;
   }
-  state.drifting = true;
   state.reapplied = state.reapplied.filter((at) => now - at < REAPPLY_WINDOW_MS);
   if (state.reapplied.length >= MAX_REAPPLICATIONS) {
-    state.gaveUp = true;
+    state.said = 'gave-up';
     return 'gave-up';
   }
   state.reapplied.push(now);
+  state.said = 'reapplied';
   return 'reapplied';
 }
 

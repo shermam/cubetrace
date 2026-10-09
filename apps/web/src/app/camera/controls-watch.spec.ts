@@ -233,6 +233,26 @@ describe('ControlsWatch', () => {
     expect(watch.drift()).toEqual([]);
   });
 
+  it('says a drift the camera brings back right after it was set back, with the setting turned off meanwhile, as left', async () => {
+    drift({ focusMode: 'manual' });
+    await readings(DRIFT_READINGS);
+    expect(events.map((event) => event.reapplied)).toEqual([true]);
+    // The camera undoes it before the next reading, and the setting goes off.
+    keep = false;
+    drift({ focusMode: 'manual' });
+    await readings(1);
+    expect(watch.drift()).toHaveLength(1);
+    await readings(1);
+    expect(events.map((event) => [event.reapplied, event.keep])).toEqual([
+      [true, true],
+      [false, false],
+    ]);
+    expect(watch.last()).toMatchObject({ reapplied: false, keep: false });
+    await readings(5);
+    expect(events).toHaveLength(2);
+    expect(reapplied).toHaveLength(1);
+  });
+
   it('starts counting again when the app applies something else', async () => {
     drift({ focusMode: 'manual' });
     await readings(1);

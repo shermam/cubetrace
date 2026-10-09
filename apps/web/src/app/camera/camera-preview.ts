@@ -141,7 +141,7 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
                     >storage {{ percent }}</span
                   >
                 }
-                @for (words of drift(); track words) {
+                @for (words of drift(); track $index) {
                   ·
                   <span class="drift" data-testid="camera-status-drift">{{ words }}</span>
                 }
