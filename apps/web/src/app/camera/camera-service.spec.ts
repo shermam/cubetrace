@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { LumaSampler, type Canvas2D } from '@cubetrace/capture';
+import { LumaSampler, controlsOf, type Canvas2D } from '@cubetrace/capture';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import {
@@ -9,14 +9,24 @@ import {
   FAKE_WEBCAM,
   FakeLocalStorage,
   FakeMediaDevices,
+  FakePerformance,
+  FakeTimers,
   FakeVideoFrames,
   mediaError,
   settle,
   type FakeCamera,
 } from '../device/fake-browser';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SETTINGS_STORAGE_KEY, SettingsService } from '../settings/settings-service';
 import { CAMERA_ENDED, NO_CAMERA_API } from './camera-errors';
-import { CameraService, LUMA_SAMPLER, cameraDevices } from './camera-service';
+import {
+  ADJUSTING_QUIET_MS,
+  CameraService,
+  LUMA_SAMPLER,
+  cameraDevices,
+  openingApplied,
+} from './camera-service';
+import { WATCH_INTERVAL_MS } from './controls-watch';
 
 const MAC =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) ' +
@@ -82,8 +92,11 @@ describe('CameraService', () => {
           useValue: options.globals ?? {
             navigator: { mediaDevices: media, userAgent: options.userAgent ?? MAC },
             localStorage: storage,
-            setTimeout: (callback: () => void) => {
-              queueMicrotask(callback);
+            // A busy camera's retry comes at once; the watchdog's readings (T5.2) never come.
+            setTimeout: (callback: () => void, ms: number) => {
+              if (ms < WATCH_INTERVAL_MS) {
+                queueMicrotask(callback);
+              }
               return 0;
             },
           },
@@ -455,9 +468,155 @@ describe('CameraService', () => {
     const camera = load({ cameras: [FAKE_PHONE_REAR], userAgent: ANDROID });
     await camera.start();
     media.tracks[0].refuseWith = mediaError('OperationError', 'Could not set zoom');
-    await camera.setControl('zoom', 3);
+    const refused = await camera.setControl('zoom', 3);
     expect(camera.notice()).toBe('The camera refused the change (Could not set zoom).');
+    expect(refused).toBe(camera.notice());
     expect(camera.values().zoom).toBe(1);
+    media.tracks[0].refuseWith = null;
+    expect(await camera.setControl('zoom', 3)).toBeNull();
+  });
+
+  describe('the watchdog of its modes (T5.2)', () => {
+    let perf: FakePerformance;
+    let timers: FakeTimers;
+
+    /** The rear camera on, its readings on the test's clock, the diagnostics' events recorded. */
+    async function watched(): Promise<{
+      camera: CameraService;
+      events: [string, Record<string, unknown>][];
+    }> {
+      perf = new FakePerformance();
+      timers = new FakeTimers(perf);
+      media = new FakeMediaDevices([FAKE_PHONE_REAR]);
+      const camera = load({
+        keepMedia: true,
+        globals: {
+          navigator: { mediaDevices: media, userAgent: ANDROID },
+          localStorage: storage,
+          performance: perf,
+          setTimeout: timers.setTimeout,
+          clearTimeout: timers.clearTimeout,
+        },
+      });
+      const events: [string, Record<string, unknown>][] = [];
+      vi.spyOn(TestBed.inject(DiagnosticsService), 'record').mockImplementation(
+        (kind, data = {}) => {
+          events.push([kind, { ...data }]);
+        },
+      );
+      await camera.start();
+      return { camera, events };
+    }
+
+    /** `count` readings of the watchdog. */
+    async function readings(count: number): Promise<void> {
+      for (let k = 0; k < count; k++) {
+        timers.advance(WATCH_INTERVAL_MS);
+        await settle();
+      }
+    }
+
+    it('applies what the camera opened in, then each change; Reset to auto as it opens again', async () => {
+      const { camera } = await watched();
+      const opening = {
+        exposureMode: 'continuous',
+        focusMode: 'continuous',
+        whiteBalanceMode: 'continuous',
+      };
+      expect(camera.applied()).toEqual(opening);
+      await camera.setControl('focusDistance', 0.5);
+      await camera.setControl('torch', true);
+      expect(camera.applied()).toEqual({ ...opening, focusMode: 'manual', focusDistance: 0.5 });
+      await camera.setControl('focusMode', 'continuous');
+      expect(camera.applied()).toEqual(opening);
+      await camera.setControl('zoom', 2);
+      await camera.resetControls();
+      expect(camera.applied()).toEqual(opening);
+      camera.stop();
+      expect(camera.applied()).toEqual({});
+      // The controls kept for a camera over the modes it opened in; Chrome's fake camera opens manual.
+      const webcam = controlsOf(FAKE_WEBCAM.capabilities, FAKE_WEBCAM.settings);
+      expect(openingApplied(webcam, FAKE_WEBCAM.settings, {})).toEqual({
+        exposureMode: 'manual',
+        focusMode: 'manual',
+      });
+      expect(openingApplied(webcam, {}, { focusMode: 'continuous', torch: true })).toEqual({
+        exposureMode: 'continuous',
+        focusMode: 'continuous',
+      });
+    });
+
+    it('sets a mode the camera changed by itself back, and says so', async () => {
+      const { camera, events } = await watched();
+      const track = media.tracks[0];
+      track.drift({ focusMode: 'manual' });
+      await readings(2);
+      expect(track.applied.at(-1)).toEqual({ advanced: [{ focusMode: 'continuous' }] });
+      expect(events.filter(([kind]) => kind === 'controls.drift')).toEqual([
+        [
+          'controls.drift',
+          {
+            camera: 'phone-rear',
+            role: 'host',
+            deviceLabel: 'camera 0, facing back',
+            drift: { focusMode: 'continuous → manual' },
+            controls: ['focusMode'],
+            reapplied: true,
+            gaveUp: false,
+            keep: true,
+          },
+        ],
+      ]);
+      expect(camera.values().focusMode).toBe('continuous');
+      expect(camera.driftOutcome()?.reapplied).toBe(true);
+      await readings(1);
+      expect(camera.drift()).toEqual([]);
+      // The source the controls panel reads says the same.
+      expect(camera.controlsSource.drift()).toEqual([]);
+      expect(camera.controlsSource.applied()).toEqual(camera.applied());
+    });
+
+    it("leaves it with Keep the camera's modes off, and shows the mode the camera is in", async () => {
+      const { camera, events } = await watched();
+      settings().setKeepCameraModes(false);
+      media.tracks[0].drift({ focusMode: 'manual' });
+      await readings(4);
+      expect(camera.drift()).toEqual([
+        { name: 'focusMode', expected: 'continuous', actual: 'manual' },
+      ]);
+      expect(camera.values().focusMode).toBe('manual');
+      expect(media.tracks[0].applied).toEqual([]);
+      const drifts = events.filter(([kind]) => kind === 'controls.drift');
+      expect(drifts).toHaveLength(1);
+      expect(drifts[0][1]).toMatchObject({ reapplied: false, gaveUp: false, keep: false });
+    });
+
+    it('reads nothing while a slider is held, nor for a second after it is let go', async () => {
+      const { camera, events } = await watched();
+      camera.controlsSource.adjusting(true);
+      media.tracks[0].drift({ focusMode: 'manual' });
+      await readings(5);
+      expect(events.filter(([kind]) => kind === 'controls.drift')).toEqual([]);
+      camera.controlsSource.adjusting(false);
+      timers.advance(ADJUSTING_QUIET_MS - 1);
+      await readings(1);
+      expect(camera.drift()).toEqual([]);
+      await readings(1);
+      expect(camera.drift()).toHaveLength(1);
+    });
+
+    it('is the controls panel’s source: the camera’s controls, values, a change, Reset to auto', async () => {
+      const { camera } = await watched();
+      const source = camera.controlsSource;
+      expect(source.controls()).toEqual(camera.controls());
+      expect(source.error()).toBeNull();
+      await source.set('exposureMode', 'manual');
+      expect(source.values().exposureMode).toBe('manual');
+      expect(source.busy()).toBe(false);
+      await source.reset();
+      expect(media.tracks).toHaveLength(2);
+      expect(source.values().exposureMode).toBe('continuous');
+    });
   });
 
   it('measures the preview: its frames, the real frame rate, and the sharpness twice a second', async () => {

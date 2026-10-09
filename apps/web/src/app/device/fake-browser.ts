@@ -525,6 +525,14 @@ export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
     this.dispatchEvent(new Event('ended'));
   }
 
+  /**
+   * The camera changes some of its settings by itself, no constraint asked for it (T5.2: the focus
+   * that went manual on its own on 2026-10-09).
+   */
+  drift(values: object): void {
+    Object.assign(this.settings, values);
+  }
+
   private satisfies(key: string, value: unknown): boolean {
     const capability = this.camera.capabilities[key];
     if (key === 'torch') {

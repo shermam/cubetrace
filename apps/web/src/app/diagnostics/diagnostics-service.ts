@@ -426,6 +426,7 @@ export class DiagnosticsService {
       recordRemoteCameras: () => settings.recordRemoteCameras(),
       livePreviewFromPhones: () => settings.livePreviewFromPhones(),
       remotePictures: () => settings.remotePictures(),
+      keepCameraModes: () => settings.keepCameraModes(),
     };
     let last: Record<string, string | number | boolean> | null = null;
     effect(() => {

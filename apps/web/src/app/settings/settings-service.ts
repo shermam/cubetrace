@@ -237,6 +237,8 @@ interface StoredSettings {
   readonly livePreviewFromPhones: boolean;
   /** T5.1: how the Timer page shows the phones' pictures; null: this device's default. */
   readonly remotePictures: RemotePictures | null;
+  /** T5.2: a mode the camera changes by itself is set back ("Keep the camera's modes"). */
+  readonly keepCameraModes: boolean;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -266,6 +268,7 @@ const DEFAULTS: StoredSettings = {
   recordRemoteCameras: true,
   livePreviewFromPhones: true,
   remotePictures: null,
+  keepCameraModes: true,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -294,7 +297,8 @@ export function macAddressProblem(text: string): string {
  * and whether the host records its remote cameras (T4.2: "Record remote cameras", in the Cameras
  * section of Camera settings) and asks them for a live picture (T4.3: "Live preview from phones",
  * there too), shown at the size of its own picture or as small tiles (T5.1: "Pictures from phones",
- * there too). Signals, kept
+ * there too); and whether a mode the camera changes by itself is set back (T5.2: "Keep the camera's
+ * modes"). Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
  * Signed in, the cube list is kept in sync with the account's by CubeSyncService (T3.4), which is
@@ -417,6 +421,13 @@ export class SettingsService {
   readonly remotePictures = computed(
     () => this.stored().remotePictures ?? remotePicturesDefault(this.isPhone),
   );
+  /**
+   * "Keep the camera's modes" (T5.2, Settings → Camera; on the phone's Camera page too): a mode the
+   * open camera changes by itself (its focus gone manual, as the Moto g60's did on 2026-10-09) is
+   * applied again by this device's watchdog, once per drift, three times a minute at most; off, it is
+   * said and left. On by default; for the host's own camera and for a phone's alike.
+   */
+  readonly keepCameraModes = computed(() => this.stored().keepCameraModes);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -599,6 +610,12 @@ export class SettingsService {
     }
   }
 
+  setKeepCameraModes(on: boolean): void {
+    if (on !== this.stored().keepCameraModes) {
+      this.update({ keepCameraModes: on });
+    }
+  }
+
   /** The clip viewer's choice for the camera labelled `camera`, or null when it has none. */
   viewerChoiceFor(camera: string): ViewerChoice | null {
     const choices = this.stored().viewer;
@@ -755,6 +772,7 @@ function readSettings(
   const recordRemoteCameras = member(parsed, 'recordRemoteCameras');
   const livePreviewFromPhones = member(parsed, 'livePreviewFromPhones');
   const remotePictures = member(parsed, 'remotePictures');
+  const keepCameraModes = member(parsed, 'keepCameraModes');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
   const settings: StoredSettings = {
     hostLabel:
@@ -818,6 +836,9 @@ function readSettings(
         : DEFAULTS.livePreviewFromPhones,
     // Settings stored before T5.1 have none: this device's default.
     remotePictures: REMOTE_PICTURES.find((p) => p === remotePictures) ?? DEFAULTS.remotePictures,
+    // Settings stored before T5.2 have none: on, as for a new device.
+    keepCameraModes:
+      typeof keepCameraModes === 'boolean' ? keepCameraModes : DEFAULTS.keepCameraModes,
   };
   return { settings, migrated: cubeMacs.migrated };
 }

@@ -463,6 +463,9 @@ describe('DiagnosticsService', () => {
     TestBed.tick();
     settings.setRemotePictures('tiles');
     TestBed.tick();
+    // Keep the camera's modes (T5.2): off.
+    settings.setKeepCameraModes(false);
+    TestBed.tick();
     // Settings → Keep the screen on: the lock it takes (wake.lock says it is wanted; no setting).
     await TestBed.inject(WakeLockService).request();
     TestBed.tick();
@@ -477,6 +480,7 @@ describe('DiagnosticsService', () => {
       { key: 'idleDisconnectMinutes', value: 1 },
       { key: 'videoQuality', value: 'high' },
       { key: 'remotePictures', value: 'tiles' },
+      { key: 'keepCameraModes', value: false },
     ]);
     expect(events().find((event) => event.kind === 'wake.lock')?.data).toEqual({
       status: 'active',

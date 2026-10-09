@@ -279,6 +279,23 @@
   </p>
   <label class="switch">
     <input
+      #keepModesBox
+      type="checkbox"
+      data-testid="keep-camera-modes"
+      aria-describedby="keep-camera-modes-hint"
+      [checked]="settings.keepCameraModes()"
+      (change)="settings.setKeepCameraModes(keepModesBox.checked)"
+    />
+    Keep the camera's modes
+  </label>
+  <p class="hint" id="keep-camera-modes-hint">
+    Every 2 s the camera's exposure, focus, white balance and zoom are read against what this device
+    applied; a mode the camera changed by itself (its focus gone manual) is set back and said, three
+    times a minute at most; then it is left, and said. Off, it is said and left. The same on a phone
+    filming for another device.
+  </p>
+  <label class="switch">
+    <input
       #audioBox
       type="checkbox"
       data-testid="record-audio"
