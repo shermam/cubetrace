@@ -8,6 +8,8 @@ export type {
   ClipAck,
   Clock,
   ControlMessage,
+  ControlsFailed,
+  ControlsReport,
   Cut,
   CutClip,
   CutDone,
@@ -31,6 +33,7 @@ export type {
   PressureSource,
   PressureState,
   Preview,
+  SetControls,
   SyncError,
   SyncMeter,
   SyncMotion,
@@ -42,6 +45,7 @@ export type {
 } from './protocol';
 export {
   CHUNK_HEADER_BYTES,
+  MAX_CONTROLS_MESSAGE,
   MAX_MOTION_FRAMES,
   PRESSURE_STATES,
   PROTOCOL_VERSION,

@@ -232,7 +232,13 @@ export interface CameraControls {
   readonly torch: boolean;
 }
 
-const METERING_MODES: readonly MeteringMode[] = ['continuous', 'single-shot', 'manual', 'none'];
+/** The metering modes, in the order the controls list them: continuous, single-shot, manual, none. */
+export const METERING_MODES: readonly MeteringMode[] = [
+  'continuous',
+  'single-shot',
+  'manual',
+  'none',
+];
 
 /**
  * The manual controls in `capabilities` (a track's `getCapabilities()` or its snapshot). The modes
@@ -304,6 +310,9 @@ export interface ControlValues {
 
 export type ControlName = keyof ControlValues;
 
+/** A value of one control: a mode, a number in the control's units, or the torch. */
+export type ControlValue = MeteringMode | number | boolean;
+
 /** The controls grouped as they are applied: a group the camera refuses leaves the others alone. */
 export const CONTROL_GROUPS: readonly (readonly ControlName[])[] = [
   ['exposureMode', 'exposureTime', 'iso'],
@@ -313,11 +322,52 @@ export const CONTROL_GROUPS: readonly (readonly ControlName[])[] = [
   ['torch'],
 ];
 
-const MODE_CONTROLS: ReadonlySet<ControlName> = new Set([
+/** Every control, in the order of their groups. */
+export const CONTROL_NAMES: readonly ControlName[] = CONTROL_GROUPS.flat();
+
+/** The controls that set a group's mode. */
+export type ModeControl = 'exposureMode' | 'focusMode' | 'whiteBalanceMode';
+
+const MODE_CONTROLS: ReadonlySet<ControlName> = new Set<ModeControl>([
   'exposureMode',
   'focusMode',
   'whiteBalanceMode',
 ]);
+
+/** The controls of the group of `name` (`focusDistance`: focusMode and focusDistance). */
+export function controlGroupOf(name: ControlName): readonly ControlName[] {
+  return CONTROL_GROUPS.find((group) => group.includes(name)) ?? [name];
+}
+
+/** The control that sets the mode of `name`'s group; null for zoom and the torch, which have none. */
+export function modeControlOf(name: ControlName): ModeControl | null {
+  const mode = controlGroupOf(name).find((member) => MODE_CONTROLS.has(member));
+  return (mode as ModeControl | undefined) ?? null;
+}
+
+/** The modes a camera lists for the group of `mode` (its `CameraControls` list). */
+export function modesOf(controls: CameraControls, mode: ModeControl): readonly MeteringMode[] {
+  switch (mode) {
+    case 'exposureMode':
+      return controls.exposureModes;
+    case 'focusMode':
+      return controls.focusModes;
+    case 'whiteBalanceMode':
+      return controls.whiteBalanceModes;
+  }
+}
+
+/**
+ * A control the camera changed by itself (docs/PLAN.md T5.2, the watchdog of the app's
+ * `ControlsWatch`): its name, the value the app expects (what it applied, or the mode the camera
+ * opened in where it applied nothing) and the value the track's settings say now. The focus that went
+ * manual by itself on 2026-10-09 is `{name: 'focusMode', expected: 'continuous', actual: 'manual'}`.
+ */
+export interface ControlDrift {
+  readonly name: ControlName;
+  readonly expected: ControlValue;
+  readonly actual: ControlValue;
+}
 
 /** The controls' values in a track's settings (or their snapshot). */
 export function controlValuesOf(settings: object): ControlValues {
