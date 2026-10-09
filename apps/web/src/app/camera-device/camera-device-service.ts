@@ -35,6 +35,7 @@ import { CameraDeviceCapture } from './camera-device-capture';
 import { CameraDeviceClips } from './camera-device-clips';
 import { CameraDevicePreview } from './camera-device-preview';
 import { CameraDeviceSync } from './camera-device-sync';
+import { watchPressure, type PressureReading } from './pressure';
 import { THUMBNAIL_GRABBER } from './thumbnail-grabber';
 
 /**
@@ -122,7 +123,8 @@ export const REFUSAL_TEXT: Readonly<Record<Exclude<PairingCheck, 'ok'>, string>>
  * the same token every few seconds for the pairing's ten minutes, T4.2b) and, once the channel is
  * open, exchanges `hello` with the host (its device and build, and the phone's camera as its own
  * session.json would describe it, sent again when the camera changes), answers the pings
- * (`answerPings`), sends its `state` and a `thumbnail` of the preview every 2 s, and shows what
+ * (`answerPings`), sends its `state` (with its battery, a thermal hint and, since T5.1, its Compute
+ * Pressure state: `observePressure`) and a `thumbnail` of the preview every 2 s, and shows what
  * the host measures of the clock (`clock`). It holds the wake lock while joined (the Camera page
  * keeps the pipeline running, `CameraDeviceCapture`, the ring buffer from the moment it opens) and
  * reconnects by itself: the transport restarts ICE on a failure; once it ends, the service calls
@@ -163,6 +165,7 @@ export class CameraDeviceService {
   private readonly sinceSignal = signal(0);
   private readonly pingsSignal = signal(0);
   private readonly batterySignal = signal<BatteryState | null>(null);
+  private readonly pressureSignal = signal<PressureReading | null>(null);
   private readonly reportsSignal = signal(0);
 
   /** See {@link CameraDeviceState}. */
@@ -190,6 +193,11 @@ export class CameraDeviceService {
   readonly reports = this.reportsSignal.asReadonly();
   /** The phone's battery, when the browser says. */
   readonly battery = this.batterySignal.asReadonly();
+  /**
+   * The phone's Compute Pressure state and its source (T5.1), while the Camera page watches it
+   * ({@link observePressure}); null where the browser has none, or before its first record.
+   */
+  readonly pressure = this.pressureSignal.asReadonly();
   /** The clips cut for the host that it has not answered for (T4.2), staged on this phone. */
   readonly pendingClips = computed(() => this.clips.pending());
   /** The thermal hint of the next `state`: throttled when the frame rate dropped under 80% of the nominal. */
@@ -219,6 +227,7 @@ export class CameraDeviceService {
    */
   private joinUntilMs = 0;
   private unwatchBattery: (() => void) | null = null;
+  private unwatchPressure: (() => void) | null = null;
   private lastHello = '';
   /** The operations under way, for the tests to wait on. */
   private pending: Promise<unknown> = Promise.resolve();
@@ -255,6 +264,7 @@ export class CameraDeviceService {
       this.globals.removeEventListener?.('pagehide', onPageHide);
       this.end('the page closed', 0);
       this.unwatchBattery?.();
+      this.unwatchPressure?.();
     });
   }
 
@@ -305,6 +315,26 @@ export class CameraDeviceService {
   /** The preview `<video>` the thumbnails are taken from; null when the page has none. */
   setPreview(video: HTMLVideoElement | null): void {
     this.preview = video;
+  }
+
+  /**
+   * Watches the phone's pressure (the Compute Pressure API, `watchPressure`: the thermals where the
+   * browser lists them, else the CPU, a sample every 2 s) for the page and every `state` (T5.1),
+   * until the returned function is called: the Camera page, while it is open.
+   */
+  observePressure(): () => void {
+    this.unwatchPressure?.();
+    const stop = watchPressure(this.globals.PressureObserver, (pressure) => {
+      this.pressureSignal.set(pressure);
+    });
+    this.unwatchPressure = stop;
+    return () => {
+      if (this.unwatchPressure === stop) {
+        this.unwatchPressure = null;
+        this.pressureSignal.set(null);
+      }
+      stop();
+    };
   }
 
   /** Resolves once the operations under way have settled, for the tests. */
@@ -722,6 +752,8 @@ export class CameraDeviceService {
       sharpness: this.camera.sharpness(),
       battery: this.batterySignal(),
       thermal: this.thermal(),
+      pressure: this.pressureSignal()?.state ?? null,
+      pressureSource: this.pressureSignal()?.source ?? null,
       pendingClips: this.clips.pending(),
     });
     if (sent) {

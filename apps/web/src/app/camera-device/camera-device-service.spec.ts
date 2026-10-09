@@ -43,6 +43,7 @@ import {
   RETRY_DELAY_MS,
 } from './camera-device-service';
 import { CameraDeviceSync, MOTION_BATCH_MS } from './camera-device-sync';
+import { fakePressure, type FakePressure } from './pressure-testing';
 import { THUMBNAIL_GRABBER, type ThumbnailGrabber } from './thumbnail-grabber';
 
 const ANDROID = 'Mozilla/5.0 (Linux; Android 16; K) Chrome/155.0.0.0 Mobile Safari/537.36';
@@ -193,7 +194,7 @@ class Host {
 describe('CameraDeviceService', () => {
   let r: Rig;
 
-  function rig(options: { signedIn?: boolean } = {}): Rig {
+  function rig(options: { signedIn?: boolean; pressure?: FakePressure } = {}): Rig {
     TestBed.resetTestingModule();
     const backend = new FakeAccountBackend();
     const localStorage = new FakeLocalStorage();
@@ -226,6 +227,7 @@ describe('CameraDeviceService', () => {
       performance: perf,
       setTimeout: timers.setTimeout,
       clearTimeout: timers.clearTimeout,
+      PressureObserver: options.pressure?.Observer,
       addEventListener: (type, listener) => {
         let set = listeners.get(type);
         if (set === undefined) {
@@ -465,6 +467,31 @@ describe('CameraDeviceService', () => {
     expect(clock?.rttMs).toBeCloseTo(8, 0);
     await pass(20_000);
     expect(r.service.clock()?.converged).toBe(true);
+  });
+
+  it('sends its Compute Pressure state and source in each state while the page observes it, null otherwise (T5.1)', async () => {
+    const pressure = fakePressure({ sources: ['cpu'] });
+    r = rig({ pressure });
+    await settle();
+    await cameraOn();
+    const host = await joined();
+    // Not observed yet (the Camera page starts it): null, as where the browser has no API.
+    await pass(REPORT_INTERVAL_MS);
+    expect(host.of('state').at(-1)).toMatchObject({ pressure: null, pressureSource: null });
+
+    const stop = r.service.observePressure();
+    await settle();
+    expect(pressure.observed).toEqual([{ source: 'cpu', sampleInterval: 2000, refused: false }]);
+    pressure.emit('serious', 'cpu');
+    await pass(REPORT_INTERVAL_MS);
+    expect(r.service.pressure()).toEqual({ state: 'serious', source: 'cpu' });
+    expect(host.of('state').at(-1)).toMatchObject({ pressure: 'serious', pressureSource: 'cpu' });
+
+    stop();
+    expect(pressure.disconnected()).toBe(1);
+    expect(r.service.pressure()).toBeNull();
+    await pass(REPORT_INTERVAL_MS);
+    expect(host.of('state').at(-1)).toMatchObject({ pressure: null, pressureSource: null });
   });
 
   it('reports the recording and a thermal hint when the frame rate drops under 80% of the nominal', async () => {

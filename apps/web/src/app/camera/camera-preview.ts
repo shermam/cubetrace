@@ -11,7 +11,7 @@ import { framingPercent } from '@cubetrace/capture';
 
 import { StorageService } from '../device/storage-service';
 import { SessionService } from '../session/session-service';
-import { SettingsService } from '../settings/settings-service';
+import { SettingsService, type RemotePictures } from '../settings/settings-service';
 import { fpsText, sharpnessText } from './camera-format';
 import { CameraService } from './camera-service';
 import { RecordingService } from './recording-service';
@@ -37,88 +37,121 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
  * (`overlay`, T2.13), the Timer page pins it at the top of the window: the picture fills the width
  * it is given at the frames' proportions, up to 42% of the window's height, its line sits over its
  * top left corner, and the sync check is the Timer page's to show, under the time, out of the
- * pinned part. Since T4.3 the phones paired as remote cameras show over it, a small tile each of
- * their live pictures in the top right corner, which a tap swaps with the main picture
- * (`RemotePreviews`, issue #60: the thumbnail at the bottom of Camera settings was too far from the
- * preview to keep the cube in a phone's frame); their code loads only once a phone is paired, and
- * without this device's camera the first phone's picture is the main one.
+ * pinned part. Since T4.3 the phones paired as remote cameras show with it (`RemotePreviews`, issue
+ * #60: the thumbnail at the bottom of Camera settings was too far from the preview to keep the cube in
+ * a phone's frame), their code loaded only once a phone is paired, in one of two layouts
+ * (`pictures`, "Pictures from phones", T5.1): `equal`, each phone's picture in a cell of its own as
+ * large as this device's, with the phone's status line under it, the cells under one another in a
+ * grid whose columns the Timer page sets (`--picture-columns`: two where its column is wide enough
+ * beside the clock; the host's class `many` says there are two pictures or more), without this
+ * device's own cell while its camera is off; `tiles` (T4.3), a small tile each over the top right
+ * corner of this device's picture, which a tap swaps with the main picture, the first phone's picture
+ * the main one without this device's camera. A phone's overlay always has tiles.
  */
 @Component({
   selector: 'app-camera-preview',
   imports: [RemotePreviews, SyncCheck],
-  host: { '[class.shown]': 'shown()', '[class.overlay]': 'overlay()' },
+  host: {
+    '[class.shown]': 'shown()',
+    '[class.overlay]': 'overlay()',
+    '[class.equal]': 'equal()',
+    '[class.many]': 'many()',
+    '[attr.data-pictures]': "equal() ? 'equal' : 'tiles'",
+  },
   template: `
     @if (shown()) {
-      <div
-        class="box"
-        data-testid="camera-preview-box"
-        [attr.data-status]="camera.status()"
-        [style.--aspect]="aspect()"
-      >
-        @if (camera.stream()) {
-          <div class="frame" [class.mirrored]="camera.mirrored()">
-            <video
-              #video
-              muted
-              playsinline
-              aria-label="Camera preview"
-              data-testid="camera-preview"
-            ></video>
-            @if (box(); as area) {
-              <div
-                class="framing"
-                aria-hidden="true"
-                data-testid="camera-preview-framing"
-                [style.left.%]="area.left"
-                [style.top.%]="area.top"
-                [style.width.%]="area.width"
-                [style.height.%]="area.height"
-              ></div>
+      <!-- With equal pictures, a grid of cells: this device's and each phone's (T5.1). Otherwise its
+           wrappers are no boxes at all: the box and the line are the host's items, as before. -->
+      <div class="cells" data-testid="camera-cells">
+        @if (ownCell()) {
+          <div class="cell" data-testid="camera-cell">
+            <div
+              class="box"
+              data-testid="camera-preview-box"
+              [attr.data-status]="camera.status()"
+              [style.--aspect]="aspect()"
+            >
+              @if (camera.stream()) {
+                <div class="frame" [class.mirrored]="camera.mirrored()">
+                  <video
+                    #video
+                    muted
+                    playsinline
+                    aria-label="Camera preview"
+                    data-testid="camera-preview"
+                  ></video>
+                  @if (box(); as area) {
+                    <div
+                      class="framing"
+                      aria-hidden="true"
+                      data-testid="camera-preview-framing"
+                      [style.left.%]="area.left"
+                      [style.top.%]="area.top"
+                      [style.width.%]="area.width"
+                      [style.height.%]="area.height"
+                    ></div>
+                  }
+                </div>
+              } @else if (camera.status() === 'starting') {
+                <p class="message">Opening the camera…</p>
+              } @else if (camera.status() === 'error') {
+                <p class="message">The camera is not working: Camera settings says why.</p>
+              }
+              @if (!equal()) {
+                @defer (when remotes()) {
+                  @if (remotes()) {
+                    <app-remote-previews
+                      layout="tiles"
+                      [local]="camera.stream()"
+                      [mirrored]="camera.mirrored()"
+                      [localAspect]="aspect()"
+                    />
+                  }
+                }
+              }
+            </div>
+            @if (camera.stream()) {
+              <!-- One line (it wraps on the narrowest phones), its parts kept whole. -->
+              <p class="status" data-testid="camera-status">
+                <span data-testid="camera-status-fps">{{ fps() }}</span> ·
+                <span
+                  data-testid="camera-status-sharpness"
+                  [attr.data-good]="camera.sharpnessGood()"
+                  [title]="sharpnessTitle()"
+                  >sharpness
+                  <span class="value" [class.good]="camera.sharpnessGood()" [class.soft]="soft()">{{
+                    sharpness()
+                  }}</span></span
+                >
+                ·
+                <span
+                  class="rec"
+                  data-testid="camera-status-recording"
+                  [attr.data-status]="recording()"
+                >
+                  @if (recording() === 'recording') {
+                    <span class="dot" aria-hidden="true"></span>
+                  }
+                  {{ recording() }}</span
+                >
+                @if (storagePercent(); as percent) {
+                  ·
+                  <span data-testid="camera-status-storage" [attr.data-level]="storage.level()"
+                    >storage {{ percent }}</span
+                  >
+                }
+              </p>
             }
           </div>
-        } @else if (camera.status() === 'starting') {
-          <p class="message">Opening the camera…</p>
-        } @else if (camera.status() === 'error') {
-          <p class="message">The camera is not working: Camera settings says why.</p>
         }
-        @defer (when remotes()) {
-          @if (remotes()) {
-            <app-remote-previews
-              [local]="camera.stream()"
-              [mirrored]="camera.mirrored()"
-              [localAspect]="aspect()"
-            />
+        @if (equal()) {
+          @defer (when remotes()) {
+            @if (remotes()) {
+              <app-remote-previews layout="equal" />
+            }
           }
         }
       </div>
-      @if (camera.stream()) {
-        <!-- One line (it wraps on the narrowest phones), its parts kept whole. -->
-        <p class="status" data-testid="camera-status">
-          <span data-testid="camera-status-fps">{{ fps() }}</span> ·
-          <span
-            data-testid="camera-status-sharpness"
-            [attr.data-good]="camera.sharpnessGood()"
-            [title]="sharpnessTitle()"
-            >sharpness
-            <span class="value" [class.good]="camera.sharpnessGood()" [class.soft]="soft()">{{
-              sharpness()
-            }}</span></span
-          >
-          ·
-          <span class="rec" data-testid="camera-status-recording" [attr.data-status]="recording()">
-            @if (recording() === 'recording') {
-              <span class="dot" aria-hidden="true"></span>
-            }
-            {{ recording() }}</span
-          >
-          @if (storagePercent(); as percent) {
-            ·
-            <span data-testid="camera-status-storage" [attr.data-level]="storage.level()"
-              >storage {{ percent }}</span
-            >
-          }
-        </p>
-      }
       @if (!overlay()) {
         <app-sync-check />
       }
@@ -137,6 +170,30 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
 
     p {
       margin: 0;
+    }
+
+    /* Without equal pictures, no boxes: the box and the line are the host's items (T4.3's layout). */
+    .cells,
+    .cell {
+      display: contents;
+    }
+
+    /* Equal pictures (T5.1): a cell each, the box and its line, in as many columns as the Timer page
+       gives (one by default), all of one width: the boxes are the same size. */
+    :host(.equal) {
+      .cells {
+        display: grid;
+        grid-template-columns: repeat(var(--picture-columns, 1), minmax(0, 1fr));
+        gap: var(--space-2);
+        align-items: start;
+      }
+
+      .cell {
+        display: grid;
+        gap: var(--space-1);
+        align-content: start;
+        min-width: 0;
+      }
     }
 
     /* A fixed box of 16:9; the frames keep their proportions inside it (the framing rectangle is
@@ -273,6 +330,11 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
 export class CameraPreview {
   /** Pinned at the top of a phone's Timer page with the scramble over it (T2.13). */
   readonly overlay = input(false);
+  /**
+   * How the phones' pictures show (T5.1, the Timer page's `remotePicturesLayout`): as large as this
+   * device's own, in cells, or as tiles over it; tiles in the overlay whatever this says.
+   */
+  readonly pictures = input<RemotePictures>('tiles');
   protected readonly camera = inject(CameraService);
   protected readonly storage = inject(StorageService);
   private readonly recorder = inject(RecordingService);
@@ -288,6 +350,21 @@ export class CameraPreview {
   );
   /** While the camera is wanted (on, opening, or not working), or a phone's picture is there. */
   protected readonly shown = computed(() => this.camera.status() !== 'off' || this.remotes());
+  /** The phones' pictures in cells as large as this device's own (T5.1). */
+  protected readonly equal = computed(() => this.pictures() === 'equal' && !this.overlay());
+  /**
+   * This device's own cell: with tiles, always (its box holds the main picture, a phone's without
+   * this device's camera); with equal pictures, while its camera is wanted.
+   */
+  protected readonly ownCell = computed(() => !this.equal() || this.camera.status() !== 'off');
+  /** Two pictures or more in cells: the Timer page sets them side by side where it is wide. */
+  protected readonly many = computed(() => {
+    if (!this.equal()) {
+      return false;
+    }
+    const phones = this.registry.cameras().filter((camera) => camera.label !== null).length;
+    return (this.ownCell() ? 1 : 0) + phones > 1;
+  });
   /** The sharpness meter waits while the time of a move is the solve's. */
   private readonly held = computed(() => {
     const phase = this.session.phase();

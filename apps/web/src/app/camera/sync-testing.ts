@@ -249,6 +249,7 @@ export function remotePhone(
     label: 'phone-rear',
     session,
     state: 'connected',
+    sinceMs: 0,
     synced: true,
     converged: false,
     recording: true,
@@ -257,6 +258,8 @@ export function remotePhone(
     deviceLabel: 'camera 0, facing back',
     preview: null,
     thumbnail: null,
+    report: null,
+    reportMs: null,
     ...changes,
   };
 }

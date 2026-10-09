@@ -3,7 +3,12 @@ import { MAX_VIEWER_CHOICES, VIEWER_DEFAULT } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import { FakeLocalStorage, FakePerformance } from '../device/fake-browser';
-import { SETTINGS_STORAGE_KEY, SettingsService, defaultHostLabel } from './settings-service';
+import {
+  SETTINGS_STORAGE_KEY,
+  SettingsService,
+  defaultHostLabel,
+  remotePicturesDefault,
+} from './settings-service';
 
 const MAC_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) ' +
@@ -65,6 +70,8 @@ describe('SettingsService', () => {
     expect(settings.diagnostics()).toBe(true);
     expect(settings.recordRemoteCameras()).toBe(true);
     expect(settings.livePreviewFromPhones()).toBe(true);
+    expect(settings.remotePicturesChoice()).toBeNull();
+    expect(settings.remotePictures()).toBe('equal');
     expect(settings.networkTypeKnown).toBe(false);
     expect(settings.wifiOnly()).toBe(false);
     expect(settings.saveError()).toBeNull();
@@ -139,6 +146,7 @@ describe('SettingsService', () => {
     settings.setViewerChoice('laptop', { latitude: 90, longitude: 180, mirror: 'left-right' });
     settings.setRecordRemoteCameras(false);
     settings.setLivePreviewFromPhones(false);
+    settings.setRemotePictures('tiles');
 
     expect(stored()).toEqual({
       version: 2,
@@ -176,12 +184,14 @@ describe('SettingsService', () => {
       viewer: { laptop: { latitude: 90, longitude: 180, mirror: 'left-right' } },
       recordRemoteCameras: false,
       livePreviewFromPhones: false,
+      remotePictures: 'tiles',
     });
     const reloaded = load();
     expect(reloaded.uploadSessions()).toBe(false);
     expect(reloaded.diagnostics()).toBe(false);
     expect(reloaded.recordRemoteCameras()).toBe(false);
     expect(reloaded.livePreviewFromPhones()).toBe(false);
+    expect(reloaded.remotePictures()).toBe('tiles');
     expect(reloaded.wifiOnlySetting()).toBe(true);
     // A laptop's browser does not say the network's type: it uploads on any network.
     expect(reloaded.wifiOnly()).toBe(false);
@@ -511,6 +521,43 @@ describe('SettingsService', () => {
 
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ livePreviewFromPhones: 'yes' }));
     expect(load().livePreviewFromPhones()).toBe(true);
+  });
+
+  it("keeps Pictures from phones as chosen, else the device's default: the same size on a laptop, small tiles on a phone (T5.1)", () => {
+    expect(remotePicturesDefault(false)).toBe('equal');
+    expect(remotePicturesDefault(true)).toBe('tiles');
+    // What 0.4.0 stored: no such choice.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ version: 2, cameraOn: true, livePreviewFromPhones: false }),
+    );
+    const laptop = load();
+    expect(laptop.remotePicturesChoice()).toBeNull();
+    expect(laptop.remotePictures()).toBe('equal');
+    expect(laptop.livePreviewFromPhones()).toBe(false);
+
+    laptop.setRemotePictures('tiles');
+    expect(stored()).toMatchObject({ remotePictures: 'tiles', livePreviewFromPhones: false });
+    expect(load().remotePictures()).toBe('tiles');
+    load().setRemotePictures('equal');
+    expect(load().remotePicturesChoice()).toBe('equal');
+
+    // A phone: tiles until it chooses.
+    const android =
+      'Mozilla/5.0 (Linux; Android 15; motorola edge 50 neo) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
+    const phoneStorage = new FakeLocalStorage();
+    const phone = load({ navigator: { userAgent: android }, localStorage: phoneStorage });
+    expect(phone.isPhone).toBe(true);
+    expect(phone.remotePictures()).toBe('tiles');
+    phone.setRemotePictures('equal');
+    expect(
+      load({ navigator: { userAgent: android }, localStorage: phoneStorage }).remotePictures(),
+    ).toBe('equal');
+
+    // A value that is not a choice: the default.
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ remotePictures: 'huge' }));
+    expect(load().remotePicturesChoice()).toBeNull();
   });
 
   it('reads the settings stored before the microphone setting existed as Raw, the rest as stored', () => {

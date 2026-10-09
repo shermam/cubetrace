@@ -458,6 +458,10 @@ describe('DiagnosticsService', () => {
     settings.setIdleDisconnectMinutes(1);
     settings.setVideoQuality('high');
     settings.setHostLabel('office-mbp');
+    // Pictures from phones (T5.1): chosen as the default is no change; tiles is one.
+    settings.setRemotePictures('equal');
+    TestBed.tick();
+    settings.setRemotePictures('tiles');
     TestBed.tick();
     // Settings → Keep the screen on: the lock it takes (wake.lock says it is wanted; no setting).
     await TestBed.inject(WakeLockService).request();
@@ -472,6 +476,7 @@ describe('DiagnosticsService', () => {
       { key: 'inspection', value: true },
       { key: 'idleDisconnectMinutes', value: 1 },
       { key: 'videoQuality', value: 'high' },
+      { key: 'remotePictures', value: 'tiles' },
     ]);
     expect(events().find((event) => event.kind === 'wake.lock')?.data).toEqual({
       status: 'active',

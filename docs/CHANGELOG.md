@@ -5,6 +5,34 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
+
+### Added
+
+- The phone's picture at the size of the host's own, with its status line (T5.1; `docs/RTC.md` §10,
+  `README.md` "The desk rig"): on the Timer page each paired phone's live picture is a cell as large
+  as the laptop's preview (a box of 16:9, the phone's upright frames between bars, its framing
+  rectangle drawn), beside it in a window of 1,552 px or more (the page then up to 120rem wide),
+  under it in a narrower one; under each, the phone's status line, the twin of the laptop's own:
+  its frame rate, its sharpness by the laptop's threshold (green good, amber soft), recording or
+  not, its battery (amber under 20% and unplugged, red under 10%), its health (the frame rate
+  dropped in amber; its Compute Pressure state, `fair` in amber, `serious` and `critical` in red),
+  `reconnecting…`, `clock syncing…`, and `no report for N s` in red when its reports stop while it
+  is connected. Camera settings → Cameras → "Pictures from phones": "Same size as mine" (a laptop's
+  default) or "Small tiles" (a phone's default, and the only layout of a phone's Timer page with the
+  scramble over its picture), the tiles of 0.4.0 with a caption saying in short what is wrong. The
+  Cameras list's report reads the same words.
+- The phone's Compute Pressure state (T5.1): where the phone's Chrome has the API
+  (`PressureObserver`, Chrome 125+), its Camera page observes the thermals source (or the CPU)
+  every 2 s while it is open, says the state beside its battery (`fair`: it is warming up;
+  `serious`: it may be hot; `critical`: let it cool down) and sends it in each `state` message
+  (`pressure`, `pressureSource`, additive within protocol version 1: a phone of 0.4.0 sends none).
+  The web platform has no temperature reading; this is the nearest.
+- Diagnostics: the host's `rtc.clock` of each minute carries the phone's last report (`report`: frame
+  rate, sharpness and whether it is soft, recording, battery, thermal hint, pressure), a phone's
+  health over a session; `settings.changed` names `remotePictures`; the round report's "After T5.1"
+  items read them.
+
 ## 0.4.0 — 2026-10-04
 
 Phase 4 of `docs/PLAN.md`: remote cameras. A phone signed in to the same account joins a laptop's

@@ -8,7 +8,8 @@ the documents' shapes) and `firebase/firestore.rules` (the signaling's rules): t
 data channel, the file transfer, the clock sync, the signaling and the pairing token, and what each
 side does when something fails. The pages that use it came with T4.1 (§8 below: the lifecycle as the host's Cameras section and
 the phone's Camera page run it), the cuts and the clips' transfer with T4.2 (§9), the sync check of
-the phone's camera and the live preview with T4.3 (§10). `docs/ARCHITECTURE.md` ("Remote cameras")
+the phone's camera and the live preview with T4.3 (§10), and the phone's picture at the host's
+picture's size with its status line with T5.1 (§10). `docs/ARCHITECTURE.md` ("Remote cameras")
 places it in the app.
 
 **Stream for control, record locally for data.** One `RTCPeerConnection` between the two devices,
@@ -44,7 +45,7 @@ file name without a path).
 | `ping` | host | `t1`, the host clock | every 500 ms until the clock sync converges, for a minute at most, then every 2 s (`PING_INTERVAL_MS`, §4) |
 | `pong` | phone | `t1` back, `t2` (when the ping came) and `t3` (when the answer goes), on the phone's clock | at once, for each ping |
 | `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
-| `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
+| `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pressure` (`nominal`, `fair`, `serious`, `critical`: the Compute Pressure API's state, null where the browser has none) and `pressureSource` (`thermals`, `cpu`, null) since T5.1 (0.5.0; additive within version 1), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
 | `thumbnail` | phone | `remoteMs`, `width`, `height`, `jpeg` (a JPEG of at most 320 px on its longer side) | every 2 s (binary) |
 | `cut` | host | `attempt`, `scrambleShown` (the attempt's, on the host clock: an attempt begun again with the same index has another), `segment` (`scramble`, `solve`), `fromRemoteMs`, `toRemoteMs` (the window in the phone's clock, through the host's clock estimate and widened by its margin on each side, §9), `reason` (the timer's milestone: `armed`, `ended`), `camera` (the label the session gives the phone's camera: its files' first name) | when the host cuts its own camera; sent again as it was over a new connection while unanswered |
 | `cut-done` | phone | `attempt`, `scrambleShown`, `segment`, `files: [{name, bytes, kind}]` (the frames file first), `clip` (what the capture said of it: `codec`, `audio`, `width`, `height`, `fpsNominal`, `frames`, `crop`, `truncatedStart`, `lateMs`, `bufferSeconds`, `audioMissing`) | the clip is muxed and staged; offered again over each connection until the host's `clip-ack` |
@@ -71,7 +72,9 @@ is not a message (`onError`) and drops it, and sends messages encoded (`link.sen
 which does nothing on a closed transport). The fields of the cuts and `clip-ack` came with T4.2,
 additive within version 1: no build before T4.2 cuts. The sync messages and `preview` came with T4.3,
 additive the same way: a phone of a build before T4.3 drops them as frames that are not messages
-(`onError`), sends no picture, and a check of its camera ends without frames.
+(`onError`), sends no picture, and a check of its camera ends without frames. `state`'s `pressure`
+and `pressureSource` came with T5.1 (0.5.0), additive too: a host reads the `state` of a phone of
+0.4.0, which has neither, with both null (no pressure known), and a host of 0.4.0 ignores them.
 
 ## 2. The transport (`transport.ts`, `webrtc.ts`)
 
@@ -413,8 +416,9 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    since T4.2b). The phone answers the pings, sends `state` and a `thumbnail` (a JPEG of at most 320
    px from its preview) every 2 s, and `hello` again when its camera changes (another camera, the
    framing). The host's list shows the name, the label, the state, the sync, the latest report and
-   the picture; the phone shows the host, the state, the clock as reported, the battery and a
-   thermal hint (the frame rate under 80% of the camera's nominal), and holds the wake lock.
+   the picture; the phone shows the host, the state, the clock as reported, the battery, a thermal
+   hint (the frame rate under 80% of the camera's nominal) and, since T5.1, its Compute Pressure
+   state where its browser has one (§10), and holds the wake lock.
 5. **A drop.** The transport restarts ICE by itself (§2). Once it ends without a `leave`, the host
    lists the camera as reconnecting for five minutes and answers a call that presents its token again
    (only while reconnecting: a second phone shown the same code cannot take a connected camera's
@@ -509,11 +513,11 @@ clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the
    bytes, the transfer's time and throughput, the bytes resumed), `remote.clip.late`,
    `remote.clip.missing`; the QA view counts the clips by camera label.
 
-## 10. The sync check of a remote camera and the live preview (T4.3)
+## 10. The sync check of a remote camera, the live preview and the phone's status line (T4.3, T5.1)
 
 How the host's `SyncService` (`apps/web/src/app/camera/sync-service.ts`) measures a phone's camera
-against the cube, and how the phone's live picture reaches the Timer page (`docs/PLAN.md` T4.3 has
-the contract):
+against the cube, how the phone's live picture reaches the Timer page, and what the host says of the
+phone under it (`docs/PLAN.md` T4.3 and T5.1 have the contracts):
 
 1. **Starting it.** Each phone of the Cameras section with a camera has a line of its own under the
    Timer page's preview (`Sync: phone-rear has no check in this session`, or its lag, with "Sync
@@ -563,12 +567,30 @@ the contract):
    it as the camera changes, and stops when the host says off, the camera goes off or the connection
    ends. The host (`RemoteCamerasService`) takes the track into the camera's entry, and the Timer
    page's `RemotePreviews`, deferred inside the preview until a phone with a camera is listed, shows
-   each phone's picture as a tile in the top right corner of the host's preview: its live video while
-   the track flows (unmuted), its latest thumbnail otherwise, its framing rectangle over it. A tap
-   swaps a tile with the main picture, a tap on this device's tile swaps back, and without a camera of
-   the host's own the first phone's picture is the main one (issue #60: the thumbnail at the bottom of
-   Camera settings was too far from the preview to keep the cube in the phone's frame). The Cameras
-   list keeps its thumbnail every 2 s, the pairing's state.
+   each phone's picture: its live video while the track flows (unmuted), its latest thumbnail
+   otherwise, its framing rectangle over it. Since T5.1 in one of two layouts, "Pictures from
+   phones" (Camera settings → Cameras; `remotePicturesLayout` in `timer-layout.ts`):
+   - **same size as mine** (`equal`, the default on a host that is not a phone): each phone's
+     picture in a cell of its own as large as the host's picture (a box of 16:9 of the same width,
+     the phone's upright frames between bars, its framing rectangle drawn as on the host's own, the
+     whole frame when the phone's rectangle is the whole frame), its label over the corner and its
+     status line under it (item 7). The cells are those of one grid with the host's own
+     (`CameraPreview`), under one another beside the clock, two to a row where the Timer page's
+     column holds two of them beside the clock (72rem: a window of 1,552 px or more, the page then
+     up to 120rem wide); without the host's camera the phones' cells are alone. On 2026-10-09 the
+     owner's phone was "a tiny picture-in-picture image" in its tile, and its focus went manual by
+     itself twenty solves before he saw it.
+   - **small tiles** (`tiles`, T4.3; the default on a phone host, and the only layout of a phone's
+     Timer page with the scramble over its picture, T2.13): a tile per phone in the top right corner
+     of the host's preview, its caption saying in short what is wrong (`soft`, `15%`, `hot`,
+     `pressure serious`, `no report`). A tap swaps a tile with the main picture, a tap on this
+     device's tile swaps back, and without a camera of the host's own the first phone's picture is
+     the main one (issue #60: the thumbnail at the bottom of Camera settings was too far from the
+     preview to keep the cube in the phone's frame).
+
+   Either way the picture is the preview's encoding of item 4 (a fifth of the camera's resolution,
+   300 kbps, 15 fps): the size the host shows it at changes nothing on the phone. The Cameras list
+   keeps its thumbnail every 2 s, the pairing's state.
 5. **What the preview costs the phone.** Each start says, in `preview.started`, how the recording
    went over the span before it (without the preview: its frame rate measured, the least of its
    seconds, the frames encoded a second and those dropped), and each stop, in `preview.stopped`, how
@@ -581,3 +603,23 @@ the contract):
 6. **Diagnostics** (`docs/DIAGNOSTICS.md`): `sync.check` with `remote: true`, the phone's `peer` and
    the clock sync that placed its frames (`clockConverged`, `clockOffsetMs`, `clockRttMs`,
    `clockSamples`); `preview.started` and `preview.stopped` on the phone.
+7. **The phone's status line** (T5.1, `remote-status.ts`): under each phone's picture, the twin of
+   the host's own line under its preview, from the phone's last `state` (`remoteStatusLine`, one
+   pure function for the Timer page's line, a tile's caption in short and the Cameras list's report,
+   so that the three never disagree): the frame rate; the sharpness against this host's threshold
+   (Settings → Camera), green when good and amber when soft; the recording word in the host's style
+   (red: `not recording`); the battery (`83%`, `charging`; amber under 20% and not charging, red
+   under 10%); the health: `hot: the frame rate dropped` in amber (the phone's thermal hint) and the
+   Compute Pressure state when the phone reports one (`pressure fair` in amber, `serious` and
+   `critical` in red); the connection when it is not plainly connected (`reconnecting…` in amber,
+   `clock syncing…` until the clock sync converges); and `no report for N s` in red once the `state`
+   messages stop for 10 s while the phone is connected (they come every 2 s), the lines' clock
+   ticking every second. **The pressure** is the phone's `PressureObserver`
+   (`camera-device/pressure.ts`, Chrome 125+), which the Camera page runs while it is open: the
+   source `thermals` when `PressureObserver.knownSources` lists it, else `cpu` (also when the
+   thermals are refused), a sample every 2 s, its latest state in every `state` (`pressure`,
+   `pressureSource`, §1); null where the browser has no observer, lists no source it reads, or
+   refuses (`observe` rejects). The web platform has no temperature reading; the pressure is the
+   nearest. The phone's page says it beside the thermal hint (fair: it is warming up; serious: it
+   may be hot; critical: let it cool down). The host's `rtc.clock` of each minute carries the last
+   report (`report`, `docs/DIAGNOSTICS.md`), the phone's health over a session.

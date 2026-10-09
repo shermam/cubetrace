@@ -176,6 +176,19 @@ adds items; the owner ticks them when done (date and any detail that others need
   `docs/DEVICES.md`'s Remote cameras rows and the live preview's cost from them, and closes issue #61
   if a pairing stayed converged for twenty minutes.
 
+## Needed for phase 5
+
+- [ ] **The "After T5.1" items (the phone's picture and its status line)**, once T5.1 is merged and
+  the deployed footer names a commit after it: on the MacBook, the ThinkPhone and then the Moto g60
+  paired as in "After T4", "Pictures from phones" on "Same size as mine" (the MacBook's default),
+  and go through "After T5.1" in `docs/MANUAL-TESTS.md`: the two pictures the same size side by side
+  and narrowed, the line's sharpness turning amber with the phone's focus set to manual on its own
+  Camera page, its battery unplugged and low, twenty minutes on the rig for the phone's warmth (and,
+  once, whether each phone's Chrome has the Compute Pressure API: `'PressureObserver' in window` in
+  its console, through `chrome://inspect` on the MacBook with the phone on USB), tiles chosen and
+  back. Write down what the items ask beside the events; the coordinator reads the rest from the
+  MacBook's `rtc.clock` records (`npm run round-report`).
+
 ## Later
 
 - [ ] Phase 2 rig: tripod + phone clamp, a lamp with a diffuser for the desk; the sofa

@@ -33,6 +33,7 @@ import { SettingsService } from '../settings/settings-service';
 import { CameraDeviceCapture } from './camera-device-capture';
 import { CameraDevicePage } from './camera-device-page';
 import { CameraDeviceService } from './camera-device-service';
+import { fakePressure, type FakePressure } from './pressure-testing';
 import { THUMBNAIL_GRABBER } from './thumbnail-grabber';
 
 const ANDROID = 'Mozilla/5.0 (Linux; Android 16; K) Chrome/155.0.0.0 Mobile Safari/537.36';
@@ -68,6 +69,8 @@ describe('CameraDevicePage', () => {
       signedIn?: boolean;
       query?: Record<string, string>;
       prepared?: FakeLocalStorage;
+      /** The browser's `PressureObserver` (T5.1); none by default. */
+      pressure?: FakePressure;
     } = {},
   ): Promise<void> {
     const localStorage = options.prepared ?? prepare(options);
@@ -79,6 +82,7 @@ describe('CameraDevicePage', () => {
       performance: perf,
       setTimeout: timers.setTimeout,
       clearTimeout: timers.clearTimeout,
+      PressureObserver: options.pressure?.Observer,
     };
     TestBed.configureTestingModule({
       providers: [
@@ -226,6 +230,40 @@ describe('CameraDevicePage', () => {
     await pump(0);
     expect(element('device-state')?.getAttribute('data-state')).toBe('idle');
     expect(element('pairing-input')).not.toBeNull();
+  });
+
+  it("shows the phone's pressure where the browser has the API, warns from fair up, and stops observing when the page goes (T5.1)", async () => {
+    const pressure = fakePressure({ sources: ['cpu', 'thermals'] });
+    const prepared = prepare();
+    const { token } = await host();
+    await render({ query: { session: SESSION_A, token }, prepared, pressure });
+    await pump(20);
+    expect(element('device-state')?.getAttribute('data-state')).toBe('connected');
+    expect(pressure.observed.map((call) => call.source)).toEqual(['thermals']);
+    // No record yet: nothing said.
+    expect(element('device-pressure')).toBeNull();
+
+    pressure.emit('nominal');
+    await pump(10);
+    expect(text('device-pressure')).toBe('nominal (thermals)');
+    expect(element('device-pressure-warning')).toBeNull();
+    pressure.emit('fair');
+    await pump(10);
+    expect(element('device-pressure')?.getAttribute('data-state')).toBe('fair');
+    const warning = element('device-pressure-warning');
+    expect(warning?.textContent.trim()).toBe('The phone is under fair pressure: it is warming up.');
+    expect(warning?.classList).toContain('notice');
+    pressure.emit('serious');
+    await pump(10);
+    expect(text('device-pressure-warning')).toBe(
+      'The phone is under serious pressure: it may be hot.',
+    );
+    expect(element('device-pressure-warning')?.classList).toContain('problem');
+
+    fixture.destroy();
+    await settle();
+    expect(pressure.disconnected()).toBe(1);
+    expect(TestBed.inject(CameraDeviceService).pressure()).toBeNull();
   });
 
   it('refuses a wrong code with the reason and Try another code', async () => {

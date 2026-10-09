@@ -207,12 +207,18 @@ describe('RemoteCameras', () => {
       sharpness: 41.2,
       battery: { level: 0.83, charging: true },
       thermal: 'throttled',
+      pressure: null,
+      pressureSource: null,
       pendingClips: 0,
     });
     await pump(10);
     expect(text('remote-camera-report')).toBe(
-      'recording · 29.9 fps · sharpness 41 · framing 800×600 · battery 83%, charging · hot: the frame rate dropped',
+      '29.9 fps · sharpness 41 · recording · framing 800×600 · battery 83%, charging · hot: the frame rate dropped',
     );
+    // The Timer page's words and colours (T5.1): the sharpness good, the frame rate dropped amber.
+    const report = element('remote-camera-report');
+    expect(report?.querySelector('[data-key="sharpness"]')?.getAttribute('data-tone')).toBe('ok');
+    expect(report?.querySelector('[data-key="thermal"]')?.getAttribute('data-tone')).toBe('warn');
     // Clips the phone still has to send (T4.2).
     link.send({
       type: 'state',
@@ -224,10 +230,14 @@ describe('RemoteCameras', () => {
       sharpness: null,
       battery: null,
       thermal: null,
+      pressure: null,
+      pressureSource: null,
       pendingClips: 2,
     });
     await pump(10);
-    expect(text('remote-camera-report')).toBe('recording · full frame · 2 clips to send');
+    expect(text('remote-camera-report')).toBe(
+      '– fps · sharpness – · recording · full frame · 2 clips to send',
+    );
     // Over 20 s the sync converges.
     await pump(22_000, 22);
     expect(row.getAttribute('data-converged')).toBe('true');
@@ -255,6 +265,25 @@ describe('RemoteCameras', () => {
     box.click();
     await pump(0);
     expect(settings.recordRemoteCameras()).toBe(true);
+  });
+
+  it('Pictures from phones is the same size by default on a laptop, and its choice switches the setting (T5.1)', async () => {
+    await render();
+    const select = element('remote-pictures') as HTMLSelectElement;
+    const settings = TestBed.inject(SettingsService);
+    expect(select.value).toBe('equal');
+    expect([...select.options].map((option) => option.textContent.trim())).toEqual([
+      'Same size as mine',
+      'Small tiles',
+    ]);
+    select.value = 'tiles';
+    select.dispatchEvent(new Event('change'));
+    await pump(0);
+    expect(settings.remotePictures()).toBe('tiles');
+    select.value = 'equal';
+    select.dispatchEvent(new Event('change'));
+    await pump(0);
+    expect(settings.remotePicturesChoice()).toBe('equal');
   });
 
   it('shows a phone whose connection dropped as reconnecting', async () => {

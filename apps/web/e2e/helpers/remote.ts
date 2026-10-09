@@ -72,6 +72,60 @@ export async function pill(phone: Page): Promise<string> {
  */
 export const RECORDING = /(?:^|· )recording(?: ·|$)/u;
 
+/** A phone's health as {@link phoneHealth} sets it: its battery, and its Compute Pressure state. */
+export interface PhoneHealth {
+  readonly battery: { readonly level: number; readonly charging: boolean };
+  readonly pressure: { readonly source: 'cpu' | 'thermals'; readonly state: string };
+}
+
+/**
+ * On every load of `page` from now on, the phone's health is the suite's (T5.1): the Battery Status
+ * API's battery (`navigator.getBattery`) and the Compute Pressure API's observer (`PressureObserver`,
+ * whose `knownSources` is the source given and which reports the state given a moment after
+ * `observe`), both replaced before the app's scripts run, so that the host's status line has known
+ * values to read (the browser's own would say the machine's, if it has them at all).
+ */
+export async function phoneHealth(page: Page, health: PhoneHealth): Promise<void> {
+  await page.addInitScript((health) => {
+    const battery = Object.assign(new EventTarget(), health.battery);
+    Object.defineProperty(navigator, 'getBattery', {
+      configurable: true,
+      value: () => Promise.resolve(battery),
+    });
+    type Callback = (records: { source: string; state: string; time: number }[]) => void;
+    class SuitePressureObserver {
+      static readonly knownSources = Object.freeze([health.pressure.source]);
+      private readonly callback: Callback;
+      private timer: ReturnType<typeof setTimeout> | null = null;
+
+      constructor(callback: Callback) {
+        this.callback = callback;
+      }
+
+      observe(source: string): Promise<void> {
+        if (source !== health.pressure.source) {
+          return Promise.reject(new DOMException(`No ${source} source.`, 'NotSupportedError'));
+        }
+        this.timer = setTimeout(() => {
+          this.callback([{ source, state: health.pressure.state, time: performance.now() }]);
+        }, 100);
+        return Promise.resolve();
+      }
+
+      disconnect(): void {
+        if (this.timer !== null) {
+          clearTimeout(this.timer);
+        }
+      }
+    }
+    Object.defineProperty(window, 'PressureObserver', {
+      configurable: true,
+      writable: true,
+      value: SuitePressureObserver,
+    });
+  }, health);
+}
+
 /** The synthetic camera's picture: its size, and the square that flips inside it. */
 export const SYNTHETIC_CAMERA = {
   width: 640,

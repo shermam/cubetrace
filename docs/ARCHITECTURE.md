@@ -241,8 +241,9 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
 - `RemoteCameraRegistry` (`apps/web/src/app/camera/remote-camera-registry.ts`, a root service of a
   few lines) is how the Timer page's preview area and `SyncService` see the phones without the
   connection's code: `RemoteCamerasService`, in the Cameras section's lazy chunk, provides it when it
-  is made (the cameras as `RemoteCameraEntry`: names, state, whether synced and recording, framing,
-  the preview's track, the thumbnail; `watchMotion`; `clockRecord`), and until then there are none.
+  is made (the cameras as `RemoteCameraEntry`: names, state and since when, whether synced and
+  recording, framing, the preview's track, the thumbnail, and since T5.1 the phone's last report and
+  when it came; `watchMotion`; `clockRecord`), and until then there are none.
 - The host: `SyncService.start({remote})` runs the check of a phone's camera with the same `SyncRun`,
   its frames from `RemoteCamerasService.watchMotion` (`sync-start`, then each `sync-motion` frame's
   times converted with the clock estimate of its batch), and keeps the lag beside the clock sync's
@@ -252,10 +253,22 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   Cameras section: `RemoteCamerasService` says `preview` to each phone after the hellos and when it
   changes, and takes the track the phone's offer brought (`Transport.preview`) into the camera's
   entry. `CameraPreview` loads `RemotePreviews` behind `@defer (when …)` once a phone with a camera
-  is listed: a tile per phone over the host's picture (`RemotePicture`: the live video while the
-  track flows, the thumbnail otherwise, the framing over it), a tap swapping it with the main
-  picture, the first phone's picture the main one when the host has no camera on.
-- The phone: `CameraDeviceSync` answers `sync-start` with the capture worker's motion meter
+  is listed (`RemotePicture` for each phone's picture: the live video while the track flows, the
+  thumbnail otherwise, the framing over it), in the layout the Timer page decides (T5.1,
+  `remotePicturesLayout` in `timer-layout.ts`, from "Pictures from phones",
+  `SettingsService.remotePicturesChoice`, null for the device's default, the page's layout and
+  whether the device is a phone): `equal`, a cell per phone in one grid with the host's own cell
+  (`RemotePreviews` is `display: contents` there), its status line under it, the grid's columns set
+  by the Timer page's container query (`--picture-columns`, two from a column of 72rem, the page
+  widened to 120rem by `app.scss` from a window of 97rem when `CameraPreview` says `many`); or
+  `tiles` (T4.3), a tile per phone over the host's picture, a tap swapping it with the main picture,
+  the first phone's picture the main one when the host has no camera on. The status line's words and
+  colours come from one pure function, `remoteStatusLine` (`remote-status.ts`), rendered by
+  `StatusParts`, which the Cameras list's report uses too.
+- The phone: `watchPressure` (`camera-device/pressure.ts`, T5.1) observes the Compute Pressure
+  API (`PressureObserver` from `BROWSER_GLOBALS`, feature-detected, with a fake in
+  `pressure-testing.ts`) while the Camera page is open (`CameraDeviceService.observePressure`), for the
+  page and every `state`; `CameraDeviceSync` answers `sync-start` with the capture worker's motion meter
   (`CameraDeviceCapture.watchMotion`) and sends the measures in batches; `CameraDevicePreview` sends
   the camera's track over the transport's preview channel while the host wants it
   (`WebRtcTransport` made with `preview: true`: a send-only video transceiver in the first offer, the

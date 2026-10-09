@@ -28,6 +28,8 @@ export type {
   MotionReport,
   Ping,
   Pong,
+  PressureSource,
+  PressureState,
   Preview,
   SyncError,
   SyncMeter,
@@ -41,6 +43,7 @@ export type {
 export {
   CHUNK_HEADER_BYTES,
   MAX_MOTION_FRAMES,
+  PRESSURE_STATES,
   PROTOCOL_VERSION,
   ProtocolError,
   THUMBNAIL_HEADER_BYTES,

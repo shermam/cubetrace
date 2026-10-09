@@ -139,6 +139,30 @@ export function isSharpnessThreshold(threshold: number): boolean {
   return Number.isFinite(threshold) && threshold > 0 && threshold <= SHARPNESS_THRESHOLD_MAX;
 }
 
+/**
+ * How the Timer page shows the phones' pictures (T5.1, "Pictures from phones" in Camera settings →
+ * Cameras): `equal`, each phone's picture in a cell as large as this device's own, with its status
+ * line under it; `tiles`, a small tile each over this device's picture, which a tap swaps with it
+ * (T4.3).
+ */
+export type RemotePictures = 'equal' | 'tiles';
+
+export const REMOTE_PICTURES: readonly RemotePictures[] = ['equal', 'tiles'];
+
+/** How the choices read in the Cameras section. */
+export const REMOTE_PICTURES_TEXT: Readonly<Record<RemotePictures, string>> = {
+  equal: 'Same size as mine',
+  tiles: 'Small tiles',
+};
+
+/**
+ * "Pictures from phones" on a device that has not chosen: small tiles on a phone, whose Timer page
+ * pins its own picture under the scramble (T2.13); the same size as its own elsewhere (T5.1).
+ */
+export function remotePicturesDefault(phone: boolean): RemotePictures {
+  return phone ? 'tiles' : 'equal';
+}
+
 /** The camera chosen on a host, by its host label: its device id and its label. */
 export interface CameraPick {
   readonly host: string;
@@ -211,6 +235,8 @@ interface StoredSettings {
   readonly recordRemoteCameras: boolean;
   /** T4.3: the host asks its remote cameras for a live picture, beside its own preview. */
   readonly livePreviewFromPhones: boolean;
+  /** T5.1: how the Timer page shows the phones' pictures; null: this device's default. */
+  readonly remotePictures: RemotePictures | null;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -239,6 +265,7 @@ const DEFAULTS: StoredSettings = {
   viewer: {},
   recordRemoteCameras: true,
   livePreviewFromPhones: true,
+  remotePictures: null,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -266,6 +293,7 @@ export function macAddressProblem(text: string): string {
  * applied to its orientation, by the camera's label, synced with the account's by ViewerSyncService;
  * and whether the host records its remote cameras (T4.2: "Record remote cameras", in the Cameras
  * section of Camera settings) and asks them for a live picture (T4.3: "Live preview from phones",
+ * there too), shown at the size of its own picture or as small tiles (T5.1: "Pictures from phones",
  * there too). Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
@@ -379,6 +407,16 @@ export class SettingsService {
    * none, and the Cameras list's thumbnail every 2 s is the picture.
    */
   readonly livePreviewFromPhones = computed(() => this.stored().livePreviewFromPhones);
+  /**
+   * "Pictures from phones" (T5.1, the Cameras section of Camera settings) as chosen; null while this
+   * device's default applies (`remotePicturesDefault`). The Timer page's layout has the last word
+   * (`remotePicturesLayout`): a phone's picture pinned under the scramble keeps tiles.
+   */
+  readonly remotePicturesChoice = computed(() => this.stored().remotePictures);
+  /** "Pictures from phones" as chosen, else this device's default: what the Cameras section shows. */
+  readonly remotePictures = computed(
+    () => this.stored().remotePictures ?? remotePicturesDefault(this.isPhone),
+  );
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -555,6 +593,12 @@ export class SettingsService {
     }
   }
 
+  setRemotePictures(choice: RemotePictures): void {
+    if (choice !== this.stored().remotePictures) {
+      this.update({ remotePictures: choice });
+    }
+  }
+
   /** The clip viewer's choice for the camera labelled `camera`, or null when it has none. */
   viewerChoiceFor(camera: string): ViewerChoice | null {
     const choices = this.stored().viewer;
@@ -710,6 +754,7 @@ function readSettings(
   const viewer = member(parsed, 'viewer');
   const recordRemoteCameras = member(parsed, 'recordRemoteCameras');
   const livePreviewFromPhones = member(parsed, 'livePreviewFromPhones');
+  const remotePictures = member(parsed, 'remotePictures');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
   const settings: StoredSettings = {
     hostLabel:
@@ -771,6 +816,8 @@ function readSettings(
       typeof livePreviewFromPhones === 'boolean'
         ? livePreviewFromPhones
         : DEFAULTS.livePreviewFromPhones,
+    // Settings stored before T5.1 have none: this device's default.
+    remotePictures: REMOTE_PICTURES.find((p) => p === remotePictures) ?? DEFAULTS.remotePictures,
   };
   return { settings, migrated: cubeMacs.migrated };
 }

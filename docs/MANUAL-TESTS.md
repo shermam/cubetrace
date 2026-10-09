@@ -1054,3 +1054,42 @@ cameras rows and the live preview's cost from the events.
   paired with a second Add camera while the ThinkPhone is connected: listed as `phone-rear-2`, a
   second tile over the preview, and its own sync check from its own line. Two solves: each badge says
   six clips, and each attempt's folder in the bucket has fourteen files.
+
+## After T5.1 — the phone's picture and its status line
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T5.1, the MacBook as the
+host (its FaceTime camera on, the GAN 12 ui, signed in, Chrome's window as wide as you use it) and a
+phone paired as its camera as in "After T4" (the ThinkPhone, then the Moto g60, each with a name of
+its own in Settings → This device), "Live preview from phones" on and "Pictures from phones" on "Same
+size as mine" (Camera settings → Cameras; both the MacBook's defaults). The events say most of it
+(`docs/DIAGNOSTICS.md`, "After T5.1": the MacBook's `rtc.clock` of each minute carries the phone's
+last report); write down what they cannot show, next to the item, with the device and what happened.
+
+- [ ] The pictures with the ThinkPhone: on the Timer page, the phone's picture beside the MacBook's,
+  the same size (two boxes of 16:9, the phone's upright frames between black bars), its framing
+  rectangle drawn on it, its label (`phone-rear`) in the corner, and under it its line: `29.9 fps ·
+  sharpness 41 · recording · battery 100%, charging`, the sharpness green, a `pressure …` word if the
+  phone's Chrome has the Compute Pressure API, and `clock syncing…` for the first seconds only. With
+  the window 1,552 px wide or more the two pictures stand side by side beside the time; narrow it
+  (under that, then under 960 px): one under the other beside the time, then the phone's picture a
+  tile over the MacBook's under the scramble. Write the window's widths where they changed, and
+  whether the line's words match what the phone's Camera page says.
+- [ ] The same with the Moto g60 (paired after the ThinkPhone left, or as `phone-rear-2` beside it:
+  three pictures, two to a row).
+- [ ] A soft picture: on the phone's Camera page, Camera settings → Focus → Manual, the distance
+  moved until the cube is blurred, for two minutes: the line under the phone's picture on the MacBook
+  says the sharpness in amber within seconds (and the tile's caption says `soft` with "Small tiles");
+  back to auto: green again. Write how long the MacBook took to show it.
+- [ ] A low battery: the phone unplugged once its battery is under 20% (or left unplugged until it
+  is): the line's battery in amber without `charging`, red under 10%; plugged in again: `charging`.
+- [ ] A hot phone: twenty minutes of solves on the rig, the live preview on. If unsure whether the
+  phone's Chrome has the Compute Pressure API, open `chrome://inspect` on the MacBook with the phone
+  plugged in by USB and type `'PressureObserver' in window` in its console (true or false), or
+  `PressureObserver.knownSources` (`['cpu']`, or with `'thermals'`). The line's `pressure …` word
+  over the twenty minutes (amber `fair`, red `serious` or `critical`), and `hot: the frame rate
+  dropped` if the frame rate fell; the phone's Camera page says the same beside its Battery line.
+  Write the phone's temperature by hand at the end (cool, warm, hot), and whether the API was there.
+- [ ] Small tiles and back: "Pictures from phones" on "Small tiles": the phone's picture a tile in the
+  top right corner of the MacBook's preview, its caption the label and, in short, what is wrong (`15%`,
+  `soft`, `pressure fair`), a tap swapping it with the main picture as before; then "Same size as
+  mine" again: the two pictures side by side again.
