@@ -2,7 +2,7 @@ import type { CameraClock, SessionRecord } from '@cubetrace/core';
 import { type Locator, type Page, expect, test } from '@playwright/test';
 
 import { fakeAccount, fakeAccountState } from './helpers/account';
-import { RECORDING } from './helpers/remote';
+import { RECORDING, phoneHealth } from './helpers/remote';
 import { fakeSignaling } from './helpers/signaling';
 import { currentSessionId, demoPath, expectSolves } from './helpers/timer';
 
@@ -10,10 +10,13 @@ import { currentSessionId, demoPath, expectSolves } from './helpers/timer';
 // cube, Chrome's fake camera, signed in to the fake account) adds a camera in Camera settings and
 // shows the QR code's URL; a second page opens it as the camera device (the same fake camera), pairs
 // through the BroadcastChannel signaling (helpers/signaling.ts) and the real RTCPeerConnection on the
-// loopback interface, and the host lists it with a thumbnail within 5 s; its live picture is a tile
-// over the host's preview, which a tap swaps with the main picture (T4.3); the clock sync converges
-// (both pages read one browser's clock: the offset is near 0); the camera is in session.json with
-// `remote`; Leave removes it. Then a second pairing by the code typed, and Remove from the host.
+// loopback interface, and the host lists it with a thumbnail within 5 s; its live picture is as large
+// as the host's own, in a cell beside it with its status line (T5.1: under it at 1280 px, side by
+// side in a wider window), or, with "Pictures from phones" on small tiles, a tile over the host's
+// preview, which a tap swaps with the main picture (T4.3), its frames a fifth of the camera's either
+// way; the clock sync converges (both pages read one browser's clock: the offset is near 0); the
+// camera is in session.json with `remote`; Leave removes it. Then a second pairing by the code typed,
+// and Remove from the host.
 // Launch options force a browser of their own for this file (the encoding project, one at a time).
 test.use({
   launchOptions: {
@@ -56,6 +59,15 @@ async function videoSize(video: Locator): Promise<[number, number]> {
   return video.evaluate((element: HTMLVideoElement) => [element.videoWidth, element.videoHeight]);
 }
 
+/** Where `locator` is on the page, and its size. */
+async function boxOf(
+  locator: Locator,
+): Promise<{ x: number; y: number; width: number; height: number }> {
+  const box = await locator.boundingBox();
+  expect(box, 'on the page').not.toBeNull();
+  return box ?? { x: 0, y: 0, width: 0, height: 0 };
+}
+
 /** The offset of the sync line: "synced · round trip 1.2 ms · offset −0.3 ms · drift 0.0 ppm". */
 function offsetOf(text: string): number {
   const match = /offset (−?)([\d,.]+) ms/u.exec(text);
@@ -63,7 +75,7 @@ function offsetOf(text: string): number {
   return (match?.[1] === '−' ? -1 : 1) * Number(match?.[2].replace(/,/g, ''));
 }
 
-test('a second page joins as a remote camera: listed with a thumbnail, its live picture a tile over the preview, the sync converges, in session.json with remote, Leave removes it; the code typed, Remove', async ({
+test('a second page joins as a remote camera: listed with a thumbnail, its live picture as large as the host’s with its status line, or a tile over it, the sync converges, in session.json with remote, Leave removes it; the code typed, Remove', async ({
   context,
   page,
 }) => {
@@ -104,6 +116,11 @@ test('a second page joins as a remote camera: listed with a thumbnail, its live 
   const phone = await context.newPage();
   await fakeAccount(phone);
   await fakeSignaling(phone);
+  // Its battery low and unplugged, its pressure fair: the host's status line reads them (T5.1).
+  await phoneHealth(phone, {
+    battery: { level: 0.15, charging: false },
+    pressure: { source: 'thermals', state: 'fair' },
+  });
   await phone.goto(path);
   const state = phone.getByTestId('device-state');
   await expect(state).toHaveAttribute('data-state', 'connected', { timeout: 45_000 });
@@ -128,21 +145,85 @@ test('a second page joins as a remote camera: listed with a thumbnail, its live 
     timeout: 15_000,
   });
 
-  // Its live picture (T4.3, issue #60): a tile over the host's preview, its frames a fifth of the
-  // camera's (the fake camera's 1920 × 1080: 384 × 216, or fewer pixels while the encoder adapts
-  // to the CPU); a tap swaps it with the main picture, and a tap on this device's tile swaps back.
+  // Its live picture (T4.3, issue #60) as large as the host's own (T5.1, "Pictures from phones": the
+  // same size by default on a laptop): a cell of its own, its frames a fifth of the camera's (the
+  // fake camera's 1920 × 1080: 384 × 216, or fewer pixels while the encoder adapts to the CPU)
+  // whatever the size it is shown at, its box the size of the host's (within 2 px), under it at 1280
+  // px (the clock beside the two of them, one under the other).
+  await expect(page.getByTestId('remote-pictures')).toHaveValue('equal');
+  const cell = page.getByTestId('remote-preview-cell');
+  await expect(cell).toHaveAttribute('data-label', 'laptop-2');
+  await expect(page.getByTestId('remote-preview-tile')).toHaveCount(0);
+  await expect(cell.locator('app-remote-picture')).toHaveAttribute('data-live', 'true', {
+    timeout: 15_000,
+  });
+  const cellVideo = cell.getByTestId('remote-picture-video');
+  await expect
+    .poll(async () => (await videoSize(cellVideo))[0], { timeout: 10_000 })
+    .toBeGreaterThan(0);
+  const [width, height] = await videoSize(cellVideo);
+  expect(width).toBeLessThanOrEqual(384);
+  expect(width / height).toBeCloseTo(16 / 9, 1);
+  const own = page.getByTestId('camera-preview-box');
+  const theirs = page.getByTestId('remote-preview-box');
+  const stacked = [await boxOf(own), await boxOf(theirs)];
+  console.info(`equal pictures at 1280 px: ${JSON.stringify(stacked)}`);
+  expect(Math.abs(stacked[0].width - stacked[1].width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(stacked[0].height - stacked[1].height)).toBeLessThanOrEqual(2);
+  expect(stacked[0].height).toBeGreaterThan(230);
+  expect(Math.abs(stacked[0].x - stacked[1].x)).toBeLessThanOrEqual(2);
+  expect(stacked[1].y).toBeGreaterThan(stacked[0].y + stacked[0].height);
+  // Under it, its status line from its state: the fake camera's frame rate, the sharpness, the
+  // recording, and the battery and pressure the suite gave the phone, amber both; the phone's own
+  // page says its pressure too.
+  const line = cell.getByTestId('remote-status');
+  await expect(line.getByTestId('remote-status-fps')).toHaveText(/^\d+\.\d fps$/);
+  await expect(line.getByTestId('remote-status-sharpness')).toHaveText(/^sharpness [\d.]+$/);
+  await expect(line.getByTestId('remote-status-recording')).toHaveText('recording');
+  const battery = line.getByTestId('remote-status-battery');
+  await expect(battery).toHaveText('battery 15%');
+  await expect(battery).toHaveAttribute('data-tone', 'warn');
+  const pressure = line.getByTestId('remote-status-pressure');
+  await expect(pressure).toHaveText('pressure fair');
+  await expect(pressure).toHaveAttribute('data-tone', 'warn');
+  await expect(phone.getByTestId('device-pressure')).toHaveText('fair (thermals)');
+  await expect(phone.getByTestId('device-pressure-warning')).toContainText('fair pressure');
+
+  // A window wide enough for two pictures beside the clock: side by side, still the same size, the
+  // page wider; the phone's frames still a fifth of its camera's.
+  await page.setViewportSize({ width: 1700, height: 900 });
+  await expect
+    .poll(async () => Math.abs((await boxOf(theirs)).y - (await boxOf(own)).y))
+    .toBeLessThanOrEqual(2);
+  const beside = [await boxOf(own), await boxOf(theirs)];
+  console.info(`equal pictures at 1700 px: ${JSON.stringify(beside)}`);
+  expect(Math.abs(beside[0].width - beside[1].width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(beside[0].height - beside[1].height)).toBeLessThanOrEqual(2);
+  expect(Math.abs(beside[0].width - stacked[0].width)).toBeLessThanOrEqual(2);
+  expect(beside[1].x).toBeGreaterThan(beside[0].x + beside[0].width);
+  const time = await boxOf(page.getByRole('region', { name: 'Time' }));
+  expect(beside[0].x).toBeGreaterThanOrEqual(time.x + time.width);
+  expect((await videoSize(cellVideo))[0]).toBeLessThanOrEqual(384);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // Small tiles (Camera settings → Cameras → Pictures from phones): a tile over the host's preview,
+  // its caption saying in short what is wrong (the battery); a tap swaps it with the main picture,
+  // and a tap on this device's tile swaps back; then the same size again.
+  await page.getByTestId('remote-pictures').selectOption('tiles');
   const tile = page.getByTestId('remote-preview-tile');
   await expect(tile).toHaveAttribute('data-label', 'laptop-2');
+  await expect(cell).toHaveCount(0);
   await expect(tile.locator('app-remote-picture')).toHaveAttribute('data-live', 'true', {
     timeout: 15_000,
   });
+  await expect(tile.getByTestId('remote-caption')).toHaveText(
+    /^\s*laptop-2\s*·\s*15%\s*·\s*pressure fair\s*$/u,
+  );
   const tileVideo = tile.getByTestId('remote-picture-video');
   await expect
     .poll(async () => (await videoSize(tileVideo))[0], { timeout: 10_000 })
     .toBeGreaterThan(0);
-  const [width, height] = await videoSize(tileVideo);
-  expect(width).toBeLessThanOrEqual(384);
-  expect(width / height).toBeCloseTo(16 / 9, 1);
+  expect((await videoSize(tileVideo))[0]).toBeLessThanOrEqual(384);
   await tile.click();
   const main = page.getByTestId('remote-preview-main');
   await expect(main).toHaveAttribute('data-label', 'laptop-2');
@@ -150,6 +231,9 @@ test('a second page joins as a remote camera: listed with a thumbnail, its live 
   await page.getByTestId('remote-preview-local').click();
   await expect(main).toHaveCount(0);
   await expect(tile).toHaveAttribute('data-label', 'laptop-2');
+  await page.getByTestId('remote-pictures').selectOption('equal');
+  await expect(cell).toHaveAttribute('data-label', 'laptop-2');
+  await expect(tile).toHaveCount(0);
 
   // The clock sync converges: ten kept answers over ten seconds, within 5 ms of spread (the pings
   // come every 500 ms until then, and the fit keeps at least the ten of least round trip of its two
@@ -230,5 +314,21 @@ test('a second page joins as a remote camera: listed with a thumbnail, its live 
     .toEqual(
       expect.arrayContaining(['rtc.paired', 'rtc.connected', 'rtc.clock', 'rtc.disconnected']),
     );
+  const events = (await fakeAccountState(page)).events.map(
+    (entry) => entry.event as { kind: string; data: Record<string, unknown> },
+  );
+  // The choice of the pictures, both ways (T5.1), and the preview's caps as T4.3 set them.
+  expect(
+    events
+      .filter(
+        (event) => event.kind === 'settings.changed' && event.data['key'] === 'remotePictures',
+      )
+      .map((event) => event.data['value']),
+  ).toEqual(['tiles', 'equal']);
+  expect(events.find((event) => event.kind === 'preview.started')?.data).toMatchObject({
+    scale: 5,
+    maxKbps: 300,
+    maxFps: 15,
+  });
   await phone.close();
 });

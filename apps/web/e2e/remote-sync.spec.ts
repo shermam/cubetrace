@@ -23,8 +23,8 @@ import { currentSessionId, demoPath, expectSolves, replayDemo } from './helpers/
 // camera stays off; the phone's page films a synthetic camera (helpers/remote.ts: a canvas whose
 // square flips at the times the suite gives, and nothing else moves), and its connection's clock is
 // 5 s ahead of the page's (`window.cubetraceE2eRemote`), so that its frames' times must go through
-// the clock sync. Its live picture is the Timer's main picture (the host has no camera of its own),
-// at a fifth of its resolution. The phone's line under it starts a check; the suite turns the demo
+// the clock sync. Its live picture is the Timer page's one picture (the host has no camera of its
+// own), in a cell of the host's picture's size (T5.1), at a fifth of its resolution. The phone's line under it starts a check; the suite turns the demo
 // cube ten times, a second and a third apart, and flips the square 120 ms after each turn: the check
 // finds that lag, keeps it beside the phone's clock sync in session.json, its event says remote, and
 // the next attempt's clips from the phone take it as their syncResidualMs. "Live preview from
@@ -145,10 +145,12 @@ test("a phone's camera gets a sync check of its own: its lag found through the c
   const label = (await row.getAttribute('data-label')) ?? '';
   expect(label).toBe('laptop');
 
-  // Its live picture: the main one, the host having no camera of its own; a fifth of 640 × 360.
-  const main = page.getByTestId('remote-preview-main');
-  await expect(main).toHaveAttribute('data-label', label, { timeout: 15_000 });
-  const picture = main.locator('app-remote-picture');
+  // Its live picture: the one picture, in a cell of its own, the host having no camera of its own
+  // (T5.1: the same size as the host's would be, a laptop's default); a fifth of 640 × 360.
+  const cell = page.getByTestId('remote-preview-cell');
+  await expect(cell).toHaveAttribute('data-label', label, { timeout: 15_000 });
+  await expect(page.getByTestId('camera-cell')).toHaveCount(0);
+  const picture = cell.locator('app-remote-picture');
   await expect(picture).toHaveAttribute('data-live', 'true', { timeout: 15_000 });
   const video = picture.getByTestId('remote-picture-video');
   await expect
