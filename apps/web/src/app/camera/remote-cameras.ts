@@ -3,7 +3,6 @@ import { Component, DestroyRef, computed, effect, inject, input, signal } from '
 import { durationText, msText } from '../rtc/device-info';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
 import { SettingsService } from '../settings/settings-service';
-import { fpsText, sharpnessText } from './camera-format';
 import { qrCode, qrSvgPath } from './qr-code';
 import { PAIRING_BLOCK_TEXT } from './pairing-block';
 import {
@@ -11,6 +10,8 @@ import {
   RemoteCamerasService,
   type RemoteCamera,
 } from './remote-cameras-service';
+import { remoteStatusLine, type StatusPart } from './remote-status';
+import { StatusParts } from './status-parts';
 
 /** The quiet zone around the QR code, in modules (the standard asks for four). */
 const QUIET_ZONE = 4;
@@ -26,8 +27,9 @@ export function tokenText(token: string): string {
  * `qr-code.ts`), the URL and the token to type; under it the phones paired (`RemoteCamerasService`),
  * each with its latest thumbnail, its name and label in the session, its state (connected,
  * reconnecting), its clock sync (syncing, or synced with the round trip and the offset), what it
- * reports (recording, frame rate, sharpness, framing, battery, a thermal hint, the clips it still has
- * to send) and Remove; and "Record remote cameras" (T4.2, on by default): whether each attempt's clips
+ * reports (the words and colours of the Timer page's line under its picture, T5.1: frame rate,
+ * sharpness, recording, battery, the frame rate dropped, the pressure, a report that stopped; and
+ * here the framing and the clips it still has to send) and Remove; and "Record remote cameras" (T4.2, on by default): whether each attempt's clips
  * are asked of the phones; and "Live preview from phones" (T4.3, on by default): whether they send a
  * small live picture, shown over the Timer page's preview (`RemotePreviews`), the thumbnail here
  * staying the pairing's state. The panel loads it only when Add camera is pressed (`@defer (when
@@ -36,6 +38,7 @@ export function tokenText(token: string): string {
  */
 @Component({
   selector: 'app-remote-cameras',
+  imports: [StatusParts],
   templateUrl: './remote-cameras.html',
   styleUrl: './remote-cameras.scss',
 })
@@ -142,30 +145,22 @@ export class RemoteCameras {
   }
 
   /**
-   * What the phone reports: recording, frame rate, sharpness, framing, battery, a thermal hint, the
-   * clips it has cut and not sent yet (T4.2).
+   * What the phone reports, as the Timer page's line under its picture says it (`remoteStatusLine`,
+   * T5.1), with the framing and the clips it has cut and not sent yet (T4.2).
    */
-  protected reportText(camera: RemoteCamera): string {
-    const report = camera.report;
-    if (report === null) {
-      return 'no report yet';
-    }
-    const parts = [
-      report.recording ? 'recording' : 'not recording',
-      report.fps === null ? null : fpsText(report.fps),
-      report.sharpness === null ? null : `sharpness ${sharpnessText(report.sharpness)}`,
-      report.framing === null
-        ? 'full frame'
-        : `framing ${String(report.framing.w)}×${String(report.framing.h)}`,
-      report.battery === null
-        ? null
-        : `battery ${String(Math.round(report.battery.level * 100))}%${report.battery.charging ? ', charging' : ''}`,
-      report.thermal === 'throttled' ? 'hot: the frame rate dropped' : null,
-      report.pendingClips === 0
-        ? null
-        : `${String(report.pendingClips)} ${report.pendingClips === 1 ? 'clip' : 'clips'} to send`,
-    ];
-    return parts.filter((part) => part !== null).join(' · ');
+  protected reportParts(camera: RemoteCamera): StatusPart[] {
+    return remoteStatusLine(
+      {
+        report: camera.report,
+        reportMs: camera.reportMs,
+        nowMs: this.now(),
+        state: camera.state,
+        sinceMs: camera.sinceMs,
+        converged: camera.sync?.converged ?? false,
+        sharpnessThreshold: this.settings.sharpnessThreshold(),
+      },
+      'list',
+    );
   }
 
   private startTicking(): void {

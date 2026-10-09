@@ -213,8 +213,12 @@ describe('RemoteCameras', () => {
     });
     await pump(10);
     expect(text('remote-camera-report')).toBe(
-      'recording · 29.9 fps · sharpness 41 · framing 800×600 · battery 83%, charging · hot: the frame rate dropped',
+      '29.9 fps · sharpness 41 · recording · framing 800×600 · battery 83%, charging · hot: the frame rate dropped',
     );
+    // The Timer page's words and colours (T5.1): the sharpness good, the frame rate dropped amber.
+    const report = element('remote-camera-report');
+    expect(report?.querySelector('[data-key="sharpness"]')?.getAttribute('data-tone')).toBe('ok');
+    expect(report?.querySelector('[data-key="thermal"]')?.getAttribute('data-tone')).toBe('warn');
     // Clips the phone still has to send (T4.2).
     link.send({
       type: 'state',
@@ -231,7 +235,9 @@ describe('RemoteCameras', () => {
       pendingClips: 2,
     });
     await pump(10);
-    expect(text('remote-camera-report')).toBe('recording · full frame · 2 clips to send');
+    expect(text('remote-camera-report')).toBe(
+      '– fps · sharpness – · recording · full frame · 2 clips to send',
+    );
     // Over 20 s the sync converges.
     await pump(22_000, 22);
     expect(row.getAttribute('data-converged')).toBe('true');

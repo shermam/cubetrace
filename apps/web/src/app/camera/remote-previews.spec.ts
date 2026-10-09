@@ -26,6 +26,7 @@ function camera(id: string, changes: Partial<RemoteCameraEntry> = {}): RemoteCam
     label: `phone-rear${id === 'a' ? '' : `-${id}`}`,
     session: 'session',
     state: 'connected',
+    sinceMs: 0,
     synced: true,
     converged: true,
     recording: true,
@@ -34,6 +35,8 @@ function camera(id: string, changes: Partial<RemoteCameraEntry> = {}): RemoteCam
     deviceLabel: 'camera 0, facing back',
     preview: null,
     thumbnail: null,
+    report: null,
+    reportMs: null,
     ...changes,
   };
 }

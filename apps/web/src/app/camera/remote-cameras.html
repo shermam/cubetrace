@@ -114,7 +114,9 @@
             </p>
             <p class="state" data-testid="remote-camera-state">{{ stateText(camera) }}</p>
             <p class="sync" data-testid="remote-camera-sync">{{ syncText(camera) }}</p>
-            <p class="report muted" data-testid="remote-camera-report">{{ reportText(camera) }}</p>
+            <p class="report muted" data-testid="remote-camera-report">
+              <app-status-parts [parts]="reportParts(camera)" />
+            </p>
           </div>
           <button type="button" data-testid="remove-camera" (click)="remove(camera.id)">
             Remove

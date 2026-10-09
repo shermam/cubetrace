@@ -1239,6 +1239,7 @@ function entryOf(camera: RemoteCamera): RemoteCameraEntry {
     label: camera.label,
     session: camera.session,
     state: camera.state,
+    sinceMs: camera.sinceMs,
     synced: camera.sync !== null,
     converged: camera.sync?.converged ?? false,
     recording: camera.report?.recording ?? false,
@@ -1247,6 +1248,8 @@ function entryOf(camera: RemoteCamera): RemoteCameraEntry {
     deviceLabel: camera.camera?.deviceLabel ?? '',
     preview: camera.preview,
     thumbnail: camera.thumbnail?.url ?? null,
+    report: camera.report,
+    reportMs: camera.reportMs,
   };
 }
 

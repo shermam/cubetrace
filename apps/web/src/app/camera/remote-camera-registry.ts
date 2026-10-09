@@ -2,12 +2,15 @@ import { Injectable, computed, signal, type Signal } from '@angular/core';
 import type { ClapperboardFrame, FrameSize, MotionMeterInfo } from '@cubetrace/capture';
 import type { CropRect, RemoteClockRecord } from '@cubetrace/core';
 
+import type { RemoteReport } from './remote-status';
+
 /** Where a remote camera is, as the Cameras list says (`RemoteCameraState`). */
 export type RemoteCameraPhase = 'connecting' | 'connected' | 'reconnecting' | 'finishing';
 
 /**
  * A remote camera as the Timer page's preview area and the sync check see it (T4.3): its names, its
- * state, what it reports of its picture, and its live preview's track.
+ * state, what it reports of its picture, its live preview's track, and its last report for its status
+ * line (T5.1).
  */
 export interface RemoteCameraEntry {
   /** Its id in the Cameras list, kept across its reconnections. */
@@ -19,6 +22,8 @@ export interface RemoteCameraEntry {
   /** The session it films: the one it was paired in. */
   readonly session: string;
   readonly state: RemoteCameraPhase;
+  /** When the current state began, on the host clock. */
+  readonly sinceMs: number;
   /** The clock sync has an answer: its frame times can be placed on the host clock. */
   readonly synced: boolean;
   /** The clock sync has converged. */
@@ -34,6 +39,10 @@ export interface RemoteCameraEntry {
   readonly preview: MediaStreamTrack | null;
   /** The latest thumbnail, as an object URL: the picture while the track does not flow. */
   readonly thumbnail: string | null;
+  /** The phone's last `state`, for its status line (T5.1); null before the first. */
+  readonly report: RemoteReport | null;
+  /** When it came, on the host clock; null before the first. */
+  readonly reportMs: number | null;
 }
 
 /** What gives the registry its cameras and measures their motion: the Cameras section's service. */
