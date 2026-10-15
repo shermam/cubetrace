@@ -1333,8 +1333,11 @@ on its tripod and plugged in, no name typed in Settings → This device), all on
 "Record remote cameras", "Live preview from phones" and "Pictures from phones" on "Same size as mine"
 (Camera settings → Cameras), "Keep the camera's modes", "Measure the motion during solves" and
 "Restart the recording when its latency drifts" on (all the defaults); the lamp on. Go through the
-items in this order, in one session but for the uploads; the "After T5.1" to "After T5.6" items above
-are the detail of each part, and the known limitations in `README.md` are expected. The events say
+items in this order, in one session but for the uploads, among the day's first 150 attempts on the
+rig (with four cameras the MacBook reaches the diagnostics' cap of 5,000 events at about 200 attempts
+in a day, and records nothing but errors after it, `docs/DIAGNOSTICS.md`); the "After T5.1" to "After
+T5.6" items above are the detail of each part, and the known limitations in `README.md` are
+expected. The events say
 most of it (`docs/DIAGNOSTICS.md`, "After T5"); write down what they cannot show, next to the item,
 with the device and what happened. The coordinator then reads the round with `npm run round-report`
 and fills the cells of `docs/DEVICES.md` it measures: the MacBook's capture latency over a session,

@@ -449,7 +449,10 @@ measurements:
 - The diagnostics can lose the events of the last seconds before a reload or a closed tab (follow-up
   (h)), a setting changed right before one among them, or the wake lock's or the storage
   persistence's change; and a switch toggled before the account is attached waits in memory, which
-  turning Diagnostics off then clears (follow-up (i)).
+  turning Diagnostics off then clears (follow-up (i)). With the whole rig a device writes about 20
+  events per attempt, so a day of more than about 200 attempts reaches the cap of 5,000 events a day
+  per device, past which only errors are recorded (`docs/DIAGNOSTICS.md`): the round report then
+  misses the rest of that day.
 - "attempt N could not be indexed: Missing or insufficient permissions" can still come into a
   session's notes when an older attempt is saved again in a later page load (a phone's clip that came
   after the MacBook's page reloaded): the attempt's document in the index then misses that change

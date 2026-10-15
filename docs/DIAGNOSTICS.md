@@ -92,7 +92,13 @@ recorded without a scope of its own.
   until T4.2a, which a day of more than about 155 attempts with a phone reached mid-session, and the
   evidence stopped there; at 5,000 a day with a phone has room for about 390 attempts, and
   Firestore's writes at that scale stay within a quarter of its free tier (the `error.*` kinds go on
-  past the cap all the same).
+  past the cap all the same). The whole rig of phase 5 (T5.4) costs the host about 20 events per
+  attempt: `attempt.done`, two `clip.saved` per camera of its own (two cameras since T5.5), six per
+  phone paired (two phones since T5.6) and three `upload.state`, with `rtc.clock` twice a minute for
+  the two phones (120 an hour): about 3,600 a day at the owner's 150 attempts over a four-hour evening,
+  but the cap at about 200 attempts in a day of the whole rig, after which that day's evidence stops
+  (the 749 attempts of 2026-10-10 to 10-12 were about 250 a day). The "After T5" round is to be done
+  before that.
 - **What goes wrong stays out.** A kind that is not one, facts that cannot be made into an event, a
   batch the server refuses: said once in the console (`cubetrace: diagnostics: …`) and dropped; the
   diagnostics never record themselves.
