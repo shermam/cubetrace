@@ -103,7 +103,8 @@ export { BITRATE_AT_1080P30, videoBitrate } from './bitrate';
 
 // T5.3 — the capture latency (issue #67): the meter of each frame's way from its capture to the
 // capture worker and to its encoded chunk, which the worker reports every second and per clip, and
-// the drift of it from the camera's sync check.
+// the drift of it from the camera's sync check; and the camera's lag from a solve's own moves, the
+// motion of its frames averaged around them, anchored to the sync check's.
 export type { FrameTiming, LatencyDriftEvent, LatencyReading } from './latency';
 export {
   CAPTURE_TIME_LIMIT_MS,
@@ -116,3 +117,16 @@ export {
   captureTimeOf,
   percentiles,
 } from './latency';
+export type { MotionPeak, MotionPoint, MotionProfile, TimedMove } from './motion-lag';
+export {
+  FIT_TOLERANCE_MS,
+  MIN_PROFILE_MOVES,
+  PROFILE_BIN_MS,
+  PROFILE_FROM_MS,
+  PROFILE_PEAK_SPREADS,
+  PROFILE_TO_MS,
+  clipMotionPoints,
+  motionPeak,
+  motionProfile,
+  moveTimes,
+} from './motion-lag';
