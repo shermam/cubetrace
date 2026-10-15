@@ -3107,7 +3107,7 @@ nothing), with a unit test that fails without it. Tests: 1,499 package tests and
 e2e 85 in 11.1 min; CI green with the cloud suite. **Open**: the diagnostics' events cap (`DAILY_CAP`
 5,000 a day: with the whole rig the MacBook writes about 20 events an attempt, so the cap is reached
 at about 200 attempts a day while the owner does 250; documented, the owner told to do the round
-within the day's first 150 attempts; raised by the coordinator after this task); the releases' tags
+within the day's first 150 attempts; raised to 12,000 by #75 the same evening, about 600 attempts); the releases' tags
 stop at v0.3.0 (v0.4.0 on 16ad587 and v0.5.0 on c6e153b are the owner's); issue #60 (the preview
 beside the host's) done by T4.3 and T5.1; for the round: the cause of #67, the ThinkPhone's Compute
 Pressure API and model string, whether the watchdog sees a mode the camera changes by itself, whether
