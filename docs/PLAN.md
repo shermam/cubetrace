@@ -2882,8 +2882,13 @@ field: `cameras[]`, `video[]` and `clock.cameras` are per label, the file names 
 solve.mp4`); the clip viewer's buttons per clip as today (eight with two phones); the session page's
 counts. (3) **The upload**: the files per attempt grow (a camera adds two clips and two frames
 files: four cameras are 19 files with `gyro.json`); the functions' daily cap (3,000 files and 15 GB)
-is raised to 8,000 files and 40 GB, the owner's decision to confirm (the bucket's cost grows with it),
-the message naming the count; `docs/USER-ACTIONS.md`. (4) **The load**: the stats of every pipeline on
+is raised to 8,000 files and 40 GB (confirmed by the owner on 2026-10-15: the storage may grow as
+fast as the rig records, the bound being the GCP trial's US$ 300 credit; the bucket held 54 GB on
+2026-10-15 after 13 days, growing 9.6–12.7 GB a day on the days with two cameras: 8.9 MB per laptop
+clip, 12.4 MB per phone clip, about 43 MB per attempt; with four cameras about 85 MB per attempt),
+the message naming the count; `docs/USER-ACTIONS.md` (the cap, the cost per month at the Standard
+class, US$ 0.02 per GB-month in us-central1, and the lifecycle rule worth setting on the bucket by
+the owner once the features are extracted from a session's clips: Nearline after 30 days, half the price). (4) **The load**: the stats of every pipeline on
 its line; a notice once when a camera's measured frame rate stays under 80% of its nominal for 10 s
 ("two cameras may be more than this laptop encodes: turn one off or lower its resolution");
 `docs/DEVICES.md` gets the MacBook's figures with two cameras once the owner measured them. (5)
