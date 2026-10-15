@@ -277,13 +277,16 @@ export class CameraService {
   /**
    * What the app applied to the open camera (T5.2): as it opened, the mode each group opened in with
    * the controls kept for it applied over them (`openingApplied`), then each control set
-   * (`setControl`: a mode to auto forgets its group's values); empty while none is open. The
-   * watchdog holds the camera to it, and a phone reports it in its `controls` messages.
+   * (`setControl`: a mode to auto forgets its group's values); empty while none is open. The panel
+   * shows it (T5.2a), the watchdog applies it again (holding the camera to its own reading of each
+   * group the app applied, and to it for a group as it opened), and a phone reports it in its
+   * `controls` messages.
    */
   readonly applied = this.appliedSignal.asReadonly();
   /**
-   * The controls the open camera changed by itself and that still differ from `applied`, as the
-   * watchdog (`ControlsWatch`, T5.2) sees them every 2 s: the focus that went manual on 2026-10-09.
+   * The controls the open camera changed by itself and that still differ from what it read of them
+   * once applied (or from `applied`, for a group as it opened), as the watchdog (`ControlsWatch`,
+   * T5.2, T5.2a) sees them every 2 s: the focus that went manual on 2026-10-09.
    */
   readonly drift = this.watch.drift;
   /** The last drift the watchdog saw and what became of it (set back, given up, left), for the words. */
@@ -493,9 +496,10 @@ export class CameraService {
    * mode forgets the group's kept values. A value (an exposure time, a distance…) switches its
    * group to manual. When the camera does not go back to an automatic mode by a constraint (the
    * ThinkPhone's front camera lists only manual focus), it is reopened: a new capture starts in the
-   * camera's automatic modes, with the other choices kept for it applied again. Resolves with why
-   * the camera refused the change (also in `notice`), or null when it took it, or while no camera
-   * is on (nothing is done then).
+   * camera's automatic modes, with the other choices kept for it applied again. Once the change is
+   * applied, the watchdog holds the group to what the camera reads of it then (T5.2a,
+   * `ControlsWatch.applied`). Resolves with why the camera refused the change (also in `notice`), or
+   * null when it took it, or while no camera is on (nothing is done then).
    */
   async setControl(name: ControlName, value: ControlValue): Promise<string | null> {
     const track = this.track;
@@ -538,6 +542,9 @@ export class CameraService {
           return;
         }
         this.takeSnapshot(track);
+        // What the camera reads of the group now (a value in its own unit, a mode by its own name) is
+        // what the watchdog holds it to, a refused change included: the camera holds what it holds.
+        this.watch.applied(group);
         if (toAuto && this.values()[name] === 'manual') {
           await this.open();
         }
@@ -757,8 +764,9 @@ export class CameraService {
 
   /**
    * Watches the modes of the camera open on `track` (T5.2, `ControlsWatch`): every 2 s its settings
-   * against `applied`; a drift is said (`controls.drift`), and with "Keep the camera's modes" applied
-   * again.
+   * against what it read of each group once the app applied it (T5.2a), or against `applied` for a
+   * group as it opened; a drift is said (`controls.drift`), and with "Keep the camera's modes"
+   * `applied` is applied again.
    */
   private startWatch(track: MediaStreamTrack): void {
     this.watch.start(track, this.appliedSignal, {
@@ -788,7 +796,8 @@ export class CameraService {
 
   /**
    * The watchdog saw a drift: the snapshot taken again when it is left (the panel then shows the
-   * mode the camera is in, not the one it opened in), and `controls.drift` (docs/DIAGNOSTICS.md).
+   * mode the camera is in, not the one it opened in), and `controls.drift` (docs/DIAGNOSTICS.md),
+   * with how the expected values were taken (`baseline`, T5.2a).
    */
   private drifted(track: MediaStreamTrack, event: DriftEvent): void {
     if (track !== this.track) {
@@ -806,6 +815,7 @@ export class CameraService {
       reapplied: event.reapplied,
       gaveUp: event.gaveUp,
       keep: event.keep,
+      baseline: event.baseline,
     });
   }
 
@@ -864,9 +874,10 @@ export class CameraService {
     const kept = this.prefs.cameraControlsFor(track.label);
     const controls = this.controls();
     const opening = this.openingSettingsSignal() ?? {};
+    const fitted = controls === null ? {} : fitControls(kept, controls);
     if (controls !== null && Object.keys(kept).length > 0) {
       try {
-        await applyControls(track, fitControls(kept, controls));
+        await applyControls(track, fitted);
       } catch (error: unknown) {
         messages.push(`The camera refused the settings kept for it (${errorMessage(error)}).`);
       }
@@ -881,6 +892,8 @@ export class CameraService {
     this.noticeSignal.set(messages.length > 0 ? messages.join(' ') : null);
     this.announce(track, choice, messages.length);
     this.startWatch(track);
+    // The controls kept for the camera, applied as it opened: held to what it reads of them (T5.2a).
+    this.watch.applied(Object.keys(fitted) as ControlName[]);
     void this.refreshDevices();
   }
 

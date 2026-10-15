@@ -144,6 +144,15 @@ export const SYNTHETIC_CAMERA = {
   },
 } as const;
 
+/**
+ * How the synthetic camera reports what it takes (T5.2a): `reciprocalFocus`, a focus distance read
+ * as the reciprocal of the one applied, as the Moto g60's rear camera reports it (docs/DEVICES.md,
+ * "Control quirks": 0.12 m set, 8.33 read).
+ */
+export interface SyntheticQuirks {
+  readonly reciprocalFocus?: boolean;
+}
+
 /** The focus of the synthetic camera's current track, and the constraints the app applied to it. */
 export interface SyntheticControls {
   readonly settings: { readonly focusMode: string; readonly focusDistance: number };
@@ -161,11 +170,12 @@ export interface SyntheticControls {
  * Since T5.2 each track has a focus, as a phone's camera has (`getCapabilities()` lists its modes and
  * its distance's range, `getSettings()` says them, `applyConstraints` sets the advanced sets it can
  * take and keeps what it was given): {@link syntheticControls} reads it, and {@link driftCamera}
- * changes it as a camera that changes its focus by itself would.
+ * changes it as a camera that changes its focus by itself would. Since T5.2a it may report what it
+ * takes as a real camera does (`quirks`).
  */
-export async function syntheticCamera(page: Page): Promise<void> {
+export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}): Promise<void> {
   await page.addInitScript(
-    ({ key, size }) => {
+    ({ key, size, quirks }) => {
       const media = navigator.mediaDevices;
       const getUserMedia = media.getUserMedia.bind(media);
       let source: MediaStreamTrack | null = null;
@@ -211,6 +221,10 @@ export async function syntheticCamera(page: Page): Promise<void> {
               const values = Object.entries(set) as [string, unknown][];
               if (values.every(([name, value]) => takes(name, value))) {
                 Object.assign(entry.settings, Object.fromEntries(values));
+                const distance = new Map(values).get('focusDistance');
+                if (quirks.reciprocalFocus === true && typeof distance === 'number') {
+                  entry.settings['focusDistance'] = 1 / distance;
+                }
               }
             }
             return Promise.resolve();
@@ -290,7 +304,7 @@ export async function syntheticCamera(page: Page): Promise<void> {
         return stream;
       };
     },
-    { key: CAMERA, size: SYNTHETIC_CAMERA },
+    { key: CAMERA, size: SYNTHETIC_CAMERA, quirks },
   );
 }
 

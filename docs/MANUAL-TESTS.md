@@ -1145,6 +1145,45 @@ reads the camera every 2 s and calls a difference that holds for two readings a 
   its line under the preview says "focus went manual" in red, and Focus → Auto on its panel puts it
   back.
 
+## After T5.2a — the watchdog against the camera's own readings
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T5.2a, the MacBook as the
+host (its FaceTime camera on, signed in) and the Moto g60 paired as its camera as in "After T4", on its
+tripod, "Pictures from phones" on "Same size as mine", "Keep the camera's modes" on on the phone (the
+default), its Camera page naming the same commit. The events say most of it (`docs/DIAGNOSTICS.md`,
+"After T5.2a": the MacBook's `remote.controls` for each change and its minute `rtc.clock` of the phone,
+the phone's `controls.drift` for each drift); write down what they cannot show, next to the item, with
+what happened.
+
+The round is the week of 2026-10-10 again: the Moto g60's camera reports a manual exposure as `none`
+and a focus distance as the reciprocal of the one set (0.12 m reads 8.33), and the watchdog of T5.2
+took each change from the MacBook for a drift, set it again three times and gave it up. Since T5.2a
+the watchdog holds each control to what the camera reads of it once the app applied it: a change from
+the MacBook leaves both devices quiet, and only a change the camera makes by itself afterwards is a
+drift.
+
+- [ ] The focus: from the MacBook, Camera settings → Cameras → the phone's "Camera controls", Focus →
+  Manual, then the Distance slider until the cube is sharp on the phone's picture. Both panels (the
+  MacBook's, and the phone's own in Camera settings on its Camera page) show the distance you set,
+  with "the camera reports …" beside it in small grey letters and another number (the camera's own
+  unit). Then two minutes without touching anything: no red word on the MacBook's line under the
+  phone's picture, and nothing on the phone's Camera page about the camera setting the focus. Write
+  the two numbers.
+- [ ] The exposure, the same: Exposure → Manual, then the Time slider (the cube darker or lighter on
+  the phone's picture). The Mode stays "Manual" on both panels (the camera calls it none), and two
+  minutes go by without a word on either device.
+- [ ] The torch, with the focus still set as above: the Torch on from the MacBook, 5 s, then off. On the
+  Moto the torch resets the focus and the white balance: within 4 s of each the phone's Camera page
+  says "The camera set the focus to continuous by itself: set back to manual." (or nothing, if the
+  camera kept them), and the picture is sharp again; never "The camera keeps setting …". Write what
+  the phone said each time.
+- [ ] The real drift still caught: Reset to auto on the MacBook's panel of the phone (its focus
+  automatic again), then the console line of "After T5.2" on the Moto (its focus to manual behind
+  the app's back): within 4 s the phone sets it back and says so, and the MacBook's line under its
+  picture says "focus went manual on the phone" in red for a moment. Then "Keep the camera's modes"
+  off on the phone's Camera page and the console line again: said and left, red on the MacBook's
+  line with Reset beside it; Reset there; the setting on again.
+
 ## After T5.3 — the capture latency and the motion lag
 
 On https://shermam.github.io/cubetrace/ once its footer names a commit after T5.3, the rig as in

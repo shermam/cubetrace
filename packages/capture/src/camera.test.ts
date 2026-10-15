@@ -24,6 +24,7 @@ import {
   fallbackChoice,
   fitControls,
   hasControls,
+  isAutomaticMode,
   isControlValue,
   modeControlOf,
   modesOf,
@@ -269,6 +270,12 @@ describe('controlsOf', () => {
     expect(autoModeOf(controls.focusModes)).toBe('continuous');
     expect(autoModeOf(['single-shot', 'manual'])).toBe('single-shot');
     expect(autoModeOf(['manual'])).toBeNull();
+  });
+
+  it('tells the automatic modes from the others: a change of mode is a change of kind (T5.2a)', () => {
+    expect(METERING_MODES.filter(isAutomaticMode)).toEqual(['continuous', 'single-shot']);
+    // Chrome for Android reports a manual exposure as none: the same kind as the manual one set.
+    expect(isAutomaticMode('none')).toBe(isAutomaticMode('manual'));
   });
 
   it('ignores ranges that allow a single value and unknown modes', () => {

@@ -309,10 +309,14 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   held): `CameraService.controlsSource` for this device's camera (Camera settings, the phone's own
   Camera page), a phone's `RemoteControlsSource` under it in the Cameras section.
 - `ControlsWatch` (`controls-watch.ts`, signals and nothing else of Angular) is the watchdog that
-  `CameraService` runs on the open camera in both roles: every 2 s the track's settings against
-  `CameraService.applied` (the modes the camera opened in, the controls kept for it and those set
-  since), a drift after two readings, set back with "Keep the camera's modes"
-  (`SettingsService.keepCameraModes`, on by default) three times a minute at most, `controls.drift`.
+  `CameraService` runs on the open camera in both roles: every 2 s the track's settings against the
+  camera's own reading of each group once the app applied it (T5.2a: `ControlsWatch.applied`, which
+  `CameraService.setControl` and the controls kept as the camera opens call, held to once the next
+  reading agrees), and against `CameraService.applied` for a group as it opened (the mode it opened
+  in); a mode compared by its kind (automatic or not), a drift after two readings, set back with
+  `CameraService.applied` under "Keep the camera's modes" (`SettingsService.keepCameraModes`, on by
+  default) three times a minute at most, `controls.drift` (with its `baseline`). The controls panel
+  shows `applied`, with the camera's reading beside a value it reports otherwise.
 - The phone: `CameraDeviceControls` (`camera-device/camera-device-controls.ts`), which
   `CameraDeviceService` hands each connection, answers `set-controls` through `CameraService`
   (`setControl`, `resetControls`: the same path as the phone's own panel) and sends `controls` after
@@ -324,7 +328,10 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   onto its status line on the Timer page, with a Reset beside it.
 - The end-to-end pair's synthetic camera has a focus (its tracks' capabilities, settings and
   `applyConstraints`), which the suite reads and changes behind the app's back
-  (`syntheticControls`, `driftCamera`).
+  (`syntheticControls`, `driftCamera`), and may read a distance as its reciprocal, as the Moto g60
+  does (`reciprocalFocus`, T5.2a); the unit tests' `FakeVideoTrack` has the Moto g60's quirks too
+  (`quirks`: a manual exposure read as `none`, the reciprocal distance, the torch resetting the
+  focus and the white balance).
 
 ## The clip viewer
 

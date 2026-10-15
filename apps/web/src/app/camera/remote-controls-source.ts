@@ -155,7 +155,7 @@ export class RemoteControlsSource implements ControlsSource {
    * automatic mode of each drifted group, and a zoom or a torch back to what was applied.
    */
   resetDrift(): Promise<void> {
-    const values = driftReset(this.drift(), this.controls());
+    const values = driftReset(this.drift(), this.controls(), this.applied());
     const names = Object.keys(values);
     return names.length === 0
       ? Promise.resolve()
@@ -245,17 +245,20 @@ export class RemoteControlsSource implements ControlsSource {
 /**
  * The values that reset `drift` (T5.2, the Reset beside a phone's line): the automatic mode of each
  * drifted control's group (`continuous`, else `single-shot`), and for the zoom and the torch, which
- * have no mode, the value applied; in the order of the controls.
+ * have no mode, the value `applied` (the drift's expected value is the camera's reading of it since
+ * T5.2a, which a camera may render otherwise: the value applied is what to send); in the order of
+ * the controls.
  */
 export function driftReset(
   drift: readonly ControlDrift[],
   controls: CameraControls | null,
+  applied: ControlValues = {},
 ): ControlValues {
   const values: Partial<Record<ControlName, ControlValue>> = {};
   for (const { name, expected } of drift) {
     const mode = modeControlOf(name);
     if (mode === null) {
-      values[name] = expected;
+      values[name] = applied[name] ?? expected;
       continue;
     }
     const auto = controls === null ? null : autoModeOf(modesOf(controls, mode));

@@ -665,12 +665,13 @@ phone under it (`docs/PLAN.md` T4.3 and T5.1 have the contracts):
    may be hot; critical: let it cool down). The host's `rtc.clock` of each minute carries the last
    report (`report`, `docs/DIAGNOSTICS.md`), the phone's health over a session.
 
-## 11. Remote controls and the watchdog of the camera's modes (T5.2)
+## 11. Remote controls and the watchdog of the camera's modes (T5.2, T5.2a)
 
 How the host sets a phone's camera controls (exposure, focus, white balance, zoom, the torch) while
 the phone sits on its tripod out of reach, and how a mode the camera changes by itself is seen and
-undone (`docs/PLAN.md` T5.2 has the contract). On 2026-10-09 the Moto g60's focus went from
-`continuous` to `manual` by itself at solve 31, and twenty solves were blurred before it was seen.
+undone (`docs/PLAN.md` T5.2 has the contract, T5.2a the watchdog's baseline). On 2026-10-09 the Moto
+g60's focus went from `continuous` to `manual` by itself at solve 31, and twenty solves were blurred
+before it was seen.
 
 ```
 phone                                                     host
@@ -679,7 +680,8 @@ controls {controls, values, applied, drift: []} ─▶        RemoteControlsSour
                                                 ◀─ set-controls {values} | {reset: true}   (in flight, 3 s at most)
 CameraService.setControl / resetControls (kept per camera)
 controls ─▶  (or controls-failed ─▶ then controls ─▶)     the answer: the panel takes changes again
-watchdog: every 2 s, two readings that differ ─▶ set back (Keep the camera's modes) or left
+watchdog: after each apply, the camera's reading of the group (confirmed by the next reading);
+          every 2 s, two readings that differ from it ─▶ set back (Keep the camera's modes) or left
 controls {drift: [{name, expected, actual}]} ─▶           "focus went manual on the phone" in red, Reset
 controls {drift: []} ─▶  (once a reading agrees)          the words go
 ```
@@ -696,13 +698,19 @@ controls {drift: []} ─▶  (once a reading agrees)          the words go
 2. **The host's panel.** Camera settings → Cameras: under each phone, "Camera controls" is the
    controls panel of the host's own camera (`app-camera-controls`, T2.1) over the phone's
    `RemoteControlsSource` (a `ControlsSource`, as `CameraService.controlsSource` is the host's own),
-   from its last `controls`: the same groups, the same Reset to auto. A change goes as `set-controls`
-   (`values`: the control changed; a slider when it is let go), Reset to auto as `{reset: true}`; it
-   is in flight (the panel's controls disabled) until the phone's next `controls` (its answer) or
-   `controls-failed` (the panel says the phone's words), or 3 s (`SET_CONTROLS_TIMEOUT_MS`: "The phone
-   did not answer."), one change at a time. A phone whose first `controls` does not come within 5 s
-   of the hellos (`CONTROLS_WAIT_MS`) runs a build without remote controls, and its panel says so
-   (the messages are additive, §1); a phone whose camera is off has none to show.
+   from its last `controls`: the same groups, the same Reset to auto. The panel (on either device)
+   shows what the app applied (`applied`): a slider at the value set, with "the camera reports 8.33"
+   beside it when the camera's reading (`values`) differs by more than the watchdog's tolerance (the
+   Moto g60 reads a focus distance as its reciprocal, `docs/DEVICES.md`, "Control quirks"), a mode as
+   set while the camera holds its kind (a manual exposure the camera calls `none` shows Manual), and a
+   group whose mode the camera changed in kind (a drift) as the camera has it (T5.2a). A change goes
+   as `set-controls` (`values`: the control changed; a slider when it is let go), Reset to auto as
+   `{reset: true}`; it is in flight (the panel's controls disabled) until the phone's next `controls`
+   (its answer) or `controls-failed` (the panel says the phone's words), or 3 s
+   (`SET_CONTROLS_TIMEOUT_MS`: "The phone did not answer."), one change at a time. A phone whose
+   first `controls` does not come within 5 s of the hellos (`CONTROLS_WAIT_MS`) runs a build without
+   remote controls, and its panel says so (the messages are additive, §1); a phone whose camera is
+   off has none to show.
 3. **The phone applies.** `set-controls` goes through `CameraService` as the phone's own panel's
    changes do (`setControl` for each control, modes before values, in their groups' order: kept for
    the camera in its Settings, by the browser's name for it; a mode to auto that the camera does not
@@ -716,25 +724,41 @@ controls {drift: []} ─▶  (once a reading agrees)          the words go
    the app applied: as the camera opens, the mode each group opened in (its own automatic choice:
    `continuous` on every phone probed; Chrome's fake camera opens in `manual`, which is then no
    drift) with the controls kept for the camera applied over them, then each control set (a mode to
-   auto replaces its group's values; the torch is never held, as Settings never keep it). Every 2 s
-   (`WATCH_INTERVAL_MS`) while the camera is on, the track's `getSettings()` against it: each mode
-   the camera has, the values of a group in manual (within 5% of the value applied or a step of its
-   range: cameras round), the zoom; a single-shot mode that has done its adjustment may say manual,
-   which is no drift. No reading while a change is in flight or a slider of a controls panel is held
-   or moved, nor for a second after (`ADJUSTING_QUIET_MS`); a reading skipped starts the count again.
-   A difference that holds for two readings in a row is a drift, `{name, expected, actual}`: in
+   auto replaces its group's values; the torch is never held, as Settings never keep it). It names
+   the controls held: each mode the camera has, the values of a group that is not automatic (in
+   `manual`, or `none`), the zoom. **What each is held to is the camera's own reading of it** once
+   the app applied its group (T5.2a; `ControlsWatch.applied`, after `CameraService.setControl`
+   applied a change from the device's panel or a `set-controls`, and after the controls kept for
+   the camera were applied as it opened): the track's `getSettings()` as the apply resolves, held to
+   once the next reading agrees with it (a camera still on its way is not judged until two readings
+   agree), so that a value the camera reports otherwise than it was set (a number rounded, the Moto
+   g60's focus distance read as its reciprocal, its manual exposure called `none`) is what is
+   expected. A group the app applied nothing to since the camera opened is held to `applied`, the
+   mode it opened in; a change of `applied` the watchdog was not told of is taken from the next
+   readings as an apply's. A mode drifts when it changes in kind (automatic, `continuous` or
+   `single-shot`, against `manual` or `none`; an expected single-shot, which may say manual once it
+   has done its adjustment, whatever follows it), a number when it moves from what it is held to by
+   more than 5% or a step of its range. Every 2 s (`WATCH_INTERVAL_MS`) while the camera is on, the
+   track's `getSettings()` against them. No reading while a change is in flight or a slider of a
+   controls panel is held or moved, nor for a second after (`ADJUSTING_QUIET_MS`); a reading skipped
+   starts the count again. A difference that holds for two readings in a row is a drift, `{name,
+   expected, actual}` (`expected` what it was held to: the camera's reading, in the camera's unit): in
    `drift` (and the phone's `controls`) until a reading agrees, said on the device (the phone's
    Camera page: "The camera set the focus to manual by itself: set back to continuous." for a
    minute; the host's own camera: Camera settings and its line under the preview, "focus went
    manual" in red) and in the diagnostics (`controls.drift`). With "Keep the camera's modes"
    (Settings → Camera, the phone's Camera page and the Timer page's Camera settings too, on by
-   default, `keepCameraModes`) the device applies the drifted groups' values again, once per drift,
-   and counts it; a drift that comes back after three re-applications within a minute
-   (`MAX_REAPPLICATIONS`, `REAPPLY_WINDOW_MS`) is left alone and said ("The camera keeps setting the
-   focus to manual: set it by hand."), until a reading agrees or the app applies something else.
-   Without the setting, a drift is said once and left (the device's panel then shows the mode the
-   camera is in). The watchdog only reads and applies constraints: it never opens the camera again,
-   which would start the recording again.
+   default, `keepCameraModes`) the device applies the drifted groups' values applied again (what the
+   app set, not the camera's reading of it), once per drift, and counts it; a re-application takes no
+   new reading (it applies the values the reading was taken for, and a reading after it could be the
+   drift come straight back, or a re-application the camera refused, held to from then on). A drift
+   that comes back after three re-applications within a minute (`MAX_REAPPLICATIONS`,
+   `REAPPLY_WINDOW_MS`) is left alone and said, naming the control ("The camera keeps setting the
+   exposure to none: left as it is."), until a reading agrees or the app applies something else. The
+   torch set on the Moto g60 resets its focus and white balance, which the watchdog sets back: a
+   drift, rightly. Without the setting, a drift is said once and left (the device's panel then shows
+   the mode the camera is in). The watchdog only reads and applies constraints: it never opens the
+   camera again, which would start the recording again.
 5. **The drift on the host.** A phone's drift (its last `controls`) is on its status line under its
    picture on the Timer page (T5.1's line, `remoteStatusLine`): "focus went manual on the phone" in
    red, a part per control, the mode as the camera calls it (`focus manual` in a tile's caption), and
@@ -745,5 +769,6 @@ controls {drift: []} ─▶  (once a reading agrees)          the words go
    chunk.
 6. **Diagnostics** (`docs/DIAGNOSTICS.md`): `remote.controls` on the host for each change sent and
    its outcome (`ok`, `failed`, `no-answer`); `controls.drift` on the device whose camera drifted (a
-   phone's own, or the host's for its own camera), with what became of it; `settings.changed` names
-   `keepCameraModes`.
+   phone's own, or the host's for its own camera), with what became of it and how what it was held
+   to was taken (`baseline`: `reading` or `applied`, T5.2a; an event per outcome and baseline);
+   `settings.changed` names `keepCameraModes`.

@@ -451,10 +451,24 @@ export const FAKE_PHONE_FRONT: FakeCamera = {
 let fakeTrackCount = 0;
 
 /**
+ * How a real camera reports what it was given (docs/DEVICES.md, "Control quirks": the Moto g60's
+ * rear camera, T5.2a): `manualReadsNone`, a manual exposure reported as `none` (the automatic
+ * exposure off, as Chrome for Android says it); `reciprocalFocus`, a focus distance reported as the
+ * reciprocal of the one applied (metres against dioptres); `torchResets`, the torch set resets the
+ * focus and the white balance to what the camera opened with.
+ */
+export interface FakeCameraQuirks {
+  readonly manualReadsNone?: boolean;
+  readonly reciprocalFocus?: boolean;
+  readonly torchResets?: boolean;
+}
+
+/**
  * A camera's video track. Its settings start as the camera's; `applyConstraints` applies each
  * advanced set it can satisfy (modes the camera lists, numbers in range, the torch where there is
  * one), skipping the others as Chrome does, and records the constraints; `refuseWith` makes it
- * reject. `end()` is the camera going away: `readyState` ended and an `ended` event.
+ * reject; `quirks` make it report what it took as some real cameras do (T5.2a). `end()` is the
+ * camera going away: `readyState` ended and an `ended` event.
  */
 export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
   contentHint = '';
@@ -471,6 +485,8 @@ export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
   refuseWith: Error | null = null;
   /** Modes the camera does not go back to by a constraint, as `focusMode: continuous` on some. */
   sticky: readonly string[] = [];
+  /** How it reports what it took (T5.2a: the Moto g60's quirks). */
+  quirks: FakeCameraQuirks = {};
   private settings: Record<string, unknown>;
   private constraints: MediaTrackConstraints;
 
@@ -494,6 +510,7 @@ export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
       const entries = Object.entries(set) as [string, unknown][];
       if (entries.every(([key, value]) => this.satisfies(key, value))) {
         Object.assign(this.settings, Object.fromEntries(entries));
+        this.quirk(new Map(entries));
       }
     }
     return Promise.resolve();
@@ -531,6 +548,23 @@ export class FakeVideoTrack extends EventTarget implements MediaStreamTrack {
    */
   drift(values: object): void {
     Object.assign(this.settings, values);
+  }
+
+  /** The settings as the camera reports a set it took, with its `quirks`. */
+  private quirk(set: ReadonlyMap<string, unknown>): void {
+    const { manualReadsNone, reciprocalFocus, torchResets } = this.quirks;
+    if (manualReadsNone === true && this.settings['exposureMode'] === 'manual') {
+      this.settings['exposureMode'] = 'none';
+    }
+    const distance = set.get('focusDistance');
+    if (reciprocalFocus === true && typeof distance === 'number' && distance > 0) {
+      this.settings['focusDistance'] = 1 / distance;
+    }
+    if (torchResets === true && set.has('torch')) {
+      for (const key of ['focusMode', 'focusDistance', 'whiteBalanceMode', 'colorTemperature']) {
+        this.settings[key] = this.camera.settings[key];
+      }
+    }
   }
 
   private satisfies(key: string, value: unknown): boolean {
@@ -702,6 +736,8 @@ export class FakeMediaDevices extends EventTarget implements MediaDevices {
   readonly failures: unknown[] = [];
   readonly requests: MediaStreamConstraints[] = [];
   readonly tracks: FakeVideoTrack[] = [];
+  /** How the cameras' tracks report what they take (T5.2a), each track's from its opening. */
+  quirks: FakeCameraQuirks = {};
   /** This device has a microphone. */
   microphone = true;
   /**
@@ -793,6 +829,7 @@ export class FakeMediaDevices extends EventTarget implements MediaDevices {
     }
     this.granted = true;
     const track = new FakeVideoTrack(camera, video);
+    track.quirks = this.quirks;
     this.tracks.push(track);
     return new FakeMediaStream([track]);
   }

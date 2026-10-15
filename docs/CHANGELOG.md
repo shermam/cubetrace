@@ -47,7 +47,7 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   manual on the phone" in red, with Reset beside it) and in its Cameras list; and, with "Keep the
   camera's modes" (Settings → Camera, the phone's Camera page and Camera settings too, on by
   default), set back, three times a minute at most, then left and said ("The camera keeps setting
-  the focus to manual: set it by hand.").
+  the focus to manual: left as it is.").
 - Diagnostics: `remote.controls` (each change of a phone's controls from the laptop, and its
   outcome) and `controls.drift` (each drift, set back, given up or left); `settings.changed` names
   `keepCameraModes`; the round report's "After T5.2" items read them.
@@ -85,6 +85,22 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
 - `clip.saved`'s `syncResidualMs` was always null: the event read the clip as the capture saved it,
   before its record had the camera's lag (found with T5.3; the round report's item 2.5.6 could not
   tick). The records had it right.
+- The watchdog of the camera's modes took the camera's own way of reporting a control for a drift
+  (T5.2a; `docs/RTC.md` §11): from 2026-10-10 to 10-12 it called 37 drifts, 4 given up, and none was
+  a change a camera made by itself. The Moto g60 reports a manual exposure as `none` and a focus
+  distance as the reciprocal of the one set (0.12 m reads 8.33; the ThinkPhone's front camera calls a
+  manual exposure `none` too, `docs/DEVICES.md`, "Control quirks"), so every such change from the
+  laptop was taken for a drift and set again, up to three times before it was given up. Each control
+  is now held to what the camera reads of it once the app applied it (two readings agreeing), a
+  group nothing was applied to since the camera opened to the mode it opened in, and a mode drifts
+  only when it changes in kind (automatic or not): a change from the laptop leaves both devices
+  quiet, the focus that goes manual by itself is still caught, and the groups a torch resets are
+  still set back. The controls panel keeps a slider at the value set, with "the camera reports
+  8.33" beside it, instead of jumping to the camera's number; a manual exposure the camera calls
+  `none` shows Manual. A drift given up names the control and says it is left ("The camera keeps
+  setting the exposure to none: left as it is."). Diagnostics: `controls.drift` says how what it held
+  the camera to was taken (`baseline`: `reading` or `applied`); the round report's "After T5.2a"
+  items.
 
 ## 0.4.0 — 2026-10-04
 

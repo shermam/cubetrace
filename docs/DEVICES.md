@@ -363,3 +363,20 @@ The live preview's cost on the phone (T4.3: a fifth of the camera's resolution, 
 | ThinkPhone, the rear camera at 1080p30 | 2026-10-05, the coordinator from `preview.stopped` (a span of 1,271 s ended by the session's end; the preview was never switched off, so the span without it is not measured) | not measured | 30 fps (29 the least), 30 encoded, none dropped | 216 × 384 at 14.9 fps, 298 kbps, 3.9 ms a frame (`libvpx`), never held back by the CPU |
 | Two pages of one browser (the end-to-end pair: a still 640 × 360 canvas), for scale | 2026-10-04, T4.3's e2e | – | 30.2 fps (29 the least), none dropped | 128 × 72 at 15 fps, 4 kbps, 0.36 ms a frame (`libvpx`), never held back |
 
+## Control quirks
+
+How the phones' cameras report the controls the app sets on them (T5.2a), from the diagnostics
+events of 2026-10-10 to 10-12 (`docs/DIAGNOSTICS.md`): the MacBook's 19 `remote.controls`, every
+one answered `ok` in 8 to 146 ms (the remote controls themselves worked), and the phones' 37
+`controls.drift`, 4 of them given up, none a change a camera made by itself. The watchdog of T5.2
+held each control to the value set, so each of these readings was a drift, set again up to three
+times and then given up; since T5.2a it holds each control to the camera's own reading of it once
+the app applied it, and the controls panel shows the value set with "the camera reports …" beside a
+reading that differs. The case the watchdog exists for is not among them: the Moto g60's focus that
+went from `continuous` to `manual` by itself at solve 31 on 2026-10-09 (a change of kind, still a
+drift).
+
+| Phone, camera, role | The exposure | The focus distance | The torch | When (UTC) |
+|---|---|---|---|---|
+| Moto g60, rear camera, the camera device | a manual exposure (`exposureMode: manual` with an `exposureTime`) reads `exposureMode: none`, the automatic exposure off as Chrome for Android names it; every manual exposure set from the MacBook was taken for a drift and set again, up to three times before it was given up | reads the reciprocal of the distance applied: `0.10 → 10`, `0.12 → 8.33`, `0.13 → 7.69` (the constraint and the setting disagree on the unit, metres in one and dioptres in the other); every distance set from the MacBook was taken for a drift the same way | setting it reset the other groups: `focusMode` and `whiteBalanceMode` back to `continuous`, `focusDistance` to its default, `colorTemperature` to 0; the watchdog set them back, which is right | 2026-10-10 13:04, 2026-10-11 21:32:14 (the torch), 2026-10-12 12:44–12:46 |
+| ThinkPhone, front camera, the host | the same: `manual` reads `none`, taken for a drift and given up | – | – | 2026-10-10 21:59–22:04 |
