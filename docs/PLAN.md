@@ -2566,10 +2566,11 @@ sign in the app (issue #67).
 |---|---|---|---|
 | T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | ✅ 2026-10-09 (#68) |
 | T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | ✅ 2026-10-09 (#69) |
+| T5.2a | `web`, `capture`: the watchdog's baseline is what the camera reports after applying (the Moto g60 reports `none` for a manual exposure and `1/x` for a focus distance `x`: 37 false drifts and 4 give-ups on 2026-10-10 to 10-12); the panel shows what the app applied; the evidence in `docs/DEVICES.md` | T5.2 | – |
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | – |
 | T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0` | T5.2, T5.3 | – |
 
-Waves: T5.1 → T5.2 → T5.3 → T5.4, one agent at a time.
+Waves: T5.1 → T5.2 → T5.3 → T5.2a → T5.4, one agent at a time (T5.2a added on 2026-10-15 from the first week's events).
 
 ### T5.1 — the phone's picture at full size, and its status line
 
@@ -2728,6 +2729,52 @@ page keeps it a minute); a request id if answers by order ever mismatch. **CI's 
 (`remote-camera.cloud.spec.ts:33`: the peer document `offered` with no answer right after both pages
 connected; main at 2bf67b5 and PR #69's first attempt, never before 2026-10-09, green on a re-run) is
 open, for T5.4.
+
+### T5.2a — the watchdog against the camera's own readings
+
+**Goal.** A control the app applied and the camera holds is never called a drift, whatever unit or
+mode name the camera reports it in; a control the camera really changed by itself still is.
+
+**The evidence (the events of 2026-10-10 to 10-12, the Moto g60 as the phone and the ThinkPhone as a
+host).** 37 `controls.drift` events, 4 of them `gaveUp`, all after a `set-controls` or a change on the
+device's own panel, none a change the camera made on its own: (1) **`exposureMode: manual → none`**,
+over and over, on both phones (the Moto's rear camera as the camera device, 10-10 13:04 and 10-12
+12:44–12:46; the ThinkPhone's front camera as the host, 10-10 21:59–22:04): a manual exposure
+(`exposureMode: manual` with an `exposureTime`) is reported by Chrome for Android as `none` (the
+automatic exposure off), so the watchdog re-applied `manual` three times and gave up, each time the
+owner set it; (2) **`focusDistance: 0.10 → 10`, `0.12 → 8.33`, `0.13 → 7.69`** (the Moto's rear
+camera): the camera reports the reciprocal of the value applied (the constraint and the setting
+disagree on the unit: metres in one, dioptres in the other), so every focus distance set from the
+MacBook was re-applied three times and given up; (3) **the torch** (10-11 21:32:14): setting it reset
+the other groups (`focusMode`, `whiteBalanceMode` back to `continuous`, `focusDistance` to the default,
+`colorTemperature` to 0), and the watchdog restored them, which is right. None of the 37 was the
+focus that went manual by itself on 2026-10-09, the case the watchdog is for.
+
+**Scope.** (1) **The baseline is the camera's own reading.** After the app applies a group (the
+device's panel, a `set-controls`, the re-application at the camera's opening, the watchdog's own
+re-application), `ControlsWatch` takes the track's `getSettings()` once the apply has resolved (and
+again at the next reading, two readings agreeing) as the expected values of that group: a value the
+camera renders differently (rounded, in another unit, a mode mapped to another name) is thereby what
+is expected, and only a later change from it is a drift. `expectedValues` keeps the automatic mode of
+a group nothing was applied to, with `manual` and `none` both counted as "not automatic" against
+`continuous`/`single-shot` (a drift is a change of kind: automatic ↔ not, or a value that moved from
+the reading). (2) **The panel shows what the app applied**, beside the camera's reading where the two
+disagree in more than the tolerance ("set 0.12 m, the camera reports 8.33"), so that a slider does
+not jump to a number the user did not choose; the `controls` message carries both as today
+(`applied`, `values`). (3) **The events**: `controls.drift` gains `baseline: 'reading' | 'applied'`
+(how the expected value was taken), and the give-up word on the phone's page and the host's line says
+which control. (4) **Docs**: `docs/DEVICES.md` (the Moto g60's and the ThinkPhone's control quirks,
+from the events above: the exposure mode reported as `none`, the focus distance's reciprocal, the
+torch resetting the groups), `docs/RTC.md` §11, `docs/MANUAL-TESTS.md` "After T5.2a" (the focus set
+from the MacBook on the Moto g60 and held for two minutes without a drift event; the manual exposure
+the same; the torch on and off with the focus kept; the real drift provoked from the console still
+caught), `docs/CHANGELOG.md`.
+
+**Acceptance.** Unit tests of the watchdog with a camera that reports `none` for `manual` exposure,
+a camera that reports `1/x` for a focus distance `x`, a camera that resets the other groups at the
+torch, and a camera that really changes its focus mode (still a drift after two readings); the e2e's
+synthetic camera given the reciprocal quirk, the host sets a focus distance and no `controls.drift`
+follows in 10 s, then a provoked drift is caught. Lint, unit and e2e green.
 
 ### T5.3 — the host's capture latency, measured per attempt (issue #67)
 
