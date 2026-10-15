@@ -12,7 +12,7 @@ import type { DriftSaid } from './controls-watch';
 
 /**
  * A camera's manual controls as the controls panel (`app-camera-controls`, T2.1) shows and changes
- * them (docs/PLAN.md T5.2): the open camera of this device (`CameraService.controlsSource`), or a
+ * them (docs/PLAN.md T5.2): an open camera of this device (`HostCamera.controlsSource`), or a
  * phone's over the connection (`RemoteControlsSource`, the Cameras section's, from the phone's last
  * `controls` message and its answers to `set-controls`). The panel is the same component over either.
  */

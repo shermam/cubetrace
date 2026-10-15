@@ -655,7 +655,9 @@ what Camera settings said.
 
 On https://shermam.github.io/cubetrace/, Timer page, on a laptop with two cameras (the MacBook's
 FaceTime camera and the Logitech C930e webcam of issue #40), the GAN 12 ui connected. Next to the
-item, write the laptop, Chrome's version and the labels and lags the export says.
+item, write the laptop, Chrome's version and the labels and lags the export says. (Since T5.5 a
+camera is chosen with its switch in Camera settings: for this item one at a time, the one on
+switched off before the other is switched on; both on at once is "After T5.5".)
 
 - [ ] A new session (New session, under the time), the FaceTime camera on (Camera settings →
   Camera): a sync check, then a solve. The Logitech webcam in Camera settings → Camera: the sync
@@ -1225,6 +1227,59 @@ without them is the good outcome.
 - [ ] The phone's line under its picture says the same of the phone's camera: `latency …` from the
   phone's own reports, `motion lag …` from its solve clips. Nothing restarts a phone's recording
   for it; write the attempts where a word came, as for the MacBook.
+
+## After T5.5 — the MacBook's two cameras, eight clips an attempt
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T5.5, the rig as in
+"After T5.6" (the MacBook as the host, the GAN 12 ui, signed in, Upload sessions on, Diagnostics on;
+the ThinkPhone and the Moto g60 paired as its cameras, "Pictures from phones" on "Same size as
+mine") with a USB webcam plugged into the MacBook beside its FaceTime camera (the Logitech C930e of
+issue #40, or whichever is at hand), on a stand of its own aimed at the cube. The events say most of
+it (`docs/DIAGNOSTICS.md`, "After T5.5": `settings.changed` with `camerasOn`, each check's
+`sync.check` with its camera's label, each clip's `clip.saved` with its camera, a load notice's
+`recording.notice`, a camera turned off's `recording.stopped`); write down what they cannot show,
+next to the item, with the camera and what happened.
+
+The round is T5.5's: every camera of the MacBook that is turned on records its own clips of every
+attempt, with its own framing, controls, sharpness meter, sync check, picture and status line; the
+microphone records with the first camera only.
+
+- [ ] Camera settings: the list names both of the MacBook's cameras, each with its switch, its
+  resolution and its frame rate. The FaceTime camera is on as before the update (the camera that was
+  on stays on), the webcam off. The webcam's switch on: its own section opens under the FaceTime
+  camera's, named, with its track, its framing (Edit it around the cube), its sharpness meter and its
+  controls; the summary says "2 of 2 cameras on · recording". The webcam's resolution and frame rate
+  (1280 × 720 at 30 if it offers them): they stay its own after a reload, the FaceTime camera's its
+  own. Write both cameras' tracks and measured frame rates.
+- [ ] The recording panel: a block per camera, each with its state, its stats and its codecs; the
+  webcam's codecs end "no sound (the microphone records with laptop)"; the estimate per attempt says
+  "2 cameras".
+- [ ] The Timer page: four pictures in the grid, the MacBook's two first (`laptop`, `laptop-2`, each
+  with its caption over its corner), then the two phones, each with its status line. The line under
+  the pictures says each camera's sync: the FaceTime camera's check is due by itself before the
+  first scramble, as before; the webcam's line says "Sync: laptop-2 has no check in this session."
+  until its own Sync check passes (its lag about 177 ms, `docs/DEVICES.md`, T2.14); each phone's
+  from its own line, as in "After T4". Write the four lags.
+- [ ] Twenty solves or more, over twenty minutes or more: every attempt gets eight clips (the solve
+  list's badge says "8 clips"), nothing noted missing in the session; the clip viewer has eight
+  buttons, `Scramble · laptop-2` and `Solve · laptop-2` among them, and the webcam's clips play
+  without sound. A glance at each status line after each solve: if a line says "encodes N of M fps"
+  and the panel "laptop-2 records N of its M frames a second. Two cameras may be more than this
+  laptop encodes: …", write the attempt and both numbers, then lower that camera's resolution and
+  write whether the words went.
+- [ ] Mid-session, the webcam's switch off: its picture, section and block go, the next attempts
+  have six clips (the phones' and the FaceTime camera's), nothing noted missing; its switch on again:
+  it is `laptop-2` again, its check holds (no new one due), and the attempts have eight clips again.
+- [ ] The webcam unplugged while on: its picture goes, its row says "(not connected)" with its
+  switch still on, the attempts go on with the other cameras; plugged in again: it opens by itself
+  and its clips come back with the next attempt.
+- [ ] Upload sessions on: every file goes (the Sessions page says Up to date; an attempt of eight
+  clips is 19 files with its record, its frames files and `gyro.json`). Write how many attempts the
+  round had: the coordinator compares the day's count in `users/{uid}.quota` with the 8,000 files and
+  40 GB of the day's quota.
+- [ ] The round report of the day (the coordinator: `npm run round-report`): each camera's checks,
+  clips and notices under its label, and the MacBook's figures with two cameras into
+  `docs/DEVICES.md`.
 
 ## After T5.6 — two phones of one name
 

@@ -5,6 +5,7 @@ import type { AttemptRecord, VideoClip } from '@cubetrace/core';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
 import {
+  FAKE_FACETIME,
   FAKE_PHONE_FRONT,
   FAKE_PHONE_REAR,
   FAKE_WEBCAM,
@@ -19,6 +20,7 @@ import { StorageService } from '../device/storage-service';
 import { ready, setup, turn, type Setup } from '../session/session-harness';
 import { CameraPreview } from './camera-preview';
 import { CameraService, LUMA_SAMPLER } from './camera-service';
+import { HostCamerasService } from './host-cameras-service';
 import { CAPTURE_STARTER, CLIP_TAIL_MS, ENCODER_SETTLE_MS } from './recording-service';
 import { FakeCaptureStarter, statsOf } from './recording-testing';
 import { RemoteCameraRegistry } from './remote-camera-registry';
@@ -443,6 +445,74 @@ describe('CameraPreview', () => {
     await update();
     expect(element('remote-preview-cell')).toBeNull();
     expect(element('remote-preview-main')?.getAttribute('data-label')).toBe('phone-rear');
+  });
+
+  it("gives each camera of the laptop a cell of its own, named, before the phones' cells, each with its line; the load on its line (T5.5)", async () => {
+    const camera = await render([FAKE_WEBCAM, FAKE_FACETIME]);
+    fixture.componentRef.setInput('pictures', 'equal');
+    await camera.start();
+    await update();
+    // One camera: its picture is not named.
+    expect(element('camera-preview-name')).toBeNull();
+    const hosts = TestBed.inject(HostCamerasService);
+    const facetime = hosts.devices().find((device) => device.deviceId === 'facetime');
+    if (facetime === undefined) {
+      throw new Error('No FaceTime camera.');
+    }
+    await hosts.setOn(facetime, true);
+    await update();
+    await update();
+    const cells = (): Element[] => [...host().querySelectorAll('[data-testid="camera-cell"]')];
+    expect(cells().map((cell) => cell.getAttribute('data-label'))).toEqual(['laptop', 'laptop-2']);
+    expect(
+      cells().map((cell) =>
+        cell.querySelector('[data-testid="camera-preview-name"]')?.textContent.trim(),
+      ),
+    ).toEqual(['laptop · fake_device_0', 'laptop-2 · FaceTime HD Camera (3A71:F4B5)']);
+    // Each picture plays its own camera, and measures it.
+    const videos = [...host().querySelectorAll<HTMLVideoElement>('[data-testid="camera-preview"]')];
+    expect(videos.map((video) => video.srcObject)).toEqual(
+      hosts.cameras().map((one) => one.stream()),
+    );
+    expect(frames.waiting).toBe(2);
+    expect(host().querySelectorAll('[data-testid="camera-status"]')).toHaveLength(2);
+    expect(host().classList).toContain('many');
+
+    // A phone: its cell after the laptop's two.
+    const source = new FakeRemoteSource();
+    TestBed.inject(RemoteCameraRegistry).provide(source);
+    source.cameras.set([remotePhone('x')]);
+    await update();
+    await update();
+    expect(
+      [
+        ...host().querySelectorAll(
+          '[data-testid="camera-cell"], [data-testid="remote-preview-cell"]',
+        ),
+      ].map((cell) => cell.getAttribute('data-label')),
+    ).toEqual(['laptop', 'laptop-2', 'phone-rear']);
+
+    // Recording, the FaceTime camera encoding 20 of its 30 frames a second for 10 s: said on its line.
+    await ready(s);
+    await update();
+    const second = starter.started.find(
+      (capture) => capture.video === hosts.cameras()[1].stream()?.getVideoTracks()[0],
+    );
+    const first = starter.started.find(
+      (capture) => capture.video === hosts.cameras()[0].stream()?.getVideoTracks()[0],
+    );
+    for (let k = 0; k < 12; k++) {
+      s.timers.advance(1000);
+      first?.emitStats(statsOf(5));
+      second?.emitStats(statsOf(5, { encodedFps: 20 }));
+    }
+    await update();
+    const lines = [...host().querySelectorAll('[data-testid="camera-status"]')];
+    expect(lines[0].querySelector('[data-testid="camera-status-load"]')).toBeNull();
+    expect(lines[1].querySelector('[data-testid="camera-status-load"]')?.textContent.trim()).toBe(
+      'encodes 20 of 30 fps',
+    );
+    expect(lines[1].getAttribute('data-label')).toBe('laptop-2');
   });
 
   it("keeps tiles over the picture in a phone's overlay, whatever the pictures asked for (T5.1)", async () => {

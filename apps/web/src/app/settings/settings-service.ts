@@ -70,6 +70,12 @@ export type CameraFrameRate = 'best' | '60' | '30';
 export const CAMERA_RESOLUTIONS: readonly CameraResolution[] = ['1080p', '720p'];
 export const CAMERA_FRAME_RATES: readonly CameraFrameRate[] = ['best', '60', '30'];
 
+/** The resolution and the frame rate a camera is asked for. */
+export interface CameraMode {
+  readonly resolution: CameraResolution;
+  readonly frameRate: CameraFrameRate;
+}
+
 /** How the resolutions read in Settings and in the Timer page's Camera settings. */
 export const CAMERA_RESOLUTION_TEXT: Readonly<Record<CameraResolution, string>> = {
   '1080p': '1920×1080',
@@ -164,6 +170,13 @@ export function remotePicturesDefault(phone: boolean): RemotePictures {
   return phone ? 'tiles' : 'equal';
 }
 
+/**
+ * The default camera of this device in `camerasOn` (T5.5): the camera the browser opens when none is
+ * named, until its name is known (before the permission, the browser names no camera). Its name
+ * takes its place as soon as it opens.
+ */
+export const DEFAULT_CAMERA = '';
+
 /** The camera chosen on a host, by its host label: its device id and its label. */
 export interface CameraPick {
   readonly host: string;
@@ -185,16 +198,25 @@ interface CameraFramingEntry extends StoredFraming {
   readonly camera: string;
 }
 
+/**
+ * The resolution and the frame rate chosen for a camera of the host (T5.5, Camera settings), by the
+ * browser's name for it, as its controls and framings are kept.
+ */
+interface CameraModeEntry extends CameraMode {
+  readonly camera: string;
+}
+
 /** At most this many framing rectangles are kept (cameras × frame sizes); the oldest go first. */
 const MAX_FRAMINGS = 24;
 /** At most this many cameras keep their manual controls, and hosts their chosen camera. */
 const MAX_CAMERA_ENTRIES = 12;
 
 /**
- * The version of what `localStorage` holds: 2 since T3.4, whose cube entries have `updatedMs` (1
- * had none). Written, not read: every field is checked on its own.
+ * The version of what `localStorage` holds: 3 since T5.5, whose cameras on are a list (`camerasOn`,
+ * 2 had `cameraOn` and the camera picked); 2 since T3.4, whose cube entries have `updatedMs` (1 had
+ * none). Written, not read: every field is checked on its own.
  */
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
 /** What `localStorage` holds; every field is checked on reading and falls back on its own. */
 interface StoredSettings {
@@ -217,7 +239,13 @@ interface StoredSettings {
   /** On a phone, the scramble over the camera's picture, both pinned at the top (T2.13). */
   readonly scrambleOverPicture: boolean;
   readonly idleDisconnectMinutes: number;
-  readonly cameraOn: boolean;
+  /**
+   * T5.5: the cameras of this device that are on, by the browser's names for them, in the order they
+   * were turned on ({@link DEFAULT_CAMERA} for the default camera before its name is known); empty:
+   * off. Before T5.5, `cameraOn` and the camera picked for the host.
+   */
+  readonly camerasOn: readonly string[];
+  /** The resolution and the frame rate of a camera that has no mode of its own (T5.5). */
   readonly cameraResolution: CameraResolution;
   readonly cameraFrameRate: CameraFrameRate;
   readonly sharpnessThreshold: number;
@@ -229,6 +257,8 @@ interface StoredSettings {
   readonly cameraPicks: readonly CameraPick[];
   readonly cameraControls: readonly CameraControlsEntry[];
   readonly cameraFramings: readonly CameraFramingEntry[];
+  /** T5.5: the resolution and frame rate chosen per camera; the others take the two above. */
+  readonly cameraModes: readonly CameraModeEntry[];
   /** T3.3: the sessions of this device are uploaded while an account is signed in. */
   readonly uploadSessions: boolean;
   /** T3.3: uploads wait off Wi-Fi; null: this device's default (on for a phone). */
@@ -269,7 +299,7 @@ const DEFAULTS: StoredSettings = {
   autoAdvance: true,
   scrambleOverPicture: true,
   idleDisconnectMinutes: IDLE_DISCONNECT_DEFAULT_MINUTES,
-  cameraOn: false,
+  camerasOn: [],
   cameraResolution: '1080p',
   cameraFrameRate: 'best',
   sharpnessThreshold: SHARPNESS_THRESHOLD_DEFAULT,
@@ -280,6 +310,7 @@ const DEFAULTS: StoredSettings = {
   cameraPicks: [],
   cameraControls: [],
   cameraFramings: [],
+  cameraModes: [],
   uploadSessions: true,
   wifiOnly: null,
   keepLocalCopies: null,
@@ -334,7 +365,11 @@ export class SettingsService {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly storage = storageOf(this.globals);
   /** What `localStorage` held as the page loaded; cube entries stored before T3.4 dated now. */
-  private readonly loaded = readSettings(this.storage, hostNow(this.globals));
+  private readonly loaded = readSettings(
+    this.storage,
+    hostNow(this.globals),
+    this.globals.navigator,
+  );
   private readonly stored = signal<StoredSettings>(this.loaded.settings);
   private readonly saveErrorSignal = signal<string | null>(null);
 
@@ -381,9 +416,17 @@ export class SettingsService {
    * 0: never. A whole number from 0 to 60, 5 by default.
    */
   readonly idleDisconnectMinutes = computed(() => this.stored().idleDisconnectMinutes);
-  /** The camera is on: the Timer page opens it when it loads. */
-  readonly cameraOn = computed(() => this.stored().cameraOn);
+  /**
+   * The cameras of this device that are on (T5.5), by the browser's names for them, the first one
+   * first; {@link DEFAULT_CAMERA} stands for the default camera until its name is known. The Timer
+   * page opens them when it loads.
+   */
+  readonly camerasOn = computed(() => this.stored().camerasOn);
+  /** A camera of this device is on: the Timer page opens it when it loads. */
+  readonly cameraOn = computed(() => this.stored().camerasOn.length > 0);
+  /** The resolution a camera is asked for, where it has none of its own (`cameraModeFor`). */
   readonly cameraResolution = computed(() => this.stored().cameraResolution);
+  /** The frame rate a camera is asked for, where it has none of its own (`cameraModeFor`). */
   readonly cameraFrameRate = computed(() => this.stored().cameraFrameRate);
   /** The sharpness meter says "good" from this value up. */
   readonly sharpnessThreshold = computed(() => this.stored().sharpnessThreshold);
@@ -614,9 +657,15 @@ export class SettingsService {
     return true;
   }
 
-  setCameraOn(on: boolean): void {
-    if (on !== this.stored().cameraOn) {
-      this.update({ cameraOn: on });
+  /**
+   * Sets the cameras of this device that are on (T5.5), by the browser's names for them, the first
+   * one first: each once, at most twelve; empty turns them all off.
+   */
+  setCamerasOn(cameras: readonly string[]): void {
+    const next = uniqueCameras(cameras);
+    const current = this.stored().camerasOn;
+    if (next.length !== current.length || next.some((camera, k) => camera !== current[k])) {
+      this.update({ camerasOn: next });
     }
   }
 
@@ -791,6 +840,41 @@ export class SettingsService {
     this.update({ cameraControls: entries.slice(-MAX_CAMERA_ENTRIES) });
   }
 
+  /**
+   * The resolution and the frame rate the camera called `camera` (the browser's name for it) is
+   * asked for (T5.5): its own, chosen in Camera settings, else those of Settings.
+   */
+  cameraModeFor(camera: string): CameraMode {
+    const own = this.cameraModeOwn(camera);
+    return own ?? { resolution: this.cameraResolution(), frameRate: this.cameraFrameRate() };
+  }
+
+  /** The resolution and the frame rate chosen for the camera called `camera`; null when it has none. */
+  cameraModeOwn(camera: string): CameraMode | null {
+    const entry = this.stored().cameraModes.find((candidate) => candidate.camera === camera);
+    return entry === undefined
+      ? null
+      : { resolution: entry.resolution, frameRate: entry.frameRate };
+  }
+
+  /** Keeps `mode` as the resolution and frame rate of the camera called `camera` (T5.5). */
+  setCameraMode(camera: string, mode: CameraMode): void {
+    const own = this.cameraModeOwn(camera);
+    if (
+      camera === '' ||
+      (own?.resolution === mode.resolution && own.frameRate === mode.frameRate)
+    ) {
+      return;
+    }
+    const others = this.stored().cameraModes.filter((entry) => entry.camera !== camera);
+    const entry: CameraModeEntry = {
+      camera,
+      resolution: mode.resolution,
+      frameRate: mode.frameRate,
+    };
+    this.update({ cameraModes: [...others, entry].slice(-MAX_CAMERA_ENTRIES) });
+  }
+
   /** The framing rectangles kept for the camera labelled `camera`, oldest first. */
   cameraFramingsOf(camera: string): readonly StoredFraming[] {
     return this.stored().cameraFramings.filter((entry) => entry.camera === camera);
@@ -932,6 +1016,7 @@ function storageOf(globals: BrowserGlobals): Storage | null {
 function readSettings(
   storage: Storage | null,
   nowMs: number,
+  navigator: Partial<Navigator> | undefined,
 ): { settings: StoredSettings; migrated: boolean } {
   let parsed: unknown;
   try {
@@ -951,6 +1036,7 @@ function readSettings(
   const autoAdvance = member(parsed, 'autoAdvance');
   const scrambleOverPicture = member(parsed, 'scrambleOverPicture');
   const idleDisconnectMinutes = member(parsed, 'idleDisconnectMinutes');
+  const camerasOn = member(parsed, 'camerasOn');
   const cameraOn = member(parsed, 'cameraOn');
   const cameraResolution = member(parsed, 'cameraResolution');
   const cameraFrameRate = member(parsed, 'cameraFrameRate');
@@ -971,20 +1057,23 @@ function readSettings(
   const motionMeter = member(parsed, 'motionMeter');
   const restartOnLatencyDrift = member(parsed, 'restartOnLatencyDrift');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
+  const cameraPicks = readList(member(parsed, 'cameraPicks'), readCameraPick).slice(
+    -MAX_CAMERA_ENTRIES,
+  );
+  const storedLabel =
+    typeof hostLabel === 'string' && hostLabel.trim() !== '' ? hostLabel.trim() : null;
+  const storedModel =
+    typeof model === 'string' && model.trim() !== '' && model.length <= MAX_MODEL
+      ? model.trim()
+      : DEFAULTS.model;
   const settings: StoredSettings = {
-    hostLabel:
-      typeof hostLabel === 'string' && hostLabel.trim() !== ''
-        ? hostLabel.trim()
-        : DEFAULTS.hostLabel,
+    hostLabel: storedLabel ?? DEFAULTS.hostLabel,
     // Settings stored before T5.6 have neither: the id is made when first read, the model read again.
     installationId:
       typeof installationId === 'string' && UUID_V4.test(installationId)
         ? installationId
         : DEFAULTS.installationId,
-    model:
-      typeof model === 'string' && model.trim() !== '' && model.length <= MAX_MODEL
-        ? model.trim()
-        : DEFAULTS.model,
+    model: storedModel,
     cubeMacs: cubeMacs.entries,
     demoSpeed:
       typeof demoSpeed === 'number' && isDemoSpeed(demoSpeed) ? demoSpeed : DEFAULTS.demoSpeed,
@@ -997,7 +1086,16 @@ function readSettings(
       typeof idleDisconnectMinutes === 'number' && isIdleDisconnectMinutes(idleDisconnectMinutes)
         ? idleDisconnectMinutes
         : DEFAULTS.idleDisconnectMinutes,
-    cameraOn: typeof cameraOn === 'boolean' ? cameraOn : DEFAULTS.cameraOn,
+    // Settings stored before T5.5 have `cameraOn` and the camera picked for the host instead.
+    camerasOn: Array.isArray(camerasOn)
+      ? uniqueCameras(camerasOn.filter((camera) => typeof camera === 'string'))
+      : cameraOn === true
+        ? [
+            cameraPicks.find(
+              (pick) => pick.host === (storedLabel ?? defaultHostLabel(navigator, storedModel)),
+            )?.label ?? DEFAULT_CAMERA,
+          ]
+        : DEFAULTS.camerasOn,
     cameraResolution:
       CAMERA_RESOLUTIONS.find((r) => r === cameraResolution) ?? DEFAULTS.cameraResolution,
     cameraFrameRate:
@@ -1015,13 +1113,15 @@ function readSettings(
     videoQuality: VIDEO_QUALITIES.find((q) => q === videoQuality) ?? DEFAULTS.videoQuality,
     cameraSettingsOpen:
       typeof cameraSettingsOpen === 'boolean' ? cameraSettingsOpen : DEFAULTS.cameraSettingsOpen,
-    cameraPicks: readList(member(parsed, 'cameraPicks'), readCameraPick).slice(-MAX_CAMERA_ENTRIES),
+    cameraPicks,
     cameraControls: readList(member(parsed, 'cameraControls'), readCameraControls).slice(
       -MAX_CAMERA_ENTRIES,
     ),
     cameraFramings: readList(member(parsed, 'cameraFramings'), readCameraFraming).slice(
       -MAX_FRAMINGS,
     ),
+    // Settings stored before T5.5 have none: every camera takes the resolution and frame rate above.
+    cameraModes: readList(member(parsed, 'cameraModes'), readCameraMode).slice(-MAX_CAMERA_ENTRIES),
     // Settings stored before T3.3 have none: uploads on, and the device's defaults.
     uploadSessions: typeof uploadSessions === 'boolean' ? uploadSessions : DEFAULTS.uploadSessions,
     wifiOnly: typeof wifiOnly === 'boolean' ? wifiOnly : DEFAULTS.wifiOnly,
@@ -1064,6 +1164,23 @@ function readList<T>(value: unknown, read: (item: unknown) => T | null): T[] {
     const entry = read(item);
     return entry === null ? [] : [entry];
   });
+}
+
+/** `cameras` each once, in order, at most {@link MAX_CAMERA_ENTRIES} (the first ones). */
+function uniqueCameras(cameras: readonly string[]): string[] {
+  return [...new Set(cameras)].slice(0, MAX_CAMERA_ENTRIES);
+}
+
+function readCameraMode(item: unknown): CameraModeEntry | null {
+  const camera = member(item, 'camera');
+  const resolution = CAMERA_RESOLUTIONS.find((r) => r === member(item, 'resolution'));
+  const frameRate = CAMERA_FRAME_RATES.find((r) => r === member(item, 'frameRate'));
+  return typeof camera === 'string' &&
+    camera !== '' &&
+    resolution !== undefined &&
+    frameRate !== undefined
+    ? { camera, resolution, frameRate }
+    : null;
 }
 
 function readCameraPick(item: unknown): CameraPick | null {
@@ -1171,9 +1288,14 @@ function writeSettings(storage: Storage | null, settings: StoredSettings): strin
     return 'This browser does not let cubetrace store its settings: they last until the page closes.';
   }
   try {
+    // `cameraOn` too, for a build before T5.5 that a page may still run (its service worker's).
     storage.setItem(
       SETTINGS_STORAGE_KEY,
-      JSON.stringify({ version: SETTINGS_VERSION, ...settings }),
+      JSON.stringify({
+        version: SETTINGS_VERSION,
+        ...settings,
+        cameraOn: settings.camerasOn.length > 0,
+      }),
     );
     return null;
   } catch (error: unknown) {

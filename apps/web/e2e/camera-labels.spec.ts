@@ -5,7 +5,8 @@ import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from 
 
 // Two cameras of one laptop in one session (docs/PLAN.md, T2.14; issue #40), with two of Chrome's
 // fake cameras, its fake microphone (the prompts answered "Allow") and the demo cube: a solve with
-// the first camera, one with the second, one with the first again. Both are `laptop` by the host;
+// the first camera, one with the second, one with the first again, one camera on at a time (each
+// camera's switch, T5.5: the first one off, then the other on). Both are `laptop` by the host;
 // the session gives the second one `laptop-2`, so that session.json has an entry for each, each
 // attempt's clips are named after the label of the camera that recorded them, and the first camera
 // gets its label back. `device-count=3` gives three fake cameras of the same test pattern at
@@ -65,12 +66,23 @@ async function recording(page: Page, checkDue: boolean): Promise<void> {
   await expect(check).toBeHidden();
 }
 
+/** The switch of the camera named `name` in Camera settings (T5.5). */
+function cameraSwitch(page: Page, name: string) {
+  return page
+    .getByTestId('camera-device-row')
+    .filter({ has: page.getByTestId('camera-device-name').getByText(name, { exact: true }) })
+    .getByTestId('camera-switch');
+}
+
 /**
- * Chooses the camera named `name` in Camera settings, and waits until the recording has started
- * again on it: its buffer starts from nothing, where the last camera's held 4 s and more.
+ * Switches from the camera named `from` to the one named `to` in Camera settings (the first one
+ * off, then the other on: one camera at a time), and waits until the recording has started again on
+ * it: its buffer starts from nothing, where the last camera's held 4 s and more.
  */
-async function switchTo(page: Page, name: string): Promise<void> {
-  await page.getByTestId('camera-device').selectOption({ label: name });
+async function switchTo(page: Page, from: string, to: string): Promise<void> {
+  await cameraSwitch(page, from).uncheck();
+  await expect(page.getByTestId('recording-stats')).toHaveCount(0);
+  await cameraSwitch(page, to).check();
   const stats = page.getByTestId('recording-stats');
   await expect
     .poll(async () => Number(await stats.getAttribute('data-buffer-seconds')), { timeout: 20_000 })
@@ -109,23 +121,23 @@ test('two cameras of the laptop in one session: an entry and a label each, the c
   await page.getByTestId('camera-section').locator('summary').click();
   await page.getByTestId('camera-toggle').click();
   await recording(page, true);
-  const picker = page.getByTestId('camera-device');
-  await expect(picker.locator('option')).toHaveText([
+  await expect(page.getByTestId('camera-device-name')).toHaveText([
     'fake_device_0',
     'fake_device_1',
     'fake_device_2',
   ]);
-  await expect(picker.locator('option:checked')).toHaveText('fake_device_0');
+  await expect(cameraSwitch(page, 'fake_device_0')).toBeChecked();
   await solveWithClips(page, 1);
 
   // The second camera: a camera of its own in the session, so a check is due for it.
-  await switchTo(page, 'fake_device_2');
+  await switchTo(page, 'fake_device_0', 'fake_device_2');
   await recording(page, true);
   await solveWithClips(page, 2);
 
   // The first camera again: its label is the session's, whose check was set aside: none is due.
-  await switchTo(page, 'fake_device_0');
-  await expect(picker.locator('option:checked')).toHaveText('fake_device_0');
+  await switchTo(page, 'fake_device_2', 'fake_device_0');
+  await expect(cameraSwitch(page, 'fake_device_0')).toBeChecked();
+  await expect(cameraSwitch(page, 'fake_device_2')).not.toBeChecked();
   await recording(page, false);
   await solveWithClips(page, 3);
 

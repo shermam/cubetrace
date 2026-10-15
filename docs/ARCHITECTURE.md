@@ -163,6 +163,45 @@ before the frames were timed too. A phone measures both the same way, and sends 
 `state` and its solve clip's motion with the clip's `cut-done`; the host does the rest
 (`docs/RTC.md` §9).
 
+**The host's cameras, more than one (T5.5).** Every camera of the laptop that is turned on records,
+each through all of the above on its own:
+
+```
+SettingsService.camerasOn (a switch per device, by its name) + cameraModes (its resolution, frame rate)
+  └─▶ HostCamerasService: the device list (enumerateDevices, devicechange) ─▶ a HostCamera per device on,
+        in the list's order, opened one after the other: its stream, controls, framing, sharpness, watchdog
+          ├─▶ RecordingService: a CameraRecording per camera: its own capture and clip workers, ring buffer,
+          │     encoder, latency and load meters; the microphone with the first camera's only (audio: false
+          │     for the others); its entry in session.json put in the list's order, so laptop, laptop-2…
+          ├─▶ SyncService: a check per camera (start({camera})), its lag in clock.cameras[label]
+          └─▶ CameraPreview: a cell per camera (a <video appCameraVideo> each), then the phones' cells
+CameraService: the facade the pages had: the host role's first camera (HostCamerasService.primary), or the
+  one camera of the camera device page (a phone filming for another host), which closes the host's cameras
+```
+
+`HostCamera` is the class of one open camera (what `CameraService` was until T5.5): its device, its
+stream, its controls source and watchdog, its framing and the sharpness of its picture, all kept per
+camera by the browser's name for it (`Settings.cameraControls`, `cameraFramings`, `cameraModes`).
+`HostCamerasService` turns the settings into cameras: a slot per device on that is listed (the
+default camera while the browser names none, its name taking its place once it opens), each opened
+in its own mode and again when that changes; a device on that is not listed (unplugged) is closed and
+opened again when `devicechange` lists it; a camera that cannot open its own device is "not
+connected" and never falls back to another. `RecordingService` coordinates a `CameraRecording` per
+camera (`camera-recording.ts`: what the service did for its one camera until T5.5): each is started,
+moved to another stream or stopped as its camera says; the timer's milestones go to every recording,
+each cutting its own clips (`laptop.solve.mp4`, `laptop-2.solve.mp4`); a clip dropped with its
+attempt is removed from whichever recording holds it. The microphone goes with the first camera's
+pipeline: two pipelines cannot share one audio track without cloning it, and one sound per attempt
+is what the dataset needs; when the first camera goes, the next one's pipeline starts again with it.
+The labels are the session's (`SessionService.cameraLabels`: the labels the cameras on would get in
+their order, before their entries are in), so that a picture, a line and a check say `laptop-2` as
+soon as the camera opens. Each recording watches its load: while several record, a camera whose
+frames are encoded at under 80% of its track's frame rate for 10 s says so once per run (its line,
+its block, `recording.notice`), the words naming the remedy (turn one off, or lower its resolution).
+The sync check is due by itself for the first camera only; the others' run from their lines, one
+check at a time, on their own pipelines' motion. The upload takes the attempt's files as they are,
+four per camera.
+
 ## Remote cameras (phase 4)
 
 A phone joins a session as a camera (`docs/PLAN.md`, the phase 4 board; the contract in
@@ -310,15 +349,16 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
 - The controls panel (`CameraControls`, T2.1) is a view over a `ControlsSource`
   (`apps/web/src/app/camera/controls-source.ts`: the controls, the values, what was applied, the
   drift, a change in flight, why one did not take; `set`, `reset`, and `adjusting` for a slider
-  held): `CameraService.controlsSource` for this device's camera (Camera settings, the phone's own
-  Camera page), a phone's `RemoteControlsSource` under it in the Cameras section.
+  held): `HostCamera.controlsSource` for each camera of this device (Camera settings, a panel per
+  camera on since T5.5; the phone's own Camera page), a phone's `RemoteControlsSource` under them in
+  the Cameras section.
 - `ControlsWatch` (`controls-watch.ts`, signals and nothing else of Angular) is the watchdog that
-  `CameraService` runs on the open camera in both roles: every 2 s the track's settings against the
+  each open camera runs (`HostCamera`, in both roles; one per camera of the host since T5.5): every 2 s the track's settings against the
   camera's own reading of each group once the app applied it (T5.2a: `ControlsWatch.applied`, which
-  `CameraService.setControl` and the controls kept as the camera opens call, held to once the next
-  reading agrees), and against `CameraService.applied` for a group as it opened (the mode it opened
+  `HostCamera.setControl` and the controls kept as the camera opens call, held to once the next
+  reading agrees), and against `HostCamera.applied` for a group as it opened (the mode it opened
   in); a mode compared by its kind (automatic or not), a drift after two readings, set back with
-  `CameraService.applied` under "Keep the camera's modes" (`SettingsService.keepCameraModes`, on by
+  `HostCamera.applied` under "Keep the camera's modes" (`SettingsService.keepCameraModes`, on by
   default) three times a minute at most, `controls.drift` (with its `baseline`). The controls panel
   shows `applied`, with the camera's reading beside a value it reports otherwise.
 - The phone: `CameraDeviceControls` (`camera-device/camera-device-controls.ts`), which
@@ -560,7 +600,7 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
   SessionService: session.started, attempt.done   ├─ signed out: a ring of the last 500, written at a sign-in
     (once the clips and gyro file are in),        │  during the page's life, gone with the page
     attempt.deleted, cube.resync, session.deleted ├─ the setting off: one last settings.changed, then nothing
-  CameraService, RecordingService: camera.on /    └─ signed in: the queue ─▶ one batch 5 s after its first
+  HostCamera, CameraRecording: camera.on /       └─ signed in: the queue ─▶ one batch 5 s after its first
     switched / off, recording.started / stopped /       event, at 20, when the page hides or goes away
     notice, clip.saved / failed, audio.missing           ─▶ AccountBackend.saveEvents (writeBatch) ─▶ Firestore's
   SyncService: sync.check                                cache ─▶ the server (a refusal: said once, dropped)
@@ -572,8 +612,8 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
     CameraDeviceService: rtc.paired / connected / disconnected / failed; CameraDeviceCapture: recording.*;
     CameraDeviceClips: remote.cut (failed); CameraDevicePreview: preview.started / stopped
   the remote controls (T5.2): on the host, RemoteCamerasService: remote.controls; on either device,
-    CameraService (its watchdog of the open camera's modes): controls.drift
-  the capture latency (T5.3): RecordingService: recording.latency / restarted (its own camera);
+    HostCamera (its watchdog of the open camera's modes): controls.drift
+  the capture latency (T5.3): CameraRecording: recording.latency / restarted (each own camera);
     RemoteCamerasService: recording.latency (a phone's, from its state)
 the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the
   router), settings.changed (the settings the checklists name), wake.lock, storage.persistence, network.changed
@@ -626,8 +666,9 @@ upload can be neither of another type nor longer than what the quota counted, an
 policy (`bucket/`) lets the app's origins send those headers. A third provider, `local`, is the
 end-to-end suite's bucket on the same machine, in the Functions emulator only ("Testing the cloud").
 
-**Quota.** Per account and UTC day, the bytes and the files signed (15 GB and 3,000 since 2026-10-03,
-6 GB and 1,200 before; parameters): `users/{uid}.quota = {day, bytes, files}`, reserved in the same transaction that records
+**Quota.** Per account and UTC day, the bytes and the files signed (40 GB and 8,000 since 2026-10-15,
+T5.5: an attempt of four cameras is 18 files and about 85 MB; 15 GB and 3,000 from 2026-10-03, 6 GB
+and 1,200 before; parameters, and a refusal names the counts): `users/{uid}.quota = {day, bytes, files}`, reserved in the same transaction that records
 the intent, every signature counted, a call that does not fit refused whole with when the day resets.
 It is a ceiling on what a runaway client can cost while there is one solver, not the community quotas
 of phase 5. The URLs are signed before the transaction, so a bucket that cannot sign counts nothing.

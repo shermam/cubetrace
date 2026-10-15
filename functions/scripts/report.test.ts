@@ -2186,6 +2186,191 @@ describe('the checklist after T5.3', () => {
   });
 });
 
+describe('the checklist after T5.5', () => {
+  const RIG_SESSION = '5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a';
+  const LOAD =
+    'laptop-2 records 21 of its 30 frames a second. Two cameras may be more than this laptop encodes: turn one off or lower its resolution.';
+
+  /**
+   * A session of the MacBook with its two cameras: 24 attempts a minute apart, the webcam (laptop-2)
+   * turned off before the 10th and on again before the 13th, a load notice, the uploads.
+   */
+  function rig(): ReportEvent[] {
+    const t0 = NOW - 3 * HOUR;
+    const scope = (attempt?: number): { session: string; attempt?: number } =>
+      attempt === undefined ? { session: RIG_SESSION } : { session: RIG_SESSION, attempt };
+    const events: ReportEvent[] = [
+      at(t0, 'settings.changed', { key: 'camerasOn', value: 2 }),
+      at(
+        t0 + 1000,
+        'recording.started',
+        { camera: 'laptop', audio: true, width: 1920, height: 1080, fps: 30 },
+        LAPTOP,
+        scope(),
+      ),
+      at(
+        t0 + 1500,
+        'recording.started',
+        { camera: 'laptop-2', audio: false, width: 1280, height: 720, fps: 30 },
+        LAPTOP,
+        scope(),
+      ),
+      at(
+        t0 + 5000,
+        'sync.check',
+        { outcome: 'ok', camera: 'laptop', offsetMs: 41.2 },
+        LAPTOP,
+        scope(),
+      ),
+      at(
+        t0 + 9000,
+        'sync.check',
+        { outcome: 'ok', camera: 'laptop-2', offsetMs: 176.8 },
+        LAPTOP,
+        scope(),
+      ),
+    ];
+    for (let attempt = 1; attempt <= 24; attempt++) {
+      const t = t0 + attempt * 60_000;
+      const webcam = attempt < 10 || attempt > 12;
+      if (attempt === 10) {
+        events.push(
+          at(
+            t - 30_000,
+            'recording.stopped',
+            { camera: 'laptop-2', why: 'camera-off' },
+            LAPTOP,
+            scope(),
+          ),
+        );
+      }
+      if (attempt === 13) {
+        events.push(
+          at(
+            t - 30_000,
+            'recording.started',
+            { camera: 'laptop-2', audio: false, width: 1280, height: 720, fps: 30 },
+            LAPTOP,
+            scope(),
+          ),
+        );
+      }
+      for (const camera of webcam ? ['laptop', 'laptop-2'] : ['laptop']) {
+        for (const [k, segment] of ['scramble', 'solve'].entries()) {
+          events.push(
+            at(
+              t + 2000 + k * 20_000,
+              'clip.saved',
+              {
+                camera,
+                segment,
+                audio: camera === 'laptop',
+                frameIntervalMs: camera === 'laptop' ? 33.3 : 33.4,
+              },
+              LAPTOP,
+              scope(attempt),
+            ),
+          );
+        }
+      }
+      events.push(
+        at(
+          t + 25_000,
+          'attempt.done',
+          { status: 'solved', clips: webcam ? 8 : 6, gyroSamples: 400 },
+          LAPTOP,
+          scope(attempt),
+        ),
+        at(
+          t + 40_000,
+          'upload.state',
+          { state: 'done', files: webcam ? 18 : 14, bytes: webcam ? 85_000_000 : 64_000_000 },
+          LAPTOP,
+          scope(attempt),
+        ),
+      );
+    }
+    events.push(
+      at(
+        t0 + 15 * 60_000,
+        'recording.notice',
+        { message: LOAD, camera: 'laptop-2' },
+        LAPTOP,
+        scope(),
+      ),
+    );
+    return events;
+  }
+
+  it('ticks the two cameras recording, a check each, twenty attempts with both, twenty minutes, the webcam off and on again, and the uploads', () => {
+    const results = new Map(evaluate(rig(), NOW).map((item) => [item.id, item.result]));
+    expect(results.get('5.5.1')).toEqual({
+      status: 'ok',
+      facts:
+        "1 session with two of the host's cameras or more: laptop (with sound, 1920×1080), laptop-2 (no sound, 1280×720); camerasOn up to 2 in Settings",
+    });
+    expect(results.get('5.5.2')).toEqual({
+      status: 'ok',
+      facts:
+        "1 session with a check of two of the host's cameras or more: laptop 41 ms, laptop-2 177 ms",
+    });
+    expect(results.get('5.5.3')).toEqual({
+      status: 'ok',
+      facts:
+        "21 attempts with both clips of two of the host's cameras or more; 21 real attempts on office-mbp with eight clips or more; clips with sound: laptop 42 of 42, laptop-2 0 of 42",
+    });
+    expect(results.get('5.5.4')?.status).toBe('ok');
+    expect(results.get('5.5.4')?.facts).toMatch(
+      /^23\.\d min with two cameras \(21 attempts\): laptop 30 fps, laptop-2 29\.9 fps by their clips' cadence; 1 load notice on office-mbp: \S+ \S+ laptop-2 records 21 of its 30 frames a second$/u,
+    );
+    expect(results.get('5.5.5')?.status).toBe('ok');
+    expect(results.get('5.5.5')?.facts).toMatch(
+      /laptop-2 off, 3 attempts without its clips, on again 3 min later$/u,
+    );
+    expect(results.get('5.5.6')).toEqual({
+      status: 'ok',
+      facts: '21 uploads on office-mbp of eight clips or more with every file: 378 files, 1.79 GB',
+    });
+  });
+
+  it('leaves one camera, too few attempts and a camera never on again; marks a pause for the quota', () => {
+    // One camera only: nothing of T5.5.
+    const one = rig().filter((e) => e.data['camera'] !== 'laptop-2');
+    const single = new Map(evaluate(one, NOW).map((item) => [item.id, item.result]));
+    expect(single.get('5.5.1')?.status).toBe('none');
+    expect(single.get('5.5.2')).toEqual({
+      status: 'none',
+      facts: "no session with a passed check of two of the host's cameras",
+    });
+    expect(single.get('5.5.3')?.status).toBe('none');
+    expect(single.get('5.5.4')?.facts).toBe(
+      "no attempt with two of the host's cameras; no load notice",
+    );
+    expect(single.get('5.5.5')?.status).toBe('none');
+    // Ten attempts, the webcam never on again.
+    const short = rig().filter(
+      (e) =>
+        (e.attempt === null || e.attempt < 13) &&
+        !(e.kind === 'recording.started' && e.tsMs > NOW - 3 * HOUR + 60_000),
+    );
+    const few = new Map(evaluate(short, NOW).map((item) => [item.id, item.result]));
+    expect(few.get('5.5.3')?.status).toBe('none');
+    expect(few.get('5.5.4')?.status).toBe('none');
+    expect(few.get('5.5.5')).toEqual({
+      status: 'none',
+      facts: expect.stringMatching(
+        /laptop-2 off, 3 attempts without its clips, not on again$/u,
+      ) as string,
+    });
+    // The day's quota reached.
+    const paused = [
+      ...rig(),
+      at(NOW - HOUR, 'upload.paused', { reason: 'quota', untilMs: NOW + HOUR, left: 3 }),
+    ];
+    expect(evaluate(paused, NOW).find((item) => item.id === '5.5.6')?.result.status).toBe('failed');
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });

@@ -84,6 +84,42 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   "Android phone"; a typed name still wins. The section also shows this browser's installation (the
   first eight characters of an id it made once) and the model. The cameras chosen under the old
   default name follow the new one.
+- Every camera of the laptop at once (T5.5; `README.md` "The desk rig", `docs/DATA-MODEL.md` §5 and
+  §6): Camera settings lists every camera of the device, each with its own switch, resolution and
+  frame rate (kept per camera, by its name), and each camera on records its own two clips of every
+  attempt (`laptop.solve.mp4` beside `laptop-2.solve.mp4`, the labels in the order of the device
+  list), through a pipeline of its own (its worker, ring buffer and encoder), with its own framing,
+  controls, sharpness meter and watchdog, its own sync check (the first camera's due by itself as
+  before, the others' from their lines under the pictures; each lag in `clock.cameras` under its
+  label, its clips taking it) and its own picture, captioned, and status line on the Timer page
+  (the laptop's cameras first, then the phones). The microphone records with the first camera's
+  clips only; the others' have no sound, which their recording block says once ("no sound (the
+  microphone records with laptop)"), and the microphone moves to the next camera when the first is
+  turned off. A camera turned off mid-session leaves the attempts after without its clips (nothing
+  noted missing); turned on again, it has its label and its check back. A camera whose frames are
+  encoded at under 80% of its frame rate for 10 s while another records says so once per recording:
+  "encodes 21 of 30 fps" on its line, and in its block and the session's notes "laptop-2 records 21
+  of its 30 frames a second. Two cameras may be more than this laptop encodes: turn one off or lower
+  its resolution." A camera on that is unplugged closes, stays listed "(not connected)" with its
+  switch on, and opens by itself when it is plugged in again. The camera device page (a phone
+  filming for another host) keeps one camera.
+- Diagnostics (T5.5): `recording.stopped`, `recording.notice`, `clip.failed` and `audio.missing` name
+  their camera; `settings.changed` names `camerasOn` (how many are on); the round report's "After
+  T5.5" items read a session with two of the laptop's cameras (each recording, each check, twenty
+  attempts with both, twenty minutes and the load, one turned off and on, the uploads).
+
+### Changed
+
+- The camera of this device is chosen with a switch per camera (T5.5): Settings keep the cameras on
+  (`camerasOn`, by the browser's names; the camera on before stays on) and each camera's resolution
+  and frame rate (`cameraModes`); Settings → Camera's resolution and frame rate are those of a camera
+  without its own.
+- The upload quota is 8,000 files and 40 GB per account and UTC day (T5.5, confirmed by the owner on
+  2026-10-15; 3,000 and 15 GB before): an attempt with two of the laptop's cameras and two phones is
+  18 files (19 with `session.json`) and about 85 MB. Its refusal names the counts: "7,990 files and
+  39.98 GB signed on … of the 8,000 files and 40 GB a day; this call asks 19 files and 85.2 MB more".
+  `docs/USER-ACTIONS.md` has the bucket's cost at the Standard class and the lifecycle rule to
+  Nearline after 30 days that the owner may set.
 
 ### Fixed
 

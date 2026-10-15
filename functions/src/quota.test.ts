@@ -1,7 +1,7 @@
 import { HttpsError } from 'firebase-functions/https';
 import { describe, expect, it } from 'vitest';
 
-import { nextUtcDay, reserve, usedOn, utcDay } from './quota.js';
+import { countText, nextUtcDay, reserve, sizeText, usedOn, utcDay } from './quota.js';
 
 const limits = { bytesPerDay: 2_000_000_000, filesPerDay: 400 };
 /** 2026-10-01, a minute before midnight UTC, and midnight. */
@@ -91,6 +91,26 @@ describe('reserve', () => {
       bytes: 1,
       files: 1,
     });
+  });
+
+  it('says the counts in its refusal: what was signed, what the day allows, what was asked (T5.5)', () => {
+    // The cap of 2026-10-15: 8,000 files and 40 GB a day, an attempt of four cameras 19 files.
+    const day = { bytesPerDay: 40_000_000_000, filesPerDay: 8000 };
+    const used = { day: '2026-10-01', bytes: 39_980_000_000, files: 7990 };
+    const error = refusal(() =>
+      reserve(used, lateOnTheFirst, { bytes: 85_200_000, files: 19 }, day),
+    );
+    expect(error.message).toBe(
+      "The day's upload quota is used up: 7,990 files and 39.98 GB signed on 2026-10-01 (UTC) of " +
+        'the 8,000 files and 40 GB a day; this call asks 19 files and 85.2 MB more. It resets at ' +
+        '2026-10-02T00:00:00.000Z.',
+    );
+    expect(countText(1, 'file')).toBe('1 file');
+    expect([sizeText(512), sizeText(14_000), sizeText(15_000_000_000)]).toEqual([
+      '512 bytes',
+      '14 kB',
+      '15 GB',
+    ]);
   });
 
   it('refuses a request larger than a whole day', () => {

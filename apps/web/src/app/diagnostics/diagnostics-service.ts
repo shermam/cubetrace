@@ -413,6 +413,8 @@ export class DiagnosticsService {
       autoAdvance: () => settings.autoAdvance(),
       scrambleOverPicture: () => settings.scrambleOverPicture(),
       idleDisconnectMinutes: () => settings.idleDisconnectMinutes(),
+      // T5.5: how many cameras of this device are on (`camera.on` and `camera.off` name them).
+      camerasOn: () => settings.camerasOn().length,
       cameraResolution: () => settings.cameraResolution(),
       cameraFrameRate: () => settings.cameraFrameRate(),
       sharpnessThreshold: () => settings.sharpnessThreshold(),

@@ -14,104 +14,170 @@
 
   <div class="panel">
     <div class="bar">
-      @if (camera.devices().length > 0) {
-        <label class="picker">
-          <span>Camera</span>
-          <select
-            #deviceSelect
-            data-testid="camera-device"
-            [disabled]="camera.status() === 'starting'"
-            (change)="select(deviceSelect.value)"
-          >
-            @for (device of camera.devices(); track device.deviceId) {
-              <option
-                [value]="device.deviceId"
-                [selected]="device.deviceId === camera.selectedId()"
-              >
-                {{ device.name }}
-              </option>
-            }
-          </select>
-        </label>
-      }
       <button
         type="button"
         data-testid="camera-toggle"
-        [class.primary]="camera.status() === 'off'"
+        [class.primary]="!prefs.cameraOn()"
         (click)="toggle()"
       >
-        {{ camera.status() === 'off' ? 'Turn on' : 'Turn off' }}
+        {{ prefs.cameraOn() ? 'Turn off' : 'Turn on' }}
       </button>
     </div>
 
+    <!-- Every camera of this device, a switch each (T5.5), and the resolution and frame rate it is
+         asked for. -->
+    @if (rows().length > 0) {
+      <ul class="devices" data-testid="camera-devices" aria-label="This device's cameras">
+        @for (row of rows(); track row.label) {
+          <li class="device" data-testid="camera-device-row" [attr.data-device]="row.label">
+            <label class="switch">
+              <input
+                #switchBox
+                type="checkbox"
+                data-testid="camera-switch"
+                [checked]="row.on"
+                (change)="setOn(row, switchBox.checked)"
+              />
+              <span data-testid="camera-device-name">{{ row.name }}</span>
+            </label>
+            <span
+              class="mode"
+              role="group"
+              [attr.aria-label]="'What ' + row.name + ' is asked for'"
+            >
+              <label>
+                <span>Resolution</span>
+                <select
+                  #resolutionSelect
+                  data-testid="camera-panel-resolution"
+                  (change)="setResolution(row, resolutionSelect.value)"
+                >
+                  @for (option of resolutions; track option.value) {
+                    <option
+                      [value]="option.value"
+                      [selected]="option.value === row.mode.resolution"
+                    >
+                      {{ option.label }}
+                    </option>
+                  }
+                </select>
+              </label>
+              <label>
+                <span>Frame rate</span>
+                <select
+                  #rateSelect
+                  data-testid="camera-panel-frame-rate"
+                  (change)="setFrameRate(row, rateSelect.value)"
+                >
+                  @for (option of frameRates; track option.value) {
+                    <option [value]="option.value" [selected]="option.value === row.mode.frameRate">
+                      {{ option.label }}
+                    </option>
+                  }
+                </select>
+              </label>
+            </span>
+          </li>
+        }
+      </ul>
+      <p class="hint">
+        Each camera on records its own clips of every attempt; the first one's have the sound. Its
+        resolution and frame rate are its own (Settings → Camera for a camera without them).
+      </p>
+    }
+
     @switch (camera.status()) {
       @case ('off') {
-        <p class="muted" data-testid="camera-off">
-          The camera is off. Turned on, it stays on across pages and reloads until it is turned off,
-          and its picture shows beside the time; the first time, Chrome asks for the permission.
-        </p>
+        @if (blocks().length === 0) {
+          <p class="muted" data-testid="camera-off">
+            The camera is off. Turned on, it stays on across pages and reloads until it is turned
+            off, and its picture shows beside the time; the first time, Chrome asks for the
+            permission.
+          </p>
+        }
       }
       @case ('starting') {
         <p class="muted" data-testid="camera-starting">Opening the camera…</p>
       }
     }
-    @if (camera.error(); as error) {
-      <p class="error" role="alert" data-testid="camera-error">{{ error }}</p>
-    }
-    @if (camera.notice(); as notice) {
-      <p class="notice" role="status" data-testid="camera-notice">{{ notice }}</p>
-    }
 
-    @if (camera.stream()) {
-      <dl class="facts">
-        <dt>Track</dt>
-        <dd data-testid="camera-track">{{ track() }}</dd>
-        <dt>Measured</dt>
-        <dd data-testid="camera-measured">{{ measured() }}</dd>
-        <dt>Framing</dt>
-        <dd>
-          <span data-testid="camera-framing-rect">{{ framingLine() }}</span>
-          <button
-            type="button"
-            class="link"
-            data-testid="camera-framing-edit"
-            [attr.aria-pressed]="editing()"
-            (click)="toggleEditing()"
-          >
-            {{ editing() ? 'Done' : 'Edit' }}
-          </button>
-          <button type="button" class="link" data-testid="camera-full-frame" (click)="wholeFrame()">
-            Full frame
-          </button>
-        </dd>
-      </dl>
-
-      <!-- The picture to frame the cube on, while the framing is edited (a second <video> of the
-           stream, there only then). -->
-      @if (open() && editing()) {
-        <app-framing-editor />
-      }
-
-      <app-sharpness-meter />
-      <p class="hint">
-        Of the framing rectangle, twice a second, and not while a solve is under way (drawing a
-        frame would hold its moves back); good from {{ threshold() }} up (Settings). Aim for good
-        with the cube in the rectangle: light helps most.
-      </p>
-
-      <app-camera-controls [source]="camera.controlsSource" />
-      @if (driftNotes(); as notes) {
-        @for (sentence of notes.sentences; track $index) {
-          <p
-            role="status"
-            data-testid="camera-drift"
-            [class.error]="notes.bad"
-            [class.notice]="!notes.bad"
-          >
-            {{ sentence }}
-          </p>
+    @for (block of blocks(); track block.camera) {
+      <section
+        class="host-camera"
+        data-testid="host-camera"
+        [attr.data-device]="block.camera.label()"
+        [attr.aria-label]="block.name"
+      >
+        @if (several()) {
+          <h3 data-testid="host-camera-name">{{ block.name }}</h3>
         }
-      }
+        @if (block.camera.error(); as error) {
+          <p class="error" role="alert" data-testid="camera-error">{{ error }}</p>
+        }
+        @if (block.camera.notice(); as notice) {
+          <p class="notice" role="status" data-testid="camera-notice">{{ notice }}</p>
+        }
+
+        @if (block.camera.stream()) {
+          <dl class="facts">
+            <dt>Track</dt>
+            <dd data-testid="camera-track">{{ block.track }}</dd>
+            <dt>Measured</dt>
+            <dd data-testid="camera-measured">{{ block.measured }}</dd>
+            <dt>Framing</dt>
+            <dd>
+              <span data-testid="camera-framing-rect">{{ block.framing }}</span>
+              <button
+                type="button"
+                class="link"
+                data-testid="camera-framing-edit"
+                [attr.aria-pressed]="block.camera.framingEditing()"
+                (click)="toggleEditing(block.camera)"
+              >
+                {{ block.camera.framingEditing() ? 'Done' : 'Edit' }}
+              </button>
+              <button
+                type="button"
+                class="link"
+                data-testid="camera-full-frame"
+                (click)="wholeFrame(block.camera)"
+              >
+                Full frame
+              </button>
+            </dd>
+          </dl>
+
+          <!-- The picture to frame the cube on, while the framing is edited (a second <video> of the
+               stream, there only then). -->
+          @if (open() && block.camera.framingEditing()) {
+            <app-framing-editor [camera]="block.camera" />
+          }
+
+          <app-sharpness-meter [camera]="block.camera" />
+          <p class="hint">
+            Of the framing rectangle, twice a second, and not while a solve is under way (drawing a
+            frame would hold its moves back); good from {{ threshold() }} up (Settings). Aim for
+            good with the cube in the rectangle: light helps most.
+          </p>
+
+          <app-camera-controls [source]="block.camera.controlsSource" />
+          @if (block.drift; as notes) {
+            @for (sentence of notes.sentences; track $index) {
+              <p
+                role="status"
+                data-testid="camera-drift"
+                [class.error]="notes.bad"
+                [class.notice]="!notes.bad"
+              >
+                {{ sentence }}
+              </p>
+            }
+          }
+        }
+      </section>
+    }
+
+    @if (anyStream()) {
       <label class="switch">
         <input
           #keepModesBox
@@ -123,40 +189,12 @@
         Keep the camera's modes
       </label>
       <p class="hint">
-        A mode the camera changes by itself (its focus gone manual) is set back within seconds,
-        three times a minute at most; off, it is said and left (Settings → Camera).
+        A mode a camera changes by itself (its focus gone manual) is set back within seconds, three
+        times a minute at most; off, it is said and left (Settings → Camera).
       </p>
     }
 
-    <div class="mode" role="group" aria-label="What the camera and the recording are asked for">
-      <label>
-        <span>Resolution</span>
-        <select
-          #resolutionSelect
-          data-testid="camera-panel-resolution"
-          (change)="setResolution(resolutionSelect.value)"
-        >
-          @for (option of resolutions; track option.value) {
-            <option [value]="option.value" [selected]="option.value === prefs.cameraResolution()">
-              {{ option.label }}
-            </option>
-          }
-        </select>
-      </label>
-      <label>
-        <span>Frame rate</span>
-        <select
-          #rateSelect
-          data-testid="camera-panel-frame-rate"
-          (change)="setFrameRate(rateSelect.value)"
-        >
-          @for (option of frameRates; track option.value) {
-            <option [value]="option.value" [selected]="option.value === prefs.cameraFrameRate()">
-              {{ option.label }}
-            </option>
-          }
-        </select>
-      </label>
+    <div class="mode" role="group" aria-label="What the recording is asked for">
       <label>
         <span>Video quality</span>
         <select

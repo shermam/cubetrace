@@ -19,7 +19,8 @@ import { SessionService, type TimerPhase } from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
 import { downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
-import { CameraService } from './camera-service';
+import type { HostCamera } from './host-camera';
+import { HostCamerasService } from './host-cameras-service';
 import { RecordingService } from './recording-service';
 import { RemoteCameraRegistry, type RemoteCameraEntry } from './remote-camera-registry';
 import {
@@ -51,6 +52,12 @@ export type SyncBlock =
   | 'remote-gone'
   | 'remote-syncing'
   | 'remote-not-recording';
+
+/** A camera of the host that a check can measure (T5.5): the camera, and its label in the session. */
+export interface LocalCamera {
+  readonly camera: HostCamera;
+  readonly label: string;
+}
 
 /** A check that ended, as the panel says it. */
 export interface SyncCheckResult {
@@ -111,10 +118,16 @@ export interface SyncCheckResult {
  * line under the preview says the phone has none), and asks for the framing on the phone while the
  * phone's rectangle is wide; it ends as failed when the phone leaves, stops recording or cannot
  * measure its frames.
+ *
+ * Since T5.5 every camera of the host has a check of its own (`start({camera})`, from its line under
+ * the pictures; one check at a time): the same check on its own frames, its lag in
+ * `clock.cameras[label]` under its own label (`laptop-2`), its later clips taking it. Only the first
+ * camera's check is due by itself, as before: the others' are started from their lines, as a phone's
+ * is, so that a session's start does not ask for several checks back to back.
  */
 @Injectable({ providedIn: 'root' })
 export class SyncService {
-  private readonly camera = inject(CameraService);
+  private readonly hosts = inject(HostCamerasService);
   private readonly recording = inject(RecordingService);
   private readonly session = inject(SessionService);
   private readonly cube = inject(CubeService);
@@ -127,29 +140,40 @@ export class SyncService {
   private readonly runSignal = signal<SyncRun | null>(null);
   /** The remote camera of the check shown (under way, waiting or ended); null for this device's. */
   private readonly targetSignal = signal<string | null>(null);
+  /** This device's camera of the check shown (T5.5), when it is not a phone's; null before one. */
+  private readonly localSignal = signal<HostCamera | null>(null);
   private readonly resultSignal = signal<SyncCheckResult | null>(null);
   private readonly visibleSignal = signal(false);
   private readonly waitingSignal = signal(false);
   private readonly noticeSignal = signal<string | null>(null);
 
   /**
-   * The camera's label in the session (`laptop`, `laptop-2`, `phone-front`…: the one the session
-   * gives the device, T2.14); null while it is not on.
+   * The first camera's label in the session (`laptop`, `phone-front`…: the one the session gives the
+   * device, T2.14); null while it is not on.
    */
   readonly label = computed(() => {
-    const identity = this.camera.identity();
-    return this.camera.status() === 'on' && identity !== null
-      ? this.session.cameraLabel(identity)
-      : null;
+    const camera = this.hosts.primary();
+    return camera === null ? null : this.labelOf(camera);
   });
-  /** The camera's clock sync in the current session, from an earlier check; null if none. */
+  /** The first camera's clock sync in the current session, from an earlier check; null if none. */
   readonly stored = computed<CameraClock | null>(() => {
-    const label = this.label();
-    const session = this.session.session();
-    if (label === null || session === null) {
-      return null;
-    }
-    return session.clock.cameras[label] ?? null;
+    const camera = this.hosts.primary();
+    return camera === null ? null : this.storedOf(camera);
+  });
+  /** The cameras of this device that are on, with their labels in the session (T5.5), in order. */
+  readonly locals = computed<readonly LocalCamera[]>(() =>
+    this.hosts.cameras().flatMap((camera) => {
+      const label = this.labelOf(camera);
+      return label === null ? [] : [{ camera, label }];
+    }),
+  );
+  /**
+   * This device's camera that the check shown measures (T5.5): the one it was started on while it
+   * is on, else the first camera; null without any.
+   */
+  readonly localCamera = computed<HostCamera | null>(() => {
+    const chosen = this.localSignal();
+    return chosen !== null && this.hosts.cameras().includes(chosen) ? chosen : this.hosts.primary();
   });
   /** The check under way, or the last one; null before the first. */
   readonly run = this.runSignal.asReadonly();
@@ -186,22 +210,18 @@ export class SyncService {
    */
   readonly framingWide = computed(() => {
     if (this.targetSignal() === null) {
-      return isWideFraming(this.camera.framing(), this.camera.frameSize());
+      const camera = this.localCamera();
+      return isWideFraming(camera?.framing() ?? null, camera?.frameSize() ?? null);
     }
     const remote = this.targetCamera();
     return isWideFraming(remote?.framing ?? null, remote?.frame ?? null);
   });
   /** Why the last request to start a check was refused, in plain words; null otherwise. */
   readonly notice = this.noticeSignal.asReadonly();
-  /** Why a check of this device's camera cannot start now; null when it can. */
+  /** Why a check of this device's first camera cannot start now; null when it can. */
   readonly blocked = computed<SyncBlock | null>(() => {
-    if (this.runSignal()?.state() === 'running') {
-      return 'running';
-    }
-    if (this.recording.status() !== 'recording' || this.label() === null) {
-      return 'not-recording';
-    }
-    return this.attemptBlock();
+    const camera = this.hosts.primary();
+    return camera === null ? this.blockedOf(null) : this.blockedOf(camera);
   });
 
   /** The session and camera labels the check was due by itself for: once each. */
@@ -230,11 +250,13 @@ export class SyncService {
         }
       });
     });
-    // A check of this device's camera ends when the recording stops (the camera off or switched,
+    // A check of this device's camera ends when its recording stops (the camera off or switched,
     // storage full); the cube's disconnection ends any check (`SyncRun`), and a remote camera's ends
     // when the phone leaves or cannot measure (its watch's error).
     effect(() => {
-      const recording = this.recording.status() === 'recording';
+      const camera = this.localSignal();
+      const recording =
+        camera !== null && this.recording.recordingOf(camera)?.status() === 'recording';
       untracked(() => {
         const run = this.runSignal();
         if (!recording && run?.state() === 'running' && this.targetSignal() === null) {
@@ -245,6 +267,42 @@ export class SyncService {
     inject(DestroyRef).onDestroy(() => {
       this.runSignal()?.cancel();
     });
+  }
+
+  /**
+   * The label in the session of this device's camera `camera` (T5.5: `laptop`, `laptop-2`); null
+   * while it is not on.
+   */
+  labelOf(camera: HostCamera): string | null {
+    return camera.status() === 'on' ? this.recording.labelOf(camera) : null;
+  }
+
+  /** The clock sync of this device's camera `camera` in the current session; null if none. */
+  storedOf(camera: HostCamera): CameraClock | null {
+    const label = this.labelOf(camera);
+    const session = this.session.session();
+    if (label === null || session === null) {
+      return null;
+    }
+    return session.clock.cameras[label] ?? null;
+  }
+
+  /**
+   * Why a check of this device's camera `camera` (null: none is on) cannot start now; null when it
+   * can: it records, and the attempt is where a check can start.
+   */
+  blockedOf(camera: HostCamera | null): SyncBlock | null {
+    if (this.runSignal()?.state() === 'running') {
+      return 'running';
+    }
+    if (
+      camera === null ||
+      this.recording.recordingOf(camera)?.status() !== 'recording' ||
+      this.labelOf(camera) === null
+    ) {
+      return 'not-recording';
+    }
+    return this.attemptBlock();
   }
 
   /**
@@ -284,23 +342,32 @@ export class SyncService {
 
   /**
    * Starts a check and shows the panel; the timer tracks no attempt until the check ends and the cube
-   * is still. The camera is this device's own, or the remote camera `remote` (T4.3: a phone of the
-   * Cameras section, by its id). While its framing rectangle is wide, the panel asks for a tighter
-   * one first, and the check waits (unless `anyway`, or it was started anyway before for this camera
-   * in this session). When a check cannot start now (`blocked`, `remoteBlocked`, or the timer refuses
-   * to suspend its attempts), `notice` says why.
+   * is still. The camera is this device's (`camera`, T5.5; its first camera by default), or the
+   * remote camera `remote` (T4.3: a phone of the Cameras section, by its id). While its framing
+   * rectangle is wide, the panel asks for a tighter one first, and the check waits (unless `anyway`,
+   * or it was started anyway before for this camera in this session). When a check cannot start now
+   * (`blockedOf`, `remoteBlocked`, or the timer refuses to suspend its attempts), `notice` says why.
    */
-  start(options: { readonly anyway?: boolean; readonly remote?: string | null } = {}): void {
+  start(
+    options: {
+      readonly anyway?: boolean;
+      readonly remote?: string | null;
+      readonly camera?: HostCamera | null;
+    } = {},
+  ): void {
     this.noticeSignal.set(null);
     const remote = options.remote ?? null;
+    const local = remote === null ? (options.camera ?? this.hosts.primary()) : null;
     const camera = remote === null ? null : this.registry.find(remote);
-    const label = remote === null ? this.label() : (camera?.label ?? null);
-    const blocked = remote === null ? this.blocked() : this.remoteBlocked(remote);
+    const label =
+      remote === null ? (local === null ? null : this.labelOf(local)) : (camera?.label ?? null);
+    const blocked = remote === null ? this.blockedOf(local) : this.remoteBlocked(remote);
     if (blocked !== null || label === null) {
       this.noticeSignal.set(`The sync check cannot start now: ${blockedWords(blocked)}`);
       return;
     }
     this.targetSignal.set(remote);
+    this.localSignal.set(local);
     const key = `${this.session.session()?.id ?? ''} ${label}`;
     if (options.anyway === true) {
       this.insisted.add(key);
@@ -317,16 +384,15 @@ export class SyncService {
       );
       return;
     }
-    const previousOffsetMs =
-      remote === null ? (this.stored()?.offsetMs ?? null) : (this.checkOf(label)?.offsetMs ?? null);
-    const identity = remote === null ? this.camera.identity() : null;
-    const rect = remote === null ? this.camera.framing() : (camera?.framing ?? null);
+    const previousOffsetMs = this.checkOf(label)?.offsetMs ?? null;
+    const identity = local?.identity() ?? null;
+    const rect = local !== null ? local.framing() : (camera?.framing ?? null);
     this.context =
       camera === null
         ? {
             label,
-            deviceLabel: this.camera.label(),
-            frameSize: this.camera.frameSize(),
+            deviceLabel: local?.label() ?? '',
+            frameSize: local?.frameSize() ?? null,
             framing: rect,
             app: APP_BUILD,
             userAgent: this.globals.navigator?.userAgent ?? null,
@@ -347,7 +413,11 @@ export class SyncService {
       new SyncRun({
         watch: (region, onSample, onError, onMeter) =>
           remote === null
-            ? this.recording.watchMotion(region, onSample, onError, onMeter)
+            ? local === null
+              ? null
+              : (this.recording
+                  .recordingOf(local)
+                  ?.watchMotion(region, onSample, onError, onMeter) ?? null)
             : this.registry.watchMotion(remote, onSample, onError, onMeter),
         unwatched:
           remote === null
@@ -373,7 +443,7 @@ export class SyncService {
                 : identity === null
                   ? label
                   : this.session.cameraLabel(identity);
-            this.finish(now, previousOffsetMs, outcome, run, camera);
+            this.finish(now, previousOffsetMs, outcome, run, camera, local);
           }
         },
       }),
@@ -381,11 +451,11 @@ export class SyncService {
   }
 
   /**
-   * Start, Retry, Check again: a check of the camera the panel shows (this device's, or the remote
-   * camera of the last check, T4.3).
+   * Start, Retry, Check again: a check of the camera the panel shows (this device's camera of the
+   * last check, or the remote camera of the last check, T4.3).
    */
   again(options: { readonly anyway?: boolean } = {}): void {
-    this.start({ ...options, remote: this.targetSignal() });
+    this.start({ ...options, remote: this.targetSignal(), camera: this.localCamera() });
   }
 
   /** "Start anyway": the check of the panel's camera starts although its framing is wide. */
@@ -393,9 +463,9 @@ export class SyncService {
     this.again({ anyway: true });
   }
 
-  /** "Edit the framing": Camera settings open to the framing rectangle's editor. */
+  /** "Edit the framing": Camera settings open to the framing rectangle's editor of the camera. */
   editFraming(): void {
-    this.camera.setFramingEditing(true);
+    this.localCamera()?.setFramingEditing(true);
   }
 
   /**
@@ -456,6 +526,7 @@ export class SyncService {
     outcome: SyncOutcome,
     run: SyncRun,
     camera: RemoteCameraEntry | null,
+    local: HostCamera | null,
   ): void {
     let saved = false;
     const clock = camera === null ? null : this.registry.clockRecord(camera.id);
@@ -468,7 +539,11 @@ export class SyncService {
       data.moves.map((move) => move.hostMs),
     );
     const latency =
-      camera === null ? this.recording.captureLatencyMs() : this.registry.latencyOf(camera.id);
+      camera === null
+        ? local === null
+          ? null
+          : (this.recording.recordingOf(local)?.captureLatencyMs() ?? null)
+        : this.registry.latencyOf(camera.id);
     if (outcome.ok) {
       const kept = this.session.session()?.clock.cameras[label];
       const record = camera === null ? null : (kept?.remote ?? clock);

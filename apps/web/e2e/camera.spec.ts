@@ -39,10 +39,13 @@ test('the fake camera: listed, turned on, measured, adjusted and framed; the fra
   const section = page.getByTestId('camera-section');
   await section.locator('summary').click();
   await expect(page.getByTestId('camera-state')).toHaveText('Off');
-  await expect(page.getByTestId('camera-device').locator('option')).toHaveText(['fake_device_0']);
+  // Every camera of the device with a switch of its own (T5.5), off.
+  await expect(page.getByTestId('camera-device-name')).toHaveText(['fake_device_0']);
+  await expect(page.getByTestId('camera-switch')).not.toBeChecked();
 
   await page.getByTestId('camera-toggle').click();
   await expect(page.getByTestId('camera-toggle')).toHaveText('Turn off');
+  await expect(page.getByTestId('camera-switch')).toBeChecked();
   await expect(page.getByTestId('camera-preview')).toBeVisible();
   await expect(page.getByTestId('camera-track')).toHaveText('1920×1080 at 20 fps');
   // Measured over a second of the camera's own clock.

@@ -214,6 +214,13 @@ attempt's folder as they come. Nothing under `camera-clips/` is a record of the 
 phone deletes the clips of other sessions when it joins one, and those staged more than a day ago
 when its Camera page opens.
 
+Since T5.5 the host records with every camera of its own that is on (`docs/PLAN.md`: the laptop's
+built-in camera and a USB webcam together), each with its own pipeline: each camera's two clips and
+their frames files are in the folder under its label, `laptop.solve.mp4` beside `laptop-2.solve.mp4`;
+with two phones paired beside them an attempt has eight clips (sixteen files and `attempt.json`,
+`gyro.json`). A camera turned off in the middle of a session has no clips in the attempts after
+(its entry stays in `cameras`, §6); one turned on has them from the next clip cut.
+
 ## 6. `session.json`
 
 ```jsonc
@@ -281,7 +288,10 @@ pauses of minutes is off by hundreds of milliseconds at its ends (as in the exam
 the 14 minutes of the owner's first laptop session, `docs/DEVICES.md`); to place a move on the host
 clock, use its attempt's `clock` (§7). `audio` is on by default (phase 2 records it with the video):
 it is Settings' "Record audio" when the session began, and again when its camera last recorded;
-whether a clip has sound is its own `audio` (§7). `notes` is free text, to which the app adds one
+whether a clip has sound is its own `audio` (§7): since T5.5 the microphone records with the first
+of the host's cameras only (a track the browser cannot share between two pipelines without cloning,
+and one sound per attempt is what the dataset needs), so the clips of its other cameras have none
+(`audio: null`), the session's `audio` true all the same. `notes` is free text, to which the app adds one
 line per clip it could not save, `clip failed: <segment> of attempt <index>: <reason>`
 (`docs/PLAN.md`, T2.4), so that a missing clip has its reason, and, since T2.9, one per clip that
 begins later than asked, `clip truncated: <segment> of attempt <index> starts <s> s late (the buffer
@@ -303,7 +313,11 @@ since T4.2, one per remote camera's clip given up, `remote clip missing: <segmen
 it, the phone left, its frames file could not be read), one per clip given up that came after all,
 `remote clip late: <segment> of attempt <index> from <camera>: attached <s> s after the attempt
 ended`, and one per remote clip that begins later than asked, `clip truncated: <segment> of attempt
-<index> from <camera> starts <s> s late (the phone's buffer held <s> s)` (§7).
+<index> from <camera> starts <s> s late (the phone's buffer held <s> s)` (§7). While several
+of the host's cameras record (T5.5), its lines about a clip name the camera after the attempt
+(`clip failed: solve of attempt 3 (laptop-2): …`), and a camera that records under 80% of its frame
+rate for 10 s says so once per recording (`notice: laptop-2 records 21 of its 30 frames a second.
+Two cameras may be more than this laptop encodes: …`).
 `summary` is counted from the attempts: each one is solved or a DNF.
 
 `cameras` lists the session's cameras: the host's own (`local: true`) and, since T4.0 (phase 4,
@@ -325,7 +339,9 @@ default label is its model, `moto g60`) or when the host label says phone, follo
 `-rear` when the facing is known (`phone-front`). The first device of the session with an own label
 gets that label, and another device with the same one the first of `<label>-2`, `<label>-3`, …
 that the session has not given (a laptop's built-in camera and a USB webcam used in one session
-are `laptop` and `laptop-2`); a device used again in the session gets its label back, its entry
+are `laptop` and `laptop-2`; since T5.5 the host records with both at once, their entries put in the
+order of the laptop's device list, so that the built-in camera, listed first, is `laptop` whichever
+pipeline starts first); a device used again in the session gets its label back, its entry
 replaced by the camera as it was opened again, so that the session's entries, its `clock.cameras`
 and its clips always name the same device. The app tells two devices apart by the browser's name
 for them (`deviceLabel`) and, for two of one name (two webcams of one model), by the browser's id
@@ -357,7 +373,9 @@ frame. `mode` is `full` when whole frames are recorded (always in phase 2, where
 metadata for training) and `crop` when only the rectangle is (later).
 
 `microphone` is the microphone of the camera's sound when it last recorded (`docs/PLAN.md` T2.12),
-null when it recorded without one (Record audio off, the microphone refused or absent). `label` is
+null when it recorded without one (Record audio off, the microphone refused or absent, or, since
+T5.5, another of the host's cameras recording first: the microphone goes with the first camera's
+clips, and moves to the next camera, its pipeline started again, when the first goes off). `label` is
 the browser's name for it (`MediaStreamTrack.label`). `processing` is how the app asked for it: `raw`,
 the default, with the browser's voice processing asked off (echo cancellation, noise suppression,
 automatic gain control and voice isolation false, one channel at 48 kHz as ideals), since that
@@ -972,13 +990,15 @@ The functions (`functions/README.md`) keep two fields through the Admin SDK, pas
   `files` has one. The functions never write `pending` or `failed`, and keep any other field of
   `upload` as it is. `path` is the file's name in the attempt's folder (`attempt.json`,
   `<camera>.<segment>.mp4`, `<camera>.<segment>.frames.json`, `gyro.json`), or `session.json`, the
-  session's file, recorded on the attempt it was uploaded with; at most 33 files in one call. An
-  attempt with one camera and a gyroscope is six files (T3.7: `gyro.json` after the clips), ten with
-  a paired phone's two clips and their frames files (T4.2), plus `session.json` now and then, each
-  signature a file of the day's quota: with the 3,000 files a day set on 2026-10-03 (1,200 before),
-  at most 500 attempts with their clips and gyro files upload in a day, 300 with a phone's, fewer
-  with `session.json` (the owner reached 1,199 files on 2026-10-03 with 171 attempts and the
-  re-signatures of follow-up (g)).
+  session's file, recorded on the attempt it was uploaded with; at most 33 files in one call (seven
+  cameras' clips in an attempt). An attempt with one camera and a gyroscope is six files (T3.7:
+  `gyro.json` after the clips), ten with a paired phone's two clips and their frames files (T4.2),
+  each camera four more: the owner's rig of 2026-10-15, two cameras of the laptop and two phones, is
+  eighteen (T5.5), plus `session.json` now and then, each signature a file of the day's quota: with
+  the 8,000 files and 40 GB a day set on 2026-10-15 (3,000 and 15 GB since 2026-10-03, 1,200 and 6 GB
+  before), about 420 attempts of four cameras upload in a day (about 85 MB each, 9 MB a laptop clip
+  and 12 MB a phone's), fewer with `session.json` (the owner reached 1,199 files on 2026-10-03 with
+  171 attempts and the re-signatures of follow-up (g)).
 - The objects are `users/{uid}/sessions/{id}/attempts/{index}/<path>`, and
   `users/{uid}/sessions/{id}/session.json` for the session's file, in the bucket of the configuration
   (`bucket/README.md`).

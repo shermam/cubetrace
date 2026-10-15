@@ -1,5 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 
+import type { HostCamera } from './host-camera';
 import { RecordingService } from './recording-service';
 import type { RemoteCameraEntry } from './remote-camera-registry';
 import { SYNC_TURNS } from './sync-run';
@@ -24,6 +25,18 @@ const BLOCKED: Readonly<Record<SyncBlock, string>> = {
   'remote-not-recording': 'Once the phone records.',
 };
 
+/**
+ * A line of one of this device's cameras under the preview (T5.5: a line each): its lag, or that it
+ * has none, and its button.
+ */
+interface LocalLine {
+  readonly camera: HostCamera;
+  readonly label: string;
+  readonly text: string;
+  /** Why its check cannot be started now; null when it can. */
+  readonly why: string | null;
+}
+
 /** A remote camera's line under the preview (T4.3): its lag, or that it has none, and its button. */
 interface RemoteLine {
   readonly camera: RemoteCameraEntry;
@@ -44,8 +57,10 @@ interface RemoteLine {
  * "Sync check" to run one. Wherever a check cannot be started, the reason is written beside its
  * button. Since T4.3 each phone of the Cameras section has a line of its own too ("Sync: phone-rear
  * has no check in this session", or its lag), whose "Sync check" runs the same check on the phone's
- * camera, the panel then naming it and asking for the framing on the phone. The logic is
- * `SyncService`'s; this only shows it.
+ * camera, the panel then naming it and asking for the framing on the phone. Since T5.5 each of this
+ * device's cameras has its line too, which names it when there are several ("Sync: laptop-2 has no
+ * check in this session"), and whose "Sync check" runs the check on that camera; the panel names it
+ * then. The logic is `SyncService`'s; this only shows it.
  */
 @Component({
   selector: 'app-sync-check',
@@ -209,24 +224,26 @@ interface RemoteLine {
         }
       </section>
     } @else {
-      @if (lineShown()) {
-        <p class="line" data-testid="sync-line">
-          <span>{{ line() }}</span>
+      @for (line of localLines(); track line.camera; let first = $first) {
+        <p class="line" data-testid="sync-line" [attr.data-label]="line.label">
+          <span>{{ line.text }}</span>
           <button
             type="button"
             class="link"
             data-testid="sync-start"
-            [disabled]="localBlocked()"
-            [title]="localBlockedText()"
-            (click)="sync.start()"
+            [disabled]="line.why !== null"
+            [title]="line.why ?? ''"
+            (click)="sync.start({ camera: line.camera })"
           >
             Sync check
           </button>
-          @if (localBlocked()) {
-            <span class="why" data-testid="sync-why">{{ localBlockedText() }}</span>
+          @if (line.why; as why) {
+            <span class="why" data-testid="sync-why">{{ why }}</span>
           }
-          @if (sync.notice(); as notice) {
-            <span class="notice" role="status" data-testid="sync-notice">{{ notice }}</span>
+          @if (first) {
+            @if (sync.notice(); as notice) {
+              <span class="notice" role="status" data-testid="sync-notice">{{ notice }}</span>
+            }
           }
         </p>
       }
@@ -248,7 +265,7 @@ interface RemoteLine {
           }
         </p>
       }
-      @if (!lineShown() && remoteLines().length > 0) {
+      @if (localLines().length === 0 && remoteLines().length > 0) {
         @if (sync.notice(); as notice) {
           <p class="notice" role="status" data-testid="sync-notice">{{ notice }}</p>
         }
@@ -343,10 +360,19 @@ export class SyncCheck {
 
   /** The check shown measures a remote camera (T4.3). */
   protected readonly remote = computed(() => this.sync.target() !== null);
-  /** The remote camera's label, for the heading; null for this device's own camera. */
-  protected readonly targetLabel = computed(() =>
-    this.sync.target() === null ? null : (this.sync.targetCamera()?.label ?? null),
-  );
+  /** This device has several cameras on (T5.5): each is named. */
+  private readonly several = computed(() => this.sync.locals().length > 1);
+  /**
+   * The camera's label, for the heading: a remote camera's, or one of this device's when it has
+   * several (T5.5); null for this device's only camera.
+   */
+  protected readonly targetLabel = computed(() => {
+    if (this.sync.target() !== null) {
+      return this.sync.targetCamera()?.label ?? null;
+    }
+    const camera = this.sync.localCamera();
+    return this.several() && camera !== null ? this.sync.labelOf(camera) : null;
+  });
   protected readonly state = computed<PanelState>(() => {
     if (this.sync.run()?.state() === 'running') {
       return 'running';
@@ -384,7 +410,7 @@ export class SyncCheck {
         ? ''
         : `; was ${String(Math.round(result.previousOffsetMs))} ms`;
     const kept = result.saved ? '' : ' No session was under way to keep it in.';
-    const subject = result.remote === null ? 'Camera' : result.label;
+    const subject = result.remote === null && !this.several() ? 'Camera' : result.label;
     return `${lagText(offsetMs, clapperboardResidualMs, subject)}${was}.${kept}`;
   });
   protected readonly failed = computed(() => {
@@ -395,17 +421,26 @@ export class SyncCheck {
     const outcome = this.sync.result()?.outcome;
     return outcome === undefined || outcome.ok ? null : outcome.reason;
   });
-  /** The line while the panel is hidden: with the camera recording, or a lag to show. */
-  protected readonly lineShown = computed(
-    () =>
-      this.sync.label() !== null &&
-      (this.recording.status() === 'recording' || this.sync.stored() !== null),
-  );
-  protected readonly line = computed(() => {
-    const stored = this.sync.stored();
-    return stored === null
-      ? 'Sync: this camera has no check in this session.'
-      : `Sync: ${lagText(stored.offsetMs, stored.clapperboardResidualMs).toLowerCase()}.`;
+  /**
+   * The lines of this device's cameras while the panel is hidden (T5.5: one each), each while its
+   * camera records or has a lag to show; named when there are several.
+   */
+  protected readonly localLines = computed<readonly LocalLine[]>(() => {
+    const several = this.several();
+    return this.sync.locals().flatMap(({ camera, label }) => {
+      const stored = this.sync.storedOf(camera);
+      if (this.recording.recordingOf(camera)?.status() !== 'recording' && stored === null) {
+        return [];
+      }
+      const blocked = this.sync.blockedOf(camera);
+      const text =
+        stored === null
+          ? `Sync: ${several ? label : 'this camera'} has no check in this session.`
+          : several
+            ? `Sync: ${lagText(stored.offsetMs, stored.clapperboardResidualMs, label)}.`
+            : `Sync: ${lagText(stored.offsetMs, stored.clapperboardResidualMs).toLowerCase()}.`;
+      return [{ camera, label, text, why: blocked === null ? null : BLOCKED[blocked] }];
+    });
   });
   /** Each phone's line (T4.3): its lag in this session, or that it has none, and why it cannot start. */
   protected readonly remoteLines = computed<readonly RemoteLine[]>(() =>
@@ -429,17 +464,12 @@ export class SyncCheck {
     const blocked = this.panelBlock();
     return blocked === null ? '' : BLOCKED[blocked];
   });
-  /** A check of this device's camera cannot be started now (its line's button). */
-  protected readonly localBlocked = computed(() => this.sync.blocked() !== null);
-  protected readonly localBlockedText = computed(() => {
-    const blocked = this.sync.blocked();
-    return blocked === null ? '' : BLOCKED[blocked];
-  });
-
   /** Why the panel's camera (this device's, or the remote one it shows) cannot be checked now. */
   private panelBlock(): SyncBlock | null {
     const target = this.sync.target();
-    return target === null ? this.sync.blocked() : this.sync.remoteBlocked(target);
+    return target === null
+      ? this.sync.blockedOf(this.sync.localCamera())
+      : this.sync.remoteBlocked(target);
   }
 }
 

@@ -69,8 +69,11 @@ one dataset.
 
 ## Recording
 
-**Turn the camera on** in Camera settings, below the Cube section of the Timer page: choose the
-camera ("Front camera" or "Rear camera" on a phone) and click Turn on. Chrome asks for the camera
+**Turn the camera on** in Camera settings, below the Cube section of the Timer page: Turn on turns on
+the first camera of the device (the front one on a phone), and the list under it has a switch per
+camera ("Front camera" and "Rear camera" on a phone), each with its own resolution and frame rate;
+on a laptop with more than one (a USB webcam beside its own), every camera switched on records
+(Two cameras of the laptop, below). Chrome asks for the camera
 once, and for the microphone when recording starts (Record audio, in Camera settings and in Settings
 → Camera, leaves the sound out). The camera stays on across reloads until Turn off. Its picture then
 stays beside the time, mirrored for a front camera, so that the cube can be kept in frame while
@@ -83,8 +86,22 @@ scramble stays there alone. Settings → Timer → "Scramble over the picture (p
 the picture under the time and pins nothing. Camera settings also show what the camera claims next
 to what it delivers (a phone may claim 60 fps and deliver 30), and the manual controls it has:
 exposure and ISO, focus, white balance, zoom and torch, with Reset to auto. Settings → Camera has
-the resolution (1920×1080 or 1280×720), the frame rate asked for, the video quality and the
-microphone (below) and the sharpness meter's threshold.
+the resolution (1920×1080 or 1280×720) and the frame rate asked for of a camera without its own,
+the video quality and the microphone (below) and the sharpness meter's threshold.
+
+**Two cameras of the laptop.** With a second camera's switch on (Camera settings), both record:
+each has its own picture beside the time (captioned with its label and its name, `laptop · FaceTime
+HD Camera` and `laptop-2 · …`, the first camera of the list first) with its own line, its own section in Camera settings (framing, sharpness, controls) and
+its own recording block, and every attempt gets two clips of each, `laptop.solve.mp4` beside
+`laptop-2.solve.mp4`. The microphone records with the first camera's clips only: the second's have
+no sound, which its block says ("no sound (the microphone records with laptop)"). Each camera has its
+own sync check: the first one's is due by itself as before, the second's is started from its line
+under the pictures ("Sync: laptop-2 has no check in this session", then Sync check). Turned off in
+the middle of a session, a camera's clips stop with the next attempt; turned on again, it is
+`laptop-2` again, with its check. Two encoders may be more than a laptop does at full speed: a camera
+that encodes under 80% of its frame rate for 10 s says so once ("encodes 21 of 30 fps" on its line,
+and in its block "laptop-2 records 21 of its 30 frames a second. Two cameras may be more than this
+laptop encodes: turn one off or lower its resolution.").
 
 **The framing rectangle** is the part of the picture the model will learn from, drawn on the
 camera's picture. Framing → Edit, in Camera settings, shows a larger picture on which it is dragged
@@ -336,6 +353,13 @@ while the first is connected: it is listed as `phone-rear-2`, with a picture of 
 preview (three pictures, two to a row in a wide window) and a sync check of its own, and each attempt then has six clips and uploads fourteen files
 (with `gyro.json`).
 
+**A second camera of the MacBook** (a USB webcam on its own stand, at a third angle): its switch on
+in Camera settings, its framing drawn in its own section, its sync check from its line under the
+pictures (Two cameras of the laptop, above). With two phones beside it every attempt has eight
+clips and uploads eighteen files with `gyro.json`. The MacBook then encodes two cameras: if a line
+says "encodes N of M fps", lower that camera's resolution (its own, in the list of cameras) or turn
+it off.
+
 **What the records hold.** A phone's camera is a camera of the session like the MacBook's: its entry
 in `session.json`'s `cameras` names the phone (`remote`: its name and platform), its clock sync is in
 `clock.cameras["phone-rear"].remote` beside its sync check's lag, and each of its clips' frames files
@@ -444,10 +468,12 @@ copies, on by default on a laptop and off on a phone, keeps the clips on the dev
 uploaded: off, an attempt's clips are deleted from it once all its files are uploaded (its
 `attempt.json` and frame times stay, and the clip says "in the cloud"). In any case, once the
 browser's storage is 70% full, the oldest uploaded clips are deleted until it is under 60%. Each
-account may have 15 GB and 3,000 files signed per UTC day, every signature counted: at most 500
-attempts with their clips and gyro files (six files each: `attempt.json`, two MP4s, two frames files
-and `gyro.json`), 300 with a paired phone's clips too (ten files each); past it, the uploads wait for
-the next UTC day, and the panel says until when.
+account may have 40 GB and 8,000 files signed per UTC day (since 2026-10-15; 15 GB and 3,000
+before), every signature counted: about 1,300 attempts of one camera with their clips and gyro files
+(six files each: `attempt.json`, two MP4s, two frames files and `gyro.json`), 800 with a paired
+phone's clips too (ten files each), about 420 with two cameras of the laptop and two phones
+(eighteen files each, 19 with `session.json`, about 85 MB); past it, the uploads wait for the next
+UTC day, and the panel says until when.
 
 **Whose cloud.** The account, the index and the bucket are the owner's: the Firebase project
 `cubetrace-cacd9` (Authentication with Google, Firestore in `nam5`, the Cloud Functions in

@@ -3,6 +3,7 @@ import {
   computed,
   effect,
   inject,
+  input,
   signal,
   viewChild,
   type ElementRef,
@@ -21,7 +22,14 @@ import {
 } from '@cubetrace/capture';
 
 import { CameraService } from './camera-service';
+import type { HostCamera } from './host-camera';
 import { showStream } from './video';
+
+/** What the editor reads of a camera, and the framing it keeps (a `HostCamera`, or the facade). */
+export type FramingCamera = Pick<
+  HostCamera,
+  'mirrored' | 'framing' | 'frameSize' | 'stream' | 'setFraming'
+>;
 
 /** A corner is taken hold of within this many CSS pixels of it (a finger's width). */
 const HANDLE_REACH_PX = 24;
@@ -52,10 +60,11 @@ interface Drag {
  * The framing rectangle's editor (docs/PLAN.md, T2.1): a larger picture of the camera (mirrored for a
  * front camera, like a mirror; the frames are not) with the rectangle over it; drag the rectangle to
  * move it, drag a corner to resize it, by mouse or touch; the arrow keys move it and Shift + arrows
- * resize it; the rectangle is kept per camera and frame size (`CameraService.setFraming`). Camera
- * settings show it while the framing is edited (T2.1), and the Camera page of a phone that films for
- * a host too (T4.1). The picture is a second `<video>` of the stream, which costs the page some work
- * on every frame: it is there only while the editor is.
+ * resize it; the rectangle is kept per camera and frame size (`HostCamera.setFraming`). Camera
+ * settings show it while the framing of one of the host's cameras is edited (T2.1; since T5.5,
+ * `camera`, the camera of its block), and the Camera page of a phone that films for a host too (T4.1:
+ * its camera, `CameraService`, by default). The picture is a second `<video>` of the stream, which
+ * costs the page some work on every frame: it is there only while the editor is.
  */
 @Component({
   selector: 'app-framing-editor',
@@ -64,7 +73,7 @@ interface Drag {
       #frame
       class="frame"
       data-testid="camera-frame"
-      [class.mirrored]="camera.mirrored()"
+      [class.mirrored]="camera().mirrored()"
       [style.--aspect]="aspect()"
     >
       <video
@@ -173,7 +182,8 @@ interface Drag {
   `,
 })
 export class FramingEditor {
-  protected readonly camera = inject(CameraService);
+  /** The camera whose framing it edits: the Camera page's by default. */
+  readonly camera = input<FramingCamera>(inject(CameraService));
   private readonly picture = viewChild<ElementRef<HTMLVideoElement>>('picture');
   private readonly frame = viewChild<ElementRef<HTMLElement>>('frame');
   /** The rectangle while it is dragged; the stored one otherwise. */
@@ -181,16 +191,16 @@ export class FramingEditor {
   private drag: Drag | null = null;
 
   /** The rectangle shown: the one dragged, else the camera's. */
-  readonly rect = computed(() => this.draft() ?? this.camera.framing());
+  readonly rect = computed(() => this.draft() ?? this.camera().framing());
   /** The rectangle over the picture, in percent of the frame. */
   protected readonly box = computed(() => {
     const rect = this.rect();
-    const size = this.camera.frameSize();
+    const size = this.camera().frameSize();
     return rect === null || size === null ? null : framingPercent(rect, size);
   });
   /** The picture's proportions: the frames', 16:9 until they are known. */
   protected readonly aspect = computed(() => {
-    const size = this.camera.frameSize();
+    const size = this.camera().frameSize();
     return size === null ? 16 / 9 : size.width / size.height;
   });
 
@@ -198,7 +208,7 @@ export class FramingEditor {
     // The picture plays the camera's stream (the preview beside the clock measures it).
     effect((onCleanup) => {
       const video = this.picture()?.nativeElement;
-      const stream = this.camera.stream();
+      const stream = this.camera().stream();
       if (video !== undefined && stream !== null) {
         onCleanup(showStream(video, stream));
       }
@@ -215,7 +225,7 @@ export class FramingEditor {
   /** A pointer goes down on the rectangle: a corner resizes it, the inside moves it. */
   protected grab(event: PointerEvent): void {
     const rect = this.rect();
-    const size = this.camera.frameSize();
+    const size = this.camera().frameSize();
     const frame = this.frame()?.nativeElement;
     if (rect === null || size === null || frame === undefined || event.button > 0) {
       return;
@@ -227,7 +237,7 @@ export class FramingEditor {
     const box: PreviewBox = {
       width: bounds.width,
       height: bounds.height,
-      mirrored: this.camera.mirrored(),
+      mirrored: this.camera().mirrored(),
     };
     const point = previewToFrame(
       { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
@@ -281,7 +291,7 @@ export class FramingEditor {
     const rect = this.draft();
     this.draft.set(null);
     if (rect !== null && event.type === 'pointerup') {
-      this.camera.setFraming(rect);
+      this.camera().setFraming(rect);
     }
   }
 
@@ -289,7 +299,7 @@ export class FramingEditor {
   protected nudge(event: KeyboardEvent): void {
     const arrow = ARROWS[event.key] as readonly [number, number] | undefined;
     const rect = this.rect();
-    const size = this.camera.frameSize();
+    const size = this.camera().frameSize();
     if (arrow === undefined || rect === null || size === null) {
       return;
     }
@@ -300,10 +310,10 @@ export class FramingEditor {
       : dragFraming(
           rect,
           'move',
-          { x: (this.camera.mirrored() ? -x : x) * step, y: y * step },
+          { x: (this.camera().mirrored() ? -x : x) * step, y: y * step },
           size,
         );
-    this.camera.setFraming(next);
+    this.camera().setFraming(next);
     event.preventDefault();
   }
 }

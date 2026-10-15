@@ -1038,6 +1038,28 @@ export class SessionService {
   }
 
   /**
+   * The labels the current session gives `cameras` taken in their order (T5.5: the host's cameras,
+   * whose entries the recording puts in that order): each as `cameraLabel` gives it, the cameras
+   * before it counted as entries, so that two cameras of the laptop are `laptop` and `laptop-2` from
+   * the start, before their entries are in the session (and without a session). Null for a camera
+   * that is not open (null).
+   */
+  cameraLabels(cameras: readonly (CameraIdentity | null)[]): (string | null)[] {
+    const session = this.sessionSignal();
+    const known: CameraIdentity[] = session === null ? [] : this.cameraIdentities(session);
+    return cameras.map((camera) => {
+      if (camera === null) {
+        return null;
+      }
+      const label = labelFor(known, camera);
+      if (!known.some((entry) => entry.label === label)) {
+        known.push({ ...camera, label });
+      }
+      return label;
+    });
+  }
+
+  /**
    * Puts `camera` in the current session's `cameras` (T2.4) under the label the session gives it
    * (`cameraLabel`, with `deviceId`, the camera's device id when the browser gives one, T2.14; a
    * remote camera's, its phone's installation id, and its name with its phone's model, T5.6,
