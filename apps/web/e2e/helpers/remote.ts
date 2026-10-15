@@ -147,10 +147,40 @@ export const SYNTHETIC_CAMERA = {
 /**
  * How the synthetic camera reports what it takes (T5.2a): `reciprocalFocus`, a focus distance read
  * as the reciprocal of the one applied, as the Moto g60's rear camera reports it (docs/DEVICES.md,
- * "Control quirks": 0.12 m set, 8.33 read).
+ * "Control quirks": 0.12 m set, 8.33 read); and `label` (T5.6), the browser's name for the camera
+ * (`MediaStreamTrack.label`) as a phone's says it, "camera 0, facing back", the same on every page
+ * that asks for it, where a canvas's track has a random name of its own on each page.
  */
 export interface SyntheticQuirks {
   readonly reciprocalFocus?: boolean;
+  readonly label?: string;
+}
+
+/** The `localStorage` key of the settings (src/app/settings/settings-service.ts). */
+const SETTINGS = 'cubetrace.settings';
+
+/**
+ * On every load of `page` from now on, the page is a browser installation of its own (T5.6): its
+ * settings say `id` as their installation id before the app reads them, as a phone of its own would.
+ * The pages of one browser share their storage, and so one installation id, which made the suite's
+ * phones one phone; each page keeps the id it read for as long as it is open.
+ */
+export async function installation(page: Page, id: string): Promise<void> {
+  await page.addInitScript(
+    ({ key, id }) => {
+      const read = (): unknown => {
+        try {
+          return JSON.parse(localStorage.getItem(key) ?? 'null');
+        } catch {
+          return null;
+        }
+      };
+      const stored = read();
+      const settings = typeof stored === 'object' && stored !== null ? stored : {};
+      localStorage.setItem(key, JSON.stringify({ ...settings, installationId: id }));
+    },
+    { key: SETTINGS, id },
+  );
 }
 
 /** The focus of the synthetic camera's current track, and the constraints the app applied to it. */
@@ -195,6 +225,9 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
             value <= focus.distance.max;
       /** `track` with the synthetic camera's focus (T5.2), as a phone's camera track has one. */
       const withFocus = (track: MediaStreamTrack): MediaStreamTrack => {
+        if (quirks.label !== undefined) {
+          Object.defineProperty(track, 'label', { value: quirks.label });
+        }
         const entry = {
           track,
           settings: { ...focus.opening } as Record<string, unknown>,
