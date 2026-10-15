@@ -5,7 +5,19 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
+## 0.5.0 — 2026-10-15
+
+Phase 5 of `docs/PLAN.md`: the rig's eyes and hands. The owner runs the desk rig alone, the phones on
+tripods out of reach: each phone's picture is as large as the laptop's own on the Timer page, with its
+health under it (its frame rate, sharpness, battery, and its Compute Pressure state where its Chrome
+has the API); a phone's camera controls are set from the laptop, and a mode a camera changes by
+itself is seen and set back; every camera's capture latency is measured per frame and kept per clip,
+with its lag from each solve's own turns, and a drift is said and, for the laptop's own cameras,
+answered by a restart (issue #67, whose cause is still open); every camera of the laptop records at
+once, and every phone paired gets its own clips, a phone being known by an installation id rather
+than by its name. Deployed at https://shermam.github.io/cubetrace/; `README.md`, "The desk rig", sets
+up the laptop's two cameras and two phones, `docs/MANUAL-TESTS.md`, "After T5", tries the whole rig
+once, and the README's "Known limitations" lists what is still open.
 
 ### Added
 
@@ -107,6 +119,14 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   their camera; `settings.changed` names `camerasOn` (how many are on); the round report's "After
   T5.5" items read a session with two of the laptop's cameras (each recording, each check, twenty
   attempts with both, twenty minutes and the load, one turned off and on, the uploads).
+- The "After T5" round (T5.4; `docs/MANUAL-TESTS.md`, `docs/DIAGNOSTICS.md`): the whole rig once,
+  the laptop's two cameras and two phones, in eight items (the rig paired, the four sync checks, each
+  phone's controls from the laptop without a false drift, a provoked drift set back, forty solves of
+  eight clips, the phones' health over twenty minutes, the latency words with each camera's motion
+  lag against its check, the uploads against the quota), which the round report reads from the
+  events of the rig's sessions (items 5.4.1–5.4.8); `README.md`'s "The desk rig" for the four
+  cameras, with what to do when a phone runs hot; `docs/DEVICES.md`'s phones as remote cameras, the
+  Moto g60 among them.
 
 ### Changed
 
@@ -120,6 +140,15 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   39.98 GB signed on … of the 8,000 files and 40 GB a day; this call asks 19 files and 85.2 MB more".
   `docs/USER-ACTIONS.md` has the bucket's cost at the Standard class and the lifecycle rule to
   Nearline after 30 days that the owner may set.
+- Development (T5.4): a phone's signaling writes an offer once (the same offer sent again writes
+  nothing: written again, it would have taken the host's answer out of the peer document, and the
+  host, which tells a new offer by its SDP, would never have answered it again; an ICE restart's
+  offer still replaces the old one). The cloud suite's pairing test waits for the host's answer, both
+  sides' candidates and the closed pairing to reach the Firestore emulator: its two pages are tabs of
+  one browser, whose Firestore clients share one cache, so each saw the other's writes before the
+  emulator had them, and the test read the peer document as the phone wrote it three times in CI
+  (2026-10-09 to 10-15; `remote-camera.cloud.spec.ts:33`). The round report tells two phones of one
+  name apart by their installations in the controls' items too.
 
 ### Fixed
 
@@ -140,7 +169,6 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   `rtc.connected`, `rtc.clock` and `remote.controls` name the phone's installation; the round report
   gives each installation a section of its Events table and names two devices of one name apart, and
   its "After T5.6" items read a session of the two phones.
-
 - `clip.saved`'s `syncResidualMs` was always null: the event read the clip as the capture saved it,
   before its record had the camera's lag (found with T5.3; the round report's item 2.5.6 could not
   tick). The records had it right.

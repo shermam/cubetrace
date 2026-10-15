@@ -71,7 +71,20 @@ test('two pages pair through the Firestore emulator: the pairing in the session 
   await expect(state).toHaveAttribute('data-state', 'connected', { timeout: 60_000 });
   await expect(page.getByTestId('remote-camera')).toHaveAttribute('data-state', 'connected');
 
-  // The peer document, as the phone created it and the host answered it, with both sides' candidates.
+  // The peer document, as the phone created it and the host answered it, with both sides' candidates,
+  // read from the emulator once it has them. The two pages are tabs of one browser, whose Firestore
+  // clients share one cache in IndexedDB (`persistentMultipleTabManager`, src/app/auth/firebase-sdk.ts):
+  // each page sees the other's writes the moment they are made, before the emulator has them (they all
+  // go to it through one tab's write stream, the candidates and the diagnostics' batches with them),
+  // and the connection over the loopback interface opens milliseconds after the answer. So both pages
+  // can say connected while the host's answer is still on its way: the document read `offered` without
+  // its answer three times in CI from 2026-10-09 to 10-15 (T5.4), no second offer made. Two devices
+  // never see each other's writes before the server has them.
+  await expect
+    .poll(async () => Object.values(await firestoreCollection(`sessions/${sessionId}/peers`)), {
+      timeout: 15_000,
+    })
+    .toEqual([expect.objectContaining({ state: 'answered' })]);
   const peers = await firestoreCollection(`sessions/${sessionId}/peers`);
   const [peerId, peer] = Object.entries(peers)[0] ?? ['', {}];
   expect(Object.keys(peers)).toHaveLength(1);
@@ -85,22 +98,27 @@ test('two pages pair through the Firestore emulator: the pairing in the session 
   });
   expect((peer['offer'] as { sdp: string }).sdp).toMatch(/^v=0/);
   expect((peer['answer'] as { sdp: string }).sdp).toMatch(/^v=0/);
-  const callers = await firestoreCollection(
-    `sessions/${sessionId}/peers/${peerId}/callerCandidates`,
-  );
-  const callees = await firestoreCollection(
-    `sessions/${sessionId}/peers/${peerId}/calleeCandidates`,
-  );
-  expect(Object.keys(callers).length).toBeGreaterThan(0);
-  expect(Object.keys(callees).length).toBeGreaterThan(0);
+  const candidates = (side: 'caller' | 'callee') =>
+    firestoreCollection(`sessions/${sessionId}/peers/${peerId}/${side}Candidates`);
+  for (const side of ['caller', 'callee'] as const) {
+    await expect
+      .poll(async () => Object.keys(await candidates(side)).length, { timeout: 15_000 })
+      .toBeGreaterThan(0);
+  }
+  const callers = await candidates('caller');
+  const callees = await candidates('callee');
   for (const candidate of [...Object.values(callers), ...Object.values(callees)]) {
     expect(candidate).toMatchObject({
       candidate: expect.any(String),
       createdMs: expect.any(Number),
     });
   }
-  // The pairing is closed: the token is taken.
-  expect((await firestoreDocument(`sessions/${sessionId}`))?.['pairing']).toBeNull();
+  // The pairing is closed: the token is taken (the host's write, which may be on its way too).
+  await expect
+    .poll(async () => (await firestoreDocument(`sessions/${sessionId}`))?.['pairing'], {
+      timeout: 15_000,
+    })
+    .toBeNull();
 
   // Leave: the host deletes the peer document and its candidates.
   await phone.getByTestId('device-leave').click();

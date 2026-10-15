@@ -2570,7 +2570,7 @@ sign in the app (issue #67).
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | ✅ 2026-10-15 (#70) |
 | T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | ✅ 2026-10-15 (#72) |
 | T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | ✅ 2026-10-15 (#73) |
-| T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | – |
+| T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | 🔄 PR #74 |
 
 Waves: T5.1 → T5.2 → T5.3 → T5.2a → T5.6 → T5.5 → T5.4, one agent at a time (T5.2a added on 2026-10-15 from the first week's events; T5.5 and T5.6 the same day from the owner's asks: the USB webcam beside the built-in camera, and the second phone's clips).
 

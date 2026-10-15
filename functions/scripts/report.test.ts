@@ -2371,6 +2371,395 @@ describe('the checklist after T5.5', () => {
   });
 });
 
+describe('the checklist after T5', () => {
+  const MAC = { ...LAPTOP, installation: '0a1b2c3d' };
+  /** The two phones of the rig, each named by its model (T5.6's default), told apart by installation. */
+  const THINK = {
+    label: 'ThinkPhone by motorola',
+    platform: 'Android',
+    installed: true,
+    installation: '1f2e3d4c',
+    model: 'ThinkPhone by motorola',
+  };
+  const MOTO = {
+    label: 'moto g60',
+    platform: 'Android',
+    installed: true,
+    installation: '9a8b7c6d',
+    model: 'moto g60',
+  };
+  const APP5 = { version: '0.5.0', commit: 'def5678' };
+  const RIG = '4e3d2c1b-0a9f-4e8d-b7c6-5a4f3e2d1c0b';
+  const MIN = 60_000;
+  const t0 = NOW - 5 * HOUR;
+  const PHONES = [
+    { device: THINK, camera: 'phone-rear', lag: 31.2, latency: 24 },
+    { device: MOTO, camera: 'phone-rear-2', lag: 34.5, latency: 30 },
+  ];
+  /** An event of the MacBook in the rig's session. */
+  const host = (tsMs: number, kind: string, data: Record<string, unknown>, attempt?: number) =>
+    at(tsMs, kind, data, MAC, { session: RIG, attempt }, APP5);
+  /** A drift of a phone's camera, as its watchdog says it. */
+  const drift = (
+    tsMs: number,
+    phone: typeof THINK,
+    changes: Record<string, string>,
+    baseline: string,
+  ) =>
+    at(
+      tsMs,
+      'controls.drift',
+      {
+        camera: 'phone-rear',
+        role: 'camera-device',
+        deviceLabel: 'camera 0, facing back',
+        drift: changes,
+        controls: Object.keys(changes).join(', '),
+        reapplied: true,
+        gaveUp: false,
+        keep: true,
+        baseline,
+      },
+      phone,
+      {},
+      APP5,
+    );
+
+  /**
+   * The whole rig once, after 0.5.0, as the MacBook's and the phones' events tell it: the MacBook's
+   * two cameras recording and both phones paired in one session, the four checks, each phone's
+   * controls from the MacBook (the focus and a distance held two minutes, the zoom, the torch on and
+   * off, Reset to auto; the Moto g60's torch resetting its focus, set back), the drift provoked on the
+   * Moto and set back, forty-two solves with eight clips each and their uploads, the MacBook's capture
+   * latency drifting at attempt 38 and the restart, the phones' minute records for an hour (the
+   * ThinkPhone's pressure fair from its thermals, the Moto without the API and its frame rate dropped
+   * once), and the clip viewer of one attempt.
+   */
+  function wholeRig(): ReportEvent[] {
+    const events: ReportEvent[] = [
+      at(t0 - 5 * MIN, 'app.start', { installed: false }, MAC, {}, APP5),
+      at(t0 - 4 * MIN, 'app.start', { installed: true }, THINK, {}, APP5),
+      at(t0 - 4 * MIN, 'app.start', { installed: true }, MOTO, {}, APP5),
+      host(t0, 'recording.started', { camera: 'laptop', audio: true, width: 1920, height: 1080 }),
+      host(t0 + 500, 'recording.started', {
+        camera: 'laptop-2',
+        audio: false,
+        width: 1280,
+        height: 720,
+      }),
+      host(t0 + MIN, 'sync.check', {
+        outcome: 'ok',
+        camera: 'laptop',
+        offsetMs: 38.3,
+        spreadMs: 40.1,
+        motionPeakMs: 44,
+        captureLatencyMs: 9.2,
+      }),
+      host(t0 + 2 * MIN, 'sync.check', {
+        outcome: 'ok',
+        camera: 'laptop-2',
+        offsetMs: 177.4,
+        spreadMs: 11.6,
+        motionPeakMs: 180.2,
+        captureLatencyMs: 40,
+      }),
+    ];
+    for (const [k, phone] of PHONES.entries()) {
+      events.push(
+        host(t0 + (k + 1) * 10_000, 'rtc.paired', {
+          peer: phone.device.label,
+          platform: 'Android',
+          peerInstallation: phone.device.installation,
+          peerModel: phone.device.model,
+          camera: phone.camera,
+          version: '0.5.0',
+          commit: 'def5678',
+          ms: 1800,
+        }),
+        host(t0 + (3 + k) * MIN, 'sync.check', {
+          outcome: 'ok',
+          camera: phone.camera,
+          remote: true,
+          peer: phone.device.label,
+          offsetMs: phone.lag,
+          spreadMs: 46,
+          motionPeakMs: 40,
+          captureLatencyMs: phone.latency,
+        }),
+      );
+      // Its controls from the MacBook: the focus and a distance left two minutes, then the zoom,
+      // the torch on and off, and Reset to auto.
+      const t = t0 + (5 + 5 * k) * MIN;
+      const change = (tsMs: number, set: string) =>
+        host(tsMs, 'remote.controls', {
+          camera: phone.camera,
+          peer: phone.device.label,
+          peerInstallation: phone.device.installation,
+          set,
+          outcome: 'ok',
+          message: null,
+          ms: 40,
+        });
+      events.push(
+        change(t, 'focusMode'),
+        change(t + 10_000, 'focusDistance'),
+        change(t + 3 * MIN, 'zoom'),
+        change(t + 3 * MIN + 20_000, 'torch'),
+        change(t + 3 * MIN + 40_000, 'torch'),
+        change(t + 4 * MIN, 'reset'),
+      );
+      // Its minute records on the MacBook, for an hour.
+      for (let m = 0; m <= 60; m++) {
+        events.push(
+          host(t0 + m * MIN + 30_000, 'rtc.clock', {
+            camera: phone.camera,
+            peer: phone.device.label,
+            peerInstallation: phone.device.installation,
+            why: 'minute',
+            converged: true,
+            report: {
+              fps: phone.device === MOTO && m === 40 ? 22.5 : 29.9,
+              sharpness: 41,
+              soft: false,
+              recording: true,
+              batteryLevel: phone.device === MOTO ? 0.95 - m * 0.005 : 1,
+              batteryCharging: phone.device !== MOTO,
+              thermal: phone.device === MOTO && m === 40 ? 'throttled' : 'ok',
+              pressure: phone.device === MOTO ? null : m < 30 ? 'nominal' : 'fair',
+              pressureSource: phone.device === MOTO ? null : 'thermals',
+              latencyMs: phone.latency,
+              ageMs: 1500,
+            },
+          }),
+        );
+      }
+    }
+    events.push(
+      // The Moto's torch reset its focus (after the two minutes), set back; then the drift provoked.
+      drift(t0 + 13 * MIN + 25_000, MOTO, { focusMode: 'manual → continuous' }, 'reading'),
+      drift(t0 + 15 * MIN, MOTO, { focusMode: 'continuous → manual' }, 'applied'),
+    );
+    for (let i = 1; i <= 42; i++) {
+      const t = t0 + (15 + i) * MIN;
+      const late = i === 38 || i === 39;
+      for (const [camera, check, latency] of [
+        ['laptop', 38.3, 9.2],
+        ['laptop-2', 177.4, 40],
+      ] as const) {
+        events.push(
+          host(t, 'clip.saved', { camera, segment: 'scramble', audio: camera === 'laptop' }, i),
+          host(
+            t + 20_000,
+            'clip.saved',
+            {
+              camera,
+              segment: 'solve',
+              audio: camera === 'laptop',
+              syncResidualMs: check,
+              captureLatencyMs: {
+                p50: late && camera === 'laptop' ? 84 : latency,
+                p95: latency + 3,
+                basis: 'timestamp',
+              },
+              motionLagMs: (late && camera === 'laptop' ? 80 : 0) + check + 3,
+            },
+            i,
+          ),
+        );
+      }
+      for (const phone of PHONES) {
+        events.push(
+          host(t + 22_000, 'remote.clip', { camera: phone.camera, segment: 'scramble' }, i),
+          host(
+            t + 23_000,
+            'remote.clip',
+            {
+              camera: phone.camera,
+              peer: phone.device.label,
+              segment: 'solve',
+              syncResidualMs: phone.lag,
+              captureLatencyMs: {
+                p50: phone.latency,
+                p95: phone.latency + 5,
+                basis: 'capture-time',
+              },
+              motionLagMs: phone.lag - 2,
+            },
+            i,
+          ),
+        );
+      }
+      events.push(
+        host(
+          t + 24_000,
+          'attempt.done',
+          { status: 'solved', clips: 8, settled: true, gyroSamples: 400 },
+          i,
+        ),
+        host(t + 50_000, 'upload.state', { state: 'done', files: 18, bytes: 85_000_000 }, i),
+      );
+    }
+    events.push(
+      host(t0 + 53 * MIN, 'recording.latency', {
+        camera: 'laptop',
+        why: 'drift',
+        baselineMs: 9.2,
+        p50Ms: 83.8,
+        deltaMs: 74.6,
+      }),
+      host(t0 + 55 * MIN, 'recording.restarted', {
+        why: 'latency',
+        camera: 'laptop',
+        deltaMs: 74.6,
+      }),
+      host(t0 + 55 * MIN + 30_000, 'recording.latency', {
+        camera: 'laptop',
+        why: 'recovered',
+        baselineMs: 9.2,
+        p50Ms: 10,
+        deltaMs: 0.8,
+      }),
+      host(t0 + 60 * MIN, 'clips.viewed', { clips: 8, local: 8, gyro: true }, 42),
+    );
+    return events;
+  }
+
+  const ITEMS = ['5.4.1', '5.4.2', '5.4.3', '5.4.4', '5.4.5', '5.4.6', '5.4.7', '5.4.8'];
+
+  it('ticks the whole rig from its events: paired, four checks, the controls, a drift set back, forty solves of eight clips, an hour of health, the latency and the uploads', () => {
+    const results = new Map(evaluate(wholeRig(), NOW).map((item) => [item.id, item.result]));
+    expect(results.get('5.4.1')).toEqual({
+      status: 'ok',
+      facts:
+        '1 session of the whole rig: laptop, laptop-2 with ThinkPhone by motorola (1f2e3d4c) as phone-rear, moto g60 (9a8b7c6d) as phone-rear-2 (builds: office-mbp 0.5.0 · def5678, ThinkPhone by motorola 0.5.0 · def5678, moto g60 0.5.0 · def5678)',
+    });
+    expect(results.get('5.4.2')).toEqual({
+      status: 'ok',
+      facts:
+        '4 cameras with a check passed in one session: laptop 38.3 ms (±40.1), laptop-2 177.4 ms (±11.6), phone-rear 31.2 ms (±46, ThinkPhone by motorola), phone-rear-2 34.5 ms (±46, moto g60)',
+    });
+    expect(results.get('5.4.3')).toEqual({
+      status: 'ok',
+      facts:
+        'ThinkPhone by motorola: the focus, Reset to auto, the zoom and the torch answered; 1 of 1 distance held two minutes without a drift; moto g60: the focus, Reset to auto, the zoom and the torch answered; 1 of 1 distance held two minutes without a drift',
+    });
+    // The torch's reset of the Moto's focus, set back by its watchdog, is no drift of the distance's
+    // two minutes, and no provoked drift either: the focus went back to automatic.
+    expect(results.get('5.4.4')).toEqual({
+      status: 'ok',
+      facts: '1 drift on moto g60 set back: focusMode continuous → manual (applied)',
+    });
+    expect(results.get('5.4.5')).toEqual({
+      status: 'ok',
+      facts:
+        "42 of the 42 attempts of one session with eight clips or more; 0 phones' clips missing in it; 1 viewing on office-mbp of eight clips or more",
+    });
+    expect(results.get('5.4.6')).toEqual({
+      status: 'ok',
+      facts:
+        'ThinkPhone by motorola: 60 minutes of reports, 29.9 fps at the median, battery 100%, charging, pressure nominal (30), fair (31) from thermals, the frame rate dropped in 0; moto g60: 60 minutes of reports, 29.9 fps at the median, battery 65% to 95%, unplugged, no pressure (the API absent or refused), the frame rate dropped in 1',
+    });
+    expect(results.get('5.4.7')).toEqual({
+      status: 'ok',
+      facts:
+        "laptop: 42 solve clips, 42 with a motion lag, +3 ms from the check's at the median, 40 within 30 ms; capture latency 9.2 ms at the median (timestamp), 9.2 to 84; laptop-2: 42 solve clips, 42 with a motion lag, +3 ms from the check's at the median, 42 within 30 ms; capture latency 40 ms at the median (timestamp), 40 to 40; phone-rear (ThinkPhone by motorola): 42 solve clips, 42 with a motion lag, -2 ms from the check's at the median, 42 within 30 ms; capture latency 24 ms at the median (capture-time), 24 to 24; phone-rear-2 (moto g60): 42 solve clips, 42 with a motion lag, -2 ms from the check's at the median, 42 within 30 ms; capture latency 30 ms at the median (capture-time), 30 to 30; 1 drift of a capture latency (1 of the host's own cameras, 0 of the phones'), 1 restart",
+    });
+    expect(results.get('5.4.8')).toEqual({
+      status: 'ok',
+      facts:
+        "2026-10-02: 42 uploads of eight clips or more with every file; the day's uploads 756 files (9% of 8,000) and 3.6 GB (9% of 40 GB)",
+    });
+
+    // None of it without the events.
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result]));
+    for (const id of ITEMS) {
+      expect(empty.get(id)?.status, id).toBe('none');
+    }
+  });
+
+  it('marks a phone check that only failed, a false drift after a distance set from the MacBook and a pause for the quota; leaves a rig without the webcam and thirty solves', () => {
+    const resultOf = (events: ReportEvent[], id: string) =>
+      evaluate(events, NOW).find((item) => item.id === id)?.result;
+
+    // The webcam never on: no session of the whole rig.
+    const noWebcam = wholeRig().filter(
+      (e) => !(e.kind === 'recording.started' && e.data['camera'] === 'laptop-2'),
+    );
+    expect(resultOf(noWebcam, '5.4.1')).toEqual({
+      status: 'none',
+      facts:
+        "no session with two of the host's cameras recording and two phones paired (0 with two of the host's cameras, 1 with two phones)",
+    });
+    expect(resultOf(noWebcam, '5.4.2')).toEqual({
+      status: 'none',
+      facts: 'no session of the whole rig',
+    });
+    expect(resultOf(noWebcam, '5.4.6')?.facts).toBe('no session of the whole rig');
+
+    // The Moto's check only failed: ❗, with its words.
+    const checkFailed = wholeRig().map((e) =>
+      e.kind === 'sync.check' && e.data['camera'] === 'phone-rear-2'
+        ? {
+            ...e,
+            data: {
+              ...e.data,
+              outcome: 'failed',
+              reason: 'spread',
+              message: 'the lags spread over 83 ms',
+            },
+          }
+        : e,
+    );
+    expect(resultOf(checkFailed, '5.4.2')?.status).toBe('failed');
+    expect(resultOf(checkFailed, '5.4.2')?.facts).toMatch(
+      /^3 cameras with a check passed in one session: .*; only failed: phone-rear-2: the lags spread over 83 ms$/u,
+    );
+
+    // A drift right after the Moto's distance was set from the MacBook, from a build after T5.2a:
+    // the false drift of 2026-10-10 back, ❗; a build before T5.2a (no baseline) proves nothing.
+    const falseDrift = [
+      ...wholeRig(),
+      drift(t0 + 10 * MIN + 20_000, MOTO, { focusDistance: '0.12 → 8.33' }, 'reading'),
+    ];
+    expect(resultOf(falseDrift, '5.4.3')).toEqual({
+      status: 'failed',
+      facts:
+        'ThinkPhone by motorola: the focus, Reset to auto, the zoom and the torch answered; 1 of 1 distance held two minutes without a drift; moto g60: the focus, Reset to auto, the zoom and the torch answered; 0 of 1 distance held two minutes without a drift (a drift after 1: focusDistance 0.12 → 8.33 (reading))',
+    });
+    const before = falseDrift.map((e) =>
+      e.kind === 'controls.drift'
+        ? {
+            ...e,
+            data: Object.fromEntries(Object.entries(e.data).filter(([k]) => k !== 'baseline')),
+          }
+        : e,
+    );
+    expect(resultOf(before, '5.4.3')?.status).toBe('none');
+    expect(resultOf(before, '5.4.4')).toEqual({
+      status: 'none',
+      facts: 'no drift of an automatic mode set back on a phone of a build after T5.2a',
+    });
+
+    // Thirty solves: not yet forty.
+    const thirty = wholeRig().filter((e) => e.attempt === null || e.attempt <= 30);
+    expect(resultOf(thirty, '5.4.5')).toEqual({
+      status: 'none',
+      facts:
+        "30 of the 30 attempts of one session with eight clips or more; 0 phones' clips missing in it; 0 viewings of eight clips or more",
+    });
+    expect(resultOf(thirty, '5.4.7')?.status).toBe('none');
+    expect(resultOf(thirty, '5.4.7')?.facts).toContain('laptop: 30 solve clips');
+
+    // The day's quota reached: ❗.
+    const paused = [
+      ...wholeRig(),
+      at(t0 + 59 * MIN, 'upload.paused', { reason: 'quota', untilMs: NOW + HOUR, left: 2 }, MAC),
+    ];
+    expect(resultOf(paused, '5.4.8')?.status).toBe('failed');
+    expect(resultOf(paused, '5.4.8')?.facts).toMatch(/; 1 pause on office-mbp for the quota$/u);
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });

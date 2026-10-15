@@ -21,7 +21,7 @@ event's time as 13 digits, a dash and 8 random hex digits, so that a device's id
   "schema": 1,
   "tsMs": 1790000012345.5,                       // host ms on the device's clock (§1 of the data model)
   "kind": "attempt.done",                         // the catalogue below
-  "app": {"version": "0.4.0", "commit": "abc1234"}, // the build that wrote it
+  "app": {"version": "0.5.0", "commit": "abc1234"}, // the build that wrote it
   "device": {"label": "office-mbp", "platform": "macOS", "installed": false,
              "installation": "0a1b2c3d"},          // T5.6; and "model" where the browser gives one
   "session": "3f1c…",                             // when it belongs to a session
@@ -92,7 +92,13 @@ recorded without a scope of its own.
   until T4.2a, which a day of more than about 155 attempts with a phone reached mid-session, and the
   evidence stopped there; at 5,000 a day with a phone has room for about 390 attempts, and
   Firestore's writes at that scale stay within a quarter of its free tier (the `error.*` kinds go on
-  past the cap all the same).
+  past the cap all the same). The whole rig of phase 5 (T5.4) costs the host about 20 events per
+  attempt: `attempt.done`, two `clip.saved` per camera of its own (two cameras since T5.5), six per
+  phone paired (two phones since T5.6) and three `upload.state`, with `rtc.clock` twice a minute for
+  the two phones (120 an hour): about 3,600 a day at the owner's 150 attempts over a four-hour evening,
+  but the cap at about 200 attempts in a day of the whole rig, after which that day's evidence stops
+  (the 749 attempts of 2026-10-10 to 10-12 were about 250 a day). The "After T5" round is to be done
+  before that.
 - **What goes wrong stays out.** A kind that is not one, facts that cannot be made into an event, a
   batch the server refuses: said once in the console (`cubetrace: diagnostics: …`) and dropped; the
   diagnostics never record themselves.
@@ -157,7 +163,7 @@ know it (a camera without a frame rate, a cube without a production date).
 
 ## The checklists, read from the events
 
-The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3, the items after T3.7, T4.1, T4.2 and T4.3, the desk rig's after T4, and the items after T5.1, T5.2, T5.2a, T5.3, T5.5 and T5.6), each with the kinds
+The items of `docs/MANUAL-TESTS.md` (rounds 1 to 3, the items after T3.7, T4.1, T4.2 and T4.3, the desk rig's after T4, the items after T5.1, T5.2, T5.2a, T5.3, T5.5 and T5.6, and the whole rig's after T5), each with the kinds
 whose presence, with their facts, is its evidence, and what still needs the owner's eyes. The round
 report evaluates the same table (`functions/scripts/report.mts`, `CHECKLIST`; the test holds the
 two to each other): ✅ the evidence is there, with the facts beside it; ⬜ it is not; ❗ the events
@@ -520,6 +526,33 @@ phones with their default names, which are now their models.
 | 5.6.2 | Every attempt with the two phones paired: four remote clips, two of each phone under its own label, beside the MacBook's two, uploaded with every file | `remote.clip`, `attempt.done`, `upload.state` | – |
 | 5.6.3 | The clip viewer of such an attempt: six buttons, the MacBook's two and each phone's two, each phone named by its label and its model | `clips.viewed` | the buttons' names |
 | 5.6.4 | The round report with the two phones: a section of the Events table per phone, each with its installation and its model, and their items telling them apart | `app.start` | the sections of this report |
+
+#### After T5 — T5.4 — the rig's eyes and hands
+
+The whole rig once, for 0.5.0 (`docs/MANUAL-TESTS.md`, "After T5"): the MacBook with its FaceTime
+camera and a USB webcam, the ThinkPhone and the Moto g60 paired, four cameras and eight clips in
+every attempt. The items read the rig's sessions: a session of the host with two of its own cameras
+recording or more (`recording.started`, T5.5) and two phones or more paired that said who they are
+(`rtc.paired` with `peerInstallation`, T5.6); the controls' item tells two phones of one name apart
+by their installations. A drift of a phone within the two minutes after a change of its focus
+distance from the MacBook, from a build after T5.2a (its `controls.drift` has a `baseline`), is the
+false drift T5.2a removed, and fails item 5.4.3 when no distance held; the torch's own reset of the
+focus, which the watchdog sets back, comes after those two minutes in the round's order. The
+latency's item takes the session with the most cameras of forty solve clips or more, with each
+camera's facts as item 5.3.2 gives them, the drifts (`recording.latency`) and the restarts; the
+uploads' item weighs each day's uploads against the quota of 8,000 files and 40 GB (`functions/.env`,
+T5.5), from the upload events, which leave out the signatures of `session.json`.
+
+| # | Item | Evidence | Still needs eyes |
+|---|---|---|---|
+| 5.4.1 | The rig paired: the MacBook's FaceTime camera and USB webcam both on and recording (laptop, laptop-2), the ThinkPhone and the Moto g60 paired in the same session, each under a label of its own with its model; each device's build | `recording.started`, `rtc.paired` | the four pictures the same size on the MacBook's window (two to a row from 1,552 px, one under the other in a narrower one), each with its caption and its status line |
+| 5.4.2 | Each camera's sync check in that session: the FaceTime camera's due by itself before the first scramble, the webcam's and each phone's from its line under its picture: four passed, each with its lag | `sync.check` | the four lines under the pictures, and the lags against docs/DEVICES.md's |
+| 5.4.3 | From the MacBook, each phone's camera controls (Camera settings → Cameras): its focus set to manual and a distance chosen and left two minutes, Reset to auto, the zoom, the torch: each answered, and no drift from a change made on the MacBook | `remote.controls`, `controls.drift`, `rtc.clock` | each change on the phone's picture, and the distance on both panels with "the camera reports …" beside it |
+| 5.4.4 | A drift provoked on a phone from its console (its focus set to manual behind the app's back) with Keep the camera's modes on: set back within 4 s, and said | `controls.drift` | the words on the phone's Camera page, and the red word with Reset on the MacBook's line under its picture |
+| 5.4.5 | Forty solves or more in one session of the whole rig: every attempt with eight clips (the scramble's and the solve's of each of the four cameras), none missing; the clip viewer's eight buttons | `attempt.done`, `remote.clip.missing`, `clips.viewed` | the solve list's badge ("8 clips"), the clip viewer's eight buttons, the webcam's clips silent |
+| 5.4.6 | Twenty minutes or more of those solves: each phone's health on its line, from the MacBook's minute records of it: its frame rate, its battery, the pressure word where its Chrome has the Compute Pressure API, the frame rate dropped if it did | `rtc.clock` | each phone's temperature by hand after twenty minutes, and, if a pressure or a hot word came, what the heat routine of README's desk rig did to it |
+| 5.4.7 | The forty solves' latency, camera by camera: each solve clip with its capture latency and its motion lag against its check's lag, the words on the lines (latency +75 ms, motion lag … (check …)) where a drift came, and the restarts | `clip.saved`, `remote.clip`, `recording.latency`, `recording.restarted` | the lines under the pictures after each solve: the attempts where a word came, and where it went |
+| 5.4.8 | Upload sessions on: every file of the rig's attempts uploaded (eighteen with gyro.json, nineteen with session.json), each day's uploads within the 8,000 files and 40 GB of the raised quota | `upload.state`, `upload.paused` | the day's count in users/{uid}.quota (the coordinator) |
 
 ## The QA view
 

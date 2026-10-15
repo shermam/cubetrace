@@ -222,7 +222,8 @@ export class FirestoreSignaling {
 
   /**
    * The phone's side of a new peer connection: its first `sendDescription` creates the peer document
-   * with the offer and the token's hash, a later one (an ICE restart) replaces the offer.
+   * with the offer and the token's hash, a later one (an ICE restart) replaces the offer; the same
+   * offer sent again writes nothing.
    */
   call(options: { tokenHash: string; peerId?: string }): Signaling {
     return this.#channel('caller', options.peerId ?? crypto.randomUUID(), options.tokenHash);
@@ -249,6 +250,8 @@ class PeerSignaling implements Signaling {
   readonly #tokenHash: string;
   readonly #now: () => number;
   #created = false;
+  /** The SDP of the offer this caller wrote last: the same offer again writes nothing (T5.4). */
+  #offerSdp: string | null = null;
   /** `close` was called. */
   #closed = false;
   /** The other side ended it (left, or deleted the documents): the watchers are off. */
@@ -290,6 +293,15 @@ class PeerSignaling implements Signaling {
       if (description.type !== 'offer') {
         throw new Error('The caller sends offers.');
       }
+      if (description.sdp === this.#offerSdp) {
+        // The offer written already: written again, it would put the document back to `offered`
+        // without the host's answer, and the host, which tells a new offer by its SDP, would never
+        // answer it again. A new offer (an ICE restart's) has an SDP of its own.
+        return;
+      }
+      // Taken before the write, so that the same offer sent while it is under way is not written
+      // twice either; a write that fails ends the transport, and this signaling with it.
+      this.#offerSdp = description.sdp;
       if (!this.#created) {
         this.#created = true;
         await this.#backend.createPeer(
