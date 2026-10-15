@@ -1,5 +1,7 @@
+import { signal } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { LumaSampler, type Canvas2D } from '@cubetrace/capture';
+import type { AttemptRecord, VideoClip } from '@cubetrace/core';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
 import {
@@ -289,6 +291,66 @@ describe('CameraPreview', () => {
     expect(text('camera-status')).toMatch(/ · focus went manual$/);
   });
 
+  it("says in amber the capture latency drifting from the camera's check, and the last solve's motion lag far from the check's (T5.3)", async () => {
+    const camera = await render();
+    // The last attempt's record, as the session will give it.
+    const last = signal<AttemptRecord | null>(null);
+    Object.defineProperty(s.service, 'lastResult', { value: last });
+    await camera.start();
+    await ready(s);
+    await update();
+    starter.last.emitStats(statsOf(5));
+    s.service.putCameraClock('laptop', {
+      offsetMs: 58.4,
+      rttMs: 0,
+      driftPpm: 0,
+      clapperboardResidualMs: 30,
+      clapperboardSamples: 8,
+      motionPeakAtCheckMs: 72.3,
+      captureLatencyAtCheckMs: 3.2,
+    });
+    await update();
+    const second = (p50: number): void => {
+      s.perf.advance(1000);
+      starter.last.emitStats(
+        statsOf(5, {
+          latency: {
+            capture: { p50, p95: p50 + 7, basis: 'timestamp' },
+            encode: null,
+            floorMs: null,
+            queueMax: 0,
+            pending: 0,
+            waiting: 0,
+            frameIntervalMs: 33.3,
+          },
+        }),
+      );
+    };
+    for (let k = 0; k < 12; k++) {
+      second(4.1);
+    }
+    await update();
+    expect(element('camera-status-latency')).toBeNull();
+    for (let k = 0; k < 12; k++) {
+      second(79.2);
+    }
+    await update();
+    expect(text('camera-status-latency')).toBe('latency +76 ms');
+    expect(element('camera-status-latency')?.classList).toContain('warn');
+
+    // The last solve's clip of this camera lagged 133 ms by its motion, its check 58.
+    const clip = (motionLagMs: number) =>
+      ({ camera: 'laptop', segment: 'solve', syncResidualMs: 58.4, motionLagMs }) as VideoClip;
+    last.set({ video: [clip(133.4)] } as AttemptRecord);
+    await update();
+    expect(text('camera-status-motion-lag')).toBe('motion lag 133 ms (check 58)');
+    expect(text('camera-status')).toMatch(/ · latency \+76 ms · motion lag 133 ms \(check 58\)$/);
+    // Within 30 ms of the check: nothing said.
+    last.set({ video: [clip(80)] } as AttemptRecord);
+    await update();
+    expect(element('camera-status-motion-lag')).toBeNull();
+  });
+
   it("shows the phones paired over its picture once one has a camera, and a phone's picture with the camera off (T4.3)", async () => {
     const camera = await render();
     await camera.start();
@@ -345,6 +407,7 @@ describe('CameraPreview', () => {
           pressure: 'fair',
           pressureSource: 'cpu',
           pendingClips: 0,
+          latencyMs: 3.5,
         },
         reportMs: 0,
         converged: true,

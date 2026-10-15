@@ -8,7 +8,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { isWideFraming } from '@cubetrace/capture';
+import { checkMotionPeak, isWideFraming } from '@cubetrace/capture';
 import type { CameraClock } from '@cubetrace/core';
 
 import { APP_BUILD } from '../../environments/version';
@@ -459,6 +459,16 @@ export class SyncService {
   ): void {
     let saved = false;
     const clock = camera === null ? null : this.registry.clockRecord(camera.id);
+    // What anchors the lag measured later from the solves themselves (T5.3): where the check's own
+    // motion peaked around its turns, by the solves' estimator, and the capture latency now, the
+    // baseline of its drift (a phone's from its last reports).
+    const data = run.data();
+    const peak = checkMotionPeak(
+      data.samples,
+      data.moves.map((move) => move.hostMs),
+    );
+    const latency =
+      camera === null ? this.recording.captureLatencyMs() : this.registry.latencyOf(camera.id);
     if (outcome.ok) {
       const kept = this.session.session()?.clock.cameras[label];
       const record = camera === null ? null : (kept?.remote ?? clock);
@@ -469,6 +479,8 @@ export class SyncService {
         clapperboardResidualMs: outcome.clapperboardResidualMs,
         clapperboardSamples: outcome.clapperboardSamples,
         samples: outcome.samples,
+        motionPeakAtCheckMs: peak?.peakMs ?? null,
+        captureLatencyAtCheckMs: latency,
         ...(record === null ? {} : { remote: record }),
       });
     }
@@ -512,6 +524,11 @@ export class SyncService {
         wide: report.framing.wide,
         costMs: result.cost?.medianMs ?? null,
         saved,
+        // T5.3: the check's own motion peak (the anchor of the solves' motion lag) and its width,
+        // and the capture latency then (the baseline of its drift).
+        motionPeakMs: peak?.peakMs ?? null,
+        motionSpreadMs: peak?.spreadMs ?? null,
+        captureLatencyMs: latency,
         ...remote,
       });
     }

@@ -274,6 +274,52 @@ describe('parseAttempt and parseSession', () => {
     );
   });
 
+  it("keep a clip's latencies and motion lag and a check's motion peak as written, and leave them out of the records written before T5.3", () => {
+    const attempt = attemptWithVideo();
+    const t53 = [
+      'captureLatencyMs',
+      'encodeLatencyMs',
+      'motionPeakMs',
+      'motionSpreadMs',
+      'motionLagMs',
+    ] as const;
+    const now = parseAttempt(structuredClone(attempt));
+    expect(now.video[1].captureLatencyMs).toEqual({ p50: 3.9, p95: 10.5, basis: 'capture-time' });
+    expect(now.video[0].motionLagMs).toBeNull();
+    // After truncatedStart, in the order of the schema, as the next save writes them.
+    expect(Object.keys(now.video[1]).slice(-6)).toEqual(['truncatedStart', ...t53]);
+    let older: unknown = attempt;
+    for (const index of [0, 1]) {
+      for (const key of t53) {
+        older = changed(older, ['video', index, key], undefined);
+      }
+    }
+    expect(VALIDATE.attempt[2](older)).toBe(true);
+    const read = parseAttempt(older);
+    // Absent, not null: a record read back is the text it was (PLAN.md follow-up (o)).
+    expect(read.video.every((clip) => t53.every((key) => !(key in clip)))).toBe(true);
+    expect(() =>
+      parseAttempt(changed(attempt, ['video', 1, 'captureLatencyMs', 'basis'], 'arrival')),
+    ).toThrow('video[1].captureLatencyMs.basis must be one of');
+    expect(() =>
+      parseAttempt(changed(attempt, ['video', 1, 'encodeLatencyMs', 'p95'], -1)),
+    ).toThrow('video[1].encodeLatencyMs.p95');
+
+    const session = sessionWithCamera();
+    expect(parseSession(structuredClone(session)).clock.cameras['laptop']).toMatchObject({
+      motionPeakAtCheckMs: 47.5,
+      captureLatencyAtCheckMs: 3.6,
+    });
+    const before = changed(
+      changed(session, ['clock', 'cameras', 'laptop', 'motionPeakAtCheckMs'], undefined),
+      ['clock', 'cameras', 'laptop', 'captureLatencyAtCheckMs'],
+      undefined,
+    );
+    expect(VALIDATE.session[2](before)).toBe(true);
+    const clock = parseSession(before).clock.cameras['laptop'];
+    expect('motionPeakAtCheckMs' in clock || 'captureLatencyAtCheckMs' in clock).toBe(false);
+  });
+
   it('read the records written before T3.7 as ones without a build, a gyro file, resyncs, battery reports and a production date', () => {
     const attempt = attemptWithVideo();
     const before = {

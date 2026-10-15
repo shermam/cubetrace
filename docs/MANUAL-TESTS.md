@@ -1144,3 +1144,45 @@ reads the camera every 2 s and calls a difference that holds for two readings a 
   back and Camera settings says so; with "Keep the camera's modes" off (Camera settings has it too),
   its line under the preview says "focus went manual" in red, and Focus → Auto on its panel puts it
   back.
+
+## After T5.3 — the capture latency and the motion lag
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T5.3, the rig as in
+"After T4" (the MacBook as the host, its FaceTime camera on, the GAN 12 ui, signed in; the Moto g60
+or the ThinkPhone paired as its camera on its tripod, its Camera page naming the same commit), in
+the place and the light of the sessions of 2026-10-09, with "Measure the motion during solves" and
+"Restart the recording when its latency drifts" on (Settings → Camera on the MacBook, and the first
+on the phone too: both on by default). The events say most of it (`docs/DIAGNOSTICS.md`, "After
+T5.3": each check's `sync.check`, each clip's `clip.saved` or `remote.clip`, a drift's
+`recording.latency`, a restart's `recording.restarted`); write down what they cannot show, next to
+the item, with the device and what happened.
+
+The round is issue #67's: on 2026-10-09 the MacBook's frames came about 75 ms later from the 38th
+attempt of both sessions, without a word from the app. Each solve now measures it twice: how late
+the frames reach the recording after the camera's own time for them (the capture latency, against
+its value at the camera's sync check: `latency +75 ms` on the line under the picture), and where the
+picture's motion lies around the solve's own turns (the clip's motion lag, against the check's lag:
+`motion lag 133 ms (check 58)`). Both words are amber and come only when something moved: a line
+without them is the good outcome.
+
+- [ ] The checks: the MacBook's own sync check, due by itself before the first scramble, and the
+  phone's from its line under its picture, as in "After T4": both pass. Nothing new on the lines.
+- [ ] Forty solves or more on the rig in one session, as on 2026-10-09 (more is better; a pause of a
+  few minutes is fine, New session is not): after each solve, a glance at the line under each
+  picture. Write the attempt numbers where a word came and where it went; nothing otherwise.
+- [ ] If `latency +75 ms` (any number) comes on the MacBook's line: write the attempt and the time.
+  The next solve should say `motion lag … (check …)` beside it, its two numbers about as far apart
+  as the latency's. When the drift holds through a whole attempt, the recording starts again a
+  second or so after that solve's clip is saved: `restarted` beside the word, and the session's
+  notes say "recording restarted: …"; if the restart cured it, the latency word goes within some
+  seconds, and `restarted` with it. Write whether it did, and whether the following solves'
+  `motion lag` went too. To see a drift go on without the restart, Settings → Camera → "Restart the
+  recording when its latency drifts" off for a few attempts (the word stays while the drift lasts),
+  then on again.
+- [ ] If `motion lag … (check …)` comes on the MacBook's line with no `latency …` beside it, for two
+  solves or more: the lag grew before the frames were timed (in the camera, or Chrome's capture
+  before it hands the frames over), which the restart does not watch for. Camera settings → Turn
+  off, then Turn on, a sync check, and write whether the next solves' word went.
+- [ ] The phone's line under its picture says the same of the phone's camera: `latency …` from the
+  phone's own reports, `motion lag …` from its solve clips. Nothing restarts a phone's recording
+  for it; write the attempts where a word came, as for the MacBook.

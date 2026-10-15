@@ -21,6 +21,7 @@ const REPORT: RemoteReport = {
   pressure: null,
   pressureSource: null,
   pendingClips: 0,
+  latencyMs: 3.1,
 };
 
 function line(
@@ -230,5 +231,36 @@ describe('remoteStatusLine', () => {
     );
     // Nothing drifted: no such part.
     expect(line({}, { drift: [] }).some((part) => part.key.startsWith('drift'))).toBe(false);
+  });
+
+  it("says in amber the phone's capture latency drifting from its check, and its last solve's motion lag far from the check's (T5.3)", () => {
+    const parts = line(
+      {},
+      {
+        latencyDeltaMs: 75,
+        motionLag: { lagMs: 133, checkMs: 58 },
+        drift: [{ name: 'focusMode', expected: 'continuous', actual: 'manual' }],
+      },
+    );
+    expect(statusText(parts)).toBe(
+      '29.9 fps · sharpness 41 · recording · battery 83%, charging · latency +75 ms · motion lag 133 ms (check 58) · focus went manual on the phone',
+    );
+    expect(partOf(parts, 'latency')).toEqual(['latency +75 ms', 'warn']);
+    expect(partOf(parts, 'motion-lag')).toEqual(['motion lag 133 ms (check 58)', 'warn']);
+    expect(shortParts(parts).map((part) => part.short)).toEqual([
+      'latency +75 ms',
+      'lag 133 ms',
+      'focus manual',
+    ]);
+    expect(parts.find((part) => part.key === 'motion-lag')?.title).toContain(
+      'more than 30 ms from its sync check',
+    );
+    // A drift below the check's; none without either.
+    expect(partOf(line({}, { latencyDeltaMs: -41 }), 'latency')).toEqual([
+      'latency -41 ms',
+      'warn',
+    ]);
+    const plain = line({}, { latencyDeltaMs: null, motionLag: null });
+    expect(plain.some((part) => part.key === 'latency' || part.key === 'motion-lag')).toBe(false);
   });
 });

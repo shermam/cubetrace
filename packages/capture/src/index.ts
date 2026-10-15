@@ -13,16 +13,27 @@ export type {
   AudioState,
   CaptureConfig,
   CaptureError,
+  CaptureLatencyStats,
   CaptureStats,
+  ClipLatency,
+  ClipMotion,
   ClipReport,
   DeleteClipParams,
   MotionMeterInfo,
+  MotionMeterState,
   MotionSample,
   ResolvedCaptureConfig,
   SaveClipParams,
   SavedClip,
 } from './protocol';
-export { AUDIO_SILENCE_MS, NO_AUDIO_DATA, resolveCaptureConfig } from './protocol';
+export {
+  AUDIO_SILENCE_MS,
+  MOTION_COST_LIMIT_MS,
+  MOTION_METER_OFF,
+  NO_AUDIO_DATA,
+  WAITING_READ_MS,
+  resolveCaptureConfig,
+} from './protocol';
 export type { CaptureHandle, CaptureSupport } from './pipeline';
 export {
   AUDIO_PROCESSOR_BUFFER,
@@ -100,3 +111,36 @@ export {
 // T2.10 — the video quality: the encoder's bitrate, which the app also shows for each quality.
 export type { VideoQuality } from './bitrate';
 export { BITRATE_AT_1080P30, videoBitrate } from './bitrate';
+
+// T5.3 — the capture latency (issue #67): the meter of each frame's way from its capture to the
+// capture worker and to its encoded chunk, which the worker reports every second and per clip, and
+// the drift of it from the camera's sync check; and the camera's lag from a solve's own moves, the
+// motion of its frames averaged around them, anchored to the sync check's.
+export type { DriftReading, FrameTiming, LatencyDriftEvent, LatencyReading } from './latency';
+export {
+  CAPTURE_TIME_LIMIT_MS,
+  DRIFT_EVENT_INTERVAL_MS,
+  DRIFT_HOLD_MS,
+  DRIFT_THRESHOLD_MS,
+  DRIFT_WINDOW_MS,
+  LatencyDrift,
+  LatencyMeter,
+  captureTimeOf,
+  frameIntervalOf,
+  percentiles,
+} from './latency';
+export type { MotionPeak, MotionPoint, MotionProfile, TimedMove } from './motion-lag';
+export {
+  FIT_TOLERANCE_MS,
+  MIN_CHECK_MOVES,
+  MIN_PROFILE_MOVES,
+  PROFILE_BIN_MS,
+  PROFILE_FROM_MS,
+  PROFILE_PEAK_SPREADS,
+  PROFILE_TO_MS,
+  checkMotionPeak,
+  clipMotionPoints,
+  motionPeak,
+  motionProfile,
+  moveTimes,
+} from './motion-lag';

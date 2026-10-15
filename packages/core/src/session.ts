@@ -187,6 +187,19 @@ export interface CameraClock {
   /** The pairs of the turns kept, when the record keeps them. */
   samples?: ClapperboardSample[];
   /**
+   * Where the check's motion peaked around its turns (docs/PLAN.md T5.3), in ms after them: the
+   * estimator of the solves' clips (`motionPeakMs`) run on the check's own frames and turns, which
+   * anchors their `motionLagMs`; null when it found no clear peak. Absent from the records written
+   * before T5.3, and from a remote camera's entry before its check.
+   */
+  motionPeakAtCheckMs?: number | null;
+  /**
+   * The camera's capture latency when the check ended (T5.3): the median of the capture pipeline's
+   * meter over the seconds before (a phone's, from its last report), the baseline the meter's drift
+   * is measured from; null when unknown. Absent from the records written before T5.3.
+   */
+  captureLatencyAtCheckMs?: number | null;
+  /**
    * The clock sync of a remote camera (T4.0, `RemoteClockFit.params`): the offset and the drift of
    * the phone's clock against the host's, from the data channel's pings, as they were when the record
    * was written, and since T4.2 whether the fit had converged then; `rttMs` and `driftPpm` above

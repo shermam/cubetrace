@@ -153,9 +153,10 @@ export interface SyntheticControls {
 /**
  * On every load of `page` from now on, the camera the page opens is a synthetic one (T4.3): a canvas
  * of {@link SYNTHETIC_CAMERA}'s size captured at 30 fps (`HTMLCanvasElement.captureStream`), a grey
- * picture with a square that is light and turns dark, or back, at the times the suite gives
- * ({@link flipAt}); nothing else in it ever changes, so that a sync check sees motion at those times
- * only. Any request with video gets a new track of it (the microphone, when asked for too, is the
+ * picture with a square that turns from light to dark to mid grey and round again, a step at each
+ * of the times the suite gives ({@link flipAt}; three greys, since T5.3, so that two flips within one
+ * frame, as a solve's turns 60 ms apart make, still change the frame); nothing else in it ever
+ * changes, so that a sync check sees motion at those times only. Any request with video gets a new track of it (the microphone, when asked for too, is the
  * browser's own). Chrome's fake camera cannot serve there: its test pattern jumps at its own pace.
  * Since T5.2 each track has a focus, as a phone's camera has (`getCapabilities()` lists its modes and
  * its distance's range, `getSettings()` says them, `applyConstraints` sets the advanced sets it can
@@ -232,11 +233,12 @@ export async function syntheticCamera(page: Page): Promise<void> {
         if (context === null) {
           throw new Error('the synthetic camera: no 2D context');
         }
-        let dark = false;
+        const greys = ['#e0e0e0', '#202020', '#a0a0a0'];
+        let grey = 0;
         const draw = (): void => {
           context.fillStyle = '#808080';
           context.fillRect(0, 0, size.width, size.height);
-          context.fillStyle = dark ? '#202020' : '#e0e0e0';
+          context.fillStyle = greys[grey];
           const { x, y, w, h } = size.square;
           context.fillRect(x, y, w, h);
         };
@@ -250,7 +252,7 @@ export async function syntheticCamera(page: Page): Promise<void> {
             for (const at of times) {
               setTimeout(
                 () => {
-                  dark = !dark;
+                  grey = (grey + 1) % greys.length;
                   draw();
                   flips.push(now());
                 },

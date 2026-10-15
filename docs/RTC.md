@@ -10,8 +10,9 @@ side does when something fails. The pages that use it came with T4.1 (§8 below:
 the phone's Camera page run it), the cuts and the clips' transfer with T4.2 (§9), the sync check of
 the phone's camera and the live preview with T4.3 (§10), the phone's picture at the host's
 picture's size with its status line with T5.1 (§10), and the phone's camera controls set from the
-host, with the watchdog of the camera's modes, with T5.2 (§11). `docs/ARCHITECTURE.md` ("Remote
-cameras") places it in the app.
+host, with the watchdog of the camera's modes, with T5.2 (§11); the phone's capture latency and its
+solve clips' motion, for the host to see the phone's lag drift, with T5.3 (§9, §10).
+`docs/ARCHITECTURE.md` ("Remote cameras") places it in the app.
 
 **Stream for control, record locally for data.** One `RTCPeerConnection` between the two devices,
 made with Google's public STUN server (`stun:stun.l.google.com:19302`) and no TURN relay: on one Wi-Fi
@@ -46,10 +47,10 @@ file name without a path; the remote controls' values as `@cubetrace/capture` de
 | `ping` | host | `t1`, the host clock | every 500 ms until the clock sync converges, for a minute at most, then every 2 s (`PING_INTERVAL_MS`, §4) |
 | `pong` | phone | `t1` back, `t2` (when the ping came) and `t3` (when the answer goes), on the phone's clock | at once, for each ping |
 | `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
-| `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pressure` (`nominal`, `fair`, `serious`, `critical`: the Compute Pressure API's state, null where the browser has none) and `pressureSource` (`thermals`, `cpu`, null) since T5.1 (0.5.0; additive within version 1), `pendingClips`; each nullable field null when unknown | every 2 s, and at each change the host should see at once |
+| `state` | phone | `remoteMs`, `recording`, `framing` (the rectangle or null), `frame: {width, height}`, `fps`, `sharpness`, `battery: {level, charging}`, `thermal` (`ok`, `throttled`, null), `pressure` (`nominal`, `fair`, `serious`, `critical`: the Compute Pressure API's state, null where the browser has none) and `pressureSource` (`thermals`, `cpu`, null) since T5.1 (0.5.0; additive within version 1), `pendingClips`, `latencyMs` (the phone's capture latency: the median of its meter's medians of each second since its last `state`, ms; null while it does not record) since T5.3 (0.5.0; additive, §9); each nullable field null when unknown | every 2 s, and at each change the host should see at once |
 | `thumbnail` | phone | `remoteMs`, `width`, `height`, `jpeg` (a JPEG of at most 320 px on its longer side) | every 2 s (binary) |
 | `cut` | host | `attempt`, `scrambleShown` (the attempt's, on the host clock: an attempt begun again with the same index has another), `segment` (`scramble`, `solve`), `fromRemoteMs`, `toRemoteMs` (the window in the phone's clock, through the host's clock estimate and widened by its margin on each side, §9), `reason` (the timer's milestone: `armed`, `ended`), `camera` (the label the session gives the phone's camera: its files' first name) | when the host cuts its own camera; sent again as it was over a new connection while unanswered |
-| `cut-done` | phone | `attempt`, `scrambleShown`, `segment`, `files: [{name, bytes, kind}]` (the frames file first), `clip` (what the capture said of it: `codec`, `audio`, `width`, `height`, `fpsNominal`, `frames`, `crop`, `truncatedStart`, `lateMs`, `bufferSeconds`, `audioMissing`) | the clip is muxed and staged; offered again over each connection until the host's `clip-ack` |
+| `cut-done` | phone | `attempt`, `scrambleShown`, `segment`, `files: [{name, bytes, kind}]` (the frames file first), `clip` (what the capture said of it: `codec`, `audio`, `width`, `height`, `fpsNominal`, `frames`, `crop`, `truncatedStart`, `lateMs`, `bufferSeconds`, `audioMissing`; since T5.3, additive: `captureLatencyMs` (`{p50, p95, basis}`) and `encodeLatencyMs` (`{p50, p95}`) of its frames, null when none was timed, and `motion` (a solve clip's: `{atMs, changed}`, each frame's time after the clip's first frame by the frames' own timestamps and its changed area inside the framing rectangle, as many of one as of the other, at most 3,600 frames, `MAX_CLIP_MOTION_FRAMES`), null without the meter, §9) | the clip is muxed and staged; offered again over each connection until the host's `clip-ack` |
 | `cut-failed` | phone | `attempt`, `scrambleShown`, `segment`, `reason` | the capture could not cut it: the phone not recording, an encoder error, no room |
 | `clip-ack` | host | `attempt`, `scrambleShown`, `segment`, `stored` (the clip is in the attempt's folder and record), `reason` (why not) | the clip is stored, or will not be taken (its attempt gone, its frames file unreadable): the phone deletes its copy either way |
 | `file-begin` | sender | `id` (this connection's number for the file), `name`, `bytes`, `kind` (`mp4`, `frames`), `attempt`, `segment` (null for a file of neither) | a file starts, or starts again after a reconnection |
@@ -85,7 +86,11 @@ no remote controls", §11); a host of 0.4.0 drops the phone's `controls`. Their 
 `@cubetrace/capture`'s vocabulary of a camera's controls (`CameraControls`, `ControlValues`,
 `ControlDrift`): a value is one of its control (`isControlValue`: a mode of the four, a finite
 number, the torch's boolean), and a key that names no control is ignored, as a later build may add
-one.
+one. `state`'s `latencyMs` and the `clip` fields of `cut-done` came with T5.3 (0.5.0), additive the
+same way: a host reads a phone of a build before T5.3 with them null (no latency known, no motion:
+its clips get no motion lag), and a host before T5.3 ignores them. A clip's motion is bounded so
+that a `cut-done` stays within one message of the data channel (3,600 frames are about 60 kB of
+JSON, two minutes at 30 fps); a longer solve's clip goes without it.
 
 ## 2. The transport (`transport.ts`, `webrtc.ts`)
 
@@ -524,9 +529,27 @@ clips from the phone into the host's attempt folder (`docs/PLAN.md` T4.2 has the
    other sessions are deleted, and when the Camera page opens, those staged more than a day ago
    (`STAGED_MAX_AGE_MS`): a phone keeps no clip that no host will ask for. The page says how many
    clips wait, and `state.pendingClips` tells the host.
-7. **Diagnostics** (`docs/DIAGNOSTICS.md`): `remote.cut` (sent, done, failed), `remote.clip` (the
-   bytes, the transfer's time and throughput, the bytes resumed), `remote.clip.late`,
-   `remote.clip.missing`; the QA view counts the clips by camera label.
+7. **The capture latency and the solve's motion** (T5.3, issue #67, `docs/DATA-MODEL.md` §7). The
+   phone's capture times each frame on its way through the capture worker as the host's does: its
+   `state` says its capture latency every 2 s (`latencyMs`), and each `cut-done` its clip's
+   `captureLatencyMs` and `encodeLatencyMs`, which the host writes into the clip's entry of the
+   record. The phone's meter of the solves' motion ("Measure the motion during solves", its own
+   Settings → Camera, on by default) goes on with the host's cut of an attempt's scramble, which
+   comes once the attempt is armed, so before its solve (a cut sent again for an attempt long over,
+   its window's end more than 2 s ago, does not), and off once the attempt's solve clip is staged, or
+   after 10 minutes (`MOTION_METER_MAX_MS`); the solve clip's `cut-done` carries the motion of its
+   frames (`motion`). Once the clip's files came, the host places those times on its own clock by the
+   frames file it converted, and finds the clip's `motionPeakMs`, `motionSpreadMs` and
+   `motionLagMs` with the estimator of its own camera's clips, anchored to the phone camera's sync
+   check (`motionPeakAtCheckMs`, which that check measured from the phone's frames). The host watches
+   the phone's `latencyMs` drift from its value at that check (`captureLatencyAtCheckMs`) by the rule
+   of its own camera's (`recording.latency` with `remote: true`), and the line under the phone's
+   picture says both (§10). Nothing restarts a phone's recording for a drift: the host's restart is
+   for its own camera (`docs/DATA-MODEL.md` §7).
+8. **Diagnostics** (`docs/DIAGNOSTICS.md`): `remote.cut` (sent, done, failed), `remote.clip` (the
+   bytes, the transfer's time and throughput, the bytes resumed; since T5.3 the clip's latencies,
+   cadence and motion lag), `remote.clip.late`, `remote.clip.missing`, `recording.latency` with
+   `remote: true`; the QA view counts the clips by camera label.
 
 ## 10. The sync check of a remote camera, the live preview and the phone's status line (T4.3, T5.1)
 
@@ -626,7 +649,10 @@ phone under it (`docs/PLAN.md` T4.3 and T5.1 have the contracts):
    (red: `not recording`); the battery (`83%`, `charging`; amber under 20% and not charging, red
    under 10%); the health: `hot: the frame rate dropped` in amber (the phone's thermal hint) and the
    Compute Pressure state when the phone reports one (`pressure fair` in amber, `serious` and
-   `critical` in red); the connection when it is not plainly connected (`reconnecting…` in amber,
+   `critical` in red); since T5.3, in amber, the phone's capture latency's drift from its sync
+   check's (`latency +40 ms`, while the host's watch of its `latencyMs` says it drifts, §9) and its
+   last solve clip's motion lag when it sits more than 30 ms from the check's (`motion lag 133 ms
+   (check 58)`); the connection when it is not plainly connected (`reconnecting…` in amber,
    `clock syncing…` until the clock sync converges); and `no report for N s` in red once the `state`
    messages stop for 10 s while the phone is connected (they come every 2 s), the lines' clock
    ticking every second. **The pressure** is the phone's `PressureObserver`

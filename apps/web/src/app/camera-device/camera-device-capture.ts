@@ -19,8 +19,12 @@ import { openMicrophone } from '../camera/microphone';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { STORAGE_STOP_PERCENT, StorageService } from '../device/storage-service';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
+import { e2eCapture } from '../rtc/e2e-remote';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
+
+/** The most per-second medians of the capture latency kept for the next `state` (T5.3). */
+const MAX_LATENCIES = 30;
 
 /** What the pipeline is to run on: the camera's stream, with or without the microphone, at a quality. */
 interface Target {
@@ -79,6 +83,10 @@ export class CameraDeviceCapture {
   private generation = 0;
   private queue: Promise<void> = Promise.resolve();
   private announced: CaptureHandle | null = null;
+  /** The capture latency's medians of the counters since the last `takeLatency` (T5.3), bounded. */
+  private latencies: number[] = [];
+  /** The solves' motion meter as the clips asked for it (T5.3): on inside its rectangle, or off. */
+  private meter: { readonly rect: FramingRect | null } | null = null;
 
   constructor() {
     this.support = this.starter.support();
@@ -121,6 +129,35 @@ export class CameraDeviceCapture {
       return Promise.reject(new Error('the phone is not recording'));
     }
     return handle.saveClip(params);
+  }
+
+  /**
+   * The capture latency since the last call, for the `state` the phone sends every 2 s (T5.3,
+   * `latencyMs`): the median of the pipeline's per-second medians since then, ms to 0.1; null
+   * without one (the pipeline not running, its first frames not out yet).
+   */
+  takeLatency(): number | null {
+    const values = this.latencies.sort((a, b) => a - b);
+    this.latencies = [];
+    if (values.length === 0) {
+      return null;
+    }
+    const middle = Math.floor(values.length / 2);
+    const median =
+      values.length % 2 === 1 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+    return Math.round(median * 10) / 10;
+  }
+
+  /**
+   * Turns the solves' motion meter of the capture on inside `rect` (frame pixels; null for the whole
+   * frame), or off (T5.3, `CaptureHandle.meterMotion`): `CameraDeviceClips` turns it on with the
+   * host's cut of an attempt's scramble and off once the attempt's solve clip is saved, so that the
+   * solve clip carries the motion of its frames to the host. A pipeline started again meanwhile (the
+   * quality changed) gets it too.
+   */
+  meterMotion(on: boolean, rect: FramingRect | null): void {
+    this.meter = on ? { rect } : null;
+    this.handle?.meterMotion(on, rect);
   }
 
   /**
@@ -239,17 +276,29 @@ export class CameraDeviceCapture {
     const audioTrack = microphone?.stream?.getAudioTracks().at(0) ?? null;
     let handle: CaptureHandle;
     try {
-      handle = this.starter.start(video, audioTrack, { audio: audioTrack !== null, quality });
+      handle = this.starter.start(video, audioTrack, {
+        audio: audioTrack !== null,
+        quality,
+        ...e2eCapture(this.globals),
+      });
     } catch (error: unknown) {
       this.fail(generation, `Recording could not start: ${errorMessage(error)}`);
       return;
     }
     this.handle = handle;
+    if (this.meter !== null) {
+      handle.meterMotion(true, this.meter.rect);
+    }
     handle.onStats((stats) => {
       if (this.handle !== handle) {
         return;
       }
       this.statsSignal.set(stats);
+      const latency = stats.latency?.capture?.p50;
+      if (latency !== undefined) {
+        // Half a minute of seconds at most: the state takes them every 2 s while connected.
+        this.latencies = [...this.latencies.slice(-(MAX_LATENCIES - 1)), latency];
+      }
       if (this.statusSignal() === 'starting' && stats.bufferSeconds > 0) {
         this.statusSignal.set('recording');
       }

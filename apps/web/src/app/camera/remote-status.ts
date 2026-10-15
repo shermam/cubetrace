@@ -2,12 +2,20 @@
 // its `state` messages, the twin of the host's own line under its preview (`CameraPreview`), from one
 // pure function, so that the Timer page's line under a phone's picture, a tile's caption (in short)
 // and the Cameras list's report never disagree. Since T5.2 it says, in red, a mode the phone's camera
-// changed by itself (its `controls`' drift).
+// changed by itself (its `controls`' drift); since T5.3, in amber, its capture latency's drift from
+// its sync check and its last solve clip's motion lag when far from the check's (issue #67).
 import type { ControlDrift } from '@cubetrace/capture';
 import type { CameraState } from '@cubetrace/rtc';
 
 import { fpsText, sharpnessText } from './camera-format';
 import { CONTROL_WORD, controlValueText, driftWords } from './controls-source';
+import {
+  MOTION_LAG_LIMIT_MS,
+  latencyWords,
+  motionLagWords,
+  signedMs,
+  type MotionLagOff,
+} from './latency-words';
 import type { RemoteCameraPhase } from './remote-camera-registry';
 
 /** What the line reads of a phone's last `state` (docs/RTC.md §1). */
@@ -22,6 +30,7 @@ export type RemoteReport = Pick<
   | 'pressure'
   | 'pressureSource'
   | 'pendingClips'
+  | 'latencyMs'
 >;
 
 /**
@@ -42,6 +51,8 @@ export type StatusKey =
   | 'battery'
   | 'thermal'
   | 'pressure'
+  | 'latency'
+  | 'motion-lag'
   | `drift-${ControlDrift['name']}`
   | 'clips'
   | 'connection'
@@ -84,6 +95,16 @@ export interface RemoteStatusInput {
    * its watchdog): a part each, in red; none when absent.
    */
   readonly drift?: readonly ControlDrift[];
+  /**
+   * While the phone's capture latency drifts from its sync check's (T5.3, the host's watch of its
+   * reports' `latencyMs`): by how much, ms; null or absent otherwise.
+   */
+  readonly latencyDeltaMs?: number | null;
+  /**
+   * The phone's last solve clip's motion lag and its check's, when they are far apart (T5.3,
+   * `motionLagOff`); null or absent otherwise.
+   */
+  readonly motionLag?: MotionLagOff | null;
 }
 
 /**
@@ -129,6 +150,36 @@ export function remoteStatusLine(
     report === null
       ? [part('report', '', 'no report yet', 'plain', null, 'The phone has sent no report yet.')]
       : reportParts(report, input.sharpnessThreshold, form);
+  const latency = input.latencyDeltaMs ?? null;
+  if (latency !== null) {
+    parts.splice(
+      clipsIndex(parts),
+      0,
+      part(
+        'latency',
+        '',
+        latencyWords(latency),
+        'warn',
+        `latency ${signedMs(latency)}`,
+        `The phone's frames reach its capture ${signedMs(latency)} later than when its sync check ran, for 5 s and more: its clips' labels would be late by as much. A sync check of the phone measures its lag again.`,
+      ),
+    );
+  }
+  const lag = input.motionLag ?? null;
+  if (lag !== null) {
+    parts.splice(
+      clipsIndex(parts),
+      0,
+      part(
+        'motion-lag',
+        '',
+        motionLagWords(lag),
+        'warn',
+        `lag ${String(lag.lagMs)} ms`,
+        `In the last solve the phone's picture lagged the cube by ${String(lag.lagMs)} ms by the motion around its turns, more than ${String(MOTION_LAG_LIMIT_MS)} ms from its sync check's ${String(lag.checkMs)} ms: the clip keeps both. A sync check of the phone measures its lag again.`,
+      ),
+    );
+  }
   for (const drift of input.drift ?? []) {
     parts.splice(clipsIndex(parts), 0, driftPart(drift));
   }

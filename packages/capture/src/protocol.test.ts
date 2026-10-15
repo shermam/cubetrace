@@ -86,18 +86,21 @@ describe('resolveCaptureConfig', () => {
       quality: 'standard',
       bufferSeconds: 90,
       bufferBytes: 160_000_000,
+      motionCostLimitMs: 3,
     });
     expect(resolveCaptureConfig({ audio: false, bufferSeconds: 30 })).toEqual({
       audio: false,
       quality: 'standard',
       bufferSeconds: 30,
       bufferBytes: 160_000_000,
+      motionCostLimitMs: 3,
     });
     expect(resolveCaptureConfig({ quality: 'high' })).toEqual({
       audio: true,
       quality: 'high',
       bufferSeconds: 90,
       bufferBytes: 160_000_000,
+      motionCostLimitMs: 3,
     });
   });
 });
@@ -114,6 +117,7 @@ describe('transferList', () => {
       config: resolveCaptureConfig(),
       frameRate: 30,
       clips: port1,
+      latencyFloorMs: null,
     };
 
     expect(transferList(start)).toEqual([video, audio, port1]);
@@ -142,6 +146,8 @@ describe('transferList', () => {
         cut: result,
         bufferSeconds: 90,
         audio: { state: 'encoding', data: 9000, chunks: 4200, error: null, configMade: false },
+        latency: { capture: null, encode: null },
+        motion: null,
       }),
     ).toEqual(cutBuffers(result));
   });
@@ -228,6 +234,7 @@ describe('post', () => {
       config: resolveCaptureConfig({ audio: false }),
       frameRate: null,
       clips: null,
+      latencyFloorMs: null,
     });
 
     const received = (await arriving) as StartMessage;

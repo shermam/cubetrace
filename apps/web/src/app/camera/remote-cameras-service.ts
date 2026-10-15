@@ -8,7 +8,12 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import type { ClapperboardFrame, ControlDrift, MotionMeterInfo } from '@cubetrace/capture';
+import {
+  LatencyDrift,
+  type ClapperboardFrame,
+  type ControlDrift,
+  type MotionMeterInfo,
+} from '@cubetrace/capture';
 import {
   RemoteClockFit,
   type AppBuild,
@@ -129,6 +134,11 @@ export interface RemoteCamera {
    * "focus went manual on the phone" on its line; empty when nothing.
    */
   readonly drift: readonly ControlDrift[];
+  /**
+   * While the phone's capture latency (its reports' `latencyMs`) drifts from its value at the
+   * camera's last sync check (T5.3, `LatencyDrift`): by how much, ms; null otherwise.
+   */
+  readonly latencyDeltaMs: number | null;
 }
 
 /** A pairing the host shows: the token, the QR's URL and until when the token is taken. */
@@ -198,6 +208,8 @@ interface Peer {
   finishing: { timer: unknown; off: () => void } | null;
   /** The phone's camera controls (T5.2), its panel's source in the Cameras section. */
   readonly controls: RemoteControlsSource;
+  /** The drift of the phone's capture latency from its sync check (T5.3), fed by its reports. */
+  readonly latency: LatencyDrift;
 }
 
 /**
@@ -294,6 +306,7 @@ export class RemoteCamerasService {
         const estimate = fit === undefined ? null : clockEstimate(fit);
         return estimate === null ? null : { ...estimate.params, converged: estimate.converged };
       },
+      latencyOf: (id) => this.peers.get(id)?.latency.p50Ms ?? null,
     });
     // "Live preview from phones" changed: every phone connected is told (T4.3).
     effect(() => {
@@ -527,6 +540,7 @@ export class RemoteCamerasService {
         session: sessionId,
         preview: null,
         drift: [],
+        latencyDeltaMs: null,
       },
       sessionId,
       fit: new RemoteClockFit(),
@@ -540,6 +554,7 @@ export class RemoteCamerasService {
       removalTimer: null,
       recordTimer: null,
       finishing: null,
+      latency: new LatencyDrift(),
       controls: new RemoteControlsSource({
         timers: this.timers,
         onOutcome: (outcome) => {
@@ -682,6 +697,7 @@ export class RemoteCamerasService {
       }),
       link.on('state', (message) => {
         this.patch(peer, { report: message, reportMs: this.timers.now() });
+        this.watchLatency(peer, message.latencyMs);
       }),
       link.on('thumbnail', (message) => {
         this.thumbnail(peer, message);
@@ -1097,6 +1113,49 @@ export class RemoteCamerasService {
   }
 
   /**
+   * The phone's capture latency from its report (T5.3): its drift from the latency the camera's last
+   * sync check kept (`captureLatencyAtCheckMs`), as the host's own camera's (`LatencyDrift`, its
+   * readings every 2 s): the status line's word under its picture, and `recording.latency` with the
+   * phone named. A phone's build before T5.3 reports none, and never drifts.
+   */
+  private watchLatency(peer: Peer, latencyMs: number | null): void {
+    const label = peer.camera.label;
+    const session = this.session.session();
+    const check =
+      label === null || session === null || session.id !== peer.sessionId
+        ? undefined
+        : (session.clock.cameras[label] as CameraClock | undefined);
+    const baseline =
+      check === undefined || check.clapperboardSamples === 0
+        ? null
+        : (check.captureLatencyAtCheckMs ?? null);
+    if (baseline !== peer.latency.baselineMs) {
+      peer.latency.setBaseline(baseline);
+    }
+    const event = peer.latency.update(
+      this.timers.now(),
+      latencyMs === null ? null : { p50: latencyMs },
+    );
+    const drifting = peer.latency.driftingSinceMs !== null;
+    const delta = drifting ? (peer.latency.deltaMs ?? peer.camera.latencyDeltaMs) : null;
+    if (delta !== peer.camera.latencyDeltaMs) {
+      this.patch(peer, { latencyDeltaMs: delta });
+    }
+    if (event !== null) {
+      this.diagnostics.record('recording.latency', {
+        camera: label,
+        peer: peer.camera.device.label,
+        remote: true,
+        why: event.why,
+        baselineMs: event.baselineMs,
+        p50Ms: event.p50Ms,
+        p95Ms: event.p95Ms,
+        deltaMs: event.deltaMs,
+      });
+    }
+  }
+
+  /**
    * The fit's record into the session's `clock.cameras[label].remote`, beside the lag of a sync
    * check of the camera there may be (T4.3: its `offsetMs`, residual and samples, kept as they are; 0
    * until a check measures them): at convergence and every minute after (`converged` true), and,
@@ -1117,6 +1176,13 @@ export class RemoteCamerasService {
       clapperboardResidualMs: existing?.clapperboardResidualMs ?? 0,
       clapperboardSamples: existing?.clapperboardSamples ?? 0,
       ...(existing?.samples === undefined ? {} : { samples: existing.samples }),
+      // T5.3: the check's anchors stay as the check kept them.
+      ...(existing?.motionPeakAtCheckMs === undefined
+        ? {}
+        : { motionPeakAtCheckMs: existing.motionPeakAtCheckMs }),
+      ...(existing?.captureLatencyAtCheckMs === undefined
+        ? {}
+        : { captureLatencyAtCheckMs: existing.captureLatencyAtCheckMs }),
       remote: params,
     };
     this.session.putCameraClock(label, clock);
@@ -1298,6 +1364,7 @@ function entryOf(camera: RemoteCamera): RemoteCameraEntry {
     report: camera.report,
     reportMs: camera.reportMs,
     drift: camera.drift,
+    latencyDeltaMs: camera.latencyDeltaMs,
   };
 }
 
@@ -1327,6 +1394,8 @@ export function reportFacts(
     thermal: report.thermal,
     pressure: report.pressure,
     pressureSource: report.pressureSource,
+    // T5.3: its capture latency, to a tenth (null from a phone's build before it).
+    latencyMs: report.latencyMs === null ? null : round1(report.latencyMs),
     ageMs: camera.reportMs === null ? null : Math.round(nowMs - camera.reportMs),
   };
 }

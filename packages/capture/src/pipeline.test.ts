@@ -108,6 +108,9 @@ const STATS: CaptureStats = {
   audioCodec: 'opus',
   audioChunks: 586,
   audioState: 'encoding',
+  latency: null,
+  motion: { state: 'off', costMs: null },
+  postedHostMs: 1000,
 };
 
 /** A stand-in for a cut: the pipeline passes it through untouched. */
@@ -148,6 +151,7 @@ const A_REPORT: ClipReport = {
   audioMissing: null,
   audioRebasedMs: 0,
   audioConfigMade: false,
+  frameIntervalMs: 33.3,
 };
 
 beforeEach(() => {
@@ -192,7 +196,13 @@ describe('startCapture', () => {
     expect(startMessage).toMatchObject({
       type: 'start',
       frameRate: 30,
-      config: { audio: true, quality: 'standard', bufferSeconds: 90, bufferBytes: 160_000_000 },
+      config: {
+        audio: true,
+        quality: 'standard',
+        bufferSeconds: 90,
+        bufferBytes: 160_000_000,
+        motionCostLimitMs: 3,
+      },
     });
     expect(transfer).toEqual([startMessage.video, startMessage.audio, startMessage.clips]);
     // The other end of the capture worker's channel goes to the clip worker.
@@ -224,6 +234,49 @@ describe('startCapture', () => {
     expect((worker.posted[0].message as StartMessage).audio).toBeNull();
     // The audio track was never handed to a processor.
     expect(FakeProcessor.tracks).toEqual([videoTrack, videoTrack]);
+  });
+
+  it("carries a track's capture latency floor to the next run of the pipeline on it (T5.3)", () => {
+    const track = { kind: 'video', getSettings: () => ({ frameRate: 30 }) };
+    const media = {
+      getVideoTracks: () => [track],
+      getAudioTracks: () => [],
+    } as unknown as MediaStream;
+    start({}, media);
+    expect((worker.posted[0].message as StartMessage).latencyFloorMs).toBeNull();
+    const latency = {
+      capture: { p50: 4, p95: 9, basis: 'timestamp' as const },
+      encode: null,
+      floorMs: 1_790_516_343_605.5,
+      queueMax: 0,
+      pending: 0,
+      waiting: 0,
+      frameIntervalMs: 33.3,
+    };
+    worker.reply({ type: 'stats', stats: { ...STATS, latency } });
+
+    start({}, media);
+    expect((worker.posted[0].message as StartMessage).latencyFloorMs).toBe(1_790_516_343_605.5);
+    // Another track starts from nothing.
+    start();
+    expect((worker.posted[0].message as StartMessage).latencyFloorMs).toBeNull();
+  });
+
+  it("turns the solves' motion meter on and off in the capture worker, and not once stopped (T5.3)", async () => {
+    vi.useFakeTimers();
+    const capture = start();
+    capture.meterMotion(true, { x: 10, y: 20, w: 300, h: 200 });
+    capture.meterMotion(false, null);
+    expect(worker.messages().slice(1)).toEqual([
+      { type: 'motion-meter', on: true, rect: { x: 10, y: 20, w: 300, h: 200 } },
+      { type: 'motion-meter', on: false, rect: null },
+    ]);
+    const stopping = capture.stop();
+    await vi.advanceTimersByTimeAsync(STOP_TIMEOUT_MS);
+    await stopping;
+    const posted = worker.posted.length;
+    capture.meterMotion(true, null);
+    expect(worker.posted).toHaveLength(posted);
   });
 
   it('gives the capture worker the quality asked for, Standard by default', () => {
@@ -441,7 +494,13 @@ describe('CaptureHandle', () => {
     // Nothing is transferred either way: the MP4 stays in the workers.
     expect(worker.posted.slice(1).map((entry) => entry.transfer)).toEqual([[], [], []]);
     // The clip worker answers the clips it saved or could not write...
-    clipWorker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP, report: A_REPORT });
+    clipWorker.reply({
+      type: 'mux-and-write-done',
+      id: 1,
+      clip: A_CLIP,
+      report: A_REPORT,
+      motion: null,
+    });
     clipWorker.reply({
       type: 'mux-and-write-failed',
       id: 2,
@@ -454,7 +513,7 @@ describe('CaptureHandle', () => {
       message: 'RangeError: Nothing is buffered yet.',
     });
 
-    await expect(first).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
+    await expect(first).resolves.toEqual({ clip: A_CLIP, report: A_REPORT, motion: null });
     await expect(second).rejects.toThrow('Error: No session gone: its folder is missing.');
     await expect(third).rejects.toThrow('RangeError: Nothing is buffered yet.');
 
@@ -463,8 +522,14 @@ describe('CaptureHandle', () => {
     const app = { version: '0.4.0', commit: 'abc1234' };
     const fourth = capture.saveClip({ ...PARAMS, app });
     expect(worker.messages().at(-1)).toEqual({ type: 'mux-and-write', id: 4, ...PARAMS, app });
-    clipWorker.reply({ type: 'mux-and-write-done', id: 4, clip: A_CLIP, report: A_REPORT });
-    await expect(fourth).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
+    clipWorker.reply({
+      type: 'mux-and-write-done',
+      id: 4,
+      clip: A_CLIP,
+      report: A_REPORT,
+      motion: null,
+    });
+    await expect(fourth).resolves.toEqual({ clip: A_CLIP, report: A_REPORT, motion: null });
     expect(worker.messages().at(-1)).not.toHaveProperty('staging');
     // A camera device's clip names its staging folder (T4.2).
     const fifth = capture.saveClip({ ...PARAMS, staging: 'camera-clips' });
@@ -474,8 +539,14 @@ describe('CaptureHandle', () => {
       ...PARAMS,
       staging: 'camera-clips',
     });
-    clipWorker.reply({ type: 'mux-and-write-done', id: 5, clip: A_CLIP, report: A_REPORT });
-    await expect(fifth).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
+    clipWorker.reply({
+      type: 'mux-and-write-done',
+      id: 5,
+      clip: A_CLIP,
+      report: A_REPORT,
+      motion: null,
+    });
+    await expect(fifth).resolves.toEqual({ clip: A_CLIP, report: A_REPORT, motion: null });
   });
 
   it('asks the clip worker to remove a clip and resolves with whether it did', async () => {
@@ -553,8 +624,14 @@ describe('CaptureHandle', () => {
     // Still saving: no stop yet, and no new clip.
     expect(worker.messages().at(-1)).toMatchObject({ type: 'mux-and-write', id: 1 });
     await expect(capture.saveClip(PARAMS)).rejects.toThrow('The capture has stopped.');
-    clipWorker.reply({ type: 'mux-and-write-done', id: 1, clip: A_CLIP, report: A_REPORT });
-    await expect(saving).resolves.toEqual({ clip: A_CLIP, report: A_REPORT });
+    clipWorker.reply({
+      type: 'mux-and-write-done',
+      id: 1,
+      clip: A_CLIP,
+      report: A_REPORT,
+      motion: null,
+    });
+    await expect(saving).resolves.toEqual({ clip: A_CLIP, report: A_REPORT, motion: null });
     await vi.waitFor(() => {
       expect(worker.messages().at(-1)).toEqual({ type: 'stop' });
     });

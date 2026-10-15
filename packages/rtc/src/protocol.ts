@@ -23,7 +23,9 @@ import {
   parseCameraInfo,
   type AppBuild,
   type CameraInfo,
+  type CaptureLatency,
   type CropRect,
+  type LatencyPercentiles,
   type VideoSegment,
 } from '@cubetrace/core';
 
@@ -120,6 +122,14 @@ export interface CameraState {
   pressureSource: PressureSource | null;
   /** Clips cut and staged on the phone that the host has not acknowledged yet. */
   pendingClips: number;
+  /**
+   * The phone's capture latency (T5.3, `@cubetrace/capture`'s meter): the median of its meter's
+   * medians since its last `state`, ms, by the basis the phone's frames give (their capture time on
+   * its clock, or their timestamps beyond the least the track gave); the host watches it drift from
+   * its value at the camera's sync check. Null while the phone does not record, and from a build
+   * before T5.3, whose `state` has none (read as null).
+   */
+  latencyMs: number | null;
 }
 
 /**
@@ -205,6 +215,30 @@ export interface CutClip {
   bufferSeconds: number;
   /** Why the clip has no sound although the phone records it; null when it has, or none is recorded. */
   audioMissing: string | null;
+  /**
+   * The capture latency of the clip's frames as the phone's capture measured them (T5.3, the clip's
+   * `captureLatencyMs`: p50, p95 and the basis); null when none was timed, and from a build before
+   * T5.3 (read as null).
+   */
+  captureLatencyMs: CaptureLatency | null;
+  /** From each frame's arrival in the phone's capture worker to its encoded chunk (T5.3); likewise. */
+  encodeLatencyMs: LatencyPercentiles | null;
+  /**
+   * The motion of a solve clip's frames as the phone's capture worker measured it during the solve
+   * (T5.3, inside its framing rectangle), for the host to find the camera's lag from the solve's own
+   * moves: null for a scramble clip, without the meter (off, too costly on the phone), for a clip of
+   * more than `MAX_CLIP_MOTION_FRAMES` frames, and from a build before T5.3.
+   */
+  motion: CutMotion | null;
+}
+
+/**
+ * A clip's motion (T5.3): per frame measured, in order, its time after the clip's first frame (ms,
+ * from the frames' own timestamps, so on the frames file's own scale) and its changed area (0 to 1).
+ */
+export interface CutMotion {
+  atMs: number[];
+  changed: number[];
 }
 
 /**
@@ -497,6 +531,13 @@ const CAMERA_LABEL = /^[a-z0-9]+(-[a-z0-9]+)*$/u;
  */
 export const MAX_MOTION_FRAMES = 240;
 
+/**
+ * The most frames of a clip's motion that `cut-done` carries (T5.3): two minutes at 30 fps, about
+ * 60 kB of JSON, well within a data channel's message (256 kB in Chrome). A longer solve's clip is
+ * sent without its motion.
+ */
+export const MAX_CLIP_MOTION_FRAMES = 3600;
+
 /** What {@link decode} throws for a frame that is not a message of this protocol. */
 export class ProtocolError extends Error {
   override readonly name = 'ProtocolError';
@@ -768,6 +809,8 @@ function state(json: Json): CameraState {
     pressure: nullable(json, 'pressure', (j, k) => oneOf(j, k, PRESSURE_STATES)),
     pressureSource: nullable(json, 'pressureSource', (j, k) => oneOf(j, k, ['cpu', 'thermals'])),
     pendingClips: int(json, 'pendingClips', 0),
+    // T5.3, additive: a build before it sends none.
+    latencyMs: nullable(json, 'latencyMs', (j, k) => num(j, k, 0)),
   };
 }
 
@@ -832,7 +875,50 @@ function cutClip(json: Json): CutClip {
     lateMs: num(json, 'lateMs', 0),
     bufferSeconds: num(json, 'bufferSeconds', 0),
     audioMissing: nullable(json, 'audioMissing', text_),
+    // T5.3, additive: a build before it sends none of the three.
+    captureLatencyMs: nullable(json, 'captureLatencyMs', (j, k) => {
+      const latency = field(j, k);
+      return {
+        p50: num(latency, 'p50', 0),
+        p95: num(latency, 'p95', 0),
+        basis: oneOf(latency, 'basis', ['capture-time', 'timestamp']),
+      };
+    }),
+    encodeLatencyMs: nullable(json, 'encodeLatencyMs', (j, k) => {
+      const latency = field(j, k);
+      return { p50: num(latency, 'p50', 0), p95: num(latency, 'p95', 0) };
+    }),
+    motion: nullable(json, 'motion', (j, k) => cutMotion(field(j, k))),
   };
+}
+
+/** A clip's motion (`cut-done`'s `clip.motion`, T5.3), checked: as many times as areas, bounded. */
+function cutMotion(json: Json): CutMotion {
+  const atMs = list(json, 'atMs');
+  const changed = list(json, 'changed');
+  if (atMs.length !== changed.length) {
+    throw new ProtocolError(
+      `motion must have as many times as areas, got ${String(atMs.length)} and ${String(changed.length)}.`,
+    );
+  }
+  if (atMs.length > MAX_CLIP_MOTION_FRAMES) {
+    throw new ProtocolError(
+      `motion must hold at most ${String(MAX_CLIP_MOTION_FRAMES)} frames, got ${String(atMs.length)}.`,
+    );
+  }
+  const times = atMs.map((value) => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new ProtocolError(`motion.atMs must hold numbers ≥ 0, got ${show(value)}.`);
+    }
+    return value;
+  });
+  const areas = changed.map((value) => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      throw new ProtocolError(`motion.changed must hold numbers from 0 to 1, got ${show(value)}.`);
+    }
+    return value;
+  });
+  return { atMs: times, changed: areas };
 }
 
 /** One frame's motion of `sync-motion`, checked. */

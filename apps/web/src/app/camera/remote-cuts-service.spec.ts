@@ -50,6 +50,9 @@ const CLIP: CutClip = {
   lateMs: 0,
   bufferSeconds: 90,
   audioMissing: null,
+  captureLatencyMs: { p50: 4.2, p95: 9.6, basis: 'timestamp' },
+  encodeLatencyMs: { p50: 21.3, p95: 28.8 },
+  motion: null,
 };
 
 /** An MP4's bytes, as many as `bytes`: five chunks of 64 KB and a bit, for the resumed transfer. */
@@ -164,7 +167,12 @@ class Phone {
    * Offers the clip of `cut` (`cut-done`) and sends its frames file and its MP4, as the Camera page
    * does; `onProgress` hears the MP4's progress. Resolves with what each send did.
    */
-  async deliver(cut: Cut, bytes = mp4(), onProgress?: (sent: number) => void): Promise<string[]> {
+  async deliver(
+    cut: Cut,
+    bytes = mp4(),
+    onProgress?: (sent: number) => void,
+    clip: CutClip = CLIP,
+  ): Promise<string[]> {
     const link = this.link;
     const sender = this.sender;
     if (link === null || sender === null) {
@@ -184,7 +192,7 @@ class Phone {
         { name: names.frames, bytes: frames.length, kind: 'frames' },
         { name: names.mp4, bytes: bytes.length, kind: 'mp4' },
       ],
-      clip: CLIP,
+      clip,
     });
     const outcomes: string[] = [];
     for (const [name, data, kind] of [
@@ -375,6 +383,64 @@ describe('RemoteCutsService', () => {
     r = await rig();
   });
 
+  it("finds where a phone's solve clip's motion peaks around the solve's moves on the host, and its lag from its check's anchor (T5.3)", async () => {
+    const phone = await paired();
+    // The phone's check: its lag and where its motion peaked around its turns.
+    const kept = r.s.service.session()?.clock.cameras['phone-rear'];
+    r.s.service.putCameraClock('phone-rear', {
+      offsetMs: 61.3,
+      rttMs: kept?.rttMs ?? 0,
+      driftPpm: kept?.driftPpm ?? 0,
+      clapperboardResidualMs: 22.5,
+      clapperboardSamples: 8,
+      motionPeakAtCheckMs: 81.2,
+      captureLatencyAtCheckMs: 30.5,
+      ...(kept?.remote === undefined ? {} : { remote: kept.remote }),
+    });
+    await scrambled();
+    // A solve of thirteen moves, irregularly apart.
+    const moves = [..."R R' ".repeat(5).trim().split(' '), ...inverse('R U F').split(' ')];
+    const gaps = [180, 260, 150, 290, 210, 170, 240, 300, 160, 220, 190, 250, 280];
+    moves.forEach((move, k) => {
+      turn(r.s, r.fake, move, gaps[k]);
+    });
+    await pump(r.s, 20);
+    const solveCut = phone.cut('solve');
+    const ended = record();
+    // The phone's frames: its file's first frame 600 ms into the window, on the host clock (the
+    // estimate here is the offset); the square changes 100 to 133 ms after each move.
+    const t0 = solveCut.fromRemoteMs + 600 - OFFSET_MS;
+    const solveMoves = ended.moves.filter((m) => m.phase === 'solve').map((m) => m.hostMs);
+    const atMs: number[] = [];
+    const changed: number[] = [];
+    for (let k = 0; t0 + (k * 1000) / 30 < solveCut.toRemoteMs - OFFSET_MS; k++) {
+      const at = t0 + (k * 1000) / 30;
+      atMs.push(Math.round(((k * 1000) / 30) * 10) / 10);
+      changed.push(solveMoves.some((m) => at - m >= 100 && at - m < 100 + 1000 / 30) ? 0.15 : 0);
+    }
+    expect(
+      await drive(
+        phone.deliver(solveCut, mp4(), undefined, { ...CLIP, motion: { atMs, changed } }),
+      ),
+    ).toEqual(['frames from 0', 'mp4 from 0']);
+    await pump(r.s, 20);
+    const clip = record().video.find((c) => c.segment === 'solve');
+    expect(clip?.motionPeakMs).toBeGreaterThan(105);
+    expect(clip?.motionPeakMs).toBeLessThan(130);
+    expect(clip?.syncResidualMs).toBe(61.3);
+    expect(clip?.motionLagMs).toBe(Math.round((61.3 + (clip?.motionPeakMs ?? 0) - 81.2) * 10) / 10);
+    expect(clip?.captureLatencyMs).toEqual({ p50: 4.2, p95: 9.6, basis: 'timestamp' });
+    const event = (await events()).find((e) => e.kind === 'remote.clip')?.data;
+    expect(event).toMatchObject({
+      segment: 'solve',
+      captureLatencyMs: { p50: 4.2, p95: 9.6, basis: 'timestamp' },
+      encodeLatencyMs: { p50: 21.3, p95: 28.8 },
+      frameIntervalMs: 33.3,
+      motionPeakMs: clip?.motionPeakMs,
+      motionLagMs: clip?.motionLagMs,
+    });
+  });
+
   it("cuts on the estimate of a fit that has not converged, widened by the margin; takes the phone's files into the attempt's folder with the times on the host clock, adds both clips to the record and acknowledges them", async () => {
     const phone = await paired();
     await scrambled();
@@ -459,6 +525,12 @@ describe('RemoteCutsService', () => {
       // The camera's entry in clock.cameras is the clock sync's, before any sync check: no lag.
       syncResidualMs: null,
       truncatedStart: false,
+      // T5.3: the latencies the phone's capture measured; no motion sent with the clip.
+      captureLatencyMs: { p50: 4.2, p95: 9.6, basis: 'timestamp' },
+      encodeLatencyMs: { p50: 21.3, p95: 28.8 },
+      motionPeakMs: null,
+      motionSpreadMs: null,
+      motionLagMs: null,
     });
     expect(
       r.cuts.stateOf(

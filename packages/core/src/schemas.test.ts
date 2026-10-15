@@ -91,13 +91,15 @@ const BY_LABEL = '#/properties/clock/properties/cameras';
  * camera has: a camera's remote (its device; required by an if/then when local is false) and a
  * camera clock's remote (its clock sync); and those of T4.2: a remote clock's converged (the records
  * of T4.0 and T4.1 have none), and, which only a remote camera's clip has, a frames file's t0RemoteMs
- * and remote (each requiring the other, by dependentRequired).
+ * and remote (each requiring the other, by dependentRequired); and those of T5.3, which the files
+ * written before have none of: a clip's latencies and motion lag, and a camera clock's check's motion
+ * peak and capture latency.
  */
 const OPTIONAL: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   'session.json version 2': {
     '#': ['battery'],
     '#/properties/cube': ['productDate'],
-    '#/$defs/cameraClock': ['samples', 'remote'],
+    '#/$defs/cameraClock': ['samples', 'motionPeakAtCheckMs', 'captureLatencyAtCheckMs', 'remote'],
     '#/$defs/camera': ['microphone', 'remote'],
     '#/$defs/remoteClock': ['converged'],
   },
@@ -105,7 +107,15 @@ const OPTIONAL: Readonly<Record<string, Readonly<Record<string, readonly string[
     '#': ['app', 'gyro', 'resyncs'],
     '#/$defs/move': ['serial', 'packetLast'],
     '#/$defs/phase': ['slot'],
-    '#/$defs/clip': ['truncatedStart', 'local'],
+    '#/$defs/clip': [
+      'truncatedStart',
+      'captureLatencyMs',
+      'encodeLatencyMs',
+      'motionPeakMs',
+      'motionSpreadMs',
+      'motionLagMs',
+      'local',
+    ],
   },
   'session.json version 1': { '#/$defs/cameraClock': ['samples'] },
   'attempt.json version 1': { '#/$defs/phase': ['slot'] },
@@ -139,7 +149,7 @@ describe('the JSON Schemas of the records', () => {
 
   it.each([
     ['session.json version 2', SESSION_SCHEMA, 20],
-    ['attempt.json version 2', ATTEMPT_SCHEMA, 11],
+    ['attempt.json version 2', ATTEMPT_SCHEMA, 13],
     ['session.json version 1', SESSION_SCHEMA_V1, 9],
     ['attempt.json version 1', ATTEMPT_SCHEMA_V1, 5],
     ['frames.json', FRAMES_SCHEMA, 4],

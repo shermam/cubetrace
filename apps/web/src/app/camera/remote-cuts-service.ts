@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, inject } from '@angular/core';
-import { clipFiles } from '@cubetrace/capture';
+import { clipFiles, frameIntervalOf } from '@cubetrace/capture';
 import {
   parseFrames,
   remoteFrames,
@@ -28,6 +28,7 @@ import { ATTEMPT_FILES } from '../session/attempt-files';
 import { ClipsInFlight } from '../session/clips-in-flight';
 import {
   SessionService,
+  withCameraLag,
   type AttemptMilestone,
   type AttemptRef,
   type ClipAttachment,
@@ -36,6 +37,7 @@ import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { clipWindow } from './clip-windows';
 import { clockEstimate, type ClockEstimate } from './remote-estimate';
+import { solveMotionPeak } from './solve-motion';
 
 /** How long after an attempt's end the host waits for its remote clips (docs/PLAN.md T4.2). */
 export const REMOTE_CLIP_WAIT_MS = 120_000;
@@ -737,6 +739,15 @@ export class RemoteCutsService {
     const names = clipFiles(clip.label, clip.segment);
     await this.session.whenSaved();
     await this.files.write(clip.ref.session, clip.ref.index, names.file, file.parts());
+    // A solve clip's motion, measured on the phone, around the solve's moves on the host (T5.3): its
+    // times after the clip's first frame, placed by the frames file's converted first frame.
+    const motion = clip.segment === 'solve' ? details.motion : null;
+    const peak = solveMotionPeak(
+      motion === null
+        ? null
+        : { t0HostMs: frames.t0HostMs, atMs: motion.atMs, changed: motion.changed },
+      this.session.attemptRecord(clip.ref),
+    );
     const entry: VideoClip = {
       camera: clip.label,
       segment: clip.segment,
@@ -753,6 +764,12 @@ export class RemoteCutsService {
       framesFile: names.framesFile,
       syncResidualMs: null,
       truncatedStart: details.truncatedStart,
+      // T5.3: the phone's capture latencies of the clip's frames, and its motion's peak.
+      captureLatencyMs: details.captureLatencyMs,
+      encodeLatencyMs: details.encodeLatencyMs,
+      motionPeakMs: clip.segment === 'solve' ? (peak?.peakMs ?? null) : null,
+      motionSpreadMs: clip.segment === 'solve' ? (peak?.spreadMs ?? null) : null,
+      motionLagMs: null,
     };
     let attached: ClipAttachment;
     try {
@@ -764,7 +781,7 @@ export class RemoteCutsService {
       this.refuse(camera, clip, 'the attempt is gone');
       return;
     }
-    this.stored(camera, clip, frames, file.bytes, attached);
+    this.stored(camera, clip, frames, file.bytes, attached, entry);
   }
 
   /** The clip is in its attempt's record: the phone told, the wait ended, the facts recorded. */
@@ -774,6 +791,7 @@ export class RemoteCutsService {
     frames: FramesJson,
     mp4Bytes: number,
     attached: ClipAttachment,
+    entry: VideoClip,
   ): void {
     const now = this.timers.now();
     const late = clip.missedMs !== null;
@@ -786,9 +804,11 @@ export class RemoteCutsService {
     const bytes = clip.framesBytes + mp4Bytes;
     const transferMs = clip.offeredMs === null ? null : Math.round(now - clip.offeredMs);
     // The lag the clip took (T4.3): the camera's sync check in the session under way, as
-    // `withSyncResidual` gave it; null before one, or for a clip of a session that ended.
+    // `withCameraLag` gave it; null before one, or for a clip of a session that ended; and its lag
+    // from the solve's own moves (T5.3).
     const session = this.session.session();
     const check = session?.id === clip.ref.session ? session.clock.cameras[clip.label] : undefined;
+    const lagged = withCameraLag(entry, session?.id === clip.ref.session ? session : null);
     this.diagnostics.record(
       'remote.clip',
       {
@@ -809,6 +829,13 @@ export class RemoteCutsService {
         syncResidualMs:
           check === undefined || check.clapperboardSamples === 0 ? null : round1(check.offsetMs),
         truncatedStart: clip.details?.truncatedStart ?? false,
+        // T5.3 (issue #67): the phone's capture latencies, the clip's cadence, its motion lag.
+        captureLatencyMs: entry.captureLatencyMs ?? null,
+        encodeLatencyMs: entry.encodeLatencyMs ?? null,
+        frameIntervalMs: frameIntervalOf(frames.dtMs),
+        motionPeakMs: lagged.motionPeakMs ?? null,
+        motionSpreadMs: lagged.motionSpreadMs ?? null,
+        motionLagMs: lagged.motionLagMs ?? null,
       },
       scope,
     );

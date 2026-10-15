@@ -53,6 +53,12 @@ export interface RemoteCameraEntry {
    * `controls`): "focus went manual on the phone" on its line, with Reset; empty when nothing.
    */
   readonly drift: readonly ControlDrift[];
+  /**
+   * While the phone's capture latency (its reports' `latencyMs`) drifts from its value at the
+   * camera's last sync check (T5.3, the host's `LatencyDrift` of the phone): by how much, ms; null
+   * otherwise, without a check, and for a phone's build before T5.3.
+   */
+  readonly latencyDeltaMs: number | null;
 }
 
 /** What gives the registry its cameras and measures their motion: the Cameras section's service. */
@@ -72,6 +78,11 @@ export interface RemoteCameraSource {
   ): (() => void) | null;
   /** The record of the clock estimate that places camera `id`'s frame times now; null without one. */
   clockRecord(id: string): RemoteClockRecord | null;
+  /**
+   * Camera `id`'s capture latency now (T5.3): the running median of its reports' `latencyMs` over the
+   * last 10 s; null without one. A sync check of the camera keeps it as its baseline.
+   */
+  latencyOf(id: string): number | null;
   /**
    * Resets what camera `id`'s camera changed by itself (T5.2, the Reset beside its line): the
    * automatic modes of the drifted groups, sent to the phone (`set-controls`).
@@ -116,6 +127,11 @@ export class RemoteCameraRegistry {
   /** See {@link RemoteCameraSource.clockRecord}. */
   clockRecord(id: string): RemoteClockRecord | null {
     return this.source()?.clockRecord(id) ?? null;
+  }
+
+  /** See {@link RemoteCameraSource.latencyOf}: null without the Cameras section, or the camera. */
+  latencyOf(id: string): number | null {
+    return this.source()?.latencyOf(id) ?? null;
   }
 
   /** See {@link RemoteCameraSource.resetDrift}: nothing without the Cameras section. */

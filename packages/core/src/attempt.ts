@@ -140,6 +140,26 @@ export interface CropRect {
   h: number;
 }
 
+/**
+ * How a clip's capture latency was timed (docs/PLAN.md T5.3, docs/DATA-MODEL.md §7):
+ * `capture-time`, from each frame's capture time on the host clock (`VideoFrame.metadata()`'s
+ * `captureTime`, where the browser gives it), so the latency itself; `timestamp`, from each frame's
+ * own timestamp (`VideoFrame.timestamp`), which counts from the camera's own zero, so the latency
+ * beyond the least one the camera's track gave since it opened.
+ */
+export type LatencyBasis = 'capture-time' | 'timestamp';
+
+/** A latency over a clip's frames (T5.3): its median and its 95th percentile, in ms. */
+export interface LatencyPercentiles {
+  p50: number;
+  p95: number;
+}
+
+/** The capture latency of a clip's frames (T5.3), and how their capture was timed. */
+export interface CaptureLatency extends LatencyPercentiles {
+  basis: LatencyBasis;
+}
+
 /** One entry of `video` in attempt.json: a clip in the attempt's folder (docs/DATA-MODEL.md §7). */
 export interface VideoClip {
   /** The camera's label in session.json's `cameras`. */
@@ -174,6 +194,33 @@ export interface VideoClip {
    * files (those written before it existed have none); `parseAttempt` reads a missing one as false.
    */
   truncatedStart: boolean;
+  /**
+   * The capture latency of the clip's frames (docs/PLAN.md T5.3): from each frame's capture to its
+   * arrival in the capture worker, whose host time the clip's frame times come from; null when no
+   * frame of the clip was timed. Absent from the files written before T5.3, and kept so when read.
+   */
+  captureLatencyMs?: CaptureLatency | null;
+  /**
+   * From each frame's arrival in the capture worker to its encoded chunk (T5.3): the encoder's queue
+   * and its work; null when none was timed. Absent from the files written before T5.3.
+   */
+  encodeLatencyMs?: LatencyPercentiles | null;
+  /**
+   * Where the motion of the clip's frames peaks around the solve's moves (T5.3): the peak of their
+   * motion averaged over the moves, in ms after the moves; null for a scramble clip, without the
+   * motion measured (the meter off, too costly, or a phone's build before T5.3), with fewer than 10
+   * moves, or without a clear peak. Absent from the files written before T5.3.
+   */
+  motionPeakMs?: number | null;
+  /** The width of that peak at half its height, in ms (T5.3); null with the peak. */
+  motionSpreadMs?: number | null;
+  /**
+   * The camera's lag behind the cube from this clip's own moves (T5.3): its check's `offsetMs` plus
+   * how far `motionPeakMs` moved from where the check's motion peaked (`motionPeakAtCheckMs` of
+   * session.json's `clock.cameras`); null without a peak, or without a check that measured its own.
+   * Absent from the files written before T5.3.
+   */
+  motionLagMs?: number | null;
   /**
    * False once the clip's MP4 is no longer on the device that recorded it: the upload queue deleted
    * it after its upload was confirmed (docs/PLAN.md T3.3), and it is in the dataset's bucket; its

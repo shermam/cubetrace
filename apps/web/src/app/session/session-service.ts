@@ -11,6 +11,7 @@ import {
 import {
   AttemptMachine,
   CubeClockFit,
+  anchoredMotionLag,
   GYRO_FILE,
   GYRO_LEAD_MS,
   GYRO_TAIL_MS,
@@ -240,15 +241,31 @@ interface Current {
  * `offsetMs` of the camera's sync check, `clock.cameras`), unless it has one; null before a check.
  * A remote camera's entry before its check (T4.1 writes its clock sync there, the clapperboard's
  * fields at 0 until a sync check of the camera measures them, T4.3) is no check: its clips keep null.
+ * Since T5.3 a solve clip whose motion peaked around its moves (`motionPeakMs`) also gets its
+ * camera's lag from them (`motionLagMs`, core's `anchoredMotionLag`: the check's `offsetMs` plus how
+ * far the peak moved from the check's own), unless it has one; null without a check that kept its
+ * peak. The recording's `clip.saved` event and the Timer page's line read the clip so.
  */
-function withSyncResidual(clip: VideoClip, session: SessionRecord | null): VideoClip {
-  if (clip.syncResidualMs !== null || session === null) {
+export function withCameraLag(clip: VideoClip, session: SessionRecord | null): VideoClip {
+  if (session === null) {
     return clip;
   }
   const sync = session.clock.cameras[clip.camera] as CameraClock | undefined;
-  return sync === undefined || sync.clapperboardSamples === 0
-    ? clip
-    : { ...clip, syncResidualMs: sync.offsetMs };
+  if (sync === undefined || sync.clapperboardSamples === 0) {
+    return clip;
+  }
+  const residual = clip.syncResidualMs ?? sync.offsetMs;
+  const motionLag =
+    clip.motionLagMs === undefined || clip.motionLagMs === null
+      ? anchoredMotionLag(clip.motionPeakMs, sync)
+      : clip.motionLagMs;
+  if (residual === clip.syncResidualMs && motionLag === (clip.motionLagMs ?? null)) {
+    return clip;
+  }
+  // A clip written before T5.3 (no motionPeakMs) stays without the field: its text is unchanged.
+  return 'motionLagMs' in clip || motionLag !== null
+    ? { ...clip, syncResidualMs: residual, motionLagMs: motionLag }
+    : { ...clip, syncResidualMs: residual };
 }
 
 /** `clips` with `clip`, which replaces the clip of the same camera and segment. */
@@ -840,7 +857,7 @@ export class SessionService {
       current.machine.events.scrambleShown === ref.scrambleShown
     ) {
       const own = session?.id === ref.session ? session : null;
-      current.clips = withClip(current.clips, withSyncResidual(clip, own));
+      current.clips = withClip(current.clips, withCameraLag(clip, own));
       return 'kept';
     }
     if (session?.id === ref.session) {
@@ -850,7 +867,7 @@ export class SessionService {
       }
       const updated: AttemptRecord = {
         ...record,
-        video: withClip(record.video, withSyncResidual(clip, session)),
+        video: withClip(record.video, withCameraLag(clip, session)),
       };
       this.attemptsSignal.update((attempts) => attempts.map((a) => (a === record ? updated : a)));
       if (this.lastResultSignal() === record) {
@@ -865,7 +882,7 @@ export class SessionService {
       const stored = await store.exportSession(ref.session);
       const record = stored.attempts.find((a) => isAttempt(a, ref));
       if (record !== undefined) {
-        const attached = withSyncResidual(clip, stored.session);
+        const attached = withCameraLag(clip, stored.session);
         await store.saveAttempt({ ...record, video: withClip(record.video, attached) });
         outcome = 'saved';
       }
@@ -951,6 +968,18 @@ export class SessionService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The record of the attempt `ref` as the current session keeps it (T5.3: a phone's solve clip
+   * places its motion by the attempt's moves); null for an attempt under way, gone, or of another
+   * session.
+   */
+  attemptRecord(ref: AttemptRef): AttemptRecord | null {
+    if (this.sessionSignal()?.id !== ref.session) {
+      return null;
+    }
+    return this.attemptsSignal().find((attempt) => isAttempt(attempt, ref)) ?? null;
   }
 
   /**

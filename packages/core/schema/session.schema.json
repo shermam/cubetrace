@@ -289,6 +289,14 @@
           "type": "array",
           "items": { "$ref": "#/$defs/clapperboardSample" }
         },
+        "motionPeakAtCheckMs": {
+          "description": "Where the check's motion peaked around its turns, ms after them (T5.3): the estimator of the solves' clips run on the check's own frames, which anchors their motionLagMs; null without a clear peak. Absent from the records written before T5.3.",
+          "type": ["number", "null"]
+        },
+        "captureLatencyAtCheckMs": {
+          "description": "The camera's capture latency when the check ended (T5.3): the median of the capture pipeline's meter, the baseline its drift is measured from; null when unknown. Absent from the records written before T5.3.",
+          "type": ["number", "null"]
+        },
         "remote": { "$ref": "#/$defs/remoteClock" }
       }
     },

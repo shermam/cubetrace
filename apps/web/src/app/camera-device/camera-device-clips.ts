@@ -1,12 +1,14 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { clipFiles, type SavedClip } from '@cubetrace/capture';
+import { clipFiles, type ClipMotion, type SavedClip } from '@cubetrace/capture';
 import type { CameraInfo } from '@cubetrace/core';
 import {
   FileSender,
+  MAX_CLIP_MOTION_FRAMES,
   TransferError,
   blobSource,
   type ClipAck,
   type Cut,
+  type CutMotion,
   type FileSource,
   type MessageLink,
 } from '@cubetrace/rtc';
@@ -18,6 +20,7 @@ import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { e2eRemote } from '../rtc/e2e-remote';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
+import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { CameraDeviceCapture } from './camera-device-capture';
 import {
@@ -31,6 +34,29 @@ import {
 /** A cut, as the phone keys it: its attempt, when the attempt's scramble was shown, its segment. */
 function cutKey(cut: Pick<Cut, 'attempt' | 'scrambleShown' | 'segment'>): string {
   return `${String(cut.attempt)}/${String(cut.scrambleShown)}/${cut.segment}`;
+}
+
+/**
+ * The solves' motion meter goes off by itself this long after the scramble's cut that turned it on,
+ * ms, when no solve clip of that attempt was saved meanwhile (a skip, a reset, a lost connection).
+ */
+export const MOTION_METER_MAX_MS = 10 * 60_000;
+
+/**
+ * A scramble's cut turns the motion meter on only when it is fresh: its window's end at most this
+ * long ago, ms (a cut sent again over a new connection, for an attempt long over, does not).
+ */
+const FRESH_CUT_MS = 2000;
+
+/**
+ * A solve clip's motion as `cut-done` carries it (T5.3): its frames' times and areas, or null without
+ * any, or for a clip longer than the protocol takes (`MAX_CLIP_MOTION_FRAMES`).
+ */
+export function cutMotion(motion: ClipMotion | null): CutMotion | null {
+  if (motion === null || motion.atMs.length === 0 || motion.atMs.length > MAX_CLIP_MOTION_FRAMES) {
+    return null;
+  }
+  return { atMs: [...motion.atMs], changed: [...motion.changed] };
 }
 
 /** The frame rate the camera's track reports, for the clip's `fpsNominal`; 30 if it says none. */
@@ -57,6 +83,7 @@ function frameRateOf(info: CameraInfo | null): number {
 export class CameraDeviceClips {
   private readonly capture = inject(CameraDeviceCapture);
   private readonly camera = inject(CameraService);
+  private readonly settings = inject(SettingsService);
   private readonly staging = inject(CLIP_STAGING);
   private readonly timers = inject(RTC_TIMERS);
   private readonly diagnostics = inject(DiagnosticsService);
@@ -85,6 +112,15 @@ export class CameraDeviceClips {
   private looping = false;
   /** The end-to-end suite's cut of the connection was made (once per page). */
   private cutOnce = false;
+  /**
+   * The attempt whose solve the motion meter measures (T5.3): on from its scramble's cut until its
+   * solve clip is saved, or {@link MOTION_METER_MAX_MS}; null while it is off.
+   */
+  private metering: {
+    readonly attempt: number;
+    readonly scrambleShown: number;
+    timer: unknown;
+  } | null = null;
   /** The operations under way, for the tests to wait on. */
   private pendingWork: Promise<unknown> = Promise.resolve();
 
@@ -186,6 +222,9 @@ export class CameraDeviceClips {
     // staged for the older one is nobody's (the new one takes its files' names).
     this.staged = this.staged.filter((clip) => !sameSlot(clip, slot));
     this.pendingSignal.set(this.staged.length);
+    if (cut.segment === 'scramble') {
+      this.meterSolve(cut);
+    }
     const delay = Math.max(0, cut.toRemoteMs + ENCODER_SETTLE_MS - this.timers.now());
     this.cutting.set(
       key,
@@ -196,10 +235,56 @@ export class CameraDeviceClips {
   }
 
   /**
+   * The attempt of a fresh scramble's cut is armed: its solve comes next, and the capture measures
+   * the motion of its frames until the solve clip is saved (T5.3, "Measure the motion during solves":
+   * the host finds the camera's lag from the solve's own moves), inside the framing rectangle.
+   */
+  private meterSolve(cut: Cut): void {
+    if (!this.settings.motionMeter() || cut.toRemoteMs < this.timers.now() - FRESH_CUT_MS) {
+      return;
+    }
+    this.stopMeter();
+    const timer = this.timers.setTimeout(() => {
+      if (this.metering?.timer === timer) {
+        this.stopMeter();
+      }
+    }, MOTION_METER_MAX_MS);
+    this.metering = { attempt: cut.attempt, scrambleShown: cut.scrambleShown, timer };
+    this.capture.meterMotion(true, this.camera.framing());
+  }
+
+  /** The motion meter goes off (its attempt's solve clip saved, or its time up). */
+  private stopMeter(): void {
+    const metering = this.metering;
+    if (metering === null) {
+      return;
+    }
+    this.metering = null;
+    this.timers.clearTimeout(metering.timer);
+    this.capture.meterMotion(false, null);
+  }
+
+  /**
    * Saves the clip of `cut` into the staging folder (the capture's clip worker), stages it and offers
    * it; a cut the capture cannot save is answered `cut-failed`.
    */
   private async save(cut: Cut, session: string, key: string): Promise<void> {
+    try {
+      await this.stage(cut, session, key);
+    } finally {
+      // The solve's clip has the motion it needs: the meter goes off until the next attempt.
+      if (
+        cut.segment === 'solve' &&
+        this.metering?.attempt === cut.attempt &&
+        this.metering.scrambleShown === cut.scrambleShown
+      ) {
+        this.stopMeter();
+      }
+    }
+  }
+
+  /** {@link save}'s work: the clip cut, muxed, staged and offered. */
+  private async stage(cut: Cut, session: string, key: string): Promise<void> {
     // The end-to-end suite's phone runs its connection's clock ahead of the capture's (RTC_TIMERS).
     const offsetMs = this.hooks.clockOffsetMs ?? 0;
     const info = this.camera.cameraInfo();
@@ -268,6 +353,10 @@ export class CameraDeviceClips {
           lateMs: report.lateMs,
           bufferSeconds: report.bufferSeconds,
           audioMissing: report.audioMissing,
+          // T5.3: the frames' latencies as the capture measured them, and a solve's motion.
+          captureLatencyMs: clip.captureLatencyMs ?? null,
+          encodeLatencyMs: clip.encodeLatencyMs ?? null,
+          motion: cut.segment === 'solve' ? cutMotion(saved.motion) : null,
         },
         files: [
           { name: names.framesFile, bytes: frames.size, kind: 'frames' },

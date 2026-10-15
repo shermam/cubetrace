@@ -466,6 +466,10 @@ describe('DiagnosticsService', () => {
     // Keep the camera's modes (T5.2): off.
     settings.setKeepCameraModes(false);
     TestBed.tick();
+    // The motion meter and the restart of a drifting recording (T5.3): off.
+    settings.setMotionMeter(false);
+    settings.setRestartOnLatencyDrift(false);
+    TestBed.tick();
     // Settings → Keep the screen on: the lock it takes (wake.lock says it is wanted; no setting).
     await TestBed.inject(WakeLockService).request();
     TestBed.tick();
@@ -481,6 +485,8 @@ describe('DiagnosticsService', () => {
       { key: 'videoQuality', value: 'high' },
       { key: 'remotePictures', value: 'tiles' },
       { key: 'keepCameraModes', value: false },
+      { key: 'motionMeter', value: false },
+      { key: 'restartOnLatencyDrift', value: false },
     ]);
     expect(events().find((event) => event.kind === 'wake.lock')?.data).toEqual({
       status: 'active',

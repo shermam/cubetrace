@@ -148,6 +148,8 @@ describe('SettingsService', () => {
     settings.setLivePreviewFromPhones(false);
     settings.setRemotePictures('tiles');
     settings.setKeepCameraModes(false);
+    settings.setMotionMeter(false);
+    settings.setRestartOnLatencyDrift(false);
 
     expect(stored()).toEqual({
       version: 2,
@@ -187,9 +189,13 @@ describe('SettingsService', () => {
       livePreviewFromPhones: false,
       remotePictures: 'tiles',
       keepCameraModes: false,
+      motionMeter: false,
+      restartOnLatencyDrift: false,
     });
     const reloaded = load();
     expect(reloaded.keepCameraModes()).toBe(false);
+    expect(reloaded.motionMeter()).toBe(false);
+    expect(reloaded.restartOnLatencyDrift()).toBe(false);
     expect(reloaded.uploadSessions()).toBe(false);
     expect(reloaded.diagnostics()).toBe(false);
     expect(reloaded.recordRemoteCameras()).toBe(false);
@@ -579,6 +585,32 @@ describe('SettingsService', () => {
 
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ keepCameraModes: 'off' }));
     expect(load().keepCameraModes()).toBe(true);
+  });
+
+  it('measures the motion during solves and restarts a drifting recording by default, and as switched; the settings before T5.3 as on (T5.3)', () => {
+    // What T5.2 stored: neither switch.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ version: 2, cameraOn: true, keepCameraModes: false }),
+    );
+    const settings = load();
+    expect(settings.motionMeter()).toBe(true);
+    expect(settings.restartOnLatencyDrift()).toBe(true);
+    expect(settings.keepCameraModes()).toBe(false);
+
+    settings.setMotionMeter(false);
+    expect(stored()).toMatchObject({ motionMeter: false, restartOnLatencyDrift: true });
+    settings.setRestartOnLatencyDrift(false);
+    const reloaded = load();
+    expect(reloaded.motionMeter()).toBe(false);
+    expect(reloaded.restartOnLatencyDrift()).toBe(false);
+
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ motionMeter: 'no', restartOnLatencyDrift: 0 }),
+    );
+    expect(load().motionMeter()).toBe(true);
+    expect(load().restartOnLatencyDrift()).toBe(true);
   });
 
   it('reads the settings stored before the microphone setting existed as Raw, the rest as stored', () => {

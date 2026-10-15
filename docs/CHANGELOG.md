@@ -51,6 +51,40 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
 - Diagnostics: `remote.controls` (each change of a phone's controls from the laptop, and its
   outcome) and `controls.drift` (each drift, set back, given up or left); `settings.changed` names
   `keepCameraModes`; the round report's "After T5.2" items read them.
+- The capture latency, measured per frame and kept per clip (T5.3, issue #67; `docs/DATA-MODEL.md`
+  §6 and §7): on 2026-10-09 the laptop's frames came about 75 ms later from the 38th attempt of two
+  sessions, and nothing said so. The capture worker now times every frame from the camera's own time
+  for it (its `captureTime` where Chrome gives one, else its `timestamp` beyond the least the track
+  gave) to its arrival, and on to its encoded chunk; each clip's record keeps the median and the 95th
+  percentile of both (`captureLatencyMs` with its `basis`, `encodeLatencyMs`), and each sync check
+  the camera's latency then (`captureLatencyAtCheckMs`). When the running median of the last 10 s
+  sits more than 30 ms from it for 5 s, the line under the preview says so in amber (`latency
+  +75 ms`); a phone's line on the laptop says the same of the phone's camera, whose `state` carries
+  its latency (`latencyMs`, additive within protocol version 1).
+- The motion lag per clip (T5.3): "Measure the motion during solves" (Settings → Camera, on by
+  default; off by itself for the recording where it costs more than 3 ms a frame) measures the
+  picture's motion inside the framing rectangle during each solve, as the sync check does; at the
+  attempt's end each solve clip gets the camera's lag from its own moves (`motionPeakMs`,
+  `motionSpreadMs`, `motionLagMs`, anchored to the sync check's own motion peak,
+  `motionPeakAtCheckMs`), a phone's clip from the motion its `cut-done` carries. The line says
+  `motion lag 133 ms (check 58)` in amber when it sits more than 30 ms from the check's.
+- A restart for a drifting latency (T5.3, issue #67's mitigation): with "Restart the recording when
+  its latency drifts" (Settings → Camera, on by default), a capture latency that drifted through a
+  whole attempt starts the recording again once that attempt's solve clip is saved, once per drift:
+  `restarted` on the line and a note in the session.
+- Diagnostics: `recording.latency` (a drift and its recovery, for the laptop's own camera with where
+  the frames waited: those already waiting for the worker, the encoder's queue, the cadence; and for
+  each phone), `recording.restarted`; `clip.saved` and `remote.clip` carry the clip's latencies,
+  cadence and motion lag (`clip.saved` also the pipeline's counters over the clip's span),
+  `sync.check` its motion peak and the camera's latency, the phone's report in `rtc.clock` its
+  `latencyMs`; `settings.changed` names `motionMeter` and `restartOnLatencyDrift`; the round report's
+  "After T5.3" items read them.
+
+### Fixed
+
+- `clip.saved`'s `syncResidualMs` was always null: the event read the clip as the capture saved it,
+  before its record had the camera's lag (found with T5.3; the round report's item 2.5.6 could not
+  tick). The records had it right.
 
 ## 0.4.0 — 2026-10-04
 

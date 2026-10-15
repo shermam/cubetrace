@@ -398,6 +398,8 @@ const T51 = 'After T5.1';
 const PICTURES = "T5.1 — the phone's picture and its status line";
 const T52 = 'After T5.2';
 const CONTROLS = 'T5.2 — remote camera controls and the watchdog';
+const T53 = 'After T5.3';
+const LATENCY = 'T5.3 — the capture latency and the motion lag';
 
 /** A median of `values` in ms as seconds, to one decimal, or `?` without one. */
 function seconds(values: readonly number[]): string {
@@ -559,10 +561,119 @@ function driftNames(event: ReportEvent): string {
   return isRecord(drift) ? Object.keys(drift).join(', ') : '?';
 }
 
+/** A number one level down an event's facts (T5.3: `captureLatencyMs.p50`), or null. */
+function nestedNum(event: ReportEvent, key: string, field: string): number | null {
+  const value = event.data[key];
+  return isRecord(value) ? reportNum(value, field) : null;
+}
+
+/** `+75`, `-41`, `±0`: a difference in ms, to one decimal, with its sign. */
+function signedMs(value: number): string {
+  const rounded = round(value, 1);
+  return rounded === '0' || rounded === '-0' ? '±0' : value > 0 ? `+${rounded}` : rounded;
+}
+
+/** A solve clip as the host's events say it since T5.3: its motion lag, its check's, its latency. */
+interface SolveClip {
+  readonly event: ReportEvent;
+  /** `motionLagMs`: the camera's lag from the solve's own moves; null without one. */
+  readonly lagMs: number | null;
+  /** `syncResidualMs`: the lag of the camera's check, which the clip took. */
+  readonly checkMs: number | null;
+  /** `captureLatencyMs.p50`, and how the capture was timed. */
+  readonly latencyMs: number | null;
+  readonly basis: string | null;
+}
+
+/**
+ * The solve clips with the facts of T5.3 (a host's `clip.saved` for its own camera, its
+ * `remote.clip` for a phone's), by session, then by camera: `laptop`, `phone-rear (Moto g60)`.
+ */
+function solveClips(q: Query): Map<string, Map<string, SolveClip[]>> {
+  const out = new Map<string, Map<string, SolveClip[]>>();
+  const add = (event: ReportEvent, camera: string): void => {
+    const session = event.session ?? '?';
+    const cameras = out.get(session) ?? new Map<string, SolveClip[]>();
+    out.set(session, cameras);
+    const clip: SolveClip = {
+      event,
+      lagMs: num(event, 'motionLagMs'),
+      checkMs: num(event, 'syncResidualMs'),
+      latencyMs: nestedNum(event, 'captureLatencyMs', 'p50'),
+      basis: (() => {
+        const latency = event.data['captureLatencyMs'];
+        return isRecord(latency) && typeof latency['basis'] === 'string' ? latency['basis'] : null;
+      })(),
+    };
+    cameras.set(camera, [...(cameras.get(camera) ?? []), clip]);
+  };
+  // A build before T5.3 says none of it: the key itself is new.
+  const isSolve = (event: ReportEvent): boolean =>
+    text(event, 'segment') === 'solve' && event.data['motionLagMs'] !== undefined;
+  for (const event of q.where('clip.saved', isSolve)) {
+    add(event, text(event, 'camera') ?? '?');
+  }
+  for (const event of q.where('remote.clip', isSolve)) {
+    add(event, `${text(event, 'camera') ?? '?'} (${text(event, 'peer') ?? '?'})`);
+  }
+  return out;
+}
+
+/** How far from its check's a solve clip's motion lag is, in ms; null without both. */
+function lagOff(clip: SolveClip): number | null {
+  return clip.lagMs === null || clip.checkMs === null ? null : clip.lagMs - clip.checkMs;
+}
+
+/**
+ * `laptop: 42 solve clips, 41 with a motion lag, +12.3 ms from the check's at the median, 38 within
+ * 30 ms; capture latency 9.1 ms at the median (timestamp), 8.7 to 84.2`.
+ */
+function solveClipFacts(camera: string, clips: readonly SolveClip[]): string {
+  const offs = clips.flatMap((clip) => {
+    const off = lagOff(clip);
+    return off === null ? [] : [off];
+  });
+  const middle = median(offs);
+  const within = offs.filter((off) => Math.abs(off) <= 30).length;
+  const latencies = clips.flatMap((clip) => (clip.latencyMs === null ? [] : [clip.latencyMs]));
+  const latency = median(latencies);
+  const bases = [...new Set(clips.flatMap((clip) => (clip.basis === null ? [] : [clip.basis])))];
+  const lag =
+    middle === null
+      ? 'none with a motion lag'
+      : `${String(offs.length)} with a motion lag, ${signedMs(middle)} ms from the check's at the median, ${String(within)} within 30 ms`;
+  const measured =
+    latency === null
+      ? 'no capture latency'
+      : `capture latency ${round(latency, 1)} ms at the median (${bases.join(', ')}), ${round(Math.min(...latencies), 1)} to ${round(Math.max(...latencies), 1)}`;
+  return `${camera}: ${String(clips.length)} solve ${clips.length === 1 ? 'clip' : 'clips'}, ${lag}; ${measured}`;
+}
+
+/** A host camera's `recording.latency` (T5.3), its own camera's (not a phone's) when `own`. */
+function latencyEvents(q: Query, why: string, own: boolean): ReportEvent[] {
+  return q.where(
+    'recording.latency',
+    (e) => text(e, 'why') === why && (flag(e, 'remote') === true) !== own,
+  );
+}
+
+/**
+ * `2026-10-15 17:02:11 office-mbp: laptop +74.6 ms from 9.2 (p95 96.1, timestamp); 29 of 29 frames
+ * waiting, the encoder's queue 2 at most, 1 held, frames 34.1 ms apart`.
+ */
+function driftFacts(event: ReportEvent): string {
+  const at = (key: string, digits = 1): string => {
+    const value = num(event, key);
+    return value === null ? '?' : round(value, digits);
+  };
+  const delta = num(event, 'deltaMs');
+  return `${when(event.tsMs)} ${event.device.label}: ${text(event, 'camera') ?? '?'} ${delta === null ? '?' : signedMs(delta)} ms from ${at('baselineMs')} (p95 ${at('p95Ms')}, ${text(event, 'basis') ?? '?'}); ${at('waiting', 0)} of ${at('fps', 0)} frames waiting, the encoder's queue ${at('queueMax', 0)} at most, ${at('pending', 0)} held, frames ${at('frameIntervalMs')} ms apart`;
+}
+
 /**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
  * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3, the items after T3.7, T4.1, T4.2 and
- * T4.3, the desk rig's after T4, and the items after T5.1 and T5.2.
+ * T4.3, the desk rig's after T4, and the items after T5.1, T5.2 and T5.3.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -3586,6 +3697,161 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         `${count(own, 'drift')}, ${String(own.filter((e) => flag(e, 'reapplied') === true).length)} set back`,
         "no drift of a host's own camera",
       );
+    },
+  },
+  // ---- After T5.3: the capture latency and the motion lag ----
+  {
+    id: '5.3.1',
+    round: T53,
+    section: LATENCY,
+    title:
+      "The rig's two checks with the motion meter on (the default): the MacBook's own sync check and the phone's, each keeping where the motion peaked around its turns and the camera's capture latency then",
+    kinds: ['sync.check'],
+    eyes: 'the two lags on the lines under the pictures',
+    check: (q) => {
+      const passed = q.where('sync.check', (e) => text(e, 'outcome') === 'ok');
+      const anchored = passed.filter((e) => num(e, 'motionPeakMs') !== null);
+      // A check of T5.3 without a clear peak says null; a build before it says nothing.
+      const without = passed.filter((e) => e.data['motionPeakMs'] === null);
+      const last = new Map<string, ReportEvent>();
+      for (const event of anchored) {
+        last.set(`${event.device.label}\u0000${text(event, 'camera') ?? '?'}`, event);
+      }
+      const facts = [
+        ...[...last.values()].map((e) => {
+          const latency = num(e, 'captureLatencyMs');
+          const where =
+            flag(e, 'remote') === true ? ` (${text(e, 'peer') ?? '?'})` : ` on ${e.device.label}`;
+          return `${text(e, 'camera') ?? '?'}${where}: lag ${round(num(e, 'offsetMs') ?? 0, 1)} ms, motion peak ${round(num(e, 'motionPeakMs') ?? 0, 1)} ms, capture latency ${latency === null ? 'unknown' : `${round(latency, 1)} ms`}`;
+        }),
+        ...(without.length === 0 ? [] : [`${count(without, 'check')} without a motion peak`]),
+      ].join('; ');
+      const own = anchored.some((e) => flag(e, 'remote') !== true);
+      const phone = anchored.some((e) => flag(e, 'remote') === true);
+      return own && phone ? ok(facts) : none(facts || 'no sync check with a motion peak');
+    },
+  },
+  {
+    id: '5.3.2',
+    round: T53,
+    section: LATENCY,
+    title:
+      "Forty solves or more on the rig in one session: each solve clip of the MacBook's camera, and of the phone's, with its capture latency and its motion lag, within 30 ms of its camera's check while the latency held",
+    kinds: ['clip.saved', 'remote.clip'],
+    eyes: 'the lines under the pictures after each solve; the attempts where a word came',
+    check: (q) => {
+      // The session whose own camera has the most solve clips with a motion lag.
+      let best: { cameras: Map<string, SolveClip[]>; own: number } | null = null;
+      for (const cameras of solveClips(q).values()) {
+        const own = Math.max(
+          0,
+          ...[...cameras.values()].map(
+            (clips) =>
+              clips.filter((clip) => clip.event.kind === 'clip.saved' && clip.lagMs !== null)
+                .length,
+          ),
+        );
+        if (best === null || own > best.own) {
+          best = { cameras, own };
+        }
+      }
+      if (best === null) {
+        return none('no solve clip with a motion lag recorded (a build before T5.3)');
+      }
+      const facts = [...best.cameras.entries()]
+        .map(([camera, clips]) => solveClipFacts(camera, clips))
+        .join('; ');
+      return best.own >= 40 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.3.3',
+    round: T53,
+    section: LATENCY,
+    title:
+      "A drift of the MacBook's capture latency, if one comes (it came at the 38th attempt of both sessions of 2026-10-09): `latency +75 ms` in amber on the line under its picture within seconds, the next solve's `motion lag … (check …)` beside it, and where the frames waited",
+    kinds: ['recording.latency'],
+    eyes: 'the words on the line; a `motion lag …` without `latency …` beside it (the lag grew before the frames were timed), and what the camera turned off and on did to it',
+    check: (q) => {
+      const drifts = latencyEvents(q, 'drift', true);
+      const recovered = latencyEvents(q, 'recovered', true);
+      const own = [...solveClips(q).values()].flatMap((cameras) =>
+        [...cameras.values()].flat().filter((clip) => clip.event.kind === 'clip.saved'),
+      );
+      const offs = own.flatMap((clip) => {
+        const off = lagOff(clip);
+        return off === null ? [] : [off];
+      });
+      const far = offs.filter((off) => Math.abs(off) > 30).length;
+      const clips = `${String(far)} of ${String(offs.length)} solve clips of the host's own cameras with a motion lag more than 30 ms from their check's`;
+      const shown = drifts.slice(0, 5).map(driftFacts);
+      const facts = [
+        `${count(drifts, 'drift')}, ${String(recovered.length)} recovered`,
+        ...shown,
+        ...(drifts.length > shown.length
+          ? [`and ${String(drifts.length - shown.length)} more`]
+          : []),
+        clips,
+      ].join('; ');
+      return drifts.length > 0 ? ok(facts) : none(`no drift of a host's own camera; ${clips}`);
+    },
+  },
+  {
+    id: '5.3.4',
+    round: T53,
+    section: LATENCY,
+    title:
+      "The drift held through a whole attempt: the recording started again once its solve clip was saved, `restarted` on the line and in the session's notes, and the latency back within 30 ms after it, or not",
+    kinds: ['recording.restarted', 'recording.started', 'recording.latency'],
+    eyes: "`restarted` on the line, and the session's note",
+    check: (q) => {
+      const restarts = q.where('recording.restarted', (e) => text(e, 'why') === 'latency');
+      const facts = restarts
+        .map((restart) => {
+          const camera = text(restart, 'camera');
+          const started = q.next(restart, 'recording.started', MINUTE);
+          const back = q.next(
+            restart,
+            'recording.latency',
+            10 * MINUTE,
+            (e) =>
+              text(e, 'why') === 'recovered' &&
+              flag(e, 'remote') !== true &&
+              text(e, 'camera') === camera,
+          );
+          const delta = num(restart, 'deltaMs');
+          return `${when(restart.tsMs)} ${restart.device.label}: ${camera ?? '?'} ${delta === null ? '?' : signedMs(delta)} ms, ${started === null ? 'not started again within a minute' : `started again in ${round((started.tsMs - restart.tsMs) / 1000, 1)} s`}, ${back === null ? 'not recovered within 10 minutes' : `recovered ${round((back.tsMs - restart.tsMs) / 1000)} s after`}`;
+        })
+        .join('; ');
+      return found(restarts, `${count(restarts, 'restart')}: ${facts}`, 'no restart for a drift');
+    },
+  },
+  {
+    id: '5.3.5',
+    round: T53,
+    section: LATENCY,
+    title:
+      "The phone's capture latency on the rig: in the MacBook's minute records of it, and `latency …` on the line under its picture only if it drifts",
+    kinds: ['rtc.clock', 'recording.latency'],
+    eyes: "the line under the phone's picture",
+    check: (q) => {
+      const drifts = latencyEvents(q, 'drift', false);
+      const phones = [...phoneReports(q).entries()].flatMap(([peer, reports]) => {
+        const latencies = reports.flatMap(({ report }) => {
+          const value = reportNum(report, 'latencyMs');
+          return value === null ? [] : [value];
+        });
+        const middle = median(latencies);
+        const drifted = drifts.filter((e) => text(e, 'peer') === peer).length;
+        return middle === null
+          ? []
+          : [
+              `${peer}: ${String(latencies.length)} of ${String(reports.length)} reports with a latency, ${round(middle, 1)} ms at the median (${round(Math.min(...latencies), 1)} to ${round(Math.max(...latencies), 1)}), ${String(drifted)} ${drifted === 1 ? 'drift' : 'drifts'}`,
+            ];
+      });
+      return phones.length > 0
+        ? ok(phones.join('; '))
+        : none("no phone's report with a capture latency (a phone's build before T5.3)");
     },
   },
 ];

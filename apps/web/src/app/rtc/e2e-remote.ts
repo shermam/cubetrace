@@ -3,10 +3,10 @@ import { isDevMode } from '@angular/core';
 import type { BrowserGlobals } from '../device/browser-globals';
 
 /**
- * The window property through which the end-to-end suite bends the remote cameras' clips (T4.2),
- * read only in development builds (`ng serve`), never in production ones, like
- * `window.cubetraceE2eSignaling` (session-signaling.ts): apps/web/e2e/remote-clips.spec.ts sets it
- * before the app's scripts run.
+ * The window property through which the end-to-end suite bends the remote cameras' clips (T4.2), and
+ * the capture's motion meter (T5.3), read only in development builds (`ng serve`), never in
+ * production ones, like `window.cubetraceE2eSignaling` (session-signaling.ts):
+ * apps/web/e2e/remote-clips.spec.ts sets it before the app's scripts run.
  */
 export const E2E_REMOTE = 'cubetraceE2eRemote';
 
@@ -32,6 +32,18 @@ export interface E2eRemote {
    * the session still to come, in place of 15 s (T4.2b).
    */
   readonly finishWaitMs?: number;
+  /**
+   * The solves' motion meter goes off above this cost a frame, in place of 3 ms (T5.3,
+   * `CaptureConfig.motionCostLimitMs`): the suite's machines, loaded with the encoders and the dev
+   * server, take longer than a laptop does.
+   */
+  readonly motionCostLimitMs?: number;
+}
+
+/** The capture's config as the suite bends it (T5.3): its motion meter's cost limit, when set. */
+export function e2eCapture(globals: BrowserGlobals): { readonly motionCostLimitMs?: number } {
+  const limit = e2eRemote(globals).motionCostLimitMs;
+  return limit === undefined ? {} : { motionCostLimitMs: limit };
 }
 
 /** The end-to-end suite's settings, in a development build; none otherwise. */
@@ -54,5 +66,6 @@ export function e2eRemote(globals: BrowserGlobals): E2eRemote {
     ignoreCuts: ignoreCuts === true,
     clipWaitMs: number('clipWaitMs'),
     finishWaitMs: number('finishWaitMs'),
+    motionCostLimitMs: number('motionCostLimitMs'),
   };
 }

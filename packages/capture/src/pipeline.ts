@@ -4,7 +4,9 @@
 // cuts, clips (T2.3) and counters; it never touches a frame or an MP4. Since T2.4 two workers run:
 // the capture worker encodes and cuts, and the clip worker muxes and writes the clips, which reach
 // it from the capture worker through a channel of their own (docs/TOOLCHAIN.md, "Two workers").
-// Plain TypeScript: no Angular.
+// Since T5.3 it carries the capture latency's floor of a camera's track from one run of the pipeline
+// to the next on it (latency.ts), and turns the solves' motion meter on and off. Plain TypeScript: no
+// Angular.
 import type { Cut } from './cut';
 import type { FramingRect } from './framing';
 import {
@@ -68,6 +70,14 @@ export interface CaptureHandle {
     onError?: (message: string) => void,
     onMeter?: (meter: MotionMeterInfo) => void,
   ): () => void;
+  /**
+   * Turns the solves' motion meter on inside `rect` (frame pixels, as the framing rectangle; null for
+   * the whole frame), or off (docs/PLAN.md T5.3): while on, the worker measures every frame's motion
+   * as for a sync check and keeps it, so that a solve clip saved meanwhile comes with it
+   * (`SavedClip.motion`). Too costly on the device, or on frames it cannot read, it goes off for the
+   * rest of the run, and `onError` hears why (not fatal).
+   */
+  meterMotion(on: boolean, rect: FramingRect | null): void;
   /** `listener` gets the counters once per second; call the returned function to stop. */
   onStats(listener: (stats: CaptureStats) => void): () => void;
   /**
@@ -112,6 +122,14 @@ export const VIDEO_PROCESSOR_BUFFER = 10;
 export const AUDIO_PROCESSOR_BUFFER = 50;
 
 const REQUIRED_APIS = ['MediaStreamTrackProcessor', 'VideoEncoder', 'Worker'];
+
+/**
+ * The capture latency's floor of each video track the pipeline ran on (T5.3, latency.ts): the least
+ * `arrival − timestamp` its frames gave, so that a run started again on the same track (a quality
+ * changed, the recording restarted) counts its frames' latency from the same floor. Gone with the
+ * track.
+ */
+const FLOORS = new WeakMap<MediaStreamTrack, number>();
 
 /** Whether `scope` (the window) has what `startCapture` needs: Chrome does, others lack some. */
 export function captureSupport(scope: object = globalThis): CaptureSupport {
@@ -174,6 +192,13 @@ export function startCapture(
     config: resolved,
     frameRate: videoTrack.getSettings().frameRate ?? null,
     clips: channel.port1,
+    latencyFloorMs: FLOORS.get(videoTrack) ?? null,
+  });
+  capture.onStats((stats) => {
+    const floor = stats.latency?.floorMs ?? null;
+    if (floor !== null) {
+      FLOORS.set(videoTrack, floor);
+    }
   });
   return capture;
 }
@@ -355,6 +380,12 @@ class Capture implements CaptureHandle {
     };
   }
 
+  meterMotion(on: boolean, rect: FramingRect | null): void {
+    if (this.#stopping === undefined) {
+      post(this.#worker, { type: 'motion-meter', on, rect });
+    }
+  }
+
   onStats(listener: (stats: CaptureStats) => void): () => void {
     this.#statsListeners.add(listener);
     return () => {
@@ -450,7 +481,11 @@ class Capture implements CaptureHandle {
         settle(this.#cuts, message.id)?.reject(new Error(message.message));
         break;
       case 'mux-and-write-done':
-        settle(this.#clips, message.id)?.resolve({ clip: message.clip, report: message.report });
+        settle(this.#clips, message.id)?.resolve({
+          clip: message.clip,
+          report: message.report,
+          motion: message.motion,
+        });
         break;
       case 'mux-and-write-failed':
         settle(this.#clips, message.id)?.reject(new Error(message.message));

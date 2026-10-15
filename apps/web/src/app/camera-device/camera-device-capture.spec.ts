@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import type { CaptureStats } from '@cubetrace/capture';
 
 import { CameraService } from '../camera/camera-service';
 import { CAPTURE_STARTER } from '../camera/recording-service';
@@ -112,6 +113,45 @@ describe('CameraDeviceCapture', () => {
     expect(starter.last.audio).toBeNull();
     expect(starter.last.config.audio).toBe(false);
     expect(capture.microphone()).toBeNull();
+  });
+
+  it("gives the state its capture latency since the last one, and keeps the solves' meter across a restart (T5.3)", async () => {
+    const { capture, camera, settings } = rig();
+    capture.setWanted(true);
+    await camera.setRole('camera-device');
+    await camera.start();
+    await sync(capture);
+    expect(capture.takeLatency()).toBeNull();
+    const latency = (p50: number): Partial<CaptureStats> => ({
+      latency: {
+        capture: { p50, p95: p50 + 6, basis: 'timestamp' },
+        encode: { p50: 20, p95: 30 },
+        floorMs: 1_790_000_000_000,
+        queueMax: 1,
+        pending: 1,
+        waiting: 0,
+        frameIntervalMs: 33.3,
+      },
+    });
+    starter.last.emitStats(statsOf(1, latency(3.2)));
+    starter.last.emitStats(statsOf(2, latency(80.4)));
+    starter.last.emitStats(statsOf(3, latency(4.6)));
+    // The median of the seconds since the last state; then they are forgotten.
+    expect(capture.takeLatency()).toBe(4.6);
+    expect(capture.takeLatency()).toBeNull();
+    starter.last.emitStats(statsOf(4, latency(10)));
+    starter.last.emitStats(statsOf(5, latency(13)));
+    expect(capture.takeLatency()).toBe(11.5);
+
+    // The clips turn the solves' meter on; a pipeline started again (the quality) gets it too.
+    capture.meterMotion(true, { x: 10, y: 20, w: 300, h: 200 });
+    expect(starter.last.meters).toEqual([{ on: true, rect: { x: 10, y: 20, w: 300, h: 200 } }]);
+    settings.setVideoQuality('high');
+    await sync(capture);
+    expect(starter.started).toHaveLength(2);
+    expect(starter.last.metering).toBe(true);
+    capture.meterMotion(false, null);
+    expect(starter.last.metering).toBe(false);
   });
 
   it('says when the microphone cannot be had, and records the video anyway', async () => {

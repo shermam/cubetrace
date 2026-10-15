@@ -9,6 +9,7 @@ import {
   untracked,
 } from '@angular/core';
 import {
+  LatencyDrift,
   NO_AUDIO_DATA,
   captureSupport,
   startCapture,
@@ -24,6 +25,7 @@ import {
 } from '@cubetrace/capture';
 import {
   sameCamera,
+  type AttemptRecord,
   type CameraInfo,
   type MicrophoneInfo,
   type MicrophoneProcessing,
@@ -36,12 +38,20 @@ import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { STORAGE_STOP_PERCENT, StorageService } from '../device/storage-service';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
+import { e2eCapture } from '../rtc/e2e-remote';
 import { ClipsInFlight } from '../session/clips-in-flight';
-import { SessionService, type AttemptMilestone, type AttemptRef } from '../session/session-service';
+import {
+  SessionService,
+  withCameraLag,
+  type AttemptMilestone,
+  type AttemptRef,
+} from '../session/session-service';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { CameraService } from './camera-service';
 import { clipWindow } from './clip-windows';
+import { signedMs } from './latency-words';
+import { solveMotionPeak } from './solve-motion';
 import { openMicrophone } from './microphone';
 
 /**
@@ -109,6 +119,75 @@ export const STORAGE_REFRESH_MS = 60_000;
 export const STORAGE_FULL =
   `Storage is ${String(STORAGE_STOP_PERCENT)}% full: recording stopped (the timer goes on). ` +
   'Export or delete sessions to record again.';
+
+/** The counters of the last minutes are kept this long for each clip's summary (T5.3), ms. */
+export const STATS_KEPT_MS = 180_000;
+
+/**
+ * The capture pipeline over a clip's span (T5.3, `clip.saved`'s `pipeline`), from its counters of
+ * each second, for what the capture latency's meter cannot say alone: where frames queued.
+ */
+export interface PipelineSummary {
+  /**
+   * The median share of the frames read in a second that were already waiting when the worker asked
+   * for them (`CaptureLatencyStats.waiting`): near 1 when frames queue before the worker and the queue
+   * never drains, near 0 when the worker waits for each frame; to 0.01. Null without counters.
+   */
+  readonly waitingShare: number | null;
+  /** The most frames the encoder held when given one, over the span. */
+  readonly queueMax: number | null;
+  /** The most frames given to the encoder whose chunks had not come out, at a second's end. */
+  readonly pendingMax: number | null;
+  /**
+   * The median time the page's thread took to take the worker's counters (their `postedHostMs` to
+   * their arrival), ms to 0.1: a measure of how busy the page's thread was.
+   */
+  readonly mainDelayMs: number | null;
+  /** The seconds of counters over the span. */
+  readonly seconds: number;
+}
+
+/** The counters of one second, as they came to the page. */
+interface StatsEntry {
+  readonly atMs: number;
+  readonly stats: CaptureStats;
+}
+
+/**
+ * The pipeline over `[fromMs, toMs]` from the counters that came then (T5.3): see
+ * {@link PipelineSummary}.
+ */
+export function pipelineSummary(
+  entries: readonly StatsEntry[],
+  fromMs: number,
+  toMs: number,
+): PipelineSummary {
+  const inSpan = entries.filter((entry) => entry.atMs >= fromMs && entry.atMs <= toMs);
+  const latencies = inSpan.flatMap((entry) =>
+    entry.stats.latency === null ? [] : [entry.stats.latency],
+  );
+  const shares = inSpan.flatMap((entry) => {
+    const waiting = entry.stats.latency?.waiting;
+    return waiting === undefined || entry.stats.fps <= 0
+      ? []
+      : [Math.min(1, waiting / entry.stats.fps)];
+  });
+  const delays = inSpan.map((entry) => Math.max(0, entry.atMs - entry.stats.postedHostMs));
+  const round = (value: number, step: number): number => Math.round(value / step) * step;
+  return {
+    waitingShare: shares.length === 0 ? null : round(middle(shares), 0.01),
+    queueMax: latencies.length === 0 ? null : Math.max(...latencies.map((l) => l.queueMax)),
+    pendingMax: latencies.length === 0 ? null : Math.max(...latencies.map((l) => l.pending)),
+    mainDelayMs: delays.length === 0 ? null : Math.round(middle(delays) * 10) / 10,
+    seconds: inSpan.length,
+  };
+}
+
+/** A restart of the recording for a drifting capture latency (T5.3): when, and the drift then. */
+export interface LatencyRestart {
+  readonly atMs: number;
+  readonly deltaMs: number;
+}
 
 /** A clip waiting for its time, which `save` saves. */
 interface PlannedClip {
@@ -195,6 +274,8 @@ export class RecordingService {
   private readonly clipNoticeSignal = signal<string | null>(null);
   private readonly savingSignal = signal(0);
   private readonly microphoneSignal = signal<MicrophoneInfo | null>(null);
+  private readonly latencyDriftSignal = signal<number | null>(null);
+  private readonly restartedSignal = signal<LatencyRestart | null>(null);
 
   /** See {@link RecordingStatus}. */
   readonly status = this.statusSignal.asReadonly();
@@ -228,6 +309,17 @@ export class RecordingService {
    * `microphone`.
    */
   readonly microphone = this.microphoneSignal.asReadonly();
+  /**
+   * While the capture latency of the camera drifts from its value at the camera's last sync check
+   * (T5.3, issue #67: `LatencyDrift`, more than 30 ms for 5 s, over the last 10 s): by how much, ms,
+   * as the status line says it (`latency +75 ms`); null otherwise, and without a check.
+   */
+  readonly latencyDrift = this.latencyDriftSignal.asReadonly();
+  /**
+   * The last time the recording started again for a drifting capture latency (T5.3, "Restart the
+   * recording when its latency drifts"), while the drift lasts; null otherwise.
+   */
+  readonly restarted = this.restartedSignal.asReadonly();
   /** The origin's storage: usage, quota and the share in use; null until read. */
   readonly storage = computed<StorageMeterValue | null>(() => {
     const usage = this.storageService.usage();
@@ -260,6 +352,17 @@ export class RecordingService {
   private readonly notedThisRun = new Set<string>();
   /** The run of the pipeline whose `recording.started` was recorded (its first stats). */
   private announced: CaptureHandle | null = null;
+  /** The capture latency's drift from the camera's sync check (T5.3), and the camera it watches. */
+  private drift = new LatencyDrift();
+  private driftLabel: string | null = null;
+  /** The counters of the last {@link STATS_KEPT_MS}, for each clip's summary (T5.3). */
+  private recentStats: StatsEntry[] = [];
+  /** The attempt whose solve the motion meter measures (T5.3); null while it is off. */
+  private metering: AttemptRef | null = null;
+  /** The attempt after whose solve clip the pipeline starts again for its latency (T5.3). */
+  private restartAfter: AttemptRef | null = null;
+  /** The pipeline started again during the drift under way: once per drift. */
+  private restartedForDrift = false;
 
   constructor() {
     this.support = this.starter.support();
@@ -283,6 +386,33 @@ export class RecordingService {
       const quality = this.settings.videoQuality();
       untracked(() => {
         this.reconcile(stream, active, full, { audio, processing, quality });
+      });
+    });
+    // The capture latency's drift is measured from the camera's last sync check (T5.3): its meter's
+    // median then, kept in the session's `clock.cameras`; another camera starts from nothing.
+    effect(() => {
+      const session = this.session.session();
+      const identity = this.camera.identity();
+      const label =
+        identity === null || this.camera.status() !== 'on'
+          ? null
+          : this.session.cameraLabel(identity);
+      const check = label === null || session === null ? undefined : session.clock.cameras[label];
+      const baseline =
+        check === undefined || check.clapperboardSamples === 0
+          ? null
+          : (check.captureLatencyAtCheckMs ?? null);
+      untracked(() => {
+        if (label !== this.driftLabel) {
+          this.driftLabel = label;
+          this.drift = new LatencyDrift();
+          this.latencyDriftSignal.set(null);
+          this.restartedSignal.set(null);
+          this.restartedForDrift = false;
+        }
+        if (baseline !== this.drift.baselineMs) {
+          this.drift.setBaseline(baseline);
+        }
       });
     });
     // The session's `cameras` holds the camera's entry while it records, with its microphone, under
@@ -316,6 +446,14 @@ export class RecordingService {
   /** Resolves once the starts and stops asked for so far are done (for tests). */
   settled(): Promise<void> {
     return this.queue;
+  }
+
+  /**
+   * The camera's capture latency now (T5.3): the running median of the meter's last 10 s, ms; null
+   * without one. The sync check keeps it as its baseline (`captureLatencyAtCheckMs`).
+   */
+  captureLatencyMs(): number | null {
+    return this.drift.p50Ms;
   }
 
   /**
@@ -443,7 +581,11 @@ export class RecordingService {
     const audioTrack = microphone?.stream.getAudioTracks().at(0) ?? null;
     let handle: CaptureHandle;
     try {
-      handle = this.starter.start(video, audioTrack, { audio: audioTrack !== null, quality });
+      handle = this.starter.start(video, audioTrack, {
+        audio: audioTrack !== null,
+        quality,
+        ...e2eCapture(this.globals),
+      });
     } catch (error: unknown) {
       this.fail(generation, `Recording could not start: ${errorMessage(error)}`);
       return;
@@ -451,11 +593,24 @@ export class RecordingService {
     this.handle = handle;
     // The clips of this run take the entry of its camera from now on, not the last camera's.
     this.putEntry(audio);
+    // The latency's readings start again with the run (its floor is the track's, T5.3), and a solve
+    // under way keeps its motion meter.
+    this.drift.restart();
+    this.recentStats = [];
+    if (this.metering !== null && this.settings.motionMeter()) {
+      handle.meterMotion(true, this.camera.framing());
+    }
     handle.onStats((stats) => {
       if (this.handle !== handle) {
         return;
       }
       this.statsSignal.set(stats);
+      const nowMs = hostNow(this.globals);
+      this.recentStats = [
+        ...this.recentStats.filter((entry) => nowMs - entry.atMs <= STATS_KEPT_MS),
+        { atMs: nowMs, stats },
+      ];
+      this.watchLatency(stats);
       if (this.statusSignal() === 'starting' && stats.bufferSeconds > 0) {
         this.statusSignal.set('recording');
       }
@@ -610,11 +765,25 @@ export class RecordingService {
       case 'ended': {
         const window = clipWindow(milestone);
         if (window !== null) {
-          this.plan(attempt, window.segment, window.startMs, window.endMs);
+          this.plan(
+            attempt,
+            window.segment,
+            window.startMs,
+            window.endMs,
+            milestone.type === 'ended' ? milestone.record : null,
+          );
+        }
+        if (milestone.type === 'armed') {
+          this.meterSolve(attempt);
+        } else {
+          this.considerRestart(attempt, milestone.record);
         }
         break;
       }
       case 'dropped':
+        if (this.metering !== null && sameAttempt(this.metering, attempt)) {
+          this.stopMeter();
+        }
         // Its clips waiting for their time are not saved; those already saved are removed.
         for (const [key, planned] of this.planned) {
           if (sameAttempt(planned.attempt, attempt)) {
@@ -630,8 +799,17 @@ export class RecordingService {
     }
   }
 
-  /** Saves the clip of `segment` once its end is in the buffer, if the pipeline runs now. */
-  private plan(attempt: AttemptRef, segment: VideoSegment, startMs: number, endMs: number): void {
+  /**
+   * Saves the clip of `segment` once its end is in the buffer, if the pipeline runs now; a solve
+   * clip with its attempt's `record`, whose moves place its motion (T5.3).
+   */
+  private plan(
+    attempt: AttemptRef,
+    segment: VideoSegment,
+    startMs: number,
+    endMs: number,
+    record: AttemptRecord | null = null,
+  ): void {
     const handle = this.handle;
     const recorded = this.cameraEntry;
     if (handle === null || recorded === null) {
@@ -639,7 +817,7 @@ export class RecordingService {
     }
     const key = `${attempt.session}/${String(attempt.index)}/${String(attempt.scrambleShown)}/${segment}`;
     const save = (): Promise<void> => {
-      const saving = this.save(handle, recorded, attempt, segment, startMs, endMs);
+      const saving = this.save(handle, recorded, attempt, segment, startMs, endMs, record);
       this.saving.add(saving);
       this.savingSignal.set(this.saving.size);
       void saving.finally(() => {
@@ -647,6 +825,9 @@ export class RecordingService {
         this.savingSignal.set(this.saving.size);
         // Saved in its record (or failed, or its attempt gone): its upload need not wait for it.
         this.inFlight.end(attempt.session, attempt.index);
+        if (segment === 'solve') {
+          this.solveSaved(attempt);
+        }
       });
       return saving;
     };
@@ -675,6 +856,7 @@ export class RecordingService {
     segment: VideoSegment,
     startHostMs: number,
     endHostMs: number,
+    record: AttemptRecord | null,
   ): Promise<void> {
     if (!this.session.hasAttempt(attempt)) {
       return;
@@ -696,7 +878,16 @@ export class RecordingService {
         // The frames file names the build that wrote it (T3.7).
         app: APP_BUILD,
       });
-      clip = { ...saved.clip, crop: this.cropNow(recorded) };
+      // A solve clip says where its motion peaked around the solve's moves (T5.3); its camera's lag
+      // from them is added with its sync check's lag when it is attached (`withCameraLag`).
+      const peak = segment === 'solve' ? solveMotionPeak(saved.motion, record) : null;
+      clip = {
+        ...saved.clip,
+        crop: this.cropNow(recorded),
+        ...(segment === 'solve'
+          ? { motionPeakMs: peak?.peakMs ?? null, motionSpreadMs: peak?.spreadMs ?? null }
+          : {}),
+      };
       report = saved.report;
     } catch (error: unknown) {
       this.failed(attempt, segment, errorMessage(error));
@@ -714,7 +905,10 @@ export class RecordingService {
       this.remove(handle, attempt, clip);
       return;
     }
-    this.lastClipSignal.set({ index: attempt.index, clip });
+    // The clip as its record has it: its camera's lags from the session's check (T2.5, T5.3).
+    const session = this.session.session();
+    const lagged = withCameraLag(clip, session?.id === attempt.session ? session : null);
+    this.lastClipSignal.set({ index: attempt.index, clip: lagged });
     this.diagnostics.record(
       'clip.saved',
       {
@@ -728,9 +922,18 @@ export class RecordingService {
         truncatedStart: clip.truncatedStart,
         lateMs: report.lateMs,
         bufferSeconds: report.bufferSeconds,
-        syncResidualMs: clip.syncResidualMs,
+        syncResidualMs: lagged.syncResidualMs,
         audioRebasedMs: report.audioRebasedMs,
         kept: attached === 'kept',
+        // T5.3 (issue #67): the frames' latencies, the clip's cadence, its motion lag, and what the
+        // pipeline's counters said over its span.
+        captureLatencyMs: clip.captureLatencyMs ?? null,
+        encodeLatencyMs: clip.encodeLatencyMs ?? null,
+        frameIntervalMs: report.frameIntervalMs,
+        motionPeakMs: lagged.motionPeakMs ?? null,
+        motionSpreadMs: lagged.motionSpreadMs ?? null,
+        motionLagMs: lagged.motionLagMs ?? null,
+        pipeline: { ...pipelineSummary(this.recentStats, startHostMs, endHostMs + 2000) },
       },
       { session: attempt.session, attempt: attempt.index },
     );
@@ -846,6 +1049,137 @@ export class RecordingService {
     this.note(attempt.session, line);
   }
 
+  /**
+   * The capture latency's drift (T5.3), from the counters of each second: `recording.latency` when
+   * the drift rule says so (`LatencyDrift`: once the running median of the last 10 s has sat more
+   * than 30 ms from the camera's sync check for 5 s, and once back within for 5 s, a minute apart at
+   * most), with what the counters say of where the frames waited; the status line's word.
+   */
+  private watchLatency(stats: CaptureStats): void {
+    const latency = stats.latency;
+    const capture = latency?.capture ?? null;
+    const event = this.drift.update(
+      hostNow(this.globals),
+      capture === null ? null : { p50: capture.p50, p95: capture.p95 },
+    );
+    const drifting = this.drift.driftingSinceMs !== null;
+    // While it drifts, the last delta known (the readings start again with a run of the pipeline).
+    this.latencyDriftSignal.set(
+      drifting ? (this.drift.deltaMs ?? this.latencyDriftSignal()) : null,
+    );
+    if (!drifting) {
+      this.restartedForDrift = false;
+      this.restartedSignal.set(null);
+    }
+    if (event === null) {
+      return;
+    }
+    this.diagnostics.record('recording.latency', {
+      camera: this.cameraEntry?.entry.label ?? null,
+      why: event.why,
+      baselineMs: event.baselineMs,
+      p50Ms: event.p50Ms,
+      p95Ms: event.p95Ms,
+      deltaMs: event.deltaMs,
+      basis: capture?.basis ?? null,
+      encodeP50Ms: latency?.encode?.p50 ?? null,
+      waiting: latency?.waiting ?? null,
+      fps: stats.fps,
+      queueMax: latency?.queueMax ?? null,
+      pending: latency?.pending ?? null,
+      frameIntervalMs: latency?.frameIntervalMs ?? null,
+      restartOn: this.settings.restartOnLatencyDrift(),
+    });
+  }
+
+  /**
+   * The attempt is armed: its solve comes next, and the capture measures the motion of its frames
+   * inside the framing rectangle until its solve clip is saved (T5.3, "Measure the motion during
+   * solves").
+   */
+  private meterSolve(attempt: AttemptRef): void {
+    const handle = this.handle;
+    if (handle === null || !this.settings.motionMeter()) {
+      return;
+    }
+    this.metering = attempt;
+    handle.meterMotion(true, this.camera.framing());
+  }
+
+  /** The motion meter goes off (the solve clip saved, the attempt gone). */
+  private stopMeter(): void {
+    this.metering = null;
+    this.handle?.meterMotion(false, null);
+  }
+
+  /**
+   * The attempt ended: when the capture latency had drifted since before its scramble's first turn
+   * and still does, so through the whole attempt, the recording starts again once its solve clip is
+   * saved (T5.3: "Restart the recording when its latency drifts"), once per drift.
+   */
+  private considerRestart(attempt: AttemptRef, record: AttemptRecord): void {
+    const since = this.drift.driftingSinceMs;
+    const began = record.events.scrambleStart ?? record.events.scrambleShown;
+    if (
+      this.settings.restartOnLatencyDrift() &&
+      since !== null &&
+      since <= began &&
+      !this.restartedForDrift
+    ) {
+      this.restartAfter = attempt;
+    }
+  }
+
+  /** The attempt's solve clip is saved (or failed): the meter goes off, and a restart may come. */
+  private solveSaved(attempt: AttemptRef): void {
+    if (this.metering !== null && sameAttempt(this.metering, attempt)) {
+      this.stopMeter();
+    }
+    if (this.restartAfter !== null && sameAttempt(this.restartAfter, attempt)) {
+      this.restartAfter = null;
+      this.restartForLatency(attempt);
+    }
+  }
+
+  /**
+   * Starts the recording again between attempts for a capture latency that drifted for a whole
+   * attempt (T5.3, issue #67's mitigation): `recording.restarted`, the session's note and the status
+   * line say so; its readings begin again, and the drift is said recovered once back within 30 ms.
+   */
+  private restartForLatency(attempt: AttemptRef): void {
+    const target = this.target;
+    if (target === null || this.handle === null) {
+      return;
+    }
+    const deltaMs = this.latencyDriftSignal() ?? 0;
+    const label = this.cameraEntry?.entry.label ?? null;
+    this.restartedForDrift = true;
+    this.restartedSignal.set({ atMs: hostNow(this.globals), deltaMs });
+    this.diagnostics.record(
+      'recording.restarted',
+      {
+        why: 'latency',
+        camera: label,
+        deltaMs,
+        baselineMs: this.drift.baselineMs,
+        p50Ms: this.drift.p50Ms,
+        p95Ms: this.drift.p95Ms,
+      },
+      { session: attempt.session, attempt: attempt.index },
+    );
+    this.note(
+      attempt.session,
+      `recording restarted: the capture latency of ${label ?? 'the camera'} was ${signedMs(deltaMs)} from its sync check's for a whole attempt (after attempt ${String(attempt.index)})`,
+    );
+    const generation = ++this.generation;
+    void this.serially(async () => {
+      await this.stopPipeline();
+      if (generation === this.generation) {
+        await this.startPipeline(generation, target);
+      }
+    });
+  }
+
   private startRefreshing(): void {
     if (this.refreshTimer !== null) {
       return;
@@ -885,6 +1219,13 @@ export class RecordingService {
       });
     clear(handle);
   }
+}
+
+/** The median of `values` (at least one), the mean of the middle two for an even count. */
+function middle(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const half = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[half] : (sorted[half - 1] + sorted[half]) / 2;
 }
 
 /** `value` when it is a finite number (a camera's settings as JSON); null otherwise. */

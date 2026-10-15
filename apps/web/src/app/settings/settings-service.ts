@@ -239,6 +239,13 @@ interface StoredSettings {
   readonly remotePictures: RemotePictures | null;
   /** T5.2: a mode the camera changes by itself is set back ("Keep the camera's modes"). */
   readonly keepCameraModes: boolean;
+  /** T5.3: the capture measures each frame's motion during a solve ("Measure the motion during solves"). */
+  readonly motionMeter: boolean;
+  /**
+   * T5.3: the recording starts again between attempts when its capture latency drifted for a whole
+   * attempt ("Restart the recording when its latency drifts").
+   */
+  readonly restartOnLatencyDrift: boolean;
 }
 
 const DEFAULTS: StoredSettings = {
@@ -269,6 +276,8 @@ const DEFAULTS: StoredSettings = {
   livePreviewFromPhones: true,
   remotePictures: null,
   keepCameraModes: true,
+  motionMeter: true,
+  restartOnLatencyDrift: true,
 };
 
 /** Why `text` is not a MAC address (the words the connect dialog uses too). */
@@ -298,7 +307,10 @@ export function macAddressProblem(text: string): string {
  * section of Camera settings) and asks them for a live picture (T4.3: "Live preview from phones",
  * there too), shown at the size of its own picture or as small tiles (T5.1: "Pictures from phones",
  * there too); and whether a mode the camera changes by itself is set back (T5.2: "Keep the camera's
- * modes"). Signals, kept
+ * modes"); and whether the capture measures the motion of the frames during each solve, for the
+ * camera's lag from the solve's own moves (T5.3: "Measure the motion during solves"), and starts the
+ * recording again between attempts when its capture latency drifted for a whole attempt (T5.3:
+ * "Restart the recording when its latency drifts"). Signals, kept
  * in `localStorage` (through BROWSER_GLOBALS) as one JSON object that is written on every change.
  * Where the browser blocks storage the settings last until the page closes, and `saveError` says so.
  * Signed in, the cube list is kept in sync with the account's by CubeSyncService (T3.4), which is
@@ -428,6 +440,21 @@ export class SettingsService {
    * said and left. On by default; for the host's own camera and for a phone's alike.
    */
   readonly keepCameraModes = computed(() => this.stored().keepCameraModes);
+  /**
+   * "Measure the motion during solves" (T5.3, Settings → Camera): during each solve the capture
+   * worker measures the motion of every frame inside the framing rectangle (the sync check's meter),
+   * so that each solve clip says where its camera's lag was (`motionLagMs`, issue #67). On by
+   * default; the meter goes off by itself on a device where it costs more than 3 ms a frame. On a
+   * phone filming for another device, its own setting.
+   */
+  readonly motionMeter = computed(() => this.stored().motionMeter);
+  /**
+   * "Restart the recording when its latency drifts" (T5.3, Settings → Camera): when the capture
+   * latency of this device's own camera sat more than 30 ms from its sync check's for a whole
+   * attempt, the recording starts again between that attempt and the next (issue #67's mitigation).
+   * On by default.
+   */
+  readonly restartOnLatencyDrift = computed(() => this.stored().restartOnLatencyDrift);
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
@@ -616,6 +643,18 @@ export class SettingsService {
     }
   }
 
+  setMotionMeter(on: boolean): void {
+    if (on !== this.stored().motionMeter) {
+      this.update({ motionMeter: on });
+    }
+  }
+
+  setRestartOnLatencyDrift(on: boolean): void {
+    if (on !== this.stored().restartOnLatencyDrift) {
+      this.update({ restartOnLatencyDrift: on });
+    }
+  }
+
   /** The clip viewer's choice for the camera labelled `camera`, or null when it has none. */
   viewerChoiceFor(camera: string): ViewerChoice | null {
     const choices = this.stored().viewer;
@@ -773,6 +812,8 @@ function readSettings(
   const livePreviewFromPhones = member(parsed, 'livePreviewFromPhones');
   const remotePictures = member(parsed, 'remotePictures');
   const keepCameraModes = member(parsed, 'keepCameraModes');
+  const motionMeter = member(parsed, 'motionMeter');
+  const restartOnLatencyDrift = member(parsed, 'restartOnLatencyDrift');
   const cubeMacs = readCubeMacs(member(parsed, 'cubeMacs'), nowMs);
   const settings: StoredSettings = {
     hostLabel:
@@ -839,6 +880,12 @@ function readSettings(
     // Settings stored before T5.2 have none: on, as for a new device.
     keepCameraModes:
       typeof keepCameraModes === 'boolean' ? keepCameraModes : DEFAULTS.keepCameraModes,
+    // Settings stored before T5.3 have neither: on, as for a new device.
+    motionMeter: typeof motionMeter === 'boolean' ? motionMeter : DEFAULTS.motionMeter,
+    restartOnLatencyDrift:
+      typeof restartOnLatencyDrift === 'boolean'
+        ? restartOnLatencyDrift
+        : DEFAULTS.restartOnLatencyDrift,
   };
   return { settings, migrated: cubeMacs.migrated };
 }
