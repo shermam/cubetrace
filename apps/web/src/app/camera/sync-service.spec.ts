@@ -5,6 +5,7 @@ import { FAKE_FACETIME, FAKE_WEBCAM } from '../device/fake-browser';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SYNC_GRACE_MS, SYNC_SETTLE_MS } from '../session/session-service';
 import { inverse, ready, turn } from '../session/session-harness';
+import { HostCamerasService } from './host-cameras-service';
 import { statsOf, type FakeCapture } from './recording-testing';
 import { SYNC_TICK_MS, SYNC_TURNS } from './sync-run';
 import {
@@ -343,6 +344,68 @@ describe('SyncService', () => {
       laptop: { offsetMs: 49, clapperboardSamples: 8 },
       'laptop-2': { offsetMs: 177, clapperboardSamples: 8 },
     });
+  });
+
+  it("checks each camera of the laptop on its own frames, its lag under its own label; only the first one's is due by itself (T5.5)", async () => {
+    const r = rig([FAKE_WEBCAM, FAKE_FACETIME]);
+    const { fake, capture } = await recording(r);
+    // The FaceTime camera on too, beside the first: a pipeline of its own.
+    const hosts = TestBed.inject(HostCamerasService);
+    const device = hosts.devices().find((one) => one.deviceId === 'facetime');
+    if (device === undefined) {
+      throw new Error('No FaceTime camera.');
+    }
+    await hosts.setOn(device, true);
+    await update(r);
+    const [first, second] = hosts.cameras();
+    const facetime = r.starter.started.filter(
+      (started) => started.video === second.stream()?.getVideoTracks()[0],
+    )[0];
+    facetime.emitStats(statsOf(5));
+    await update(r);
+    expect(r.sync.locals().map((local) => local.label)).toEqual(['laptop', 'laptop-2']);
+    expect(r.sync.locals().map((local) => local.camera)).toEqual([first, second]);
+
+    // The first camera's check, due by itself with the session, on its own pipeline.
+    expect(r.sync.run()?.state()).toBe('running');
+    expect(r.sync.localCamera()).toBe(first);
+    const one = clapperboard(r.s.perf.hostMs, LAGS);
+    await film(r, capture, fake, 14_000, one.energy, one.turns);
+    expect(r.sync.result()?.label).toBe('laptop');
+    expect(facetime.watches).toEqual([]);
+    r.sync.later();
+    await settleAfter(r, capture, fake);
+    // The second camera's is not due by itself: its line has it.
+    expect(r.sync.visible()).toBe(false);
+    expect(r.sync.storedOf(second)).toBeNull();
+    expect(r.sync.blockedOf(second)).toBeNull();
+
+    // Its line's Sync check: its framing first (the whole frame), then its own frames.
+    r.sync.start({ camera: second });
+    expect(r.sync.waiting()).toBe(true);
+    expect(r.sync.localCamera()).toBe(second);
+    second.setFraming(AROUND_THE_CUBE);
+    await update(r);
+    r.sync.again();
+    await update(r);
+    expect(r.sync.run()?.state()).toBe('running');
+    expect(facetime.watches).toHaveLength(1);
+    expect(facetime.watches[0].rect).toEqual(AROUND_THE_CUBE);
+    expect(capture.watches).toHaveLength(1);
+    const lags = LAGS.map((lag) => lag + 128);
+    const two = clapperboard(r.s.perf.hostMs, lags);
+    await film(r, facetime, fake, 14_000, two.energy, two.turns);
+    expect(r.sync.result()).toMatchObject({
+      label: 'laptop-2',
+      saved: true,
+      outcome: { ok: true, offsetMs: 177 },
+    });
+    const cameras = r.s.service.session()?.clock.cameras ?? {};
+    expect(Object.keys(cameras)).toEqual(['laptop', 'laptop-2']);
+    expect(cameras['laptop'].offsetMs).toBe(49);
+    expect(cameras['laptop-2'].offsetMs).toBe(177);
+    expect(r.sync.storedOf(second)).toEqual(cameras['laptop-2']);
+    expect(r.sync.stored()).toEqual(cameras['laptop']);
   });
 
   it('fails after 20 s without turns, keeping nothing, and Retry starts it again', async () => {

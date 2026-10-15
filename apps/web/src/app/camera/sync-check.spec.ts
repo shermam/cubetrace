@@ -5,6 +5,7 @@ import { SYNC_TICK_MS } from './sync-run';
 import { SyncCheck } from './sync-check';
 import { FAKE_FACETIME, FAKE_WEBCAM, settle } from '../device/fake-browser';
 import { ready, turn } from '../session/session-harness';
+import { HostCamerasService } from './host-cameras-service';
 import { statsOf } from './recording-testing';
 import { RemoteCameraRegistry } from './remote-camera-registry';
 import {
@@ -178,6 +179,52 @@ describe('SyncCheck', () => {
     await refresh();
     expect(element.querySelector('[data-testid="sync-check"]')).toBeNull();
     expect(text(element, 'sync-line')).toBe(lag);
+  });
+
+  it('gives each camera of the laptop a line of its own, named, whose Sync check runs on it; the panel names it (T5.5)', async () => {
+    const r = rig([FAKE_WEBCAM, FAKE_FACETIME]);
+    const { element, refresh } = render(r);
+    const { fake, capture } = await recording(r);
+    const first = clapperboard(r.s.perf.hostMs, [45, 10, 47, 48, 49, 95, 49, 50, 51, 53]);
+    await film(r, capture, fake, 14_000, first.energy, first.turns);
+    await refresh();
+    button(element, 'sync-later')?.click();
+    await film(r, capture, fake, SYNC_SETTLE_MS + SYNC_GRACE_MS + SYNC_TICK_MS, STILL);
+    await refresh();
+
+    // The FaceTime camera on beside it: two lines, each naming its camera.
+    const hosts = TestBed.inject(HostCamerasService);
+    const device = hosts.devices().find((one) => one.deviceId === 'facetime');
+    if (device === undefined) {
+      throw new Error('No FaceTime camera.');
+    }
+    await hosts.setOn(device, true);
+    await refresh();
+    r.starter.last.emitStats(statsOf(5));
+    await refresh();
+    const lines = (): (string | undefined)[] =>
+      Array.from(element.querySelectorAll('[data-testid="sync-line"]'), (line) =>
+        line.textContent.replace(/\s+/g, ' ').trim(),
+      );
+    expect(lines()).toEqual([
+      'Sync: laptop lags the cube by 49 ms (±8). Sync check',
+      'Sync: laptop-2 has no check in this session. Sync check',
+    ]);
+    expect(
+      Array.from(element.querySelectorAll('[data-testid="sync-line"]'), (line) =>
+        line.getAttribute('data-label'),
+      ),
+    ).toEqual(['laptop', 'laptop-2']);
+    // Not due by itself: its line runs it, the panel naming the camera.
+    expect(element.querySelector('[data-testid="sync-check"]')).toBeNull();
+    element.querySelectorAll<HTMLButtonElement>('button[data-testid="sync-start"]').item(1).click();
+    await refresh();
+    expect(state(element)).toBe('framing');
+    expect(text(element, 'sync-heading')).toBe('Sync check · laptop-2');
+    // Edit the framing opens the second camera's editor.
+    button(element, 'sync-edit-framing')?.click();
+    expect(hosts.cameras()[1].framingEditing()).toBe(true);
+    expect(hosts.cameras()[0].framingEditing()).toBe(false);
   });
 
   it('counts no turn made in its first second, while it asks to hold still', async () => {
