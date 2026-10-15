@@ -39,6 +39,7 @@ import {
   CameraDeviceService,
   HELLO_TIMEOUT_MS,
   LEAVE_GRACE_MS,
+  MODEL_WAIT_MS,
   RECONNECT_WINDOW_MS,
   REFUSAL_TEXT,
   REPORT_INTERVAL_MS,
@@ -196,7 +197,15 @@ class Host {
 describe('CameraDeviceService', () => {
   let r: Rig;
 
-  function rig(options: { signedIn?: boolean; pressure?: FakePressure; model?: string } = {}): Rig {
+  function rig(
+    options: {
+      signedIn?: boolean;
+      pressure?: FakePressure;
+      model?: string;
+      /** The client hints' answer, when the test says (T5.6); `model`'s at once otherwise. */
+      answer?: Promise<unknown>;
+    } = {},
+  ): Rig {
     TestBed.resetTestingModule();
     const backend = new FakeAccountBackend();
     const localStorage = new FakeLocalStorage();
@@ -220,13 +229,14 @@ describe('CameraDeviceService', () => {
     const connector = new MemoryConnector({ delayMs: 4, timers: rtcTimers(perf, timers) });
     // T5.6: the phone's model, as Chrome on Android gives it through the client hints.
     const hints =
-      options.model === undefined
+      options.model === undefined && options.answer === undefined
         ? {}
         : {
             userAgentData: {
               platform: 'Android',
               mobile: true,
               getHighEntropyValues: (asked: string[]) =>
+                options.answer ??
                 Promise.resolve(asked.includes('model') ? { model: options.model } : {}),
             },
           };
@@ -462,6 +472,44 @@ describe('CameraDeviceService', () => {
     // A new code forgets it.
     r.service.reset();
     expect(r.service.label()).toBeNull();
+  });
+
+  it('makes its first call once the browser said its model, so that its first hello names it; 2 s at most (T5.6)', async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    r = rig({ answer: new Promise((resolve) => (answer = resolve)) });
+    await settle();
+    await cameraOn();
+    const host = new Host(r);
+    const token = await host.publish();
+    r.service.join({ sessionId: host.sessionId, token });
+    await pump(500);
+    // Checked and joining, but no call before the model.
+    expect(r.service.state()).toBe('joining');
+    expect(host.connections).toBe(0);
+    answer({ model: 'moto g60' });
+    await called(host, 1);
+    await pump(20);
+    expect(host.of('hello')[0].device.model).toBe('moto g60');
+    expect(host.of('hello')[0].device.label).toBe('moto g60');
+
+    // A browser that never says: the call goes after MODEL_WAIT_MS, without a model.
+    r = rig({ answer: new Promise(() => undefined) });
+    await settle();
+    await cameraOn();
+    const other = new Host(r);
+    const code = await other.publish();
+    r.service.join({ sessionId: other.sessionId, token: code });
+    // The code checked, the wait begins.
+    for (let k = 0; k < 50 && r.service.state() !== 'joining'; k++) {
+      await settle();
+    }
+    expect(r.service.state()).toBe('joining');
+    await pump(MODEL_WAIT_MS - 200);
+    expect(other.connections).toBe(0);
+    await pump(400);
+    await called(other, 1);
+    await pump(20);
+    expect(other.of('hello')[0].device).toMatchObject({ label: 'Android phone', model: null });
   });
 
   it('finds the session of a code typed alone among the account’s sessions', async () => {

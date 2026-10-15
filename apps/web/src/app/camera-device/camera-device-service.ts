@@ -99,6 +99,12 @@ export const RETRY_DELAY_MS = 3000;
 /** How long `leave` has to go out before the connection is closed (`RTCPeerConnection.close` drops what is queued). */
 export const LEAVE_GRACE_MS = 250;
 
+/**
+ * How long the first call waits, at most, for the browser to say the device's model (T5.6), which it
+ * does within milliseconds; the hello goes without it after that.
+ */
+export const MODEL_WAIT_MS = 2000;
+
 /** How many of the account's newest sessions are looked at for a code typed without its session. */
 const SESSIONS_SEARCHED = 20;
 
@@ -414,7 +420,28 @@ export class CameraDeviceService {
     this.hold();
     this.setState('joining', null);
     this.joinUntilMs = this.timers.now() + PAIRING_TTL_MS;
+    // The phone's model first (T5.6), so that its first hello names it as every later one does: the
+    // host's session tells the cameras of phones apart by it too (`identityName`, for when the host's
+    // page reloaded). The browser says it within milliseconds of the page's start.
+    await this.modelKnown();
+    if (generation !== this.generation) {
+      return;
+    }
     await this.call(signaling, await hashToken(input.token), generation, false);
+  }
+
+  /**
+   * Resolves once the browser said the device's model (T5.6, `SettingsService.modelRead`), or after
+   * {@link MODEL_WAIT_MS} if it is slow to.
+   */
+  private modelKnown(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timer = this.timers.setTimeout(resolve, MODEL_WAIT_MS);
+      void this.settings.modelRead.then(() => {
+        this.timers.clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /**

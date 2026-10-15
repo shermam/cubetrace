@@ -484,6 +484,12 @@ export class SettingsService {
 
   /** This installation's id once made or read (T5.6); see {@link installationId}. */
   private installation: string | null = this.loaded.settings.installationId;
+  /**
+   * Settles once the browser said the device's model, or that it gives none (T5.6, at each page
+   * load, within milliseconds): a phone's first `hello` waits for it, so that every hello of the
+   * page names the model alike.
+   */
+  readonly modelRead: Promise<void>;
 
   constructor() {
     if (this.loaded.migrated) {
@@ -492,7 +498,7 @@ export class SettingsService {
       this.saveErrorSignal.set(writeSettings(this.storage, this.stored()));
     }
     // The device's model (T5.6), which the browser gives in a moment: the default label follows it.
-    void deviceModel(this.globals.navigator).then((model) => {
+    this.modelRead = deviceModel(this.globals.navigator).then((model) => {
       if (model !== undefined) {
         this.learnModel(model);
       }

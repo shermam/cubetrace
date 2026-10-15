@@ -220,6 +220,22 @@ export type AttemptMilestone =
 /** What `attachClip` did with a clip: kept for a record to come, saved in one, or nothing. */
 export type ClipAttachment = 'kept' | 'saved' | 'gone';
 
+/**
+ * The name a session tells a camera by (`labelFor`'s `deviceLabel`, T2.14: the browser's name for
+ * it), with a remote camera's model where the phone gave one (T5.6, `remote.model`). The host knows
+ * a phone by its installation id only while its page is open (no record keeps one): after a reload,
+ * two phones whose cameras the browser names alike ("camera 0, facing back") are still two devices
+ * by their models, each getting its label back as it pairs again in whatever order; two phones of
+ * one model, or without one, by the name alone, as before. (An entry recorded before T5.6 has no
+ * `model`: `cameraIdentities` names it as the camera to label, matching it by the name alone.)
+ */
+export function identityName(camera: Pick<CameraInfo, 'deviceLabel' | 'remote'>): string {
+  const model = camera.remote?.model ?? null;
+  return model === null || model === ''
+    ? camera.deviceLabel
+    : `${camera.deviceLabel}\u0000${model}`;
+}
+
 /** The device ids of a session's cameras by their labels, as known on this page (T2.14). */
 interface CameraIds {
   readonly session: string;
@@ -1023,7 +1039,9 @@ export class SessionService {
 
   /**
    * Puts `camera` in the current session's `cameras` (T2.4) under the label the session gives it
-   * (`cameraLabel`, with `deviceId`, the camera's device id when the browser gives one, T2.14),
+   * (`cameraLabel`, with `deviceId`, the camera's device id when the browser gives one, T2.14; a
+   * remote camera's, its phone's installation id, and its name with its phone's model, T5.6,
+   * `identityName`),
    * replacing the entry of that label, the same device's, its `microphone` included (T2.12: what
    * the browser applied to the microphone of its clips), and `audio` in its `audio`, and saves
    * session.json; nothing when both are already so. Returns the entry as the session has it, its
@@ -1034,7 +1052,11 @@ export class SessionService {
     if (session === null) {
       return null;
     }
-    const label = labelFor(this.cameraIdentities(session), { ...camera, deviceId });
+    const label = labelFor(this.cameraIdentities(session, camera), {
+      ...camera,
+      deviceLabel: identityName(camera),
+      deviceId,
+    });
     const entry: CameraInfo = { ...camera, label };
     if (deviceId !== null) {
       this.rememberCameraId(session.id, label, deviceId);
@@ -1157,14 +1179,27 @@ export class SessionService {
     });
   }
 
-  /** The cameras of `session` as `labelFor` tells them apart: with their device ids known here. */
-  private cameraIdentities(session: SessionRecord): CameraIdentity[] {
+  /**
+   * The cameras of `session` as `labelFor` tells them apart: with their device ids known here, and a
+   * remote camera's name with its phone's model (`identityName`, T5.6). A remote camera's entry
+   * recorded before T5.6, without `model`, takes the model of `camera`, the camera to label: a phone
+   * of a session that spans the update gets its label back by its name alone, as it did before.
+   */
+  private cameraIdentities(
+    session: SessionRecord,
+    camera: Pick<CameraInfo, 'remote'> | null = null,
+  ): CameraIdentity[] {
     const known = this.cameraIdsSignal();
     const ids = known?.session === session.id ? known.ids : null;
-    return session.cameras.map((camera) => ({
-      label: camera.label,
-      deviceLabel: camera.deviceLabel,
-      deviceId: ids?.get(camera.label) ?? null,
+    const model = camera?.remote?.model;
+    return session.cameras.map((entry) => ({
+      label: entry.label,
+      deviceLabel: identityName(
+        entry.remote !== undefined && entry.remote.model === undefined && model !== undefined
+          ? { ...entry, remote: { ...entry.remote, model } }
+          : entry,
+      ),
+      deviceId: ids?.get(entry.label) ?? null,
     }));
   }
 
