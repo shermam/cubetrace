@@ -288,7 +288,11 @@ describe('CameraDeviceClips', () => {
     const mp4 = mp4Text(mp4Bytes);
     await r.root.plant(`${folder}/${params.camera}.${params.segment}.frames.json`, frames);
     await r.root.plant(`${folder}/${params.camera}.${params.segment}.mp4`, mp4);
-    pending.resolve({ clip: { ...clipFor(params), bytes: mp4Bytes }, report: CLIP_AS_ASKED });
+    pending.resolve({
+      clip: { ...clipFor(params), bytes: mp4Bytes },
+      report: CLIP_AS_ASKED,
+      motion: null,
+    });
     await pump(0);
     return { frames, mp4 };
   }

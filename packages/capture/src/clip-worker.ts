@@ -76,6 +76,7 @@ export class ClipWorker {
         fpsNominal,
         truncatedStart: info.truncatedStart,
         ...(app === undefined ? {} : { app }),
+        latency: job.latency,
       });
       this.#answer({
         type: 'mux-and-write-done',
@@ -88,6 +89,8 @@ export class ClipWorker {
           audioRebasedMs: info.audioRebasedMs,
           audioConfigMade: info.audio !== null && job.audio.configMade,
         },
+        // The solve's motion (T5.3) goes on to the window, which finds the camera's lag from it.
+        motion: job.motion,
       });
     } catch (error: unknown) {
       this.#answer({ type: 'mux-and-write-failed', id, message: describeError(error) });

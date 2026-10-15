@@ -30,6 +30,10 @@ const DETAILS: ClipDetails = {
   height: 1080,
   fpsNominal: 30,
   truncatedStart: false,
+  latency: {
+    capture: { p50: 3.9, p95: 10.5, basis: 'timestamp' },
+    encode: { p50: 18.3, p95: 26.1 },
+  },
 };
 
 /** Stands for an MP4: `size` bytes counting up from `seed`. */
@@ -125,7 +129,14 @@ describe('writeClip', () => {
         framesFile: 'laptop.solve.frames.json',
         syncResidualMs: null,
         truncatedStart: false,
+        // T5.3: the frames' latencies as the capture gave them; the motion's for the window to fill.
+        captureLatencyMs: { p50: 3.9, p95: 10.5, basis: 'timestamp' },
+        encodeLatencyMs: { p50: 18.3, p95: 26.1 },
+        motionPeakMs: null,
+        motionSpreadMs: null,
+        motionLagMs: null,
       });
+      expect(clip.captureLatencyMs).not.toBe(DETAILS.latency?.capture);
     },
   );
 

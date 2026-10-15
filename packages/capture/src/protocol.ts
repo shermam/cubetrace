@@ -4,7 +4,13 @@
 // The window starts both workers and gives each an end of a channel between them: the capture
 // worker cuts a clip and moves the cut through it to the clip worker, which muxes and writes it and
 // answers the window. Plain TypeScript: nothing here touches a browser API.
-import type { AppBuild, VideoClip, VideoSegment } from '@cubetrace/core';
+import type {
+  AppBuild,
+  CaptureLatency,
+  LatencyPercentiles,
+  VideoClip,
+  VideoSegment,
+} from '@cubetrace/core';
 
 import type { VideoQuality } from './bitrate';
 import { cutBuffers, type Cut } from './cut';
@@ -55,6 +61,48 @@ export const NO_AUDIO_DATA =
  */
 export type AudioState = 'off' | 'waiting' | 'encoding' | 'stopped';
 
+/**
+ * The capture latency over the last second (docs/PLAN.md T5.3, latency.ts), with what tells where a
+ * frame's time goes: the queue before the worker (`waiting`), the encoder's (`queueMax`, `pending`),
+ * and the camera's own cadence.
+ */
+export interface CaptureLatencyStats {
+  /**
+   * From each frame's capture to the worker, over the frames whose chunks came out (or that were
+   * dropped) in the second; null without one.
+   */
+  readonly capture: CaptureLatency | null;
+  /** From the worker to the encoder's output, over the same frames; null without one encoded. */
+  readonly encode: LatencyPercentiles | null;
+  /**
+   * The least `arrival − timestamp` the camera's track has given, ms (latency.ts's floor): the window
+   * hands it to the next run of the pipeline on the same track. Null before the first frame.
+   */
+  readonly floorMs: number | null;
+  /** The most frames the encoder held (`encodeQueueSize`) when a frame was given to it, this second. */
+  readonly queueMax: number;
+  /** The frames given to the encoder whose chunks have not come out yet, now. */
+  readonly pending: number;
+  /**
+   * Of the frames read this second, those that were already waiting when the worker asked for the
+   * next one (the read came back within `WAITING_READ_MS`): frames queued before the worker, which a
+   * queue that never drains keeps near all of them.
+   */
+  readonly waiting: number;
+  /** The camera's own cadence: the median interval of the last frames' timestamps, ms; null before two. */
+  readonly frameIntervalMs: number | null;
+}
+
+/**
+ * The motion meter of the solves (T5.3): `off` (not asked for now), `on`, or off for the rest of the
+ * recording: `costly` (it took more than `MOTION_COST_LIMIT_MS` a frame) or `unreadable` (the frames'
+ * pixels cannot be read here); with its cost per frame, the median of its last frames, ms.
+ */
+export interface MotionMeterState {
+  readonly state: 'off' | 'on' | 'costly' | 'unreadable';
+  readonly costMs: number | null;
+}
+
 /** The pipeline's counters, once per second. */
 export interface CaptureStats {
   /** Frames that reached the worker per second, over the last second. */
@@ -82,6 +130,51 @@ export interface CaptureStats {
   readonly audioChunks: number;
   /** See {@link AudioState}. */
   readonly audioState: AudioState;
+  /** The capture latency over the last second (T5.3); null before the first frame. */
+  readonly latency: CaptureLatencyStats | null;
+  /** The solves' motion meter (T5.3). */
+  readonly motion: MotionMeterState;
+}
+
+/**
+ * The capture worker's non-fatal `error` when the solves' motion meter goes off for the rest of the
+ * recording (T5.3), followed by why.
+ */
+export const MOTION_METER_OFF = 'The motion meter of the solves is off for this recording:';
+
+/**
+ * The solves' motion meter goes off for the rest of the recording when the median of its last frames
+ * costs more than this, ms (T5.3): the frames wait for it, and a slow device's would come late.
+ */
+export const MOTION_COST_LIMIT_MS = 3;
+
+/**
+ * A read of the camera's next frame that comes back sooner than this, ms, found the frame waiting
+ * (T5.3, `CaptureLatencyStats.waiting`): a frame the camera delivers comes at its own pace, tens of ms
+ * after the worker asked for it, unless frames queue before the worker.
+ */
+export const WAITING_READ_MS = 1;
+
+/**
+ * The motion of a solve clip's frames (T5.3), as the capture worker measured it in the framing
+ * rectangle (motion.ts), for the window to find the camera's lag from the solve's moves
+ * (motion-lag.ts): each frame measured, by its time after the clip's first frame.
+ */
+export interface ClipMotion {
+  /** The clip's first frame on the device's host clock: its frames file's `t0HostMs`. */
+  readonly t0HostMs: number;
+  /** Per frame measured, its time after the first frame, from the frames' timestamps, ms to 0.1. */
+  readonly atMs: readonly number[];
+  /** Its changed area (motion.ts), 0 to 1, to a millionth. */
+  readonly changed: readonly number[];
+  /** What measuring a frame cost the worker, the median of its last frames, ms; null if unknown. */
+  readonly costMs: number | null;
+}
+
+/** A clip's latencies over its frames (T5.3), for its `video[]` entry. */
+export interface ClipLatency {
+  readonly capture: CaptureLatency | null;
+  readonly encode: LatencyPercentiles | null;
 }
 
 /**
@@ -134,10 +227,14 @@ export interface ClipReport {
   readonly audioConfigMade: boolean;
 }
 
-/** A clip saved: its `video[]` entry, and its report. */
+/**
+ * A clip saved: its `video[]` entry, and its report; and, for a solve clip, the motion of its frames
+ * the worker measured (T5.3; null when it measured none).
+ */
 export interface SavedClip {
   readonly clip: VideoClip;
   readonly report: ClipReport;
+  readonly motion: ClipMotion | null;
 }
 
 /** Recording stopped by itself (`fatal`: the buffer stays, so cuts still work), or only its audio. */
@@ -159,6 +256,11 @@ export interface StartMessage {
   readonly frameRate: number | null;
   /** Where the capture worker sends the cuts of the clips to save: the clip worker's channel. */
   readonly clips: MessagePort | null;
+  /**
+   * The capture latency's floor of the video track from an earlier run of the pipeline on it (T5.3,
+   * `CaptureLatencyStats.floorMs`); null for a track new to the pipeline.
+   */
+  readonly latencyFloorMs: number | null;
 }
 
 export interface CutRequest {
@@ -248,8 +350,26 @@ export interface SyncStop {
   readonly id: number;
 }
 
+/**
+ * The window turns the solves' motion meter on (inside `rect`, frame pixels; null for the whole
+ * frame) or off (T5.3): while on, the worker measures every frame's motion, as for a sync check, and
+ * keeps it with the buffer for the solve clip's cut. A sync check's measuring takes the frames while
+ * it runs.
+ */
+export interface MotionMeterMessage {
+  readonly type: 'motion-meter';
+  readonly on: boolean;
+  readonly rect: FramingRect | null;
+}
+
 export type WindowToWorker =
-  StartMessage | CutRequest | MuxAndWriteRequest | StopMessage | SyncStart | SyncStop;
+  | StartMessage
+  | CutRequest
+  | MuxAndWriteRequest
+  | StopMessage
+  | SyncStart
+  | SyncStop
+  | MotionMeterMessage;
 
 /** The window gives the clip worker its end of the channel from the capture worker. */
 export interface ConnectMessage {
@@ -270,6 +390,10 @@ export interface ClipJob {
   readonly cut: Cut;
   readonly bufferSeconds: number;
   readonly audio: AudioReport;
+  /** The latencies of the cut's frames (T5.3), for the clip's entry. */
+  readonly latency: ClipLatency;
+  /** The motion of a solve's frames (T5.3), for the window; null otherwise. */
+  readonly motion: ClipMotion | null;
 }
 
 export interface StatsMessage {
@@ -451,6 +575,7 @@ const WINDOW_TYPES: ReadonlySet<unknown> = new Set<WindowToWorker['type']>([
   'stop',
   'sync-start',
   'sync-stop',
+  'motion-meter',
 ]);
 const WORKER_TYPES: ReadonlySet<unknown> = new Set<WorkerToWindow['type']>([
   'stats',

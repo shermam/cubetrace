@@ -17,6 +17,13 @@ export interface EncodedChunkRecord {
    * offset in it.
    */
   readonly arrivalHostMs: number;
+  /**
+   * A video frame's capture time on the host clock, where the browser gave one with the frame
+   * (T5.3, latency.ts); null where it gave none; absent for audio.
+   */
+  readonly captureHostMs?: number | null;
+  /** When a video frame's chunk came out of the encoder, host ms (T5.3); absent for audio. */
+  readonly encodedHostMs?: number;
   /** The encoded bytes, owned by the buffer. */
   readonly data: ArrayBuffer;
 }

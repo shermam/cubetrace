@@ -7,6 +7,7 @@ import type {
   CaptureHandle,
   CaptureStats,
   CaptureSupport,
+  ClipMotion,
   ClipReport,
   Cut,
   DeleteClipParams,
@@ -50,6 +51,8 @@ export function statsOf(seconds: number, changes: Partial<CaptureStats> = {}): C
     audioCodec: 'opus',
     audioChunks: Math.round(seconds * 50),
     audioState: 'encoding',
+    latency: null,
+    motion: { state: 'off', costMs: null },
     ...changes,
   };
 }
@@ -96,6 +99,8 @@ export class FakeCapture implements CaptureHandle {
   readonly deletions: DeleteClipParams[] = [];
   /** The motion watches asked for, the last one the one under way. */
   readonly watches: MotionWatchCall[] = [];
+  /** The solves' motion meter as it was turned on and off (T5.3), in order. */
+  readonly meters: { readonly on: boolean; readonly rect: FramingRect | null }[] = [];
   stopped = false;
   private readonly statsListeners = new Set<(stats: CaptureStats) => void>();
   private readonly errorListeners = new Set<(error: CaptureError) => void>();
@@ -137,6 +142,15 @@ export class FakeCapture implements CaptureHandle {
     };
   }
 
+  meterMotion(on: boolean, rect: FramingRect | null): void {
+    this.meters.push({ on, rect });
+  }
+
+  /** Whether the solves' motion meter is on now (T5.3). */
+  get metering(): boolean {
+    return this.meters.at(-1)?.on ?? false;
+  }
+
   onStats(listener: (stats: CaptureStats) => void): () => void {
     this.statsListeners.add(listener);
     return () => {
@@ -170,15 +184,19 @@ export class FakeCapture implements CaptureHandle {
 
   /**
    * Saves the oldest clip asked for (as `clipFor` says, with `changes`), with its report (as asked,
-   * with `report`'s changes); returns the clip.
+   * with `report`'s changes) and the motion of its frames (T5.3; none by default); returns the clip.
    */
-  saveNext(changes: Partial<VideoClip> = {}, report: Partial<ClipReport> = {}): VideoClip {
+  saveNext(
+    changes: Partial<VideoClip> = {},
+    report: Partial<ClipReport> = {},
+    motion: ClipMotion | null = null,
+  ): VideoClip {
     const pending = this.saves.shift();
     if (pending === undefined) {
       throw new Error('No clip was asked for.');
     }
     const clip = { ...clipFor(pending.params), ...changes };
-    pending.resolve({ clip, report: { ...CLIP_AS_ASKED, ...report } });
+    pending.resolve({ clip, report: { ...CLIP_AS_ASKED, ...report }, motion });
     return clip;
   }
 

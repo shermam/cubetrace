@@ -13,16 +13,27 @@ export type {
   AudioState,
   CaptureConfig,
   CaptureError,
+  CaptureLatencyStats,
   CaptureStats,
+  ClipLatency,
+  ClipMotion,
   ClipReport,
   DeleteClipParams,
   MotionMeterInfo,
+  MotionMeterState,
   MotionSample,
   ResolvedCaptureConfig,
   SaveClipParams,
   SavedClip,
 } from './protocol';
-export { AUDIO_SILENCE_MS, NO_AUDIO_DATA, resolveCaptureConfig } from './protocol';
+export {
+  AUDIO_SILENCE_MS,
+  MOTION_COST_LIMIT_MS,
+  MOTION_METER_OFF,
+  NO_AUDIO_DATA,
+  WAITING_READ_MS,
+  resolveCaptureConfig,
+} from './protocol';
 export type { CaptureHandle, CaptureSupport } from './pipeline';
 export {
   AUDIO_PROCESSOR_BUFFER,

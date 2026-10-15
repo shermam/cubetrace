@@ -89,6 +89,8 @@ function job(
     cut: source ?? readMediaSample(),
     bufferSeconds: 90,
     audio,
+    latency: { capture: null, encode: null },
+    motion: null,
   };
 }
 
@@ -165,6 +167,28 @@ describe('ClipWorker', () => {
     expect(
       JSON.parse(root.files().get(`${FOLDER}/laptop.solve.frames.json`)?.text ?? ''),
     ).toMatchObject({ camera: 'laptop', segment: 'solve', dtMs: sample.frames.dtMs });
+  });
+
+  it("puts the cut's latencies in the clip's entry, and hands the solve's motion on to the window (T5.3)", async () => {
+    const { worker, posted } = await clipWorker();
+    const motion = { t0HostMs: 1000, atMs: [33.3, 66.7], changed: [0.004, 0.1], costMs: 0.8 };
+    await worker.handle({
+      ...job(1),
+      latency: {
+        capture: { p50: 3.9, p95: 10.5, basis: 'capture-time' },
+        encode: { p50: 18.3, p95: 26.1 },
+      },
+      motion,
+    });
+    const answer = posted.at(-1);
+    expect(clipOf(answer)).toMatchObject({
+      captureLatencyMs: { p50: 3.9, p95: 10.5, basis: 'capture-time' },
+      encodeLatencyMs: { p50: 18.3, p95: 26.1 },
+      motionPeakMs: null,
+      motionSpreadMs: null,
+      motionLagMs: null,
+    });
+    expect(answer).toMatchObject({ type: 'mux-and-write-done', motion });
   });
 
   it("stages a camera device's clip under its staging folder, the session's folder made there (T4.2)", async () => {

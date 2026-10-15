@@ -9,7 +9,14 @@
 // access handles (`createSyncAccessHandle`, dedicated workers only); where there are none, a
 // writable stream does it. Plain TypeScript over the structural OPFS types of @cubetrace/storage
 // (types only: see clip-files.ts), so it runs in Node's tests on the in-memory fake.
-import type { AppBuild, FramesJson, VideoClip, VideoSegment } from '@cubetrace/core';
+import type {
+  AppBuild,
+  CaptureLatency,
+  FramesJson,
+  LatencyPercentiles,
+  VideoClip,
+  VideoSegment,
+} from '@cubetrace/core';
 import type { OpfsDirectoryHandle, OpfsFileHandle } from '@cubetrace/storage';
 
 import { attemptPath, clipFiles, isTemporaryOf, temporaryName } from './clip-files';
@@ -29,12 +36,19 @@ export interface ClipDetails {
   readonly truncatedStart: boolean;
   /** The build of the app, which the frames file names as `app` (T3.7); absent, it names none. */
   readonly app?: AppBuild;
+  /** The latencies of the clip's frames (T5.3); absent, the entry says null for both. */
+  readonly latency?: {
+    readonly capture: CaptureLatency | null;
+    readonly encode: LatencyPercentiles | null;
+  };
 }
 
 /**
  * Writes the clip of `camera` for `segment` into the folder of attempt `index` of session
  * `sessionId` (the folder is made if needed; the session's must exist) and returns its `video[]`
- * entry (docs/DATA-MODEL.md §7), with `crop` and `syncResidualMs` null for the caller to fill.
+ * entry (docs/DATA-MODEL.md §7), with `crop` and `syncResidualMs` null for the caller to fill, and
+ * since T5.3 the latencies of its frames (`details.latency`) and its motion's fields null, for the
+ * caller to fill.
  * `frames.json` is written as compact JSON, with the build that wrote it (`details.app`, T3.7) after
  * the clip's names. A clip saved again replaces the files as a whole.
  *
@@ -103,7 +117,17 @@ export async function writeClip(
     framesFile: names.framesFile,
     syncResidualMs: null,
     truncatedStart: details.truncatedStart,
+    captureLatencyMs: copyOf(details.latency?.capture ?? null),
+    encodeLatencyMs: copyOf(details.latency?.encode ?? null),
+    motionPeakMs: null,
+    motionSpreadMs: null,
+    motionLagMs: null,
   };
+}
+
+/** A latency's own copy, for the entry; null as it is. */
+function copyOf<T extends object>(value: T | null): T | null {
+  return value === null ? null : { ...value };
 }
 
 /**

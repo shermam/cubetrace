@@ -277,7 +277,17 @@ function clipPort(jobs: ClipJob[]): MessageTarget {
 }
 
 function harness(
-  options: { audio?: boolean; frameRate?: number | null; quality?: VideoQuality } = {},
+  options: {
+    audio?: boolean;
+    frameRate?: number | null;
+    quality?: VideoQuality;
+    /** The worker's `performance.timeOrigin` (T5.3): absent, frames' capture times are not read. */
+    timeOrigin?: number;
+    /** The track's capture latency floor from an earlier run (T5.3). */
+    latencyFloorMs?: number | null;
+    /** The ring buffer's seconds; 90 by default. */
+    bufferSeconds?: number;
+  } = {},
 ): Harness {
   const posted: WorkerToWindow[] = [];
   const jobs: ClipJob[] = [];
@@ -287,6 +297,7 @@ function harness(
     VideoEncoder: FakeVideoEncoder,
     AudioEncoder: FakeAudioEncoder,
     now: () => state.now,
+    ...(options.timeOrigin === undefined ? {} : { timeOrigin: options.timeOrigin }),
     post: (message) => {
       transferList(message);
       posted.push(message);
@@ -305,9 +316,10 @@ function harness(
   void worker.start(
     video.stream,
     options.audio === true ? audio.stream : null,
-    resolveCaptureConfig({ quality: options.quality }),
+    resolveCaptureConfig({ quality: options.quality, bufferSeconds: options.bufferSeconds }),
     options.frameRate ?? 30,
     clipPort(jobs),
+    options.latencyFloorMs ?? null,
   );
   return {
     worker,
@@ -567,6 +579,18 @@ describe('CaptureWorker', () => {
       audioCodec: null,
       audioChunks: 0,
       audioState: 'off',
+      // The frames' latency (T5.3): all of them came at the same time after their capture, so none
+      // later than the soonest; the encoder answered at once; nothing queued or waiting.
+      latency: {
+        capture: { p50: 0, p95: 0, basis: 'timestamp' },
+        encode: { p50: 0, p95: 0 },
+        floorMs: OFFSET_MS,
+        queueMax: 0,
+        pending: 0,
+        waiting: 0,
+        frameIntervalMs: 33.3,
+      },
+      motion: { state: 'off', costMs: null },
     });
     await capture.feed(30, 59);
     expect(capture.stats(arrivalOf(0) - 1 + 2000)).toMatchObject({ fps: 30, encodedFps: 30 });
@@ -1218,5 +1242,260 @@ describe('CaptureWorker during a sync check', () => {
         changeLevels: 12,
       },
     ]);
+  });
+});
+
+describe('CaptureWorker: the capture latency and the solves’ motion (T5.3)', () => {
+  /** A still picture, and the same with a bright square of 120 pixels at (600, 360). */
+  const STILL = lumaPlane(1920, 1080, 16);
+  const SQUARE = lumaPlane(1920, 1080, 16, [{ x: 600, y: 360, size: 120, value: 255 }]);
+
+  /** A frame whose `metadata()` gives its capture time, on the worker's time origin, as Chrome's may. */
+  class TimedFrame extends SyntheticFrame {
+    constructor(
+      timestamp: number,
+      pixels: Uint8Array,
+      readonly captureTime: number,
+    ) {
+      super(timestamp, pixels);
+    }
+
+    metadata(): { captureTime: number } {
+      return { captureTime: this.captureTime };
+    }
+  }
+
+  /** A frame whose pixels take 4 ms to copy out: a slow device's. */
+  class SlowFrame extends SyntheticFrame {
+    override copyTo(
+      destination: Uint8Array,
+      options?: { rect?: { x: number; y: number; width: number; height: number } },
+    ): Promise<{ offset: number; stride: number }[]> {
+      const until = performance.now() + 4;
+      while (performance.now() < until) {
+        // Busy, as a copy out of a slow camera's frame would be.
+      }
+      return super.copyTo(destination, options);
+    }
+  }
+
+  const TIME_ORIGIN = OFFSET_MS - 50_000;
+
+  /**
+   * Feeds frames `from` to `to` showing `picture(index)`, each reaching the worker `late(index)` ms
+   * after the offset of the others (`arrivalOf`), as frames queued on the way would.
+   */
+  async function feedLate(
+    capture: Harness,
+    from: number,
+    to: number,
+    late: (index: number) => number,
+    options: {
+      picture?: (index: number) => Uint8Array;
+      captureTimes?: boolean;
+      make?: (index: number, pixels: Uint8Array) => SyntheticFrame;
+    } = {},
+  ): Promise<void> {
+    for (let index = from; index <= to; index += 1) {
+      const pixels = options.picture?.(index) ?? STILL;
+      const timestamp = timestampOf(index);
+      const frame =
+        options.make?.(index, pixels) ??
+        (options.captureTimes === true
+          ? new TimedFrame(timestamp, pixels, timestamp / 1000 + OFFSET_MS - TIME_ORIGIN)
+          : new SyntheticFrame(timestamp, pixels));
+      capture.now = arrivalOf(index) + late(index);
+      capture.video.push(frame);
+      await settle();
+    }
+  }
+
+  it("times each frame from its timestamp to its arrival: a step of 75 ms in the frames' delivery is in the next second's counters", async () => {
+    const capture = harness();
+    await feedLate(capture, 0, 29, () => 5);
+    const first = capture.stats(arrivalOf(29) + 6);
+    expect(first.latency?.capture).toEqual({ p50: 0, p95: 0, basis: 'timestamp' });
+    expect(first.latency?.floorMs).toBeCloseTo(OFFSET_MS + 5, 3);
+    // From frame 30 on the frames come 75 ms later than they did: the issue's step.
+    await feedLate(capture, 30, 59, () => 80);
+    const second = capture.stats(arrivalOf(59) + 81);
+    expect(second.latency?.capture).toEqual({ p50: 75, p95: 75, basis: 'timestamp' });
+    // The camera's own cadence stays what its timestamps say.
+    expect(second.latency?.frameIntervalMs).toBe(33.3);
+  });
+
+  it('times the frames by the capture times the browser gives with them, from the time origin', async () => {
+    const capture = harness({ timeOrigin: TIME_ORIGIN });
+    await feedLate(capture, 0, 29, (index) => (index < 20 ? 9 : 31), { captureTimes: true });
+    expect(capture.stats(arrivalOf(29) + 32).latency?.capture).toEqual({
+      p50: 9,
+      p95: 31,
+      basis: 'capture-time',
+    });
+  });
+
+  it("carries the track's floor from an earlier run: a pipeline started again on late frames says so", async () => {
+    const capture = harness({ latencyFloorMs: OFFSET_MS + 5 });
+    await feedLate(capture, 0, 29, () => 80);
+    expect(capture.stats(arrivalOf(29) + 81).latency?.capture?.p50).toBe(75);
+  });
+
+  it("times each frame from its arrival to its chunk, and counts the frames waiting when read, the encoder's queue and what it holds", async () => {
+    const capture = harness();
+    await feedLate(capture, 0, 19, () => 5);
+    const encoder = capture.encoder();
+    encoder.holdOutput = true;
+    encoder.encodeQueueSize = 4;
+    // Three frames queued before the worker reads them: the last two were waiting.
+    for (const index of [20, 21, 22]) {
+      capture.video.push(new SyntheticFrame(timestampOf(index), STILL));
+    }
+    capture.now = arrivalOf(22) + 5;
+    await settle();
+    const held = capture.stats(arrivalOf(22) + 6).latency;
+    expect(held?.waiting).toBe(2);
+    expect(held?.queueMax).toBe(4);
+    expect(held?.pending).toBe(3);
+    // The encoder answers 20 ms later.
+    capture.now = arrivalOf(22) + 25;
+    encoder.release();
+    const encoded = capture.stats(arrivalOf(22) + 26).latency;
+    expect(encoded?.encode).toEqual({ p50: 20, p95: 20 });
+    expect(encoded?.pending).toBe(0);
+    expect(encoded?.queueMax).toBe(0);
+    expect(encoded?.waiting).toBe(0);
+  });
+
+  it('gives each clip its frames’ latencies, the dropped ones too for the capture', async () => {
+    const capture = harness();
+    await feedLate(capture, 0, 44, (index) => (index < 30 ? 5 : 45));
+    capture.worker.muxAndWrite({
+      type: 'mux-and-write',
+      id: 1,
+      startHostMs: arrivalOf(15),
+      endHostMs: arrivalOf(44) + 50,
+      sessionId: 's',
+      index: 1,
+      camera: 'laptop',
+      segment: 'scramble',
+      fpsNominal: 30,
+    });
+    const [job] = capture.jobs;
+    // 15 frames of the clip at 0 ms beyond the floor and 15 at 40.
+    expect(job.latency).toEqual({
+      capture: { p50: 0, p95: 40, basis: 'timestamp' },
+      encode: { p50: 0, p95: 0 },
+    });
+    // A scramble clip carries no motion.
+    expect(job.motion).toBeNull();
+    // The buffer's chunks keep each frame's encode time (and no capture time, here).
+    expect(capture.worker.buffer.video[0]).toMatchObject({ captureHostMs: null });
+    expect(capture.worker.buffer.video[0].encodedHostMs).toBeTypeOf('number');
+  });
+
+  it("measures the solves' motion while asked, and gives a solve clip its frames' motion by their time after its first frame", async () => {
+    const capture = harness();
+    await feedLate(capture, 0, 14, () => 5);
+    capture.worker.handle({ type: 'motion-meter', on: true, rect: null });
+    // The square comes and goes every frame: each frame after the first measured changes as much.
+    await feedLate(capture, 15, 59, () => 5, {
+      picture: (index) => (index % 2 === 0 ? STILL : SQUARE),
+    });
+    capture.worker.handle({ type: 'motion-meter', on: false, rect: null });
+    await feedLate(capture, 60, 74, () => 5);
+    expect(capture.worker.motionKept).toBe(44);
+    const stats = capture.stats(arrivalOf(74) + 6);
+    expect(stats.motion.state).toBe('off');
+    expect(stats.motion.costMs).toBeLessThan(2);
+
+    capture.worker.muxAndWrite({
+      type: 'mux-and-write',
+      id: 2,
+      startHostMs: arrivalOf(15),
+      endHostMs: arrivalOf(74) + 50,
+      sessionId: 's',
+      index: 1,
+      camera: 'laptop',
+      segment: 'solve',
+      fpsNominal: 30,
+    });
+    const motion = capture.jobs[0].motion;
+    expect(motion).not.toBeNull();
+    // The cut begins at the keyframe of frame 15; the first frame measured (15) has no motion yet.
+    expect(motion?.t0HostMs).toBe(capture.jobs[0].cut.frames.t0HostMs);
+    expect(motion?.atMs).toHaveLength(44);
+    expect(motion?.atMs.slice(0, 3)).toEqual([33.3, 66.7, 100]);
+    expect(new Set(motion?.changed)).toEqual(new Set([Math.round((400 / 57_600) * 1e6) / 1e6]));
+    expect(motion?.costMs).toBe(stats.motion.costMs);
+  });
+
+  it('keeps the motion only as far back as the buffer goes', async () => {
+    const capture = harness({ bufferSeconds: 1 });
+    await feedLate(capture, 0, 14, () => 5);
+    capture.worker.handle({ type: 'motion-meter', on: true, rect: null });
+    await feedLate(capture, 15, 119, () => 5, {
+      picture: (index) => (index % 2 === 0 ? STILL : SQUARE),
+    });
+    const buffered = capture.worker.buffer.video.length;
+    expect(buffered).toBeLessThan(70);
+    expect(capture.worker.motionKept).toBeLessThanOrEqual(buffered);
+  });
+
+  it('lets a sync check take the frames while it runs', async () => {
+    const capture = harness();
+    // After the warm-up (the buffer begins with the first frame encoded, and the motion with it).
+    await feedLate(capture, 0, 14, () => 5);
+    const picture = (index: number): Uint8Array => (index % 2 === 0 ? STILL : SQUARE);
+    capture.worker.handle({ type: 'motion-meter', on: true, rect: null });
+    await feedLate(capture, 15, 24, () => 5, { picture });
+    const before = capture.worker.motionKept;
+    expect(before).toBe(9);
+    capture.worker.handle({ type: 'sync-start', id: 1, rect: null });
+    await feedLate(capture, 25, 34, () => 5, { picture });
+    expect(capture.worker.motionKept).toBe(before);
+    expect(capture.posted.filter((message) => message.type === 'sync-sample')).toHaveLength(9);
+    capture.worker.handle({ type: 'sync-stop', id: 1 });
+    await feedLate(capture, 35, 44, () => 5, { picture });
+    // Its own meter compares with the frame it measured last: before the check.
+    expect(capture.worker.motionKept).toBe(before + 10);
+  });
+
+  it('goes off for the recording, saying why once, when it costs more than 3 ms a frame, or cannot read the frames', async () => {
+    const slow = harness();
+    slow.worker.handle({ type: 'motion-meter', on: true, rect: null });
+    await feedLate(slow, 0, 14, () => 5, {
+      make: (index, pixels) => new SlowFrame(timestampOf(index), pixels),
+    });
+    expect(slow.errors()).toEqual([
+      {
+        type: 'error',
+        message: expect.stringMatching(
+          /^The motion meter of the solves is off for this recording: it took \d+\.\d ms a frame \(more than 3\)\.$/u,
+        ) as unknown,
+        fatal: false,
+      },
+    ]);
+    // Asked again (the next solve): it stays off, and the counters say why.
+    slow.worker.handle({ type: 'motion-meter', on: true, rect: null });
+    await feedLate(slow, 15, 20, () => 5);
+    expect(slow.stats(arrivalOf(20) + 6).motion.state).toBe('costly');
+    expect(slow.errors()).toHaveLength(1);
+
+    const blind = harness();
+    blind.worker.handle({ type: 'motion-meter', on: true, rect: null });
+    await feedLate(blind, 0, 3, () => 5, {
+      make: (index, pixels) => new SyntheticFrame(timestampOf(index), pixels, 1920, 1080, null),
+    });
+    expect(blind.errors()).toEqual([
+      {
+        type: 'error',
+        message:
+          'The motion meter of the solves is off for this recording: Error: The motion meter cannot read frames of no pixel format.',
+        fatal: false,
+      },
+    ]);
+    expect(blind.stats(arrivalOf(3) + 6).motion.state).toBe('unreadable');
+    // Recording goes on.
+    expect(blind.encoder().encoded.length).toBeGreaterThan(0);
   });
 });

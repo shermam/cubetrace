@@ -9,11 +9,17 @@
 // capture pipeline"); `startCapture` (pipeline.ts) starts it. Plain TypeScript: no Angular. The
 // encoders, the clock and the timer come in through `WorkerEnvironment`, so the logic also runs in
 // Node's tests with fakes; the last lines wire it to the worker's global scope.
-// It encodes the video at the bitrate of the start's quality (bitrate.ts, T2.10).
+// It encodes the video at the bitrate of the start's quality (bitrate.ts, T2.10). Since T5.3 (issue
+// #67) it times every frame's way through it (latency.ts: from its capture to its arrival here, and
+// to its encoded chunk) for its counters and for each clip, with what tells where the time goes (the
+// frames already waiting when read, the encoder's queue, the camera's cadence); and, while the window
+// asks for it during a solve, it measures each frame's motion as for a sync check and keeps it with
+// the buffer, so that the solve clip carries its motion to the window (motion-lag.ts).
 import { audioDecoderConfigFor, isAudioDecoderConfigComplete } from './audio-config';
 import { videoBitrate, type VideoQuality } from './bitrate';
-import { cut } from './cut';
+import { cut, type Cut } from './cut';
 import type { FramingRect } from './framing';
+import { LatencyMeter, captureTimeOf, type FrameTiming } from './latency';
 import {
   MotionMeter,
   isMotionFrame,
@@ -23,7 +29,10 @@ import {
 } from './motion';
 import {
   AUDIO_SILENCE_MS,
+  MOTION_COST_LIMIT_MS,
+  MOTION_METER_OFF,
   NO_AUDIO_DATA,
+  WAITING_READ_MS,
   describeError,
   isWindowToWorker,
   post,
@@ -31,9 +40,12 @@ import {
   type AudioState,
   type CaptureStats,
   type ClipJob,
+  type ClipLatency,
+  type ClipMotion,
   type CutRequest,
   type MessageTarget,
   type MotionMeterInfo,
+  type MotionMeterState,
   type MuxAndWriteRequest,
   type ResolvedCaptureConfig,
   type WindowToWorker,
@@ -50,6 +62,10 @@ export const WARMUP_MS = 500;
 
 /** Frame intervals the frame rate is measured over (the median of the last ones). */
 const RATE_INTERVALS = 30;
+
+/** The motion meter's cost is the median of this many of its last frames, judged from the tenth on. */
+const MOTION_COST_FRAMES = 30;
+const MOTION_COST_MIN_FRAMES = 10;
 
 /**
  * The video encoders to try, in order: H.264 High, then Main (both level 4.0), each on the
@@ -102,7 +118,10 @@ export function videoEncoderConfig(
   return choice.codec.startsWith('avc1.') ? { ...config, avc: { format: 'avc' } } : config;
 }
 
-/** The parts of a `VideoFrame` the worker reads. */
+/**
+ * The parts of a `VideoFrame` the worker reads (and, where the browser has it, its `metadata()`,
+ * whose `captureTime` latency.ts reads).
+ */
 export interface FrameLike {
   readonly timestamp: number;
   readonly duration: number | null;
@@ -159,6 +178,11 @@ export interface WorkerEnvironment {
   readonly AudioEncoder: AudioEncoderClass | undefined;
   /** Host ms: `performance.timeOrigin + performance.now()`, the same scale as the window's. */
   now(): number;
+  /**
+   * `performance.timeOrigin`: what a frame's `metadata().captureTime` counts from (T5.3); absent,
+   * the frames' capture times are not read.
+   */
+  readonly timeOrigin?: number;
   /** Sends a message to the window with its transfer list. */
   post(message: WorkerToWindow): void;
   /** Calls `callback` every `ms` until the returned function is called. */
@@ -178,6 +202,23 @@ interface SyncCheck {
   readonly id: number;
   readonly meter: MotionMeter<FrameLike & MotionFrame>;
   sent: MotionMeterInfo | null;
+}
+
+/** A frame on its way through the encoder: its arrival here, and its capture time (T5.3). */
+interface FrameArrival {
+  readonly arrivalHostMs: number;
+  readonly captureHostMs: number | null;
+}
+
+/** The solves' motion meter while it measures (T5.3): its rectangle and its meter. */
+interface MotionSeries {
+  readonly meter: MotionMeter<FrameLike & MotionFrame>;
+}
+
+/** One frame's motion for the solves (T5.3): its timestamp and its changed area. */
+interface SeriesPoint {
+  readonly timestampUs: number;
+  readonly changed: number;
 }
 
 /** An audio input's timestamp and arrival, kept until the chunks that start in it are out. */
@@ -216,8 +257,22 @@ export class CaptureWorker {
   #warmupStartHostMs: number | undefined;
   #framesSinceKey = Number.POSITIVE_INFINITY;
   #keyInterval = 30;
-  /** Frame timestamp → arrival, from `encode` until the frame's chunk comes out. */
-  readonly #frameArrivals = new Map<number, number>();
+  /** Frame timestamp → arrival (and capture time), from `encode` until the frame's chunk comes out. */
+  readonly #frameArrivals = new Map<number, FrameArrival>();
+  /** The capture latency (T5.3): every frame, as it leaves the worker's hands. */
+  #latency = new LatencyMeter();
+  /** The most frames the encoder held when given one, since the last counters (T5.3). */
+  #queueMax = 0;
+  /** The frames read since the last counters that were already waiting (T5.3). */
+  #waitingInWindow = 0;
+
+  /** The solves' motion meter while the window asks for it (T5.3); null otherwise. */
+  #series: MotionSeries | null = null;
+  #seriesState: MotionMeterState['state'] = 'off';
+  /** The frames' motion while it measured, oldest first, as far back as the buffer goes. */
+  #seriesPoints: SeriesPoint[] = [];
+  /** The costs of its last frames, ms. */
+  #seriesCosts: number[] = [];
 
   #audioEncoder: AudioEncoderLike | undefined;
   #audioConfig: AudioEncoderConfig | undefined;
@@ -257,6 +312,11 @@ export class CaptureWorker {
     return this.#buffer;
   }
 
+  /** The frames whose motion the solves' meter keeps (T5.3), for tests. */
+  get motionKept(): number {
+    return this.#seriesPoints.length;
+  }
+
   /** One message from the window. */
   handle(message: WindowToWorker): void {
     switch (message.type) {
@@ -267,6 +327,7 @@ export class CaptureWorker {
           message.config,
           message.frameRate,
           message.clips,
+          message.latencyFloorMs,
         );
         break;
       case 'cut':
@@ -286,7 +347,33 @@ export class CaptureWorker {
           this.#sync = null;
         }
         break;
+      case 'motion-meter':
+        this.meterMotion(message.on, message.rect);
+        break;
     }
+  }
+
+  /**
+   * Turns the solves' motion meter on inside `rect` (frame pixels; null for the whole frame), or off
+   * (T5.3). While on, every frame's motion is measured (after the encoder has the frame, as for a
+   * sync check, which takes the frames while it runs) and kept as far back as the buffer goes, so
+   * that a solve clip's cut carries it (`ClipJob.motion`). Once it was found too costly, or the frames
+   * unreadable, it stays off for the rest of the recording.
+   */
+  meterMotion(on: boolean, rect: FramingRect | null): void {
+    if (this.#seriesState === 'costly' || this.#seriesState === 'unreadable') {
+      return;
+    }
+    if (!on) {
+      this.#series = null;
+      this.#seriesState = 'off';
+      return;
+    }
+    const draw = this.#env.drawLuma;
+    this.#series = {
+      meter: new MotionMeter<FrameLike & MotionFrame>(rect, draw === undefined ? {} : { draw }),
+    };
+    this.#seriesState = 'on';
   }
 
   /**
@@ -313,6 +400,7 @@ export class CaptureWorker {
     config: ResolvedCaptureConfig,
     frameRate: number | null,
     clips: MessageTarget | null = null,
+    latencyFloorMs: number | null = null,
   ): Promise<void> {
     if (this.#started) {
       return;
@@ -320,6 +408,7 @@ export class CaptureWorker {
     this.#started = true;
     this.#recording = true;
     this.#clips = clips;
+    this.#latency = new LatencyMeter(latencyFloorMs);
     this.#quality = config.quality;
     this.#audioAsked = audio !== null;
     this.#buffer = new RingBuffer({
@@ -368,12 +457,15 @@ export class CaptureWorker {
     }
     let job: ClipJob;
     try {
+      const taken = cut(this.#buffer, request.startHostMs, request.endHostMs);
       job = {
         type: 'clip-job',
         request,
-        cut: cut(this.#buffer, request.startHostMs, request.endHostMs),
+        cut: taken,
         bufferSeconds: Math.round(this.#buffer.bufferSeconds * 1000) / 1000,
         audio: this.#audioReport(),
+        latency: this.#clipLatency(taken),
+        motion: request.segment === 'solve' ? this.#clipMotion(taken) : null,
       };
     } catch (error: unknown) {
       this.#refuseClip(request, describeError(error));
@@ -397,6 +489,7 @@ export class CaptureWorker {
     this.#stopped = true;
     this.#recording = false;
     this.#sync = null;
+    this.#series = null;
     this.#stopTicker?.();
     await this.#release();
     this.#buffer.clear();
@@ -421,17 +514,26 @@ export class CaptureWorker {
       const reader = stream.getReader();
       this.#readers.push(reader);
       for (;;) {
+        const askedHostMs = this.#env.now();
         const { value: frame, done } = await reader.read();
         if (done) {
           break;
         }
         const arrivalHostMs = this.#env.now();
+        if (arrivalHostMs - askedHostMs < WAITING_READ_MS) {
+          this.#waitingInWindow += 1;
+        }
+        const timeOrigin = this.#env.timeOrigin;
+        const captureHostMs = timeOrigin === undefined ? null : captureTimeOf(frame, timeOrigin);
         try {
-          await this.#onFrame(frame, arrivalHostMs);
+          await this.#onFrame(frame, { arrivalHostMs, captureHostMs });
+          // After the encoder has the frame: the motion never holds up the recording.
           const sync = this.#sync;
+          const series = this.#series;
           if (sync !== null) {
-            // After the encoder has the frame: the motion never holds up the recording.
             await this.#measureMotion(sync, frame, arrivalHostMs);
+          } else if (series !== null) {
+            await this.#measureSeries(series, frame);
           }
         } finally {
           frame.close();
@@ -488,16 +590,18 @@ export class CaptureWorker {
     });
   }
 
-  async #onFrame(frame: FrameLike, arrivalHostMs: number): Promise<void> {
+  async #onFrame(frame: FrameLike, arrival: FrameArrival): Promise<void> {
     if (!this.#live()) {
       return;
     }
+    const { arrivalHostMs } = arrival;
     this.#arrivedInWindow += 1;
     this.#noteTimestamp(frame.timestamp);
     this.#checkSilence(arrivalHostMs);
     if (this.#videoEncoder === undefined) {
       this.#warmupStartHostMs ??= arrivalHostMs;
       if (arrivalHostMs - this.#warmupStartHostMs < WARMUP_MS) {
+        this.#timeFrame(frame.timestamp, arrival, null);
         return;
       }
       if (!(await this.#configureVideo(frame)) || !this.#live()) {
@@ -515,17 +619,20 @@ export class CaptureWorker {
         return;
       }
     }
-    this.#encode(encoder, frame, arrivalHostMs);
+    this.#encode(encoder, frame, arrival);
   }
 
-  #encode(encoder: VideoEncoderLike, frame: FrameLike, arrivalHostMs: number): void {
+  #encode(encoder: VideoEncoderLike, frame: FrameLike, arrival: FrameArrival): void {
     this.#framesSinceKey += 1;
-    if (encoder.encodeQueueSize > MAX_ENCODE_QUEUE) {
+    const queue = encoder.encodeQueueSize;
+    this.#queueMax = Math.max(this.#queueMax, queue);
+    if (queue > MAX_ENCODE_QUEUE) {
       this.#dropped += 1;
+      this.#timeFrame(frame.timestamp, arrival, null);
       return;
     }
     const keyFrame = this.#framesSinceKey >= this.#keyInterval;
-    this.#frameArrivals.set(frame.timestamp, arrivalHostMs);
+    this.#frameArrivals.set(frame.timestamp, arrival);
     try {
       encoder.encode(frame, { keyFrame });
     } catch (error: unknown) {
@@ -610,6 +717,7 @@ export class CaptureWorker {
     this.#buffer.clear();
     this.#buffer.setVideoTrack({ codec: resized.codec, width, height });
     this.#frameArrivals.clear();
+    this.#seriesPoints = [];
     this.#framesSinceKey = Number.POSITIVE_INFINITY;
   }
 
@@ -619,6 +727,11 @@ export class CaptureWorker {
       this.#buffer.setVideoDecoderConfig(copyDecoderConfig(decoderConfig));
     }
     this.#encodedInWindow += 1;
+    const encodedHostMs = this.#env.now();
+    const arrival = this.#frameArrival(chunk.timestamp);
+    if (arrival !== undefined) {
+      this.#timeFrame(chunk.timestamp, arrival, encodedHostMs);
+    }
     this.#buffer.push({
       kind: 'video',
       type: chunk.type,
@@ -630,13 +743,19 @@ export class CaptureWorker {
           ? chunk.duration
           : Math.round(1e6 / this.#frameRate()),
       byteLength: chunk.byteLength,
-      arrivalHostMs: this.#frameArrival(chunk.timestamp),
+      arrivalHostMs: arrival?.arrivalHostMs ?? encodedHostMs,
+      captureHostMs: arrival?.captureHostMs ?? null,
+      encodedHostMs,
       data: copyOut(chunk),
     });
+    this.#pruneSeries();
   }
 
-  /** The arrival of the frame behind a chunk; frames the encoder skipped are forgotten. */
-  #frameArrival(timestampUs: number): number {
+  /**
+   * The arrival of the frame behind a chunk (undefined when it is not known: the buffer started
+   * again since); frames the encoder skipped are forgotten.
+   */
+  #frameArrival(timestampUs: number): FrameArrival | undefined {
     const arrival = this.#frameArrivals.get(timestampUs);
     for (const pending of this.#frameArrivals.keys()) {
       if (pending > timestampUs) {
@@ -644,7 +763,123 @@ export class CaptureWorker {
       }
       this.#frameArrivals.delete(pending);
     }
-    return arrival ?? this.#env.now();
+    return arrival;
+  }
+
+  /** A frame leaves the worker's hands: encoded (its chunk out, at `encodedHostMs`), or not (null). */
+  #timeFrame(timestampUs: number, arrival: FrameArrival, encodedHostMs: number | null): void {
+    this.#latency.add({
+      timestampUs,
+      captureHostMs: arrival.captureHostMs,
+      arrivalHostMs: arrival.arrivalHostMs,
+      encodedHostMs,
+    });
+  }
+
+  /** The latencies of a cut's frames (T5.3), by the meter's floor now. */
+  #clipLatency(taken: Cut): ClipLatency {
+    const frames: FrameTiming[] = taken.video.chunks.map((chunk) => ({
+      timestampUs: chunk.timestampUs,
+      captureHostMs: chunk.captureHostMs ?? null,
+      arrivalHostMs: chunk.arrivalHostMs,
+      encodedHostMs: chunk.encodedHostMs ?? null,
+    }));
+    const reading = this.#latency.read(frames);
+    return { capture: reading.capture, encode: reading.encode };
+  }
+
+  /**
+   * The motion the solves' meter measured of a cut's frames (T5.3): each by its time after the
+   * cut's first frame; null when it measured none of them.
+   */
+  #clipMotion(taken: Cut): ClipMotion | null {
+    if (this.#seriesPoints.length === 0) {
+      return null;
+    }
+    const byTimestamp = new Map(
+      this.#seriesPoints.map((point) => [point.timestampUs, point.changed]),
+    );
+    const firstUs = taken.video.chunks.at(0)?.timestampUs ?? 0;
+    const atMs: number[] = [];
+    const changed: number[] = [];
+    for (const chunk of taken.video.chunks) {
+      const value = byTimestamp.get(chunk.timestampUs);
+      if (value !== undefined) {
+        atMs.push(Math.round((chunk.timestampUs - firstUs) / 100) / 10);
+        changed.push(value);
+      }
+    }
+    return atMs.length === 0
+      ? null
+      : { t0HostMs: taken.frames.t0HostMs, atMs, changed, costMs: this.#seriesCost() };
+  }
+
+  /**
+   * Measures a frame's motion for the solves (T5.3): kept with its timestamp; the meter goes off for
+   * the rest of the recording, said once, when the frames cannot be read or it costs too much.
+   */
+  async #measureSeries(series: MotionSeries, frame: FrameLike): Promise<void> {
+    let measured: MotionMeasure;
+    try {
+      if (!isMotionFrame(frame)) {
+        throw new Error("the camera's frames cannot be read here");
+      }
+      measured = await series.meter.measure(frame);
+    } catch (error: unknown) {
+      if (this.#series === series) {
+        this.#stopSeries('unreadable', describeError(error));
+      }
+      return;
+    }
+    if (this.#series !== series) {
+      return;
+    }
+    this.#seriesCosts.push(measured.costMs);
+    if (this.#seriesCosts.length > MOTION_COST_FRAMES) {
+      this.#seriesCosts.shift();
+    }
+    if (measured.changed !== null) {
+      // A millionth: finer than one pixel of a 320 × 180 plane, as the sync check's samples.
+      this.#seriesPoints.push({
+        timestampUs: frame.timestamp,
+        changed: Math.round(measured.changed * 1e6) / 1e6,
+      });
+    }
+    const cost = this.#seriesCost();
+    if (
+      cost !== null &&
+      this.#seriesCosts.length >= MOTION_COST_MIN_FRAMES &&
+      cost > MOTION_COST_LIMIT_MS
+    ) {
+      this.#stopSeries(
+        'costly',
+        `it took ${cost.toFixed(1)} ms a frame (more than ${String(MOTION_COST_LIMIT_MS)}).`,
+      );
+    }
+  }
+
+  /** The solves' meter goes off for the rest of the recording, and the window hears why, once. */
+  #stopSeries(state: 'costly' | 'unreadable', why: string): void {
+    this.#series = null;
+    this.#seriesState = state;
+    this.#env.post({ type: 'error', message: `${MOTION_METER_OFF} ${why}`, fatal: false });
+  }
+
+  /** The median cost of the solves' meter over its last frames, ms to 0.01; null before one. */
+  #seriesCost(): number | null {
+    const costs = [...this.#seriesCosts].sort((a, b) => a - b);
+    return costs.length === 0 ? null : Math.round(costs[Math.floor(costs.length / 2)] * 100) / 100;
+  }
+
+  /** The solves' motion is kept as far back as the buffer goes. */
+  #pruneSeries(): void {
+    const first = this.#buffer.video.at(0)?.timestampUs;
+    const points = this.#seriesPoints;
+    if (first === undefined || points.length === 0 || points[0].timestampUs >= first) {
+      return;
+    }
+    const keep = points.findIndex((point) => point.timestampUs >= first);
+    this.#seriesPoints = keep < 0 ? [] : points.slice(keep);
   }
 
   #noteTimestamp(timestampUs: number): void {
@@ -889,6 +1124,7 @@ export class CaptureWorker {
   #postStats(): void {
     const now = this.#env.now();
     const seconds = (now - this.#windowStartHostMs) / 1000;
+    const latency = this.#latency.take();
     const stats: CaptureStats = {
       fps: perSecond(this.#arrivedInWindow, seconds),
       encodedFps: perSecond(this.#encodedInWindow, seconds),
@@ -901,11 +1137,35 @@ export class CaptureWorker {
       audioCodec: this.#audioCodec,
       audioChunks: this.#audioChunks,
       audioState: this.#audioState(),
+      latency:
+        this.#latency.floorMs === null
+          ? null
+          : {
+              capture: latency.capture,
+              encode: latency.encode,
+              floorMs: this.#latency.floorMs,
+              queueMax: this.#queueMax,
+              pending: this.#frameArrivals.size,
+              waiting: this.#waitingInWindow,
+              frameIntervalMs: this.#frameIntervalMs(),
+            },
+      motion: { state: this.#seriesState, costMs: this.#seriesCost() },
     };
     this.#arrivedInWindow = 0;
     this.#encodedInWindow = 0;
+    this.#queueMax = 0;
+    this.#waitingInWindow = 0;
     this.#windowStartHostMs = now;
     this.#env.post({ type: 'stats', stats });
+  }
+
+  /** The median interval of the last frames' own timestamps, ms to 0.1; null before two frames. */
+  #frameIntervalMs(): number | null {
+    if (this.#intervalsUs.length === 0) {
+      return null;
+    }
+    const sorted = [...this.#intervalsUs].sort((a, b) => a - b);
+    return Math.round(sorted[Math.floor(sorted.length / 2)] / 100) / 10;
   }
 
   #audioState(): AudioState {
@@ -999,6 +1259,7 @@ if (globalFunction('DedicatedWorkerGlobalScope') !== undefined) {
     VideoEncoder: globalFunction('VideoEncoder') as VideoEncoderClass | undefined,
     AudioEncoder: globalFunction('AudioEncoder') as AudioEncoderClass | undefined,
     now: () => performance.timeOrigin + performance.now(),
+    timeOrigin: performance.timeOrigin,
     post: (message) => {
       post(scope, message);
     },
