@@ -259,7 +259,8 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   it sends say how many wait.
 - The end-to-end suite bends both sides in development builds through `window.cubetraceE2eRemote`
   (`e2e-remote.ts`): a camera device's clock moved by an offset (`RTC_TIMERS`), its connection cut
-  once in the middle of a file, its cuts ignored, the host's wait shortened.
+  once in the middle of a file, its cuts ignored, the host's wait shortened, and (T5.6) its clips
+  staged in a folder of its own (`stagingFolder`), so that two phone pages of one browser stage apart.
 
 **The sync check and the live preview (T4.3; `docs/RTC.md` §10 has them step by step).**
 

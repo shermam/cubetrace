@@ -337,11 +337,13 @@ two phones of one name whose cameras the browser names alike (two phones that bo
 phone", their rear cameras "camera 0, facing back") are two devices, `phone-rear` and `phone-rear-2`,
 and a phone paired again in the session gets its label back; a phone of a build before T5.6 says no
 id and is known by its host label, as before. The host knows the installation ids of the phones
-paired since its page loaded; after a reload it tells a remote camera by the browser's name for it
-together with its phone's `model` (`identityName` in `apps/web/src/app/session/session-service.ts`),
-so that phones of two models get their labels back in whatever order they pair again, and phones of
-one model, or without one, take the labels of that name in the order they pair (an entry written
-before T5.6, without `model`, is matched by the name alone). A new session starts again from the camera's own label. In the files
+paired since its page loaded, and a phone of a known id keeps its label whatever its model says (its
+first hello can go before its browser said it); after a reload it tells a remote camera by the
+browser's name for it together with its phone's `model` (`identityName` and `labelIn` in
+`apps/web/src/app/session/session-service.ts`), so that phones of two models get their labels back
+in whatever order they pair again, and phones of one model take the labels of that name in the order
+they pair; an entry without `model` (written before T5.6, or by a phone whose model came late), or a
+phone that says none, is matched by the name alone, an entry of the same name and model first. A new session starts again from the camera's own label. In the files
 written before T2.14, a second device took the label of the first, whose entry it replaced, and the
 clips of both name it. `facing` is the camera's `facingMode` when the browser says it (`user` for
 a front camera, `environment` for a rear one), `unknown` otherwise; `deviceLabel` is the browser's
