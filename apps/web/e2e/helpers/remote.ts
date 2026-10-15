@@ -157,6 +157,15 @@ export const SYNTHETIC_CAMERA = {
 export interface SyntheticQuirks {
   readonly reciprocalFocus?: boolean;
   readonly label?: string;
+  /**
+   * The cameras the browser lists (T5.5: a laptop with two cameras): the device list
+   * (`enumerateDevices`) says these names, each with an id of its own (`synthetic-camera-<k>`), in
+   * place of the browser's cameras, and a request for one of them (its `deviceId`; the first without
+   * one) gets a track of a picture of its own, whose square flips at the times given for that camera
+   * ({@link flipAt}'s `device`, its index here); its track says its name and its id. Without, one
+   * camera as before, the device list the browser's own.
+   */
+  readonly devices?: readonly string[];
 }
 
 /** The `localStorage` key of the settings (src/app/settings/settings-service.ts). */
@@ -211,7 +220,13 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
     ({ key, size, quirks }) => {
       const media = navigator.mediaDevices;
       const getUserMedia = media.getUserMedia.bind(media);
-      let source: MediaStreamTrack | null = null;
+      const names = quirks.devices ?? null;
+      const idOf = (device: number): string => `synthetic-camera-${String(device)}`;
+      /** Each camera's picture (one without `devices`): its track, and when its square flipped. */
+      const pictures = new Map<
+        number,
+        { track: MediaStreamTrack; flipAt: (times: number[]) => void; flips: number[] }
+      >();
       /** The tracks handed out, with their focus and the constraints applied to them. */
       const opened: {
         track: MediaStreamTrack;
@@ -226,11 +241,17 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
             typeof value === 'number' &&
             value >= focus.distance.min &&
             value <= focus.distance.max;
-      /** `track` with the synthetic camera's focus (T5.2), as a phone's camera track has one. */
-      const withFocus = (track: MediaStreamTrack): MediaStreamTrack => {
-        if (quirks.label !== undefined) {
-          Object.defineProperty(track, 'label', { value: quirks.label });
+      /**
+       * `track` of camera `device` with the synthetic camera's focus (T5.2), as a phone's camera
+       * track has one; with `devices`, its name and its id (T5.5).
+       */
+      const withFocus = (track: MediaStreamTrack, device: number): MediaStreamTrack => {
+        const label = names === null ? quirks.label : names[device];
+        if (label !== undefined) {
+          Object.defineProperty(track, 'label', { value: label });
         }
+        const own: Record<string, unknown> =
+          names === null ? {} : { deviceId: idOf(device), groupId: idOf(device) };
         const entry = {
           track,
           settings: { ...focus.opening } as Record<string, unknown>,
@@ -241,7 +262,7 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
         const getCapabilities = track.getCapabilities.bind(track);
         // Image Capture's keys, which TypeScript's DOM types do not have: plain objects.
         Object.defineProperty(track, 'getSettings', {
-          value: (): Record<string, unknown> => ({ ...getSettings(), ...entry.settings }),
+          value: (): Record<string, unknown> => ({ ...getSettings(), ...own, ...entry.settings }),
         });
         Object.defineProperty(track, 'getCapabilities', {
           value: (): Record<string, unknown> => ({
@@ -269,9 +290,39 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
         return track;
       };
       const live = () => opened.filter((entry) => entry.track.readyState === 'live');
-      const open = (): MediaStreamTrack => {
-        if (source !== null) {
-          return source;
+      const now = (): number => performance.timeOrigin + performance.now();
+      /** What the suite reaches through the window, once a picture is open. */
+      const expose = (): void => {
+        if (Reflect.get(window, key) !== undefined) {
+          return;
+        }
+        Reflect.set(window, key, {
+          flipAt: (times: number[], device?: number): void => {
+            for (const [k, picture] of pictures) {
+              if (device === undefined || device === k) {
+                picture.flipAt(times);
+              }
+            }
+          },
+          flips: (device = 0): number[] => [...(pictures.get(device)?.flips ?? [])],
+          controls: () => {
+            const entry = live().at(-1);
+            return entry === undefined
+              ? null
+              : { settings: { ...entry.settings }, applied: [...entry.applied] };
+          },
+          drift: (values: Record<string, unknown>): void => {
+            for (const entry of live()) {
+              Object.assign(entry.settings, values);
+            }
+          },
+        });
+      };
+      /** The picture of camera `device`, made the first time it is asked for. */
+      const open = (device: number): MediaStreamTrack => {
+        const known = pictures.get(device);
+        if (known !== undefined) {
+          return known.track;
         }
         const canvas = document.createElement('canvas');
         canvas.width = size.width;
@@ -296,8 +347,10 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
         // Drawn over and over (the same picture), so that frames keep coming at the capture's rate.
         setInterval(draw, 16);
         const flips: number[] = [];
-        const now = (): number => performance.timeOrigin + performance.now();
-        Reflect.set(window, key, {
+        const [track] = canvas.captureStream(30).getVideoTracks();
+        pictures.set(device, {
+          track,
+          flips,
           flipAt: (times: number[]): void => {
             for (const at of times) {
               setTimeout(
@@ -310,28 +363,46 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
               );
             }
           },
-          flips: (): number[] => [...flips],
-          controls: () => {
-            const entry = live().at(-1);
-            return entry === undefined
-              ? null
-              : { settings: { ...entry.settings }, applied: [...entry.applied] };
-          },
-          drift: (values: Record<string, unknown>): void => {
-            for (const entry of live()) {
-              Object.assign(entry.settings, values);
-            }
-          },
         });
-        const [track] = canvas.captureStream(30).getVideoTracks();
-        source = track;
+        expose();
         return track;
       };
+      /** The camera a request asks for: the index of its `deviceId` (-1: none such), else the first. */
+      const asked = (video: boolean | MediaTrackConstraints): number => {
+        const wanted = typeof video === 'object' ? video.deviceId : undefined;
+        if (names === null || wanted === undefined) {
+          return 0;
+        }
+        const value: unknown =
+          typeof wanted === 'string' || Array.isArray(wanted)
+            ? wanted
+            : (wanted.exact ?? wanted.ideal);
+        const ids = (Array.isArray(value) ? value : [value]).filter(
+          (id): id is string => typeof id === 'string',
+        );
+        return ids.length === 0 ? 0 : names.findIndex((_, k) => ids.includes(idOf(k)));
+      };
+      if (names !== null) {
+        // The device list names the synthetic cameras in place of the browser's.
+        const enumerate = media.enumerateDevices.bind(media);
+        media.enumerateDevices = async (): Promise<MediaDeviceInfo[]> => {
+          const others = (await enumerate()).filter((device) => device.kind !== 'videoinput');
+          const cameras = names.map((label, k) => {
+            const info = { deviceId: idOf(k), groupId: idOf(k), kind: 'videoinput', label };
+            return { ...info, toJSON: () => info } as unknown as MediaDeviceInfo;
+          });
+          return [...cameras, ...others];
+        };
+      }
       media.getUserMedia = async (constraints?: MediaStreamConstraints): Promise<MediaStream> => {
         if (constraints?.video === undefined || constraints.video === false) {
           return getUserMedia(constraints);
         }
-        const stream = new MediaStream([withFocus(open().clone())]);
+        const device = asked(constraints.video);
+        if (device < 0) {
+          throw new DOMException('Requested device not found', 'NotFoundError');
+        }
+        const stream = new MediaStream([withFocus(open(device).clone(), device)]);
         if (constraints.audio !== undefined && constraints.audio !== false) {
           for (const track of (await getUserMedia({ audio: constraints.audio })).getAudioTracks()) {
             stream.addTrack(track);
@@ -348,20 +419,21 @@ export async function syntheticCamera(page: Page, quirks: SyntheticQuirks = {}):
  * The synthetic camera of `page` ({@link syntheticCamera}) flips its square at each of `times`, on
  * the shared clock of the browser's pages (`performance.timeOrigin + performance.now()`, the host
  * clock of docs/DATA-MODEL.md §1, without the clock offset the suite may bend the phone's
- * connection with). Resolves at once; the flips come at their times.
+ * connection with): every camera's picture, or camera `device`'s only (T5.5, its index in
+ * `devices`). Resolves at once; the flips come at their times.
  */
-export async function flipAt(page: Page, times: readonly number[]): Promise<void> {
+export async function flipAt(page: Page, times: readonly number[], device?: number): Promise<void> {
   await page.evaluate(
-    ({ key, times }) => {
+    ({ key, times, device }) => {
       const camera: unknown = Reflect.get(window, key);
       const flip: unknown =
         typeof camera === 'object' && camera !== null ? Reflect.get(camera, 'flipAt') : undefined;
       if (typeof flip !== 'function') {
         throw new Error('the synthetic camera is not open on this page');
       }
-      (flip as (times: number[]) => void)([...times]);
+      (flip as (times: number[], device?: number) => void)([...times], device ?? undefined);
     },
-    { key: CAMERA, times },
+    { key: CAMERA, times, device: device ?? null },
   );
 }
 
