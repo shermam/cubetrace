@@ -767,6 +767,16 @@ one file each unconfirmed in the index, after the refused index write of (n)); t
 the attempt as not uploaded (item 3.3.4, 54 of 55). The queue should write the index's `done` again when
 `uploads.json` has every file done and the index disagrees, and the report could read the bucket's listing.
 
+(s) **The solves' motion meter is off on the phones** (2026-10-15, the first four-camera session): both
+phones turned it off at once (`recording.notice`: 4.7–6.9 ms a frame against T5.3's limit of 3 ms), so the
+phones' clips carry no `motionLagMs`; the limit should follow the device (a phone's worker has the
+headroom: its encoder is hardware) or the meter run at 96 px on a phone, measured on the ThinkPhone
+and the Moto g60. (t) **The clips labelled `laptop-rear`** (71 attempts of 2026-10-15's first
+session, 142 clips) are the Moto g60's: the owner had typed "Moto g60" as its name on a build before
+T5.6, whose `cameraLabel` made a phone of a name with "phone" in it only; the records say `local:
+false` and `remote.label`, so the ML side must tell phones by `local`, never by the label (a note for
+cubetrace-ml's dataset tooling); nothing to change in the app since T5.6.
+
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
 **Goal.** The records phase 2 writes, defined before anything writes them, and the clock fit
