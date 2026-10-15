@@ -9,6 +9,7 @@ import {
   hashToken,
   type Clock,
   type ControlsReport,
+  type DeviceInfo,
   type Message,
 } from '@cubetrace/rtc';
 
@@ -78,6 +79,12 @@ class Phone {
   /** The token it joined with, and the peer document of its call. */
   token = '';
   peerId = '';
+  /**
+   * Its installation id and model (T5.6), as its hello says them; null for both: a phone of a build
+   * before T5.6, known by its label alone.
+   */
+  id: string | null = null;
+  model: string | null = null;
   private readonly signaling: FirestoreSignaling;
 
   /** How many pings it answered. */
@@ -98,6 +105,11 @@ class Phone {
       uid: ADA.uid,
       now: () => r.s.perf.hostMs,
     });
+  }
+
+  /** The phone as its hello names it. */
+  device(): DeviceInfo {
+    return { label: this.label, platform: 'Android', id: this.id, model: this.model };
   }
 
   /** Whether the session takes `token` now. */
@@ -126,7 +138,7 @@ class Phone {
         type: 'hello',
         v: PROTOCOL_VERSION,
         role: 'camera',
-        device: { label: this.label, platform: 'Android' },
+        device: this.device(),
         app: { version: '0.4.0', commit: 'abc1234' },
         camera: PHONE_CAMERA,
       });
@@ -358,7 +370,13 @@ describe('RemoteCamerasService', () => {
     expect(cameras).toHaveLength(1);
     const camera = cameras[0];
     expect(camera.state).toBe('connected');
-    expect(camera.device).toEqual({ label: 'ThinkPhone', platform: 'Android' });
+    // A phone of a build before T5.6: no installation id, no model.
+    expect(camera.device).toEqual({
+      label: 'ThinkPhone',
+      platform: 'Android',
+      id: null,
+      model: null,
+    });
     expect(camera.app).toEqual({ version: '0.4.0', commit: 'abc1234' });
     expect(camera.camera).toEqual(PHONE_CAMERA);
     expect(camera.label).toBe('phone-rear');
@@ -374,8 +392,11 @@ describe('RemoteCamerasService', () => {
     expect(entry).toEqual({
       ...PHONE_CAMERA,
       local: false,
-      remote: { label: 'ThinkPhone', platform: 'Android' },
+      remote: { label: 'ThinkPhone', platform: 'Android', model: null },
     });
+    // The phone is told its label (T5.6), after the host's hello.
+    expect(phone.received.map((m) => m.type).slice(0, 2)).toEqual(['hello', 'label']);
+    expect(phone.of('label')).toEqual([{ type: 'label', camera: 'phone-rear' }]);
 
     const all = await events();
     expect(kinds(all)).toEqual(['rtc.paired', 'rtc.connected']);
@@ -751,9 +772,10 @@ describe('RemoteCamerasService', () => {
     await pump(r.s, 20);
     expect(r.service.cameras()).toEqual([]);
     expect(r.service.pairing()).toBeNull();
-    // The hello, the live preview asked for (T4.3), the leave.
+    // The hello, its label (T5.6), the live preview asked for (T4.3), the leave.
     expect(phone.received.map((m) => m.type).filter((t) => t !== 'ping' && t !== 'clock')).toEqual([
       'hello',
+      'label',
       'preview',
       'leave',
     ]);
@@ -853,7 +875,7 @@ describe('RemoteCamerasService', () => {
       type: 'hello',
       v: 2,
       role: 'camera',
-      device: { label: 'ThinkPhone', platform: 'Android' },
+      device: { label: 'ThinkPhone', platform: 'Android', id: null, model: null },
       app: { version: '0.5.0', commit: 'def5678' },
       camera: null,
     });
@@ -986,6 +1008,9 @@ describe('RemoteCamerasService', () => {
       {
         id: r.service.cameras()[0].id,
         name: 'ThinkPhone',
+        // A phone of a build before T5.6 (T5.6): neither.
+        installation: null,
+        model: null,
         label: 'phone-rear',
         session: r.s.service.session()?.id,
         state: 'connected',
@@ -1184,7 +1209,7 @@ describe('RemoteCamerasService', () => {
       type: 'hello',
       v: PROTOCOL_VERSION,
       role: 'camera',
-      device: { label: 'ThinkPhone', platform: 'Android' },
+      device: phone.device(),
       app: { version: '0.4.0', commit: 'abc1234' },
       camera: null,
     });

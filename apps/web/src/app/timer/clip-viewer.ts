@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import {
   type AttemptRecord,
+  type CameraInfo,
   type GyroTrack,
   MIRRORS,
   type Mirror,
@@ -38,6 +39,7 @@ import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { ATTEMPT_FILES } from '../session/attempt-files';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SettingsService } from '../settings/settings-service';
+import { cameraNames } from '../shared/camera-name';
 import { downloadBlob, downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
 import { formatBytes } from '../shared/format-bytes';
@@ -192,7 +194,7 @@ export const CUBE_ASPECT_DEFAULT = 3.556;
           >
             {{ clip.segment === 'solve' ? 'Solve' : 'Scramble' }}
             @if (severalCameras()) {
-              <span data-testid="clip-segment-camera">· {{ clip.camera }}</span>
+              <span data-testid="clip-segment-camera">· {{ nameOf(clip.camera) }}</span>
             }
             @if (clip.truncatedStart) {
               <span class="late" data-testid="clip-segment-late">· late</span>
@@ -575,6 +577,11 @@ export const CUBE_ASPECT_DEFAULT = 3.556;
 export class ClipViewer {
   /** The attempt, with its clips (`video`). */
   readonly attempt = input.required<AttemptRecord>();
+  /**
+   * Its session's cameras (`session.json`'s `cameras`), which name each clip's camera with the
+   * phone's model where its record keeps one (T5.6: "phone-rear-2 · moto g60"); none: the labels.
+   */
+  readonly cameras = input<readonly CameraInfo[]>([]);
   /** Closed with the dialog (the Close button, Esc). */
   protected readonly viewing = inject(ClipViewing);
   protected readonly tempoScale = CUBE_TEMPO_SCALE;
@@ -610,6 +617,12 @@ export class ClipViewer {
   protected readonly severalCameras = computed(
     () => new Set(this.attempt().video.map((clip) => clip.camera)).size > 1,
   );
+  /** The session's cameras' names by label (T5.6): a phone's with its model. */
+  private readonly names = computed(() => cameraNames(this.cameras()));
+  /** A clip's camera as its button names it: "phone-rear-2 · moto g60", or its label (T5.6). */
+  protected nameOf(camera: string): string {
+    return this.names().get(camera) ?? camera;
+  }
   /** The chosen clip's MP4 behind an object URL. */
   protected readonly url = signal<string | null>(null);
   protected readonly readError = signal<string | null>(null);

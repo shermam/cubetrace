@@ -11,6 +11,9 @@
     @if (joined()) {
       <span class="muted" data-testid="device-host"> · {{ hostText() }}</span>
       <span class="muted" data-testid="device-since"> · {{ sinceText() }}</span>
+      @if (service.label(); as label) {
+        <span class="muted" data-testid="device-label"> · you are {{ label }} here</span>
+      }
     }
   </p>
   @if (service.problem(); as problem) {

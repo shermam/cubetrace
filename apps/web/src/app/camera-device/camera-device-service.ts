@@ -165,6 +165,7 @@ export class CameraDeviceService {
   private readonly inputSignal = signal<PairingInput | null>(null);
   private readonly joinedSignal = signal<Joined | null>(null);
   private readonly hostSignal = signal<Hello | null>(null);
+  private readonly labelSignal = signal<string | null>(null);
   private readonly clockSignal = signal<DeviceClock | null>(null);
   private readonly problemSignal = signal<string | null>(null);
   private readonly sinceSignal = signal(0);
@@ -183,6 +184,12 @@ export class CameraDeviceService {
   readonly host = this.hostSignal.asReadonly();
   /** The host's device, for the page. */
   readonly hostDevice = computed<DeviceInfo | null>(() => this.hostSignal()?.device ?? null);
+  /**
+   * The label the host's session gives this phone's camera (T5.6: `phone-rear-2`), as the host says
+   * it (`label`; from a host's build before T5.6, its last cut's camera); null until it says it, and
+   * from a new code on: "you are phone-rear-2 here".
+   */
+  readonly label = this.labelSignal.asReadonly();
   /** The clock sync as the host last reported it; null before the first report. */
   readonly clock = this.clockSignal.asReadonly();
   /**
@@ -296,6 +303,7 @@ export class CameraDeviceService {
     this.end('a new code', LEAVE_GRACE_MS);
     this.inputSignal.set(input);
     this.joinedSignal.set(null);
+    this.labelSignal.set(null);
     this.problemSignal.set(null);
     this.track(this.start());
   }
@@ -315,6 +323,7 @@ export class CameraDeviceService {
     this.inputSignal.set(null);
     this.joinedSignal.set(null);
     this.hostSignal.set(null);
+    this.labelSignal.set(null);
     this.clockSignal.set(null);
     this.setState('idle', null);
   }
@@ -514,6 +523,13 @@ export class CameraDeviceService {
       }),
       link.on('leave', (message) => {
         this.hostLeft(generation, message.reason);
+      }),
+      // This camera's label in the host's session (T5.6), and a cut's, which names it too.
+      link.on('label', (message) => {
+        this.labelSignal.set(message.camera);
+      }),
+      link.on('cut', (message) => {
+        this.labelSignal.set(message.camera);
       }),
       link.onError((error) => {
         console.warn(`cubetrace: camera device: a frame was not a message: ${error.message}`);

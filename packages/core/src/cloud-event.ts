@@ -15,6 +15,18 @@ export interface EventDevice {
   platform: string;
   /** The app runs installed (display mode `standalone`), not in a browser tab. */
   installed: boolean;
+  /**
+   * The first eight characters of the device's installation id (T5.6: a UUID v4 made once per
+   * browser installation, kept in its Settings), which tells two devices of one label apart (two
+   * phones that both say "Android phone"): never the whole id. Absent from the events written before
+   * T5.6.
+   */
+  installation?: string;
+  /**
+   * The device's model where its browser gives it (T5.6: Chrome on Android, `moto g60`), at most
+   * {@link EVENT_MODEL_MAX_LENGTH} characters; absent where it does not, and before T5.6.
+   */
+  model?: string;
 }
 
 /** A fact of an event: text (at most {@link EVENT_TEXT_MAX_LENGTH} characters), a number, a boolean or null. */
@@ -61,6 +73,12 @@ export const EVENT_TEXT_MAX_LENGTH = 500;
 
 /** An event's id: the event's time as 13 digits, a dash and 8 hex digits. */
 export const EVENT_ID = /^\d{13}-[0-9a-f]{8}$/u;
+
+/** A device's `installation` (T5.6): the first eight characters of its installation id, a UUID v4. */
+export const EVENT_INSTALLATION = /^[0-9a-f]{8}$/u;
+
+/** The most characters of a device's `model` (T5.6). */
+export const EVENT_MODEL_MAX_LENGTH = 100;
 
 /** Whether `kind` is a kind the documents take. */
 export function isEventKind(kind: string): boolean {
@@ -197,13 +215,29 @@ export function cloudEvent(input: CloudEventInput): CloudEvent {
     tsMs: input.tsMs,
     kind: input.kind,
     app: { version: input.app.version, commit: input.app.commit },
-    device: {
-      label: input.device.label,
-      platform: input.device.platform,
-      installed: input.device.installed,
-    },
+    device: eventDevice(input.device),
     ...(session !== null && session !== '' ? { session } : {}),
     ...(attempt !== null ? { attempt } : {}),
     data: sanitizeEventData(input.data),
+  };
+}
+
+/**
+ * The device of an event as the documents take it: its label, platform and display mode, and since
+ * T5.6 its `installation` when it is eight lowercase hex digits (anything else is left out, as the
+ * rules would refuse the whole batch for it) and its `model` when it has one, cut to
+ * {@link EVENT_MODEL_MAX_LENGTH} characters.
+ */
+function eventDevice(device: EventDevice): EventDevice {
+  const installation = device.installation;
+  const model = device.model?.trim() ?? '';
+  return {
+    label: device.label,
+    platform: device.platform,
+    installed: device.installed,
+    ...(installation !== undefined && EVENT_INSTALLATION.test(installation)
+      ? { installation }
+      : {}),
+    ...(model === '' ? {} : { model: model.slice(0, EVENT_MODEL_MAX_LENGTH) }),
   };
 }

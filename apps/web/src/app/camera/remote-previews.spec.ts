@@ -42,6 +42,8 @@ function camera(id: string, changes: Partial<RemoteCameraEntry> = {}): RemoteCam
   return {
     id,
     name: 'ThinkPhone',
+    installation: null,
+    model: null,
     label: `phone-rear${id === 'a' ? '' : `-${id}`}`,
     session: 'session',
     state: 'connected',

@@ -41,6 +41,19 @@ export interface DeviceInfo {
   label: string;
   /** Its platform, such as `Android` or `macOS`. */
   platform: string;
+  /**
+   * Its installation id (T5.6): a UUID v4 made once per browser installation and kept in its
+   * Settings, which tells two devices of one label apart (the host knows a phone's camera by it, so
+   * that two phones named alike are two cameras); never in a record. Null from a build before T5.6,
+   * whose `hello` has none: such a phone is known by its label alone, as before.
+   */
+  id: string | null;
+  /**
+   * The device's model where the browser gives it (T5.6: Chrome on Android, through
+   * `navigator.userAgentData.getHighEntropyValues(['model'])`, such as `moto g60`); null elsewhere,
+   * and from a build before T5.6.
+   */
+  model: string | null;
 }
 
 /**
@@ -341,6 +354,17 @@ export interface ClipAck {
   reason: string;
 }
 
+/**
+ * The label the host's session gives the phone's camera (T5.6: `phone-rear-2`), the first name of
+ * its clips' files there and the name the host shows it by: sent once the hellos are exchanged and
+ * the camera is in the session, and again whenever it changes (the phone's camera changed), for the
+ * phone's page to say ("you are phone-rear-2 here"). A phone before T5.6 drops it (`onError`).
+ */
+export interface CameraLabel {
+  type: 'label';
+  camera: string;
+}
+
 /** A side leaves on purpose (the phone's Leave, the host's Remove), with why. */
 export interface Leave {
   type: 'leave';
@@ -480,6 +504,7 @@ export type Message =
   | CutDone
   | CutFailed
   | ClipAck
+  | CameraLabel
   | FileBegin
   | FileChunk
   | FileAck
@@ -518,6 +543,15 @@ const MAX_TEXT = 1000;
 
 /** The most characters of `controls-failed`'s message (T5.2): a camera's refusal in a sentence. */
 export const MAX_CONTROLS_MESSAGE = 500;
+
+/** The most characters of a device's model in `hello` (T5.6): Chrome's are a few words. */
+export const MAX_DEVICE_MODEL = 100;
+
+/**
+ * An installation id in `hello` (T5.6): letters, digits and hyphens, 8 to 64 of them (a UUID v4 is
+ * 36), so that a later build may make it otherwise and its first eight characters still name it.
+ */
+const INSTALLATION_ID = /^[0-9A-Za-z-]{8,64}$/u;
 
 /** A file's name: a plain name, no path (docs/DATA-MODEL.md §5 names the clips' files). */
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/u;
@@ -696,6 +730,8 @@ function decodeControl(text: string): ControlMessage {
         stored: bool(json, 'stored'),
         reason: text_(json, 'reason'),
       };
+    case 'label':
+      return { type, camera: cameraLabel(json, 'camera') };
     case 'file-begin':
       return {
         type,
@@ -815,7 +851,24 @@ function state(json: Json): CameraState {
 }
 
 function device(json: Json): DeviceInfo {
-  return { label: text_(json, 'label'), platform: text_(json, 'platform') };
+  return {
+    label: text_(json, 'label'),
+    platform: text_(json, 'platform'),
+    // T5.6, additive: a build before it sends neither, read as null; an empty model is none.
+    id: nullable(json, 'id', installationId),
+    model: optionalText(json, 'model', MAX_DEVICE_MODEL),
+  };
+}
+
+/** An installation id (`hello`'s `device.id`, T5.6): {@link INSTALLATION_ID}. */
+function installationId(json: Json, key: string): string {
+  const value = json[key];
+  if (typeof value !== 'string' || !INSTALLATION_ID.test(value)) {
+    throw new ProtocolError(
+      `${key} must be an installation id (8 to 64 letters, digits and hyphens), got ${show(value)}.`,
+    );
+  }
+  return value;
 }
 
 function build(json: Json): AppBuild {
@@ -1154,4 +1207,10 @@ function list(json: Json, key: string): unknown[] {
 function nullable<T>(json: Json, key: string, read: (json: Json, key: string) => T): T | null {
   const value = json[key];
   return value === null || value === undefined ? null : read(json, key);
+}
+
+/** A text of at most `max` characters that may be absent or null: null then, and when it is empty. */
+function optionalText(json: Json, key: string, max: number): string | null {
+  const value = nullable(json, key, (j, k) => text_(j, k, max));
+  return value === '' ? null : value;
 }

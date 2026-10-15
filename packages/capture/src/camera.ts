@@ -517,16 +517,17 @@ export function facingFromLabel(label: string): CameraFacing {
 }
 
 /**
- * The camera's own short label: `phone` when the host label says phone (the default labels of
- * phones all do: "Android phone", "iPhone", "Phone"), `laptop` otherwise, followed by `-front` or
- * `-rear` when the facing is known: `laptop`, `phone-front`, `phone-rear`. Lowercase words joined
- * by hyphens, as the camera labels that name clip files must be. Two cameras of a host can have one
- * own label (a laptop's built-in camera and a USB webcam): in a session each device gets a label of
- * its own from it, `laptop` for the first and `laptop-2` for another (@cubetrace/core's `labelFor`,
- * docs/PLAN.md T2.14).
+ * The camera's own short label: `phone` on a phone (`phone`: its browser says it is one, T5.6, since
+ * a phone's default host label is its model, `moto g60`, which need not say phone) or when the host
+ * label says phone (the default labels of phones before T5.6 all did: "Android phone", "iPhone",
+ * "Phone"), `laptop` otherwise, followed by `-front` or `-rear` when the facing is known: `laptop`,
+ * `phone-front`, `phone-rear`. Lowercase words joined by hyphens, as the camera labels that name clip
+ * files must be. Two cameras of a host can have one own label (a laptop's built-in camera and a USB
+ * webcam): in a session each device gets a label of its own from it, `laptop` for the first and
+ * `laptop-2` for another (@cubetrace/core's `labelFor`, docs/PLAN.md T2.14).
  */
-export function cameraLabel(hostLabel: string, facing: CameraFacing): string {
-  const base = /phone/i.test(hostLabel) ? 'phone' : 'laptop';
+export function cameraLabel(hostLabel: string, facing: CameraFacing, phone = false): string {
+  const base = phone || /phone/i.test(hostLabel) ? 'phone' : 'laptop';
   switch (facing) {
     case 'user':
       return `${base}-front`;
@@ -549,18 +550,19 @@ export interface CameraTrack extends SnapshotSource {
  * settings and capabilities (`snapshot`), the constraints it was asked for (without the device id),
  * `crop`, the framing rectangle in frame pixels (null for the whole frame), and `mode: 'full'`: in
  * phase 2 the video keeps the whole frame. Its `microphone` is null: the recording, which opens the
- * microphone, puts its own (T2.12).
+ * microphone, puts its own (T2.12). `phone`: the host is a phone, whatever its label (T5.6).
  */
 export function cameraInfo(
   hostLabel: string,
   choice: CameraChoice,
   track: CameraTrack,
   crop: CropRect | null,
+  phone = false,
 ): CameraInfo {
   const { settings, capabilities } = snapshot(track);
   const facing = facingOf(settings, track.label);
   return {
-    label: cameraLabel(hostLabel, facing),
+    label: cameraLabel(hostLabel, facing, phone),
     local: true,
     facing,
     deviceLabel: track.label,

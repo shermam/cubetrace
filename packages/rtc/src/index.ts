@@ -4,6 +4,7 @@
 
 // The data channel's protocol: the messages and their wire form.
 export type {
+  CameraLabel,
   CameraState,
   ClipAck,
   Clock,
@@ -48,6 +49,7 @@ export {
   CHUNK_HEADER_BYTES,
   MAX_CLIP_MOTION_FRAMES,
   MAX_CONTROLS_MESSAGE,
+  MAX_DEVICE_MODEL,
   MAX_MOTION_FRAMES,
   PRESSURE_STATES,
   PROTOCOL_VERSION,

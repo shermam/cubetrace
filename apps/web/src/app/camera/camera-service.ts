@@ -339,7 +339,7 @@ export class CameraService {
       return null;
     }
     return {
-      label: cameraLabel(this.prefs.hostLabel(), this.facing()),
+      label: cameraLabel(this.prefs.hostLabel(), this.facing(), this.prefs.isPhone),
       deviceLabel,
       deviceId: this.deviceIdSignal(),
     };
@@ -610,7 +610,7 @@ export class CameraService {
       return null;
     }
     const crop = rect === null || size === null || isFullFrame(rect, size) ? null : rect;
-    return cameraInfo(this.prefs.hostLabel(), choice, track, crop);
+    return cameraInfo(this.prefs.hostLabel(), choice, track, crop, this.prefs.isPhone);
   }
 
   /**

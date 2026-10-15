@@ -8,7 +8,7 @@ import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { installedApp } from '../device/display-mode';
 import { StorageService } from '../device/storage-service';
 import { WakeLockService } from '../device/wake-lock-service';
-import { SettingsService, hostPlatform } from '../settings/settings-service';
+import { SettingsService, hostPlatform, shortInstallation } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import { localDay } from '../shared/local-day';
 
@@ -475,8 +475,23 @@ export class DiagnosticsService {
     });
   }
 
+  /**
+   * This device for an event: its label, platform and display mode, and since T5.6 its installation
+   * (the first eight characters of its installation id, which tells two devices of one label apart)
+   * and its model where the browser gives it. Read untracked: an event recorded in a computed or an
+   * effect makes it depend on none of them.
+   */
   private device(): EventDevice {
-    return { label: this.settings.hostLabel(), platform: this.platform, installed: this.installed };
+    return untracked(() => {
+      const model = this.settings.model();
+      return {
+        label: this.settings.hostLabel(),
+        platform: this.platform,
+        installed: this.installed,
+        installation: shortInstallation(this.settings.installationId()),
+        ...(model === null ? {} : { model }),
+      };
+    });
   }
 
   private readKept(): Kept {

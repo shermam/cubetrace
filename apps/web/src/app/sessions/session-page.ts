@@ -18,6 +18,7 @@ import { StorageService } from '../device/storage-service';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SessionService } from '../session/session-service';
 import { sessionStats } from '../session/session-stats';
+import { cameraName } from '../shared/camera-name';
 import { clipsText as describeClips } from '../shared/clips-text';
 import { downloadJson } from '../shared/download';
 import { errorMessage } from '../shared/error-message';
@@ -56,13 +57,18 @@ type Shown = (DeviceSession | CloudOnlySession) & {
   readonly current: boolean;
 };
 
-/** "laptop (FaceTime HD Camera), phone-front": the cameras of `session`; "none" without one. */
+/**
+ * "laptop (FaceTime HD Camera), phone-rear-2 · moto g60 (camera 0, facing back)": the cameras of
+ * `session`, each by its label, a phone's with its model where its record keeps one (T5.6), and the
+ * browser's name for it; "none" without one.
+ */
 export function camerasText(session: SessionRecord): string {
-  const cameras = session.cameras.map((camera) =>
-    camera.deviceLabel === '' || camera.deviceLabel === camera.label
-      ? camera.label
-      : `${camera.label} (${camera.deviceLabel})`,
-  );
+  const cameras = session.cameras.map((camera) => {
+    const name = cameraName(camera.label, camera.remote?.model);
+    return camera.deviceLabel === '' || camera.deviceLabel === camera.label
+      ? name
+      : `${name} (${camera.deviceLabel})`;
+  });
   return cameras.length === 0 ? 'none' : cameras.join(', ');
 }
 
@@ -199,7 +205,7 @@ export function clipsText(attempts: readonly Pick<AttemptRecord, 'video'>[]): st
     }
     @if (viewed(); as attempt) {
       @defer (on immediate) {
-        <app-clip-viewer [attempt]="attempt" />
+        <app-clip-viewer [attempt]="attempt" [cameras]="shown()?.session.cameras ?? []" />
       }
     }
   `,

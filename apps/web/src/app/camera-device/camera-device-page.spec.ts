@@ -146,7 +146,7 @@ describe('CameraDevicePage', () => {
             type: 'hello',
             v: PROTOCOL_VERSION,
             role: 'host',
-            device: { label: 'office-mbp', platform: 'macOS' },
+            device: { label: 'office-mbp', platform: 'macOS', id: null, model: null },
             app: { version: '0.4.0', commit: 'abc1234' },
             camera: null,
           });

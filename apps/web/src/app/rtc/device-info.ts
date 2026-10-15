@@ -5,10 +5,17 @@ import { SettingsService, hostPlatform } from '../settings/settings-service';
 
 /**
  * This device as `hello` names it (docs/RTC.md §1), and as a remote camera's `remote` names the
- * device it runs on (docs/DATA-MODEL.md §6): its host label (Settings → This device) and its platform.
+ * device it runs on (docs/DATA-MODEL.md §6): its host label (Settings → This device), its platform,
+ * and since T5.6 its installation id (Settings: the host knows a phone by it, never records it) and
+ * its model where the browser gives it.
  */
 export function thisDevice(settings: SettingsService, globals: BrowserGlobals): DeviceInfo {
-  return { label: settings.hostLabel(), platform: hostPlatform(globals.navigator).platform };
+  return {
+    label: settings.hostLabel(),
+    platform: hostPlatform(globals.navigator).platform,
+    id: settings.installationId(),
+    model: settings.model(),
+  };
 }
 
 /** A duration for the connection's lines: "4 s", "2 min 05 s", "1 h 02 min". */

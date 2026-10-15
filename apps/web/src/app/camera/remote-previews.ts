@@ -15,6 +15,7 @@ import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
 import { SessionService } from '../session/session-service';
 import { SettingsService, type RemotePictures } from '../settings/settings-service';
+import { cameraName } from '../shared/camera-name';
 import { motionLagOff, solveClipOf } from './latency-words';
 import { RemoteCameraRegistry, type RemoteCameraEntry } from './remote-camera-registry';
 import { remoteStatusLine, shortParts, type StatusPart } from './remote-status';
@@ -39,7 +40,7 @@ import { showStream } from './video';
           muted
           playsinline
           [class.hidden]="!live()"
-          [attr.aria-label]="'Live picture of ' + camera().name"
+          [attr.aria-label]="'Live picture of ' + name()"
           data-testid="remote-picture-video"
         ></video>
       }
@@ -47,7 +48,7 @@ import { showStream } from './video';
         @if (camera().thumbnail; as url) {
           <img
             [src]="url"
-            [alt]="'The latest picture of ' + camera().name"
+            [alt]="'The latest picture of ' + name()"
             data-testid="remote-picture-thumbnail"
           />
         } @else {
@@ -126,6 +127,8 @@ export class RemotePicture {
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
   private readonly flowing = signal(false);
 
+  /** The phone as the pictures name it (T5.6): "phone-rear-2 · moto g60". */
+  protected readonly name = computed(() => nameOf(this.camera()));
   /** The live track, the same object as long as the connection is. */
   private readonly track = computed(() => this.camera().preview);
   /** A stream of the track for the video element; null without one (or a browser without streams). */
@@ -188,6 +191,14 @@ export class RemotePicture {
 export const STATUS_TICK_MS = 1000;
 
 /**
+ * A phone's picture's name (T5.6): its label in the session and its model where its browser gives
+ * it, "phone-rear-2 · moto g60"; its name until it has a label.
+ */
+export function nameOf(camera: Pick<RemoteCameraEntry, 'label' | 'name' | 'model'>): string {
+  return cameraName(camera.label ?? camera.name, camera.model);
+}
+
+/**
  * The live pictures of the host's remote cameras on the Timer page, in one of two layouts
  * ("Pictures from phones", T5.1, `remotePicturesLayout`):
  *
@@ -219,7 +230,7 @@ export const STATUS_TICK_MS = 1000;
         <div class="cell" data-testid="remote-preview-cell" [attr.data-label]="camera.label">
           <div class="box" data-testid="remote-preview-box">
             <app-remote-picture [camera]="camera" [full]="true" />
-            <span class="caption">{{ camera.label }}</span>
+            <span class="caption" data-testid="remote-preview-name">{{ nameOf(camera) }}</span>
           </div>
           <p class="status" data-testid="remote-status" [attr.data-label]="camera.label">
             <app-status-parts [parts]="lineOf(camera)" testId="remote-status" />
@@ -229,7 +240,7 @@ export const STATUS_TICK_MS = 1000;
                 class="reset"
                 data-testid="remote-drift-reset"
                 [attr.aria-label]="
-                  'Reset what the camera of ' + camera.label + ' changed by itself'
+                  'Reset what the camera of ' + nameOf(camera) + ' changed by itself'
                 "
                 (click)="resetDrift(camera.id)"
               >
@@ -244,7 +255,7 @@ export const STATUS_TICK_MS = 1000;
         <div class="main" data-testid="remote-preview-main" [attr.data-label]="camera.label">
           <app-remote-picture [camera]="camera" />
           <span class="caption" data-testid="remote-caption">
-            {{ camera.label }}
+            {{ nameOf(camera) }}
             @if (shortOf(camera); as parts) {
               <span aria-hidden="true">{{ ' · ' }}</span>
               <app-status-parts [parts]="parts" [short]="true" testId="remote-caption" />
@@ -273,13 +284,13 @@ export const STATUS_TICK_MS = 1000;
             class="tile"
             data-testid="remote-preview-tile"
             [attr.data-label]="camera.label"
-            [attr.aria-label]="'Show ' + (camera.label ?? camera.name) + ' as the main picture'"
+            [attr.aria-label]="'Show ' + nameOf(camera) + ' as the main picture'"
             [style.--aspect]="aspectOf(camera)"
             (click)="show(camera.id)"
           >
             <app-remote-picture [camera]="camera" />
             <span class="caption" data-testid="remote-caption">
-              {{ camera.label ?? camera.name }}
+              {{ nameOf(camera) }}
               @if (shortOf(camera); as parts) {
                 <span aria-hidden="true">{{ ' · ' }}</span>
                 <app-status-parts [parts]="parts" [short]="true" testId="remote-caption" />
@@ -418,6 +429,8 @@ export class RemotePreviews {
   /** This device's frames' proportions. */
   readonly localAspect = input(16 / 9);
 
+  /** A phone's name on its picture (T5.6): its label and its model. */
+  protected readonly nameOf = nameOf;
   private readonly registry = inject(RemoteCameraRegistry);
   private readonly settings = inject(SettingsService);
   private readonly session = inject(SessionService);

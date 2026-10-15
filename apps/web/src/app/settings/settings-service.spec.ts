@@ -2,11 +2,13 @@ import { TestBed } from '@angular/core/testing';
 import { MAX_VIEWER_CHOICES, VIEWER_DEFAULT } from '@cubetrace/core';
 
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
-import { FakeLocalStorage, FakePerformance } from '../device/fake-browser';
+import { FakeLocalStorage, FakePerformance, settle } from '../device/fake-browser';
 import {
   SETTINGS_STORAGE_KEY,
   SettingsService,
   defaultHostLabel,
+  deviceModel,
+  newInstallationId,
   remotePicturesDefault,
 } from './settings-service';
 
@@ -154,6 +156,9 @@ describe('SettingsService', () => {
     expect(stored()).toEqual({
       version: 2,
       hostLabel: 'office-mbp',
+      // T5.6: no installation id until one is read; no model from a laptop's browser.
+      installationId: null,
+      model: null,
       cubeMacs: [{ name: 'GAN12ui_AB12', mac: 'AB:12:CD:34:EF:56', updatedMs: clock.hostMs }],
       demoSpeed: 20,
       inspection: true,
@@ -245,6 +250,85 @@ describe('SettingsService', () => {
       mirror: 'left-right',
     });
     expect(reloaded.viewerChoiceFor('phone')).toBeNull();
+  });
+
+  it('makes the installation id at its first read and keeps it, the same after a reload (T5.6)', () => {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+    const settings = load();
+    // Nothing stored before it is read.
+    expect(storage.length).toBe(0);
+    const id = settings.installationId();
+    expect(id).toMatch(uuid);
+    expect(settings.installationId()).toBe(id);
+    expect((stored() as Record<string, unknown>)['installationId']).toBe(id);
+    // Another change keeps it.
+    settings.setInspection(true);
+    expect((stored() as Record<string, unknown>)['installationId']).toBe(id);
+    expect(load().installationId()).toBe(id);
+    // An id of another shape is none: a new one is made.
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ installationId: 'not-a-uuid' }));
+    const other = load().installationId();
+    expect(other).toMatch(uuid);
+    expect(other).not.toBe(id);
+  });
+
+  it('names a phone by its model where its browser gives it, keeps the model for the next load, lets a typed name win, and moves the cameras chosen under the old name (T5.6)', async () => {
+    /** A phone whose Chrome answers the client hints with `model` (empty: none). */
+    const phone = (model: string): BrowserGlobals => ({
+      navigator: {
+        userAgent: '',
+        userAgentData: {
+          platform: 'Android',
+          mobile: true,
+          getHighEntropyValues: () => Promise.resolve({ model }),
+        },
+      } as unknown as Partial<Navigator>,
+      localStorage: storage,
+      performance: clock,
+    });
+    // Before T5.6 the phone was "Android phone": its camera device's choice is kept under that name.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        cameraPicks: [
+          { host: 'Android phone (camera)', deviceId: 'rear-2', label: 'camera 2, facing back' },
+          { host: 'office-mbp', deviceId: 'mbp', label: 'FaceTime HD Camera' },
+        ],
+      }),
+    );
+    const settings = load(phone('moto g60'));
+    expect(settings.model()).toBeNull();
+    expect(settings.hostLabel()).toBe('Android phone');
+    await settle();
+    expect(settings.model()).toBe('moto g60');
+    expect(settings.defaultHostLabel()).toBe('moto g60');
+    expect(settings.hostLabel()).toBe('moto g60');
+    expect(settings.cameraPickFor('moto g60 (camera)')).toEqual({
+      host: 'moto g60 (camera)',
+      deviceId: 'rear-2',
+      label: 'camera 2, facing back',
+    });
+    expect(settings.cameraPickFor('Android phone (camera)')).toBeNull();
+    expect(settings.cameraPickFor('office-mbp')?.deviceId).toBe('mbp');
+
+    // The next load has it from the start; the browser saying it again changes nothing.
+    const written = storage.getItem(SETTINGS_STORAGE_KEY);
+    const reloaded = load(phone('moto g60'));
+    expect(reloaded.hostLabel()).toBe('moto g60');
+    await settle();
+    expect(storage.getItem(SETTINGS_STORAGE_KEY)).toBe(written);
+    // The typed name wins, and keeps the choices where they are; the model stays.
+    reloaded.setHostLabel('Moto');
+    expect(reloaded.hostLabel()).toBe('Moto');
+    expect(reloaded.model()).toBe('moto g60');
+
+    // A browser that gives no model: the platform word, as before T5.6.
+    storage.clear();
+    const plain = load(phone(''));
+    await settle();
+    expect(plain.model()).toBeNull();
+    expect(plain.hostLabel()).toBe('Android phone');
+    expect(storage.length).toBe(0);
   });
 
   it("keeps the clip viewer's choice per camera, normalized, the oldest first and at most 8 (T3.10)", () => {
@@ -910,5 +994,78 @@ describe('defaultHostLabel', () => {
 
   it('falls back to "Laptop" without a navigator', () => {
     expect(defaultHostLabel(undefined)).toBe('Laptop');
+  });
+
+  it('is the model where the browser gives it (T5.6), else the platform word', () => {
+    expect(defaultHostLabel(withHints('Android', true), 'moto g60')).toBe('moto g60');
+    expect(defaultHostLabel(withHints('Android', true), 'ThinkPhone by motorola')).toBe(
+      'ThinkPhone by motorola',
+    );
+    expect(defaultHostLabel(withHints('Android', true), null)).toBe('Android phone');
+    expect(defaultHostLabel(withHints('Android', true), '  ')).toBe('Android phone');
+  });
+});
+
+describe('deviceModel', () => {
+  /** A navigator whose client hints answer `getHighEntropyValues` with `answer`. */
+  function hinted(answer: () => Promise<unknown>): Partial<Navigator> {
+    const userAgentData = {
+      platform: 'Android',
+      mobile: true,
+      // As Chrome's NavigatorUAData: called detached, it would throw (an illegal invocation).
+      getHighEntropyValues(this: unknown, hints: string[]): Promise<unknown> {
+        if (this !== userAgentData) {
+          throw new TypeError('Illegal invocation');
+        }
+        expect(hints).toEqual(['model']);
+        return answer();
+      },
+    };
+    return { userAgent: '', userAgentData } as unknown as Partial<Navigator>;
+  }
+
+  it("reads the model from Chrome's client hints, feature-detected (T5.6)", async () => {
+    expect(await deviceModel(hinted(() => Promise.resolve({ model: 'moto g60' })))).toBe(
+      'moto g60',
+    );
+    expect(await deviceModel(hinted(() => Promise.resolve({ model: ' Pixel 8 ' })))).toBe(
+      'Pixel 8',
+    );
+    // Desktop Chrome gives an empty model; other browsers have no client hints: none.
+    expect(await deviceModel(hinted(() => Promise.resolve({ model: '' })))).toBeNull();
+    expect(await deviceModel({ userAgent: MAC_USER_AGENT })).toBeNull();
+    expect(await deviceModel(undefined)).toBeNull();
+    // A refusal says nothing either way.
+    expect(
+      await deviceModel(hinted(() => Promise.reject(new DOMException('No.', 'NotAllowedError')))),
+    ).toBeUndefined();
+  });
+});
+
+describe('newInstallationId', () => {
+  it('makes a lowercase UUID v4, another each time', () => {
+    const ids = new Set(Array.from({ length: 20 }, () => newInstallationId()));
+    expect(ids.size).toBe(20);
+    for (const id of ids) {
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+    }
+  });
+
+  it('makes one of the same shape from random bytes where crypto has no randomUUID', () => {
+    const randomUUID = Reflect.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(crypto),
+      'randomUUID',
+    );
+    Reflect.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true });
+    try {
+      expect(newInstallationId()).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      );
+    } finally {
+      Reflect.deleteProperty(crypto, 'randomUUID');
+      expect(Reflect.getOwnPropertyDescriptor(Object.getPrototypeOf(crypto), 'randomUUID')).toEqual(
+        randomUUID,
+      );
+    }
   });
 });

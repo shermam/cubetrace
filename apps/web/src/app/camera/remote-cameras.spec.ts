@@ -111,7 +111,7 @@ describe('RemoteCameras', () => {
       type: 'hello',
       v: PROTOCOL_VERSION,
       role: 'camera',
-      device: { label, platform: 'Android' },
+      device: { label, platform: 'Android', id: null, model: null },
       app: { version: '0.4.0', commit: 'abc1234' },
       camera: PHONE_CAMERA,
     });

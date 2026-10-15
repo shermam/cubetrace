@@ -420,6 +420,12 @@ describe('facing and labels', () => {
     expect(cameraLabel('Android phone', 'user')).toBe('phone-front');
     expect(cameraLabel('iPhone', 'environment')).toBe('phone-rear');
     expect(cameraLabel('ThinkPhone', 'unknown')).toBe('phone');
+    // T5.6: a phone's default label is its model, which need not say phone; its browser says it is
+    // one. A laptop named after a phone stays a phone, as before.
+    expect(cameraLabel('moto g60', 'environment', true)).toBe('phone-rear');
+    expect(cameraLabel('moto g60', 'environment')).toBe('laptop-rear');
+    expect(cameraLabel('Pixel', 'user', true)).toBe('phone-front');
+    expect(cameraLabel('macOS laptop', 'unknown', false)).toBe('laptop');
   });
 });
 
@@ -462,11 +468,18 @@ describe('cameraInfo', () => {
         h: 1080,
       }),
       cameraInfo('Android phone', { deviceId: 'id', exactFps: true }, trackOf(PHONE_REAR), null),
+      // T5.6: the phone named after its model, a phone by its platform.
+      cameraInfo('moto g60', { deviceId: 'id' }, trackOf(PHONE_REAR), null, true),
     ];
     for (const entry of entries) {
       expect(validate?.(entry), JSON.stringify(validate?.errors)).toBe(true);
     }
-    expect(entries.map((entry) => entry.label)).toEqual(['laptop', 'phone-front', 'phone-rear']);
+    expect(entries.map((entry) => entry.label)).toEqual([
+      'laptop',
+      'phone-front',
+      'phone-rear',
+      'phone-rear',
+    ]);
   });
 
   it('labels the MacBook camera "laptop", facing unknown', () => {

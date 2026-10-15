@@ -85,6 +85,9 @@ class Phone {
   peerId = '';
   /** The phone's clock minus the host's; a test moves it (a phone that slept). */
   offsetMs = OFFSET_MS;
+  /** Its installation id and model (T5.6), as its hello says them; null: a build before T5.6. */
+  id: string | null = null;
+  model: string | null = null;
 
   constructor(
     private readonly r: Rig,
@@ -111,7 +114,7 @@ class Phone {
       type: 'hello',
       v: PROTOCOL_VERSION,
       role: 'camera',
-      device: { label: this.label, platform: 'Android' },
+      device: { label: this.label, platform: 'Android', id: this.id, model: this.model },
       app: { version: '0.4.0', commit: 'abc1234' },
       camera: {
         label: 'phone-rear',

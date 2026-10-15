@@ -260,6 +260,8 @@ export function remotePhone(
   return {
     id: 'peer-1',
     name: 'ThinkPhone',
+    installation: null,
+    model: null,
     label: 'phone-rear',
     session,
     state: 'connected',

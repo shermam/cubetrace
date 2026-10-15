@@ -108,6 +108,52 @@ describe('cloudEvent', () => {
     expect(cloudEvent({ ...start, session: '' })).not.toHaveProperty('session');
   });
 
+  it("keeps a device's installation and model (T5.6) when they are of their shapes, and leaves them out otherwise", () => {
+    const phone = {
+      label: 'moto g60',
+      platform: 'Android',
+      installed: true,
+      installation: '6f1c2b3a',
+      model: 'moto g60',
+    };
+    const start = cloudEvent({ tsMs: 1, kind: 'app.start', app: APP, device: phone, data: {} });
+    expect(start.device).toEqual(phone);
+    expect(Object.keys(start.device)).toEqual([
+      'label',
+      'platform',
+      'installed',
+      'installation',
+      'model',
+    ]);
+    expect(isCloudEvent(start), JSON.stringify(isCloudEvent.errors)).toBe(true);
+    expect(parseCloudEvent(start)).toEqual(start);
+    // The whole id, or one that is not lowercase hex, is no installation: the rules would refuse
+    // the batch for it. An empty model is none; a long one is cut.
+    for (const installation of ['6f1c2b3a-9d4e-4f5a-8b6c-7d8e9f0a1b2c', 'ABCDEFGH', '', 'a1b2']) {
+      const event = cloudEvent({
+        tsMs: 1,
+        kind: 'app.start',
+        app: APP,
+        device: { ...phone, installation, model: ' ' },
+        data: {},
+      });
+      expect(event.device, installation).toEqual({
+        label: 'moto g60',
+        platform: 'Android',
+        installed: true,
+      });
+    }
+    const long = cloudEvent({
+      tsMs: 1,
+      kind: 'app.start',
+      app: APP,
+      device: { ...LAPTOP, model: 'm'.repeat(150) },
+      data: {},
+    });
+    expect(long.device.model).toBe('m'.repeat(100));
+    expect(isCloudEvent(long)).toBe(true);
+  });
+
   it('copies the build and the device rather than sharing them', () => {
     const app = { ...APP };
     const device = { ...LAPTOP };
@@ -351,6 +397,14 @@ describe('the JSON Schema of users/{uid}/events/{eventId}', () => {
     ['a device without a label', 'device', { label: '', platform: 'macOS', installed: false }],
     ['a device without installed', 'device', { label: 'office-mbp', platform: 'macOS' }],
     ['a device with a user agent', 'device', { ...LAPTOP, userAgent: 'Mozilla/5.0' }],
+    [
+      'a device with its whole installation id (T5.6)',
+      'device',
+      { ...LAPTOP, installation: '6f1c2b3a-9d4e-4f5a-8b6c-7d8e9f0a1b2c' },
+    ],
+    ['a device whose installation is not hex', 'device', { ...LAPTOP, installation: 'GHIJKLMN' }],
+    ['a device whose model is empty', 'device', { ...LAPTOP, model: '' }],
+    ['a device whose model is too long', 'device', { ...LAPTOP, model: 'm'.repeat(101) }],
     ['an empty session', 'session', ''],
     ['a session that is a number', 'session', 7],
     ['an attempt of index 0', 'attempt', 0],

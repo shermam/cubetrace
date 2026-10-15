@@ -202,7 +202,7 @@
       "else": { "not": { "required": ["remote"] } }
     },
     "remoteDevice": {
-      "description": "The device a remote camera runs on (T4.0, docs/DATA-MODEL.md §6): there exactly when the camera's local is false. Absent from the files written before phase 4.",
+      "description": "The device a remote camera runs on (T4.0, docs/DATA-MODEL.md §6): there exactly when the camera's local is false. Absent from the files written before phase 4. Its model since T5.6; never its installation id.",
       "type": "object",
       "additionalProperties": false,
       "required": ["label", "platform"],
@@ -211,7 +211,11 @@
           "description": "The device's host label (Settings → This device on the phone).",
           "type": "string"
         },
-        "platform": { "description": "Its platform, such as Android.", "type": "string" }
+        "platform": { "description": "Its platform, such as Android.", "type": "string" },
+        "model": {
+          "description": "Its model where its browser gives it (T5.6: Chrome on Android, from the phone's hello), null where it does not; absent from the files written before T5.6.",
+          "type": ["string", "null"]
+        }
       }
     },
     "microphone": {

@@ -431,6 +431,25 @@ describe('users/{uid}/events/{eventId}', () => {
         }),
       ),
     );
+    // T5.6: a device that says its installation (the first eight hex digits of its id) and its
+    // model, as the builds since write every event.
+    await assertSucceeds(
+      db.doc(`users/alice/events/${eventId(1_790_000_000_001, '00000001')}`).set(
+        cloudEvent({
+          tsMs: 1_790_000_000_001,
+          kind: 'app.start',
+          app: { version: '0.5.0', commit: 'def5678' },
+          device: {
+            label: 'moto g60',
+            platform: 'Android',
+            installed: true,
+            installation: '6f1c2b3a',
+            model: 'moto g60',
+          },
+          data: { installed: true },
+        }),
+      ),
+    );
   });
 
   it('never changes or deletes an event, not even for its owner', async () => {
@@ -475,6 +494,38 @@ describe('users/{uid}/events/{eventId}', () => {
     [
       'a device with a user agent',
       { device: { label: 'office-mbp', platform: 'macOS', installed: false, userAgent: 'Chrome' } },
+    ],
+    [
+      'a device with its whole installation id (T5.6)',
+      {
+        device: {
+          label: 'moto g60',
+          platform: 'Android',
+          installed: true,
+          installation: '6f1c2b3a-9d4e-4f5a-8b6c-7d8e9f0a1b2c',
+        },
+      },
+    ],
+    [
+      'a device whose installation is not hex (T5.6)',
+      {
+        device: {
+          label: 'moto g60',
+          platform: 'Android',
+          installed: true,
+          installation: 'ABCDEFGH',
+        },
+      },
+    ],
+    [
+      'a device whose model is empty (T5.6)',
+      { device: { label: 'moto g60', platform: 'Android', installed: true, model: '' } },
+    ],
+    [
+      'a device whose model is over 100 characters (T5.6)',
+      {
+        device: { label: 'moto g60', platform: 'Android', installed: true, model: 'm'.repeat(101) },
+      },
     ],
     ['an empty session', { session: '' }],
     ['a session that is a number', { session: 7 }],

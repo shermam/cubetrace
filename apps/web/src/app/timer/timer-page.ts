@@ -123,7 +123,7 @@ export const TIMER_SOLVES = 12;
     </div>
     @if (viewed(); as attempt) {
       @defer (on immediate) {
-        <app-clip-viewer [attempt]="attempt" />
+        <app-clip-viewer [attempt]="attempt" [cameras]="session.session()?.cameras ?? []" />
       }
     }
   `,
