@@ -569,11 +569,14 @@ export function meterText(meter: MotionMeterInfo | null): string {
   );
 }
 
+/** The counters the table prints as they are: not the latencies and the motion meter's state (T5.3). */
+type PlainCounter = Exclude<keyof CaptureStats, 'latency' | 'motion'>;
+
 /** The latest counters as the table's rows; dashes before the first second. */
 function counterRows(
   stats: CaptureStats | undefined,
 ): { label: string; testId: string; value: string }[] {
-  const value = (key: keyof CaptureStats): string => {
+  const value = (key: PlainCounter): string => {
     const found = stats?.[key];
     return found === undefined ? '–' : found === null ? 'none' : String(found);
   };
