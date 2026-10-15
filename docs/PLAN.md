@@ -17,7 +17,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ✅ 0.2.0 (2026-10-01: the fixes from the owner's first recordings, T2.8–T2.13, merged; the full round 2 skipped by the owner's decision; the tag from the GitHub UI pending) |
 | 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ✅ 0.3.0 (2026-10-02: T3.0–T3.6 merged and deployed; the tag from the GitHub UI on 2896591 or later). Follow-ups T3.6–T3.9 merged the same day (the installed app's sign-in, the cube's whole record, the 3D cube in the clip viewer, the diagnostics events), for 0.4.0 |
 | 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ✅ 0.4.0 (2026-10-04: T4.0–T4.4, T4.2a and T4.2b merged and deployed; the tag from the GitHub UI on 16ad587). Open: #61 closes when a pairing stays converged for 20 minutes; the measured cells of `docs/DEVICES.md` |
-| 5. The rig's eyes and hands | The phone's picture at full size with its health, remote camera controls from the laptop, the host's capture latency measured per attempt, every phone's clips, the laptop's cameras more than one. | in progress (2026-10-09: the board below, T5.1–T5.4; issue #67) |
+| 5. The rig's eyes and hands | The phone's picture at full size with its health, remote camera controls from the laptop, the host's capture latency measured per attempt, every phone's clips, the laptop's cameras more than one. | ✅ 0.5.0 (2026-10-15: T5.1–T5.3 on 10-09 and 10-15, T5.2a, T5.6 and T5.5 added from the first week's events and the owner's asks, T5.4; merged and deployed; the tag from the GitHub UI on c6e153b pending, v0.4.0's on 16ad587 too). Open: issue #67 until the "After T5" round; the cells of `docs/DEVICES.md` |
 | 6. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
 ## Phase 1 task board
@@ -2570,7 +2570,7 @@ sign in the app (issue #67).
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | ✅ 2026-10-15 (#70) |
 | T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | ✅ 2026-10-15 (#72) |
 | T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | ✅ 2026-10-15 (#73) |
-| T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | 🔄 PR #74 |
+| T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | ✅ 2026-10-15 (#74) |
 
 Waves: T5.1 → T5.2 → T5.3 → T5.2a → T5.6 → T5.5 → T5.4, one agent at a time (T5.2a added on 2026-10-15 from the first week's events; T5.5 and T5.6 the same day from the owner's asks: the USB webcam beside the built-in camera, and the second phone's clips).
 
@@ -3068,6 +3068,40 @@ measured, about 5 Mbps; its lag about 30 ms by the video against 37 to 92 ms by 
 
 **Acceptance.** Lint, unit, e2e and cloud suites green; the deployed footer reads `cubetrace 0.5.0`; the
 tag by the owner.
+
+**Outcome (2026-10-15).** As contracted, PR #74. Version 0.5.0 in every `package.json` and the
+lockfile; the CHANGELOG's `## 0.5.0 — 2026-10-15` in the file's own style, with an empty Unreleased
+above it; the footer `cubetrace 0.5.0`. `README.md` "The desk rig" rewritten for four cameras with the
+heat routine, "Known limitations" updated (#67 open, #61 removed as closed, follow-ups (p)–(r)),
+consent moved to phase 6; `docs/MANUAL-TESTS.md` "After T5" (eight items) with the round report's
+items 5.4.1–5.4.8 (tests) and `docs/DIAGNOSTICS.md` "After T5"; `docs/DEVICES.md` with a "Phones as
+remote cameras" table (the Moto g60's row beside the ThinkPhone's) and the cells for the round to
+fill (the MacBook's latency over a session, the USB webcam, two cameras); `docs/USER-ACTIONS.md`'s
+release and round; the read-through fixed `docs/RTC.md` (`withCameraLag`, not a stale
+`withSyncResidual`; the watchdog in `HostCamera` since T5.5), `docs/DATA-MODEL.md`'s version notes
+and examples, `docs/ARCHITECTURE.md` for phase 5; the docs' example builds at 0.5.0. **The cloud
+e2e flake** (`remote-camera.cloud.spec.ts:33`, three times on 2026-10-09 to 10-15): there is no
+second offer. The two pages are tabs of one browser and the app's Firestore uses
+`persistentMultipleTabManager`, so they share one IndexedDB cache and each tab sees the other's
+writes as soon as they are made, before the emulator has them (the SDK's `syncEngineApplyBatchState`
+shows another tab's pending write to this tab's listeners); the phone took the host's answer from
+the shared cache, the loopback connection opened milliseconds later, and the spec's REST read found
+the document as the phone created it (`offered`, the answer null). A probe of Playwright's Chromium
+141 with the caller's exact set-up, five times: the channel opened 5 ms after the answer and only
+one `negotiationneeded` fired, none after the answer, the open, or the preview turning on and off;
+an ICE restart (needs `failed`), a repeated call (a new peer document) and the token's
+re-presentation (such a call) are ruled out; nothing involved changed after 10-04, so what widened
+the window on 10-09 is unknown. The spec now polls (`expect.poll`) for the answered document, the
+candidates and the closed pairing; the signaling writes an offer once (an identical resend writes
+nothing), with a unit test that fails without it. Tests: 1,499 package tests and 980 app tests; the
+e2e 85 in 11.1 min; CI green with the cloud suite. **Open**: the diagnostics' events cap (`DAILY_CAP`
+5,000 a day: with the whole rig the MacBook writes about 20 events an attempt, so the cap is reached
+at about 200 attempts a day while the owner does 250; documented, the owner told to do the round
+within the day's first 150 attempts; raised by the coordinator after this task); the releases' tags
+stop at v0.3.0 (v0.4.0 on 16ad587 and v0.5.0 on c6e153b are the owner's); issue #60 (the preview
+beside the host's) done by T4.3 and T5.1; for the round: the cause of #67, the ThinkPhone's Compute
+Pressure API and model string, whether the watchdog sees a mode the camera changes by itself, whether
+the MacBook encodes both cameras at 1080p30 beside two phone previews.
 
 ## Phase 6
 
