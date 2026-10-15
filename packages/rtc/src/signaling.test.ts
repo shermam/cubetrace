@@ -211,6 +211,36 @@ describe('the offer, the answer and the candidates over MemorySignaling', () => 
     expect(watching.offers).toHaveLength(1);
   });
 
+  it('writes an offer once: the same offer sent again leaves the answer in place (T5.4)', async () => {
+    const { memory, host, phone } = devices();
+    const tokenHash = await hashToken('7R2KQ9WX');
+    const watching = watchOffers(host);
+    const caller = phone.call({ tokenHash, peerId: 'peer-1' });
+    const callerSide = listen(caller);
+    // Sent twice at once: written once.
+    await Promise.all([caller.sendDescription(OFFER), caller.sendDescription(OFFER)]);
+    await flush();
+    const callee = watching.offers[0].signaling;
+    const calleeSide = listen(callee);
+    await callee.sendDescription(ANSWER);
+    await flush();
+    // Sent again once answered: the document keeps the answer, and the host has nothing new to answer.
+    await caller.sendDescription(OFFER);
+    await flush();
+    expect(memory.backend.peers.get(SESSION)?.get('peer-1')).toMatchObject({
+      offer: OFFER,
+      answer: ANSWER,
+      state: 'answered',
+    });
+    expect(memory.backend.writes).toEqual([
+      `create ${SESSION}/peer-1`,
+      `update ${SESSION}/peer-1 answer,state`,
+    ]);
+    expect(calleeSide.descriptions).toEqual([OFFER]);
+    expect(callerSide.descriptions).toEqual([ANSWER]);
+    expect(watching.offers).toHaveLength(1);
+  });
+
   it('refuses the wrong kind of description for a role', async () => {
     const { host, phone } = devices();
     const caller = phone.call({ tokenHash: await hashToken('7R2KQ9WX') });
