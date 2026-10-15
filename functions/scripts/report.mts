@@ -477,6 +477,8 @@ const T52A = 'After T5.2a';
 const READINGS = "T5.2a — the watchdog against the camera's own readings";
 const T53 = 'After T5.3';
 const LATENCY = 'T5.3 — the capture latency and the motion lag';
+const T55 = 'After T5.5';
+const HOST_CAMERAS = "T5.5 — the MacBook's two cameras";
 const T56 = 'After T5.6';
 const PHONES = 'T5.6 — two phones of one name';
 
@@ -928,6 +930,106 @@ function driftFacts(event: ReportEvent): string {
   };
   const delta = num(event, 'deltaMs');
   return `${when(event.tsMs)} ${event.device.label}: ${text(event, 'camera') ?? '?'} ${delta === null ? '?' : signedMs(delta)} ms from ${at('baselineMs')} (p95 ${at('p95Ms')}, ${text(event, 'basis') ?? '?'}); ${at('waiting', 0)} of ${at('fps', 0)} frames waiting, the encoder's queue ${at('queueMax', 0)} at most, ${at('pending', 0)} held, frames ${at('frameIntervalMs')} ms apart`;
+}
+
+/** The clips of one camera of the host in an attempt (`clip.saved`). */
+interface CameraClips {
+  readonly segments: Set<string>;
+  /** Its clips, and those with sound. */
+  clips: number;
+  sound: number;
+}
+
+/** An attempt's clips of the host's own cameras (T5.5), by camera. */
+interface OwnAttempt {
+  readonly key: string;
+  readonly session: string;
+  /** Its first and last own clip: the device, and when. */
+  readonly first: ReportEvent;
+  last: ReportEvent;
+  readonly cameras: Map<string, CameraClips>;
+}
+
+/**
+ * The clips of the host's own cameras (`clip.saved`; a phone's come as `remote.clip`), by attempt,
+ * then by camera (its label in the session): since T5.5 a laptop records with every camera of its
+ * own that is on.
+ */
+function ownAttempts(q: Query): OwnAttempt[] {
+  const out = new Map<string, OwnAttempt>();
+  for (const e of q.of('clip.saved')) {
+    if (e.session === null || e.attempt === null) {
+      continue;
+    }
+    const key = `${e.uid}/${e.session}/${String(e.attempt)}`;
+    const attempt = out.get(key) ?? {
+      key,
+      session: `${e.uid}/${e.session}`,
+      first: e,
+      last: e,
+      cameras: new Map<string, CameraClips>(),
+    };
+    attempt.last = e;
+    const camera = text(e, 'camera') ?? '?';
+    const clips = attempt.cameras.get(camera) ?? {
+      segments: new Set<string>(),
+      clips: 0,
+      sound: 0,
+    };
+    clips.segments.add(text(e, 'segment') ?? '?');
+    clips.clips++;
+    if (flag(e, 'audio') === true) {
+      clips.sound++;
+    }
+    attempt.cameras.set(camera, clips);
+    out.set(key, attempt);
+  }
+  return [...out.values()];
+}
+
+/** The cameras of `attempt` with both its clips, the scramble's and the solve's. */
+function wholeCameras(attempt: OwnAttempt): string[] {
+  return [...attempt.cameras.entries()]
+    .filter(([, clips]) => clips.segments.has('scramble') && clips.segments.has('solve'))
+    .map(([camera]) => camera);
+}
+
+/** The attempts with both clips of `n` of the host's own cameras or more. */
+function attemptsWithOwnCameras(q: Query, n: number): OwnAttempt[] {
+  return ownAttempts(q).filter((attempt) => wholeCameras(attempt).length >= n);
+}
+
+/**
+ * The host's own cameras that recorded in each session (`recording.started` not of a camera device),
+ * in the order they first started, each with whether it asked for the sound.
+ */
+function ownRecordings(q: Query): Map<string, Map<string, { sound: boolean; event: ReportEvent }>> {
+  const out = new Map<string, Map<string, { sound: boolean; event: ReportEvent }>>();
+  for (const e of q.where('recording.started', (event) => flag(event, 'remote') !== true)) {
+    const camera = text(e, 'camera');
+    if (e.session === null || camera === null) {
+      continue;
+    }
+    const key = `${e.uid}/${e.session}`;
+    const cameras = out.get(key) ?? new Map<string, { sound: boolean; event: ReportEvent }>();
+    const known = cameras.get(camera);
+    cameras.set(camera, { sound: (known?.sound ?? false) || flag(e, 'audio') === true, event: e });
+    out.set(key, cameras);
+  }
+  return out;
+}
+
+/** The words of `recording.notice` when a camera records under 80% of its frame rate (T5.5). */
+const LOAD_NOTICE = /frames a second\. Two cameras may be more than this laptop encodes/u;
+
+/** The frame rate of `camera`'s clips in `events`, by the median of their cadence; null without one. */
+function cadenceFps(events: readonly ReportEvent[], camera: string): number | null {
+  const intervals = events.flatMap((e) => {
+    const interval = text(e, 'camera') === camera ? num(e, 'frameIntervalMs') : null;
+    return interval === null || interval <= 0 ? [] : [interval];
+  });
+  const middle = median(intervals);
+  return middle === null ? null : 1000 / middle;
 }
 
 /**
@@ -4192,6 +4294,228 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       return phones.length > 0
         ? ok(phones.join('; '))
         : none("no phone's report with a capture latency (a phone's build before T5.3)");
+    },
+  },
+  // ---- After T5.5: the MacBook's two cameras ----
+  {
+    id: '5.5.1',
+    round: T55,
+    section: HOST_CAMERAS,
+    title:
+      "Both of the MacBook's cameras on in Camera settings, each with its switch, its resolution and its frame rate: each records in the session under its own label (laptop, laptop-2), the first with the microphone's sound, the other without",
+    kinds: ['settings.changed', 'recording.started', 'camera.on'],
+    eyes: "the list of cameras with their switches, each camera's own section, and its mode kept across a reload",
+    check: (q) => {
+      const sessions = [...ownRecordings(q).values()].filter((cameras) => cameras.size >= 2);
+      const facts = sessions
+        .map((cameras) =>
+          [...cameras.entries()]
+            .map(
+              ([camera, { sound, event }]) =>
+                `${camera} (${sound ? 'with sound' : 'no sound'}, ${String(num(event, 'width') ?? '?')}×${String(num(event, 'height') ?? '?')})`,
+            )
+            .join(', '),
+        )
+        .slice(-3)
+        .join('; ');
+      const switched = q.where('settings.changed', (e) => text(e, 'key') === 'camerasOn');
+      const most = Math.max(0, ...switched.map((e) => num(e, 'value') ?? 0));
+      const settings = switched.length === 0 ? '' : `; camerasOn up to ${String(most)} in Settings`;
+      return sessions.length > 0
+        ? ok(
+            `${String(sessions.length)} ${sessions.length === 1 ? 'session' : 'sessions'} with two of the host's cameras or more: ${facts}${settings}`,
+          )
+        : none(`no session with two of the host's cameras recording${settings}`);
+    },
+  },
+  {
+    id: '5.5.2',
+    round: T55,
+    section: HOST_CAMERAS,
+    title:
+      "Each camera's own sync check: the first camera's due by itself before the first scramble, the webcam's from its line under the pictures (\"laptop-2 has no check in this session\"), each passing with its own lag",
+    kinds: ['sync.check'],
+    eyes: 'the lines under the pictures, one per camera',
+    check: (q) => {
+      const bySession = new Map<string, Map<string, ReportEvent>>();
+      for (const e of q.where(
+        'sync.check',
+        (event) => text(event, 'outcome') === 'ok' && flag(event, 'remote') !== true,
+      )) {
+        const camera = text(e, 'camera');
+        if (e.session === null || camera === null) {
+          continue;
+        }
+        const key = `${e.uid}/${e.session}`;
+        const cameras = bySession.get(key) ?? new Map<string, ReportEvent>();
+        cameras.set(camera, e);
+        bySession.set(key, cameras);
+      }
+      const two = [...bySession.values()].filter((cameras) => cameras.size >= 2);
+      const facts = two
+        .map((cameras) =>
+          [...cameras.entries()]
+            .map(([camera, e]) => `${camera} ${round(num(e, 'offsetMs') ?? 0)} ms`)
+            .join(', '),
+        )
+        .slice(-3)
+        .join('; ');
+      return two.length > 0
+        ? ok(
+            `${String(two.length)} ${two.length === 1 ? 'session' : 'sessions'} with a check of two of the host's cameras or more: ${facts}`,
+          )
+        : none("no session with a passed check of two of the host's cameras");
+    },
+  },
+  {
+    id: '5.5.3',
+    round: T55,
+    section: HOST_CAMERAS,
+    title:
+      "Twenty solves or more with both cameras recording: every attempt with both clips of each of the MacBook's cameras (eight clips with the two phones), the webcam's without sound",
+    kinds: ['clip.saved', 'attempt.done'],
+    eyes: "the solve list's badge, the clip viewer's eight buttons, the webcam's clips silent",
+    check: (q) => {
+      const two = attemptsWithOwnCameras(q, 2);
+      const eight = q.realAttempts().filter((e) => !isPhone(e) && (num(e, 'clips') ?? 0) >= 8);
+      const sound = new Map<string, { clips: number; sound: number }>();
+      for (const attempt of two) {
+        for (const [camera, clips] of attempt.cameras) {
+          const known = sound.get(camera) ?? { clips: 0, sound: 0 };
+          sound.set(camera, { clips: known.clips + clips.clips, sound: known.sound + clips.sound });
+        }
+      }
+      const heard = [...sound.entries()]
+        .map(
+          ([camera, { clips, sound: with_ }]) => `${camera} ${String(with_)} of ${String(clips)}`,
+        )
+        .join(', ');
+      const facts = `${String(two.length)} ${two.length === 1 ? 'attempt' : 'attempts'} with both clips of two of the host's cameras or more; ${count(eight, 'real attempt')} with eight clips or more${heard === '' ? '' : `; clips with sound: ${heard}`}`;
+      return two.length >= 20 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.5.4',
+    round: T55,
+    section: HOST_CAMERAS,
+    title:
+      'Twenty minutes or more with both cameras recording: each camera\'s clips at its frame rate (their cadence), and the load notice if one recorded under 80% of its frame rate for 10 s ("encodes N of M fps" on its line)',
+    kinds: ['clip.saved', 'recording.notice'],
+    eyes: 'the status lines under the pictures, and whether a lower resolution sent the words away',
+    check: (q) => {
+      const notices = q.where('recording.notice', (e) =>
+        LOAD_NOTICE.test(text(e, 'message') ?? ''),
+      );
+      const shown = notices
+        .slice(0, 3)
+        .map((e) => `${when(e.tsMs)} ${text(e, 'message')?.split('. ')[0] ?? '?'}`);
+      const said =
+        notices.length === 0
+          ? 'no load notice'
+          : `${count(notices, 'load notice')}: ${shown.join('; ')}`;
+      // The longest session of attempts with two of the host's cameras, from its first to its last.
+      let best: { ms: number; attempts: OwnAttempt[] } = { ms: 0, attempts: [] };
+      const bySession = new Map<string, OwnAttempt[]>();
+      for (const attempt of attemptsWithOwnCameras(q, 2)) {
+        bySession.set(attempt.session, [...(bySession.get(attempt.session) ?? []), attempt]);
+      }
+      for (const attempts of bySession.values()) {
+        const ms =
+          Math.max(...attempts.map((a) => a.last.tsMs)) -
+          Math.min(...attempts.map((a) => a.first.tsMs));
+        if (ms >= best.ms) {
+          best = { ms, attempts };
+        }
+      }
+      if (best.attempts.length === 0) {
+        return none(`no attempt with two of the host's cameras; ${said}`);
+      }
+      const session = best.attempts[0].session;
+      const clips = q.where('clip.saved', (e) => `${e.uid}/${e.session ?? '?'}` === session);
+      const cameras = [...new Set(best.attempts.flatMap(wholeCameras))].sort();
+      const rates = cameras
+        .map((camera) => {
+          const fps = cadenceFps(clips, camera);
+          return `${camera} ${fps === null ? '?' : round(fps, 1)} fps`;
+        })
+        .join(', ');
+      const facts = `${round(best.ms / MINUTE, 1)} min with two cameras (${String(best.attempts.length)} attempts): ${rates} by their clips' cadence; ${said}`;
+      return best.ms >= 20 * MINUTE ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.5.5',
+    round: T55,
+    section: HOST_CAMERAS,
+    title:
+      'The webcam turned off mid-session and on again: its recording stopped, the attempts between without its clips, then its clips again under the same label',
+    kinds: ['recording.stopped', 'recording.started', 'clip.saved'],
+    eyes: 'its picture, section and block going and coming back',
+    check: (q) => {
+      const facts: string[] = [];
+      let back = 0;
+      for (const stop of q.where(
+        'recording.stopped',
+        (e) => text(e, 'why') === 'camera-off' && text(e, 'camera') !== null && e.session !== null,
+      )) {
+        const camera = text(stop, 'camera');
+        const again = q.next(
+          stop,
+          'recording.started',
+          2 * HOUR,
+          (e) => e.session === stop.session && text(e, 'camera') === camera,
+        );
+        // The other cameras went on meanwhile: clips of the session's attempts without this one's.
+        const until = again?.tsMs ?? Number.POSITIVE_INFINITY;
+        const without = new Set(
+          ownAttempts(q)
+            .filter(
+              (attempt) =>
+                attempt.session === `${stop.uid}/${stop.session ?? '?'}` &&
+                attempt.first.tsMs > stop.tsMs &&
+                attempt.last.tsMs < until &&
+                !attempt.cameras.has(camera ?? '?') &&
+                attempt.cameras.size > 0,
+            )
+            .map((attempt) => attempt.key),
+        );
+        if (without.size === 0) {
+          continue;
+        }
+        if (again !== null) {
+          back++;
+        }
+        facts.push(
+          `${when(stop.tsMs)} ${camera ?? '?'} off, ${String(without.size)} ${without.size === 1 ? 'attempt' : 'attempts'} without its clips, ${again === null ? 'not on again' : `on again ${round((again.tsMs - stop.tsMs) / MINUTE, 1)} min later`}`,
+        );
+      }
+      return back > 0
+        ? ok(facts.slice(-3).join('; '))
+        : none(
+            facts.length > 0
+              ? facts.slice(-3).join('; ')
+              : 'no camera of the host turned off while another recorded',
+          );
+    },
+  },
+  {
+    id: '5.5.6',
+    round: T55,
+    section: HOST_CAMERAS,
+    title:
+      "Upload sessions on: every file of the attempts of four cameras uploaded (eighteen files, nineteen with the session's), within the day's quota of 8,000 files and 40 GB",
+    kinds: ['upload.state', 'upload.paused'],
+    eyes: "the day's count in users/{uid}.quota (the coordinator)",
+    check: (q) => {
+      const whole = uploadsWith(q, 8);
+      const files = whole.reduce((sum, e) => sum + (num(e, 'files') ?? 0), 0);
+      const bytes = whole.reduce((sum, e) => sum + (num(e, 'bytes') ?? 0), 0);
+      const quota = q.where('upload.paused', (e) => text(e, 'reason') === 'quota');
+      const facts = `${count(whole, 'upload')} of eight clips or more with every file: ${String(files)} files, ${round(bytes / 1e9, 2)} GB${quota.length === 0 ? '' : `; ${count(quota, 'pause')} for the quota`}`;
+      if (quota.length > 0) {
+        return failed(facts);
+      }
+      return whole.length > 0 ? ok(facts) : none(facts);
     },
   },
   // ---- After T5.6: two phones of one name ----
