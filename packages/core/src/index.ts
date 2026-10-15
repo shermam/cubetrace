@@ -184,7 +184,7 @@ export {
   slerp,
   toPlayerFrame,
 } from './orientation';
-export { clipHostMs, clipLagMs, clipSeconds } from './clip';
+export { anchoredMotionLag, clipHostMs, clipLagMs, clipSeconds } from './clip';
 // T3.0 — the account's record in Firestore; T3.10 — the clip viewer's choice per camera in it
 export type { UserRecord, UserRecordInput, ViewerChoice, ViewerChoices } from './user';
 export {

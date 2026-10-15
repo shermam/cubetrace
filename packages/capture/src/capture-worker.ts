@@ -212,6 +212,7 @@ interface FrameArrival {
 
 /** The solves' motion meter while it measures (T5.3): its rectangle and its meter. */
 interface MotionSeries {
+  readonly rect: FramingRect | null;
   readonly meter: MotionMeter<FrameLike & MotionFrame>;
 }
 
@@ -345,6 +346,12 @@ export class CaptureWorker {
       case 'sync-stop':
         if (this.#sync?.id === message.id) {
           this.#sync = null;
+          // The solves' meter compares each frame with the one it measured before, which the check
+          // took: it begins again, so that its first frame after the check is not compared with one
+          // from before it.
+          if (this.#series !== null) {
+            this.#series = this.#newSeries(this.#series.rect);
+          }
         }
         break;
       case 'motion-meter':
@@ -369,11 +376,17 @@ export class CaptureWorker {
       this.#seriesState = 'off';
       return;
     }
+    this.#series = this.#newSeries(rect);
+    this.#seriesState = 'on';
+  }
+
+  /** A new meter of the solves' motion inside `rect`. */
+  #newSeries(rect: FramingRect | null): MotionSeries {
     const draw = this.#env.drawLuma;
-    this.#series = {
+    return {
+      rect,
       meter: new MotionMeter<FrameLike & MotionFrame>(rect, draw === undefined ? {} : { draw }),
     };
-    this.#seriesState = 'on';
   }
 
   /**
@@ -1150,6 +1163,7 @@ export class CaptureWorker {
               frameIntervalMs: this.#frameIntervalMs(),
             },
       motion: { state: this.#seriesState, costMs: this.#seriesCost() },
+      postedHostMs: now,
     };
     this.#arrivedInWindow = 0;
     this.#encodedInWindow = 0;

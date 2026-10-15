@@ -110,6 +110,7 @@ const STATS: CaptureStats = {
   audioState: 'encoding',
   latency: null,
   motion: { state: 'off', costMs: null },
+  postedHostMs: 1000,
 };
 
 /** A stand-in for a cut: the pipeline passes it through untouched. */
@@ -150,6 +151,7 @@ const A_REPORT: ClipReport = {
   audioMissing: null,
   audioRebasedMs: 0,
   audioConfigMade: false,
+  frameIntervalMs: 33.3,
 };
 
 beforeEach(() => {

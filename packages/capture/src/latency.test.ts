@@ -7,6 +7,7 @@ import {
   LatencyMeter,
   MAX_READING_FRAMES,
   captureTimeOf,
+  frameIntervalOf,
   percentiles,
   type FrameTiming,
   type LatencyDriftEvent,
@@ -43,6 +44,15 @@ describe('percentiles', () => {
     expect(percentiles(values)).toEqual({ p50: 10, p95: 19 });
     expect(percentiles([3.04, 3.06, -2])).toEqual({ p50: 3, p95: 3.1 });
     expect(percentiles([-4, -1])).toEqual({ p50: 0, p95: 0 });
+  });
+});
+
+describe('frameIntervalOf', () => {
+  it("gives a clip's median frame interval, to 0.1 ms, from its frames file's dtMs", () => {
+    expect(frameIntervalOf([0, 33.3, 33.4, 33.3, 66.7, 33.3])).toBe(33.3);
+    expect(frameIntervalOf([0, 34.6, 34.5])).toBe(34.6);
+    expect(frameIntervalOf([0])).toBeNull();
+    expect(frameIntervalOf([])).toBeNull();
   });
 });
 
@@ -185,6 +195,27 @@ describe('LatencyDrift', () => {
       },
     ]);
     expect(drift.deltaMs).toBe(75);
+    // Since the running median crossed the threshold: half of the ten seconds at 79 ms, at 25 s.
+    expect(drift.driftingSinceMs).toBe(25_000);
+  });
+
+  it("takes a phone's readings, which have no 95th percentile", () => {
+    const drift = new LatencyDrift();
+    drift.setBaseline(30);
+    const events: LatencyDriftEvent[] = [];
+    // A phone reports every 2 s.
+    for (let s = 0; s <= 40; s += 2) {
+      const event = drift.update(s * 1000, { p50: s < 10 ? 31 : 105 });
+      if (event !== null) {
+        events.push(event);
+      }
+    }
+    expect(events).toEqual([
+      { why: 'drift', baselineMs: 30, p50Ms: 105, p95Ms: null, deltaMs: 75 },
+    ]);
+    expect(drift.p95Ms).toBeNull();
+    expect(drift.update(42_000, { p50: Number.NaN })).toBeNull();
+    expect(drift.p50Ms).toBe(105);
   });
 
   it('takes no single bad second for a drift: the median of ten', () => {
@@ -254,5 +285,6 @@ describe('LatencyDrift', () => {
     drift.setBaseline(null);
     expect(drift.update(21_000, { p50: 79, p95: 90 })).toBeNull();
     expect(drift.deltaMs).toBeNull();
+    expect(drift.driftingSinceMs).toBeNull();
   });
 });

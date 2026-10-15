@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FIT_TOLERANCE_MS,
+  MIN_CHECK_MOVES,
   MIN_PROFILE_MOVES,
   PROFILE_BIN_MS,
   PROFILE_FROM_MS,
   PROFILE_TO_MS,
+  checkMotionPeak,
   clipMotionPoints,
   motionPeak,
   motionProfile,
@@ -13,6 +15,7 @@ import {
   type MotionPoint,
 } from './motion-lag';
 import { MotionMeter } from './motion';
+import type { MotionSample } from './protocol';
 import { SyntheticFrame, lumaPlane, seeded } from './test-frames';
 
 // A synthetic solve filmed at 30 fps: 640 × 360 frames of a grey picture with a little noise, the
@@ -125,6 +128,96 @@ describe('motionPeak, on the frames of a synthetic solve', () => {
   });
 });
 
+/**
+ * A synthetic sync check filmed at 30 fps: `turns` single turns from 1.5 s into it, 1.2 to 1.5 s
+ * apart as the check asks for them, the square changing `afterFrames` frames after the first frame at
+ * or after each turn; each frame measured by the worker's meter, with its own timestamp (µs, from
+ * the camera's zero) and its arrival on the host clock, a fixed delivery and a jitter of a few ms
+ * later: the samples the check collects (`MotionSample`).
+ */
+async function checkScene(
+  turns: number,
+  afterFrames: number,
+  seed = 5,
+): Promise<{ moves: number[]; samples: MotionSample[] }> {
+  const random = seeded(seed);
+  const zeroMs = T0_MS - 4_000_000;
+  const moves: number[] = [];
+  let at = T0_MS + 1500;
+  for (let k = 0; k < turns; k++) {
+    moves.push(at);
+    at += 1200 + random() * 300;
+  }
+  const frames = Math.ceil((at + 1000 - T0_MS) / FRAME_MS);
+  const changes = new Set(moves.map((move) => Math.ceil((move - T0_MS) / FRAME_MS) + afterFrames));
+  const meter = new MotionMeter<SyntheticFrame>(null, { now: () => 0 });
+  const samples: MotionSample[] = [];
+  let level = 0;
+  for (let index = 0; index < frames; index++) {
+    if (changes.has(index)) {
+      level = (level + 1) % LEVELS.length;
+    }
+    const plane = lumaPlane(WIDTH, HEIGHT, 128, [
+      { x: 220, y: 80, size: 200, value: LEVELS[level] },
+    ]);
+    const hostMs = T0_MS + index * FRAME_MS;
+    const timestampUs = Math.round((hostMs - zeroMs) * 1000);
+    const measured = await meter.measure(new SyntheticFrame(timestampUs, plane, WIDTH, HEIGHT));
+    if (measured.changed !== null && measured.mean !== null) {
+      samples.push({
+        timestampUs,
+        // Each frame reaches the worker 6 ms after it was taken, and up to 4 ms later now and then.
+        arrivalHostMs: hostMs + 6 + random() * 4,
+        mean: measured.mean,
+        changed: measured.changed,
+        costMs: 0.5,
+      });
+    }
+  }
+  return { moves, samples };
+}
+
+describe('checkMotionPeak, on the frames of a synthetic sync check', () => {
+  it("finds the check's planted lag where a solve's estimator finds the same lag: the anchor of the solves' motion lag", async () => {
+    const check = await checkScene(10, 3);
+    const atCheck = checkMotionPeak(check.samples, check.moves);
+    const solve = motionPeak(...args(await scene(60, 3, { seed: 9 })));
+    expect(atCheck).not.toBeNull();
+    expect(solve).not.toBeNull();
+    console.info(
+      `motion peak of a synthetic check (a change 3 to 4 frames after each of 10 single turns): ` +
+        `${String(atCheck?.peakMs)} ms; of a synthetic solve with the same: ${String(solve?.peakMs)} ms`,
+    );
+    // Both where the change is, 3.5 frame intervals after the turns, and so within a few ms of each
+    // other: a clip's motionLagMs is then its check's offsetMs.
+    expect(Math.abs((atCheck?.peakMs ?? 0) - 3.5 * FRAME_MS)).toBeLessThan(8);
+    expect(Math.abs((atCheck?.peakMs ?? 0) - (solve?.peakMs ?? 0))).toBeLessThan(8);
+    expect(atCheck?.moves).toBe(10);
+  });
+
+  it("follows the issue's step: a solve whose lag grew by two frames since the check peaks 67 ms later", async () => {
+    const atCheck = checkMotionPeak(...checkArgs(await checkScene(10, 2)));
+    const solve = motionPeak(...args(await scene(60, 4, { seed: 13 })));
+    const grown = (solve?.peakMs ?? 0) - (atCheck?.peakMs ?? 0);
+    console.info(
+      `a lag grown by two frames since the check: the solve's peak ${grown.toFixed(1)} ms after the check's ` +
+        `(${(2 * FRAME_MS).toFixed(1)} planted)`,
+    );
+    expect(Math.abs(grown - 2 * FRAME_MS)).toBeLessThan(10);
+  });
+
+  it('takes the single turns only, and gives no peak with fewer than four of them', async () => {
+    const few = await checkScene(MIN_CHECK_MOVES - 1, 2);
+    expect(checkMotionPeak(few.samples, few.moves)).toBeNull();
+    const enough = await checkScene(MIN_CHECK_MOVES, 2);
+    expect(checkMotionPeak(enough.samples, enough.moves)).not.toBeNull();
+    // A move 200 ms after a turn makes neither of them a single turn: the turns left are too few.
+    const doubled = enough.moves.flatMap((move, k) => (k < 2 ? [move, move + 200] : [move]));
+    expect(checkMotionPeak(enough.samples, doubled)).toBeNull();
+    expect(checkMotionPeak([], enough.moves)).toBeNull();
+  });
+});
+
 describe('motionProfile', () => {
   it('averages over the moves whose whole window lies among the frames, in bins of 10 ms', () => {
     const points: MotionPoint[] = Array.from({ length: 200 }, (_, k) => ({
@@ -181,4 +274,11 @@ describe('clipMotionPoints', () => {
 
 function args(scene: Scene): [MotionPoint[], number[]] {
   return [scene.points, scene.moves];
+}
+
+function checkArgs(check: {
+  moves: number[];
+  samples: MotionSample[];
+}): [MotionSample[], number[]] {
+  return [check.samples, check.moves];
 }

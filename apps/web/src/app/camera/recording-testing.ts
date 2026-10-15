@@ -35,6 +35,7 @@ export const CLIP_AS_ASKED: ClipReport = {
   audioMissing: null,
   audioRebasedMs: 0,
   audioConfigMade: false,
+  frameIntervalMs: 33.3,
 };
 
 /** The counters of a pipeline that has buffered `seconds`. */
@@ -53,6 +54,7 @@ export function statsOf(seconds: number, changes: Partial<CaptureStats> = {}): C
     audioState: 'encoding',
     latency: null,
     motion: { state: 'off', costMs: null },
+    postedHostMs: 0,
     ...changes,
   };
 }

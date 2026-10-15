@@ -75,6 +75,27 @@ export function percentiles(values: readonly number[]): LatencyPercentiles | nul
   return { p50: tenth(Math.max(0, rank(0.5))), p95: tenth(Math.max(0, rank(0.95))) };
 }
 
+/**
+ * A clip's own cadence (T5.3): the median of its frame intervals (a frames file's `dtMs` without its
+ * first 0), ms to 0.1; null with fewer than two frames. On 2026-10-09 the MacBook's cadence went from
+ * 32.9 to 34.6 ms with its latency's step (issue #67): the clip's events say it beside its latencies.
+ */
+export function frameIntervalOf(dtMs: readonly number[]): number | null {
+  const intervals = dtMs
+    .slice(1)
+    .filter((dt) => Number.isFinite(dt))
+    .sort((a, b) => a - b);
+  if (intervals.length === 0) {
+    return null;
+  }
+  const middle = Math.floor(intervals.length / 2);
+  const value =
+    intervals.length % 2 === 1
+      ? intervals[middle]
+      : (intervals[middle - 1] + intervals[middle]) / 2;
+  return tenth(value);
+}
+
 /** The frames' latencies over a span (a second of the counters, a clip), as `LatencyMeter` reads them. */
 export interface LatencyReading {
   /**
@@ -215,11 +236,21 @@ export interface LatencyDriftEvent {
   readonly deltaMs: number;
 }
 
-/** One reading of the capture latency: its median and 95th percentile, ms. */
+/**
+ * One reading of a camera's capture latency for its drift, ms: the meter's median of a second (a
+ * phone's, of the span since its last report, `state`'s `latencyMs`), and its 95th percentile where
+ * known (a phone reports none).
+ */
+export interface DriftReading {
+  readonly p50: number;
+  readonly p95?: number | null;
+}
+
+/** A reading kept for the running medians. */
 interface DriftSample {
   readonly atMs: number;
   readonly p50: number;
-  readonly p95: number;
+  readonly p95: number | null;
 }
 
 /**
@@ -246,6 +277,8 @@ export class LatencyDrift {
   #pending: 'drift' | 'recovered' | null = null;
   #lastEventMs: number | null = null;
   #lastEvent: 'drift' | 'recovered' | null = null;
+  /** Since when the camera drifts: when its running median crossed the threshold; null otherwise. */
+  #sinceMs: number | null = null;
 
   constructor(
     options: {
@@ -271,9 +304,20 @@ export class LatencyDrift {
     return this.#median('p50');
   }
 
-  /** The running median of the readings' 95th percentiles, ms to 0.1; null without a reading. */
+  /**
+   * The running median of the readings' 95th percentiles, ms to 0.1; null without a reading that
+   * has one.
+   */
   get p95Ms(): number | null {
     return this.#median('p95');
+  }
+
+  /**
+   * Since when the camera drifts, on the clock of `update`: when its running median crossed the
+   * threshold, 5 s before the drift was declared; null while it does not drift.
+   */
+  get driftingSinceMs(): number | null {
+    return this.#drifting ? this.#sinceMs : null;
   }
 
   /** While the camera drifts, the running median less the baseline, whole ms; null otherwise. */
@@ -300,9 +344,14 @@ export class LatencyDrift {
    * A reading at `nowMs` (null when the meter had no frame): the drift's state at that time, and the
    * event to record, if one is due now.
    */
-  update(nowMs: number, reading: LatencyPercentiles | null): LatencyDriftEvent | null {
-    if (reading !== null) {
-      this.#samples.push({ atMs: nowMs, p50: reading.p50, p95: reading.p95 });
+  update(nowMs: number, reading: DriftReading | null): LatencyDriftEvent | null {
+    if (reading !== null && Number.isFinite(reading.p50)) {
+      const p95 = reading.p95 ?? null;
+      this.#samples.push({
+        atMs: nowMs,
+        p50: reading.p50,
+        p95: p95 !== null && Number.isFinite(p95) ? p95 : null,
+      });
     }
     this.#samples = this.#samples.filter((sample) => nowMs - sample.atMs < this.#windowMs);
     const p50 = this.p50Ms;
@@ -310,6 +359,7 @@ export class LatencyDrift {
     if (baseline === null) {
       // Nothing to compare with: a camera without a check never drifts (a new session's camera).
       this.#drifting = false;
+      this.#sinceMs = null;
       this.#crossedMs = null;
       this.#pending = null;
       return null;
@@ -325,6 +375,7 @@ export class LatencyDrift {
       this.#crossedMs ??= nowMs;
       if (nowMs - this.#crossedMs >= this.#holdMs) {
         this.#drifting = beyond;
+        this.#sinceMs = beyond ? this.#crossedMs : null;
         this.#crossedMs = null;
         this.#pending = beyond ? 'drift' : 'recovered';
       }
@@ -358,10 +409,15 @@ export class LatencyDrift {
   }
 
   #median(key: 'p50' | 'p95'): number | null {
-    if (this.#samples.length === 0) {
+    const sorted = this.#samples
+      .flatMap((sample) => {
+        const value = sample[key];
+        return value === null ? [] : [value];
+      })
+      .sort((a, b) => a - b);
+    if (sorted.length === 0) {
       return null;
     }
-    const sorted = this.#samples.map((sample) => sample[key]).sort((a, b) => a - b);
     const middle = Math.floor(sorted.length / 2);
     const value =
       sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;

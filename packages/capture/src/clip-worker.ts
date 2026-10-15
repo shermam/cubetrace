@@ -13,6 +13,7 @@ import type { OpfsDirectoryHandle } from '@cubetrace/storage';
 
 import { SESSIONS_FOLDER } from './clip-files';
 import { deleteClipIf, writeClip } from './clip-writer';
+import { frameIntervalOf } from './latency';
 import { muxClip } from './mux';
 import {
   describeError,
@@ -88,6 +89,7 @@ export class ClipWorker {
           audioMissing: info.audioMissing,
           audioRebasedMs: info.audioRebasedMs,
           audioConfigMade: info.audio !== null && job.audio.configMade,
+          frameIntervalMs: frameIntervalOf(frames.dtMs),
         },
         // The solve's motion (T5.3) goes on to the window, which finds the camera's lag from it.
         motion: job.motion,

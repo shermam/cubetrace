@@ -134,6 +134,11 @@ export interface CaptureStats {
   readonly latency: CaptureLatencyStats | null;
   /** The solves' motion meter (T5.3). */
   readonly motion: MotionMeterState;
+  /**
+   * When the worker posted these counters, on the host clock (T5.3): the window's clock when they
+   * come, less this, is how long the window's thread took to take them, a measure of how busy it is.
+   */
+  readonly postedHostMs: number;
 }
 
 /**
@@ -225,6 +230,11 @@ export interface ClipReport {
    * encoder's settings (`AudioReport.configMade`); false otherwise, and without an audio track.
    */
   readonly audioConfigMade: boolean;
+  /**
+   * The clip's own cadence (T5.3, `frameIntervalOf`): the median interval of its frames, ms; null
+   * with fewer than two. The latency's step of issue #67 came with a slower cadence.
+   */
+  readonly frameIntervalMs: number | null;
 }
 
 /**

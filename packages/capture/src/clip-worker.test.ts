@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CaptureWorker, type FrameLike } from './capture-worker';
 import { ClipWorker } from './clip-worker';
 import { cut, type Cut } from './cut';
+import { frameIntervalOf } from './latency';
 import {
   resolveCaptureConfig,
   transferList,
@@ -155,7 +156,10 @@ describe('ClipWorker', () => {
       audioMissing: null,
       audioRebasedMs: 0,
       audioConfigMade: false,
+      // T5.3: the clip's own cadence, from its frames file.
+      frameIntervalMs: frameIntervalOf(sample.frames.dtMs),
     });
+    expect(reportOf(posted.at(-1)).frameIntervalMs).toBeGreaterThan(30);
     const mp4 = root.files().get(`${FOLDER}/laptop.solve.mp4`)?.bytes;
     expect(mp4?.length).toBe(clip.bytes);
     const input = new Input({
@@ -245,6 +249,7 @@ describe('ClipWorker', () => {
       audioMissing: null,
       audioRebasedMs: 0,
       audioConfigMade: false,
+      frameIntervalMs: frameIntervalOf(sample.frames.dtMs),
     });
     expect(root.files().get(`${FOLDER}/laptop.scramble.mp4`)?.bytes.length).toBe(clip.bytes);
   });

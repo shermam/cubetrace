@@ -9,7 +9,8 @@
 // TypeScript, no browser API: tested in Node on synthetic frames with a known delay.
 import type { CubeClockParams } from '@cubetrace/core';
 
-import { ENERGY_FLOOR } from './clapperboard';
+import { ENERGY_FLOOR, MIN_MATCHES, frameHostTimes, singleTurns } from './clapperboard';
+import type { MotionSample } from './protocol';
 
 /** The profile around a move begins this long before it, ms … */
 export const PROFILE_FROM_MS = -150;
@@ -18,8 +19,16 @@ export const PROFILE_TO_MS = 300;
 /** The width of its bins, ms. */
 export const PROFILE_BIN_MS = 10;
 
-/** Fewer moves with their whole window among the frames give no peak. */
+/** Fewer moves of a solve with their whole window among the frames give no peak. */
 export const MIN_PROFILE_MOVES = 10;
+
+/**
+ * Fewer single turns of a sync check with their whole window among its frames give no peak: the
+ * clapperboard's own least (`MIN_MATCHES`). A check's turns are single, a second and more apart, so
+ * that each turn's motion stands alone in its window and fewer of them make a clear peak; a check
+ * asks for ten.
+ */
+export const MIN_CHECK_MOVES = MIN_MATCHES;
 
 /**
  * A peak is clear when it rises above the profile's median by this many times the profile's spread
@@ -133,15 +142,17 @@ export function motionProfile(
 /**
  * Where the motion of `points` peaks around `moves` (`motionProfile`): the top bin, refined with a
  * parabola through it and its neighbours, and the peak's width at half its rise above the baseline.
- * Null with fewer than `MIN_PROFILE_MOVES` moves, a top bin at an end of the window, or no clear
- * peak (a rise under `PROFILE_PEAK_SPREADS` times the spread, or under `ENERGY_FLOOR`).
+ * Null with fewer than `minMoves` moves (`MIN_PROFILE_MOVES`, a solve's, by default), a top bin at
+ * an end of the window, or no clear peak (a rise under `PROFILE_PEAK_SPREADS` times the spread, or
+ * under `ENERGY_FLOOR`).
  */
 export function motionPeak(
   points: readonly MotionPoint[],
   moves: readonly number[],
+  minMoves = MIN_PROFILE_MOVES,
 ): MotionPeak | null {
   const profile = motionProfile(points, moves);
-  if (profile === null || profile.moves < MIN_PROFILE_MOVES) {
+  if (profile === null || profile.moves < minMoves) {
     return null;
   }
   const { values, baseline, spread } = profile;
@@ -185,6 +196,25 @@ export function motionPeak(
     rise,
     noise: spread,
   };
+}
+
+/**
+ * Where the motion of a sync check's frames peaks around its single turns (T5.3): the estimator of
+ * the solves' clips (`motionPeak`) run on the check, which anchors their lag (`motionPeakAtCheckMs` of
+ * the camera's clock, docs/DATA-MODEL.md §6). Each frame is placed on the host clock as the
+ * clapperboard places it (its timestamp plus the median of arrival minus timestamp over the check's
+ * frames, the clips' rule) and the moves are the check's single turns (`singleTurns`), at their
+ * packets' arrivals as the check takes them; at least `MIN_CHECK_MOVES` of them. Null otherwise, or
+ * without a clear peak.
+ */
+export function checkMotionPeak(
+  frames: readonly MotionSample[],
+  moves: readonly number[],
+): MotionPeak | null {
+  const ordered = [...frames].sort((p, q) => p.timestampUs - q.timestampUs);
+  const { times } = frameHostTimes(ordered);
+  const points = ordered.map((frame, k) => ({ hostMs: times[k], changed: frame.changed }));
+  return motionPeak(points, singleTurns(moves), MIN_CHECK_MOVES);
 }
 
 /** A move as an attempt's record keeps it: its packet's arrival, its cube time and its phase. */

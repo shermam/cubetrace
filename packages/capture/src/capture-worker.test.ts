@@ -591,6 +591,8 @@ describe('CaptureWorker', () => {
         frameIntervalMs: 33.3,
       },
       motion: { state: 'off', costMs: null },
+      // When it was posted: the window's clock less this is how long its thread took to take it.
+      postedHostMs: arrivalOf(0) - 1 + 1000,
     });
     await capture.feed(30, 59);
     expect(capture.stats(arrivalOf(0) - 1 + 2000)).toMatchObject({ fps: 30, encodedFps: 30 });
@@ -1456,8 +1458,9 @@ describe('CaptureWorker: the capture latency and the solves’ motion (T5.3)', (
     expect(capture.posted.filter((message) => message.type === 'sync-sample')).toHaveLength(9);
     capture.worker.handle({ type: 'sync-stop', id: 1 });
     await feedLate(capture, 35, 44, () => 5, { picture });
-    // Its own meter compares with the frame it measured last: before the check.
-    expect(capture.worker.motionKept).toBe(before + 10);
+    // Its own meter begins again after the check: the first frame after it is compared with
+    // nothing (not with one from before the check), the nine after it are kept.
+    expect(capture.worker.motionKept).toBe(before + 9);
   });
 
   it('goes off for the recording, saying why once, when it costs more than 3 ms a frame, or cannot read the frames', async () => {
