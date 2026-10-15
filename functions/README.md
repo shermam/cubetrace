@@ -36,8 +36,10 @@ signUpload({ sessionId, attemptIndex, files: [{ path, bytes, contentType }] })
   accepts that content type and that size only; once it has expired, sign again.
 - Each call counts against the account's UTC day, `QUOTA_BYTES_PER_DAY` and `QUOTA_FILES_PER_DAY`, a
   file signed again included. A call that does not fit is refused whole, `resource-exhausted`, with
-  `details: {used, requested, limits, resetsAtMs}`; the count is in `users/{uid}.quota`, which the
-  account can read.
+  `details: {used, requested, limits, resetsAtMs}` and a message that names the counts ("The day's
+  upload quota is used up: 7,990 files and 39.98 GB signed on 2026-10-15 (UTC) of the 8,000 files and
+  40 GB a day; this call asks 19 files and 85.2 MB more. It resets at …"); the count is in
+  `users/{uid}.quota`, which the account can read.
 - It records the intent on the attempt's document: `upload.state = 'uploading'` and
   `upload.files[path] = {bytes, doneMs: null}`, for every file signed (one signed again starts again).
 
@@ -78,8 +80,8 @@ end-to-end suite's bucket (below, "The local bucket") and which deploys neither 
 | `BUCKET_PROVIDER` | `gcs` | `gcs` (Google Cloud Storage) or `r2` (Cloudflare R2); `local` in the Functions emulator only |
 | `BUCKET_NAME` | `cubetrace-data` | the bucket at the provider |
 | `R2_ACCOUNT_ID` | empty | Cloudflare's account id, for R2's endpoint |
-| `QUOTA_BYTES_PER_DAY` | `6000000000` | 6 GB signed per account per UTC day |
-| `QUOTA_FILES_PER_DAY` | `1200` | files signed per account per UTC day |
+| `QUOTA_BYTES_PER_DAY` | `40000000000` | 40 GB signed per account per UTC day (since 2026-10-15, T5.5; 15 GB from 2026-10-03, 6 GB before) |
+| `QUOTA_FILES_PER_DAY` | `8000` | files signed per account per UTC day (since 2026-10-15, T5.5: an attempt of four cameras is 18 files, 19 with `session.json`; 3,000 from 2026-10-03, 1,200 before) |
 | `MAX_FILE_BYTES` | `512000000` | the largest file, 512 MB |
 
 Secrets, with `BUCKET_PROVIDER=r2` only: `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`, an R2 API

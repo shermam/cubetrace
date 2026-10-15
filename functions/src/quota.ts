@@ -69,14 +69,35 @@ export function reserve(
     const resetsAtMs = nextUtcDay(nowMs);
     throw new HttpsError(
       'resource-exhausted',
-      `The day's upload quota is used up: ${String(used.bytes)} bytes in ${String(used.files)} files ` +
-        `signed on ${used.day} (UTC), ${String(request.bytes)} bytes in ${String(request.files)} files ` +
-        `asked, ${String(limits.bytesPerDay)} bytes and ${String(limits.filesPerDay)} files a day ` +
-        `allowed. It resets at ${new Date(resetsAtMs).toISOString()}.`,
+      `The day's upload quota is used up: ${countText(used.files, 'file')} and ` +
+        `${sizeText(used.bytes)} signed on ${used.day} (UTC) of the ` +
+        `${countText(limits.filesPerDay, 'file')} and ${sizeText(limits.bytesPerDay)} a day; ` +
+        `this call asks ${countText(request.files, 'file')} and ${sizeText(request.bytes)} more. ` +
+        `It resets at ${new Date(resetsAtMs).toISOString()}.`,
       { used, requested: request, limits, resetsAtMs },
     );
   }
   return after;
+}
+
+/** "8,000 files", "1 file": a count with its thousands separated, and its noun. */
+export function countText(count: number, noun: string): string {
+  return `${count.toLocaleString('en-US')} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/** "40 GB", "39.98 GB", "85.2 MB", "14 kB", "512 bytes": a size in decimal units, as a person reads it. */
+export function sizeText(bytes: number): string {
+  const units: readonly [number, string, number][] = [
+    [1e9, 'GB', 100],
+    [1e6, 'MB', 10],
+    [1e3, 'kB', 10],
+  ];
+  for (const [unit, name, steps] of units) {
+    if (bytes >= unit) {
+      return `${String(Math.round((bytes / unit) * steps) / steps)} ${name}`;
+    }
+  }
+  return `${String(bytes)} bytes`;
 }
 
 function isCount(value: unknown): value is number {
