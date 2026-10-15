@@ -17,7 +17,7 @@ Status legend: ⬜ not started · 🟦 in progress (branch named) · 🟨 in rev
 | **2. The host's own camera** | WebCodecs pipeline, ring buffer, two-segment cuts with audio, MP4 via mediabunny, `frames.json`, sharpness meter, clapperboard. Solo mode and laptop-only rigs produce paired data. | ✅ 0.2.0 (2026-10-01: the fixes from the owner's first recordings, T2.8–T2.13, merged; the full round 2 skipped by the owner's decision; the tag from the GitHub UI pending) |
 | 3. Cloud | Firebase auth, session index, upload queue with signed URLs (R2 or GCS by configuration), budget alert, QA view across devices. | ✅ 0.3.0 (2026-10-02: T3.0–T3.6 merged and deployed; the tag from the GitHub UI on 2896591 or later). Follow-ups T3.6–T3.9 merged the same day (the installed app's sign-in, the cube's whole record, the 3D cube in the clip viewer, the diagnostics events), for 0.4.0 |
 | 4. Remote cameras | WebRTC pairing by QR, clock sync, remote cuts, clip transfer over the data channel. | ✅ 0.4.0 (2026-10-04: T4.0–T4.4, T4.2a and T4.2b merged and deployed; the tag from the GitHub UI on 16ad587). Open: #61 closes when a pairing stays converged for 20 minutes; the measured cells of `docs/DEVICES.md` |
-| 5. The rig's eyes and hands | The phone's picture at full size with its health, remote camera controls from the laptop, the host's capture latency measured per attempt. | in progress (2026-10-09: the board below, T5.1–T5.4; issue #67) |
+| 5. The rig's eyes and hands | The phone's picture at full size with its health, remote camera controls from the laptop, the host's capture latency measured per attempt, every phone's clips, the laptop's cameras more than one. | in progress (2026-10-09: the board below, T5.1–T5.4; issue #67) |
 | 6. Community | consent flow, quotas, delete-my-data, community mode. | ⬜ |
 
 ## Phase 1 task board
@@ -2566,10 +2566,13 @@ sign in the app (issue #67).
 |---|---|---|---|
 | T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | ✅ 2026-10-09 (#68) |
 | T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | ✅ 2026-10-09 (#69) |
+| T5.2a | `web`, `capture`: the watchdog's baseline is what the camera reports after applying (the Moto g60 reports `none` for a manual exposure and `1/x` for a focus distance `x`: 37 false drifts and 4 give-ups on 2026-10-10 to 10-12); the panel shows what the app applied; the evidence in `docs/DEVICES.md` | T5.2 | – |
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | 🔄 PR #70 |
-| T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0` | T5.2, T5.3 | – |
+| T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | – |
+| T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | – |
+| T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | – |
 
-Waves: T5.1 → T5.2 → T5.3 → T5.4, one agent at a time.
+Waves: T5.1 → T5.2 → T5.3 → T5.2a → T5.6 → T5.5 → T5.4, one agent at a time (T5.2a added on 2026-10-15 from the first week's events; T5.5 and T5.6 the same day from the owner's asks: the USB webcam beside the built-in camera, and the second phone's clips).
 
 ### T5.1 — the phone's picture at full size, and its status line
 
@@ -2729,6 +2732,52 @@ page keeps it a minute); a request id if answers by order ever mismatch. **CI's 
 connected; main at 2bf67b5 and PR #69's first attempt, never before 2026-10-09, green on a re-run) is
 open, for T5.4.
 
+### T5.2a — the watchdog against the camera's own readings
+
+**Goal.** A control the app applied and the camera holds is never called a drift, whatever unit or
+mode name the camera reports it in; a control the camera really changed by itself still is.
+
+**The evidence (the events of 2026-10-10 to 10-12, the Moto g60 as the phone and the ThinkPhone as a
+host).** 37 `controls.drift` events, 4 of them `gaveUp`, all after a `set-controls` or a change on the
+device's own panel, none a change the camera made on its own: (1) **`exposureMode: manual → none`**,
+over and over, on both phones (the Moto's rear camera as the camera device, 10-10 13:04 and 10-12
+12:44–12:46; the ThinkPhone's front camera as the host, 10-10 21:59–22:04): a manual exposure
+(`exposureMode: manual` with an `exposureTime`) is reported by Chrome for Android as `none` (the
+automatic exposure off), so the watchdog re-applied `manual` three times and gave up, each time the
+owner set it; (2) **`focusDistance: 0.10 → 10`, `0.12 → 8.33`, `0.13 → 7.69`** (the Moto's rear
+camera): the camera reports the reciprocal of the value applied (the constraint and the setting
+disagree on the unit: metres in one, dioptres in the other), so every focus distance set from the
+MacBook was re-applied three times and given up; (3) **the torch** (10-11 21:32:14): setting it reset
+the other groups (`focusMode`, `whiteBalanceMode` back to `continuous`, `focusDistance` to the default,
+`colorTemperature` to 0), and the watchdog restored them, which is right. None of the 37 was the
+focus that went manual by itself on 2026-10-09, the case the watchdog is for.
+
+**Scope.** (1) **The baseline is the camera's own reading.** After the app applies a group (the
+device's panel, a `set-controls`, the re-application at the camera's opening, the watchdog's own
+re-application), `ControlsWatch` takes the track's `getSettings()` once the apply has resolved (and
+again at the next reading, two readings agreeing) as the expected values of that group: a value the
+camera renders differently (rounded, in another unit, a mode mapped to another name) is thereby what
+is expected, and only a later change from it is a drift. `expectedValues` keeps the automatic mode of
+a group nothing was applied to, with `manual` and `none` both counted as "not automatic" against
+`continuous`/`single-shot` (a drift is a change of kind: automatic ↔ not, or a value that moved from
+the reading). (2) **The panel shows what the app applied**, beside the camera's reading where the two
+disagree in more than the tolerance ("set 0.12 m, the camera reports 8.33"), so that a slider does
+not jump to a number the user did not choose; the `controls` message carries both as today
+(`applied`, `values`). (3) **The events**: `controls.drift` gains `baseline: 'reading' | 'applied'`
+(how the expected value was taken), and the give-up word on the phone's page and the host's line says
+which control. (4) **Docs**: `docs/DEVICES.md` (the Moto g60's and the ThinkPhone's control quirks,
+from the events above: the exposure mode reported as `none`, the focus distance's reciprocal, the
+torch resetting the groups), `docs/RTC.md` §11, `docs/MANUAL-TESTS.md` "After T5.2a" (the focus set
+from the MacBook on the Moto g60 and held for two minutes without a drift event; the manual exposure
+the same; the torch on and off with the focus kept; the real drift provoked from the console still
+caught), `docs/CHANGELOG.md`.
+
+**Acceptance.** Unit tests of the watchdog with a camera that reports `none` for `manual` exposure,
+a camera that reports `1/x` for a focus distance `x`, a camera that resets the other groups at the
+torch, and a camera that really changes its focus mode (still a drift after two readings); the e2e's
+synthetic camera given the reciprocal quirk, the host sets a focus distance and no `controls.drift`
+follows in 10 s, then a provoked drift is caught. Lint, unit and e2e green.
+
 ### T5.3 — the host's capture latency, measured per attempt (issue #67)
 
 **Goal.** The lag of the host's own camera is known for every attempt and not only at the sync check,
@@ -2765,6 +2814,96 @@ the words on the line, the recorded `motionLagMs` against the sync check's numbe
 **Acceptance.** Unit tests of the meter's statistics and the drift rule, and of the motion estimator on
 synthetic frames with a known delay (a planted motion a known number of frames after each turn); the
 e2e's recording has the fields; the forty-attempt run is the owner's, in the "After T5" round (T5.4).
+
+### T5.6 — every phone's clips: a phone is who it is, not what it is called
+
+**Goal.** Two or more phones paired in one session, whatever their names, each get a label of their
+own, their own line and picture, and clips of their own for every attempt.
+
+**The evidence (the owner, 2026-10-15).** "While I can connect two phones at the same time and see the
+live feed on the laptop app, only the videos from the first phone are captured as the clips for the
+solve and scramble." The code: the host puts a phone's camera into the session with the identity
+`remote:<the phone's host label>` and the camera's browser name (`RemoteCamerasService`,
+`SessionService.putCamera`, `@cubetrace/core`'s `labelFor` and `sameCamera`); the ThinkPhone and the
+Moto g60 both say "Android phone" (the default host label of a phone) and "camera 0, facing back", so
+they are one camera to the session: one label, `phone-rear`, and `RemoteCutsService` groups the cuts
+by label and asks one phone. The diagnostics merge the two phones into one device "Android phone" for
+the same reason (the round report of 2026-10-15 lists one phone with three builds).
+
+**Scope.** (1) **`rtc`**: `DeviceInfo` (in `hello`, both roles) gains `id`, an installation id (a UUID
+v4 made once per browser installation and kept in Settings; never in a record), and `model`, the
+device's model where Chrome gives it (`navigator.userAgentData.getHighEntropyValues(['model'])` on
+Android; null elsewhere); both additive within protocol version 1: a phone on an older build has
+neither and is identified by its label as today, said in the Cameras section ("named only; update the
+phone"). (2) **The host** identifies a phone's camera by `remote:<id>` (its label when there is no
+id), so that `labelFor` gives a second phone `phone-rear-2` and a phone paired again in the session
+gets its label back; the Cameras section, the pictures' captions and status lines, the clip viewer's
+buttons and the session page name the phone by its label and model ("phone-rear-2 · moto g60");
+`RemoteCutsService` asks every phone (one cut per label, as today, which is now one per phone). (3)
+**The phone's default name** (Settings → This device) is its model when Chrome gives it ("moto g60",
+"ThinkPhone by motorola"), else "Android phone" as today; the typed name still wins; the phone's
+Camera page says its label in the session ("you are phone-rear-2 here"). (4) **The diagnostics**: the
+events carry the installation id's first eight characters as `installation`, and the round report
+tells devices apart by it (the Events table one row per phone, the items' facts the same); `docs/
+DIAGNOSTICS.md`. (5) **Docs**: `docs/RTC.md` §1 (`hello`), `docs/DATA-MODEL.md` §6 (`cameras[].remote`
+gains `model`; no id in any record), `docs/MANUAL-TESTS.md` "After T5.6": the two phones paired with
+their default names, two pictures and two lines on the MacBook, four remote clips in every attempt,
+the clip viewer's six buttons, the round report with two phones; `docs/CHANGELOG.md`.
+
+**Acceptance.** Unit tests: two phones of one name and one camera name get `phone-rear` and
+`phone-rear-2`, the same phone paired again gets its label back, a phone without an id is labelled by
+its name; the cuts of an attempt go to both phones and both clips are stored under their labels; the
+default name from the model. The e2e pair with two phone pages of the same default name (the fake
+signaling and the synthetic camera, `remote-clips.spec.ts`): an attempt with four remote clips, the
+two labels in the attempt's record and in the session's `cameras`, the two pictures in the grid.
+Lint, unit and e2e green.
+
+### T5.5 — the host's cameras, more than one
+
+**Goal.** Every camera of the laptop that the owner turns on records clips of every attempt: the
+built-in camera and a USB webcam together, and more if there are more; with the phones, four cameras
+or more in every attempt.
+
+**Scope.** (1) **`web`: one camera service per camera.** `CameraService` (one device, one stream, the
+controls source, the framing, the sharpness meter, T5.2's watchdog) becomes the class of one open
+camera, `HostCamera`, and a `HostCamerasService` keeps the list: Camera settings shows every video
+device of the laptop with a switch of its own instead of the single selection (the first device on
+by default, as today's choice; the resolution and the frame rate per device, persisted per device
+label as the framings and the controls are), and the services that took the one camera
+(`RecordingService`, `SyncService`, `CameraPreview`, the framing editor, the controls panel, the
+sharpness meter, T5.3's meters) take each of them: a recording pipeline per open camera (its own
+worker, ring buffer and encoder; its clips per attempt under the label the session gives the device:
+`laptop`, `laptop-2`, by the browser's device id, as `labelFor` already does; the microphone with the
+first camera's clips only, the others' clips without sound, `audio: false`, said once); a sync check
+per camera (its own "Sync check" under its picture, its own entry in `clock.cameras`); a cell per
+camera in T5.1's grid with its status line (host cameras first, then the phones; tiles on a phone
+host as today); the camera device page (a phone) keeps one camera. (2) **The records** need no new
+field: `cameras[]`, `video[]` and `clock.cameras` are per label, the file names by label (`laptop-2.
+solve.mp4`); the clip viewer's buttons per clip as today (eight with two phones); the session page's
+counts. (3) **The upload**: the files per attempt grow (a camera adds two clips and two frames
+files: four cameras are 19 files with `gyro.json`); the functions' daily cap (3,000 files and 15 GB)
+is raised to 8,000 files and 40 GB (confirmed by the owner on 2026-10-15: the storage may grow as
+fast as the rig records, the bound being the GCP trial's US$ 300 credit; the bucket held 54 GB on
+2026-10-15 after 13 days, growing 9.6–12.7 GB a day on the days with two cameras: 8.9 MB per laptop
+clip, 12.4 MB per phone clip, about 43 MB per attempt; with four cameras about 85 MB per attempt),
+the message naming the count; `docs/USER-ACTIONS.md` (the cap, the cost per month at the Standard
+class, US$ 0.02 per GB-month in us-central1, and the lifecycle rule worth setting on the bucket by
+the owner once the features are extracted from a session's clips: Nearline after 30 days, half the price). (4) **The load**: the stats of every pipeline on
+its line; a notice once when a camera's measured frame rate stays under 80% of its nominal for 10 s
+("two cameras may be more than this laptop encodes: turn one off or lower its resolution");
+`docs/DEVICES.md` gets the MacBook's figures with two cameras once the owner measured them. (5)
+**The e2e**: Chrome's fake camera flag with two devices (`--use-fake-device-for-media-stream=
+device-count=2`, which lists `fake_device_0` and `fake_device_1`): both turned on, an attempt with
+four local clips under `laptop` and `laptop-2` (and the phones' with the pair), a sync check on
+each, the two cells, the second camera turned off mid-session (its later attempts without its clips,
+the records right). (6) **Docs**: `docs/ARCHITECTURE.md`, `docs/DATA-MODEL.md` (the second camera's
+clips without sound), `docs/MANUAL-TESTS.md` "After T5.5": the FaceTime camera and the USB webcam
+with the two phones on the MacBook: eight clips in every attempt, the pictures, each camera's sync
+check, the status lines over twenty minutes, the upload's count and the quota; `docs/CHANGELOG.md`.
+
+**Acceptance.** Unit tests of the cameras list and its switches, the labels per device, the
+pipelines per camera (clips per camera and attempt, the microphone on one), the sync check per
+camera, the grid's cells; the e2e above; lint, unit and e2e green; the bundle's chunks noted.
 
 ### T5.4 — docs, "After T5", `0.5.0`
 
