@@ -439,10 +439,52 @@
           "description": "The clip begins later than asked, at the oldest keyframe in memory: the start asked for was older than the capture's buffer (docs/DATA-MODEL.md §7). Absent from the files written before it existed, which read as false.",
           "type": "boolean"
         },
+        "captureLatencyMs": {
+          "description": "From each frame's capture to its arrival in the capture worker, over the clip's frames (T5.3); null when none was timed. Absent from the files written before T5.3.",
+          "$ref": "#/$defs/captureLatency"
+        },
+        "encodeLatencyMs": {
+          "description": "From each frame's arrival in the capture worker to its encoded chunk, over the clip's frames (T5.3); null when none was timed. Absent from the files written before T5.3.",
+          "$ref": "#/$defs/latencyPercentiles"
+        },
+        "motionPeakMs": {
+          "description": "Where the motion of the clip's frames peaks around the solve's moves, ms after them (T5.3); null for a scramble clip, without the motion measured, with fewer than 10 moves or without a clear peak. Absent from the files written before T5.3.",
+          "type": ["number", "null"]
+        },
+        "motionSpreadMs": {
+          "description": "The width of that peak at half its height, ms (T5.3); null with the peak.",
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "motionLagMs": {
+          "description": "The camera's lag behind the cube from this clip's own moves (T5.3): its check's offsetMs plus how far motionPeakMs moved from the check's motionPeakAtCheckMs; null without a peak or without a check that measured its own. Absent from the files written before T5.3.",
+          "type": ["number", "null"]
+        },
         "local": {
           "description": "False once the MP4 is no longer on the device that recorded it: deleted after its upload was confirmed, it is in the dataset's bucket (docs/DATA-MODEL.md §7, T3.3); its frames file stays. Absent while the file is there, which true means too, and in the uploaded attempt.json. Written by the builds before T4.2a only: since then the device keeps this to itself (uploads.json and the attempt's folder), and the record does not change when a clip leaves the device.",
           "type": "boolean"
         }
+      }
+    },
+    "latencyPercentiles": {
+      "description": "A latency over a clip's frames (T5.3, docs/DATA-MODEL.md §7): its median and its 95th percentile (nearest rank), ms; null when none of its frames was timed.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["p50", "p95"],
+      "properties": {
+        "p50": { "type": "number", "minimum": 0 },
+        "p95": { "type": "number", "minimum": 0 }
+      }
+    },
+    "captureLatency": {
+      "description": "The capture latency of a clip's frames (T5.3, docs/DATA-MODEL.md §7): from each frame's capture to its arrival in the capture worker, its median and 95th percentile (nearest rank), ms; and how the capture was timed: capture-time, from the frame's capture time on the host clock (VideoFrame.metadata().captureTime), the latency itself; timestamp, from the frame's own timestamp, the latency beyond the least one the camera's track gave since it opened. Null when none of its frames was timed.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["p50", "p95", "basis"],
+      "properties": {
+        "p50": { "type": "number", "minimum": 0 },
+        "p95": { "type": "number", "minimum": 0 },
+        "basis": { "enum": ["capture-time", "timestamp"] }
       }
     },
     "app": {

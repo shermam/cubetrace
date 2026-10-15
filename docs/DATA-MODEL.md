@@ -40,7 +40,11 @@ records written before, all of which were written at the fit's convergence. T4.3
 remote camera's clock entry gained the sync check's fields that a local camera's has (§6, until then
 0), and the `remote` of a remote clip's frames file is the estimate of the clip's cut, its `offsetMs`
 the one applied at the clip's first frame (§9; in the files written before, the fit's when the file
-came, at its newest sample).
+came, at its newest sample). T5.3 (the capture latency, issue #67) added, optional in the same way
+but kept absent when read (a reader's default would change the text of every older record read
+back): in `attempt.json`, a clip's `captureLatencyMs`, `encodeLatencyMs`, `motionPeakMs`,
+`motionSpreadMs` and `motionLagMs` (§7); in `session.json`, a camera clock's `motionPeakAtCheckMs`
+and `captureLatencyAtCheckMs` (§6).
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -235,7 +239,8 @@ when its Camera page opens.
     "cube": {"a": 1.0031, "b": 1730639990000.0, "residualP95Ms": 618.7, "samples": 1425},  // coarse
     "cameras": {"laptop": {"offsetMs": 41.5, "rttMs": 0, "driftPpm": 0,
                            "clapperboardResidualMs": 12.3, "clapperboardSamples": 5,
-                           "samples": [{"moveHostMs": 1730640010000.5, "onsetHostMs": 1730640010040.5}, …]},
+                           "samples": [{"moveHostMs": 1730640010000.5, "onsetHostMs": 1730640010040.5}, …],
+                           "motionPeakAtCheckMs": 47.5, "captureLatencyAtCheckMs": 3.6},   // T5.3
                 "phone-rear": {"offsetMs": 63.0, "rttMs": 9.6, "driftPpm": 37.8,
                                "clapperboardResidualMs": 8.1, "clapperboardSamples": 8,
                                "remote": {"offsetMs": 3127.4, "driftPpm": 37.8, "rttMs": 9.6, "samples": 58,
@@ -393,6 +398,18 @@ before phase 4 have none. A clip's `syncResidualMs` (§7) is its camera's `offse
 recorded, once the entry has a check's result (`clapperboardSamples` above 0), for a remote camera
 as for a local one: a remote camera's entry before its sync check gives its clips none.
 
+Since T5.3 (issue #67: the MacBook's frames came 75 ms later from the 38th attempt of a session on,
+and one `offsetMs` per session could not say so) a check also keeps what anchors the lag measured
+later from the solves themselves (§7): `motionPeakAtCheckMs`, where the motion of the check's frames
+peaks around its turns, by the estimator of the clips' `motionPeakMs` run on the check's frames and
+turns (null when it finds no clear peak, as with fewer than ten turns among the frames), and
+`captureLatencyAtCheckMs`, the camera's capture latency when the check ended: the median of the
+capture pipeline's meter (§7's `captureLatencyMs`) over its last ten seconds, a phone's from its
+last reports (`docs/RTC.md` §1, `state`'s `latencyMs`), null when unknown; the baseline that the
+app's warning of a drifting latency is measured from (`recording.latency`, `docs/DIAGNOSTICS.md`).
+Both are absent from the records written before T5.3, and from a remote camera's entry before its
+check; the clock sync's records of each minute keep them as they are.
+
 ## 7. `attempt.json`
 
 ```jsonc
@@ -427,7 +444,10 @@ as for a local one: a remote camera's entry before its sync check gives its clip
      "codec": "avc1.640028", "audio": "mp4a.40.2", "width": 1920, "height": 1080,
      "crop": {"x": 480, "y": 120, "w": 960, "h": 840}, "fpsNominal": 30, "frames": 721,
      "firstFrameHostMs": 1730640017211.9, "framesFile": "laptop.solve.frames.json",
-     "syncResidualMs": 41.5, "truncatedStart": false}
+     "syncResidualMs": 41.5, "truncatedStart": false,
+     "captureLatencyMs": {"p50": 3.9, "p95": 10.5, "basis": "timestamp"},   // T5.3
+     "encodeLatencyMs": {"p50": 18.3, "p95": 26.1},
+     "motionPeakMs": 62.4, "motionSpreadMs": 48.5, "motionLagMs": 56.4}
                                          // "local": false once the MP4 left the device (T3.3;
                                          // written until T4.2a only)
   ],
@@ -530,6 +550,38 @@ cube when the clip was recorded (`offsetMs` of `clock.cameras`, §6), null befor
 `camera` is the label of the camera that recorded the clip, that of its entry in the session's
 `cameras` and in `clock.cameras` (§6): an attempt during which the camera changed has its scramble
 from one camera and its solve from the other.
+
+Since T5.3 (issue #67) a clip says how its frames went through the capture pipeline and where its
+camera's lag was during it. `captureLatencyMs` and `encodeLatencyMs` are each the median (`p50`) and
+the 95th percentile (`p95`, nearest rank) over the clip's frames, in ms, null when none was timed.
+`captureLatencyMs` is from each frame's capture to its arrival in the capture worker, the host time
+its frame times come from (§9): with `basis` `capture-time`, from the frame's capture time on the
+host clock as the browser gives it with the frame (`VideoFrame.metadata().captureTime`, which
+Chrome fills on some tracks and versions), the latency itself; with `timestamp`, from the frame's own
+timestamp, whose zero is the camera's, so the latency beyond the least one the camera's track gave
+since it opened (its floor, carried across the pipeline's restarts on the track): a frame queued
+anywhere between the camera's timestamp and the worker raises it, and nothing before the timestamp
+does (what the camera itself takes stays in the sync check's lag). `encodeLatencyMs` is from that
+arrival to the frame's encoded chunk. `motionPeakMs` is where the clip's motion peaks around the
+solve's moves: the capture worker measures each frame's motion in the framing rectangle (the
+changed area of the sync check's meter, §6, on a plane 160 or 320 pixels wide), the app puts each
+frame's motion in the 10 ms bin of its time after each of the solve's moves, from 150 ms before to
+300 ms after (the moves on the attempt's `clock` fit, `a·cubeMs + b`, where it is within 200 ms of
+their arrival), averages each bin over the moves whose whole window lies among the frames, smooths
+the bins over three, and refines the top bin with a parabola through it and its neighbours;
+`motionSpreadMs` is the peak's width at half its rise above the bins' median. Both are null for a
+scramble clip, when the motion was not measured (Settings → Camera, "Measure the motion during
+solves", off; the meter over 3 ms a frame on the device, which turns it off; a phone's build before
+T5.3), with fewer than 10 such moves, or without a clear peak (a rise under three times the bins'
+spread, their median absolute deviation as a standard deviation, or under 0.1% of the pixels; a top
+bin at an end of the window). The peak sits a little after the camera's lag (the hands' motion around
+each turn, a constant of the camera and the hands), so `motionLagMs` anchors it to the camera's check:
+the check's `offsetMs` plus `motionPeakMs` less the check's `motionPeakAtCheckMs` (§6), the camera's
+lag from this clip's own moves, to set against its `syncResidualMs`; null without a peak, or without
+a check that kept its own. A remote camera's clip takes the latencies its phone's capture measured,
+and its motion when the phone sends the solve's with the clip (`docs/RTC.md` §9, `cut-done`); a
+phone's build before T5.3 sends neither, and they are null. The five fields are absent from the files
+written before T5.3.
 
 A remote camera's clips (T4.2, `docs/RTC.md` §9) are entries like the others, named after its label,
 and cut by the phone over the same windows on its own clock, widened on each side by the margin of

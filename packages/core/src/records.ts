@@ -16,9 +16,11 @@ import type {
   AttemptRecord,
   AttemptResult,
   AttemptResync,
+  CaptureLatency,
   CropRect,
   FramesJson,
   FramesRemote,
+  LatencyPercentiles,
   VideoClip,
 } from './attempt';
 import type { CubeClockParams } from './clock';
@@ -769,6 +771,16 @@ const result = object<AttemptResult>({
   scrambleExtraMoves: int(0),
 });
 
+/** A latency's median and 95th percentile over a clip's frames (T5.3), in ms. */
+const percentileFields = { p50: num({ min: 0 }), p95: num({ min: 0 }) };
+
+const latencyPercentiles = object<LatencyPercentiles>(percentileFields);
+
+const captureLatency = object<CaptureLatency>({
+  ...percentileFields,
+  basis: oneOf('capture-time', 'timestamp'),
+});
+
 const clip = object<VideoClip>({
   camera: label,
   segment: oneOf('scramble', 'solve'),
@@ -789,6 +801,13 @@ const clip = object<VideoClip>({
   syncResidualMs: nullable(num()),
   // Since T2.9; the clips written before it have none, and began where asked.
   truncatedStart: defaulted(bool, false),
+  // Since T5.3, null when not measured; absent from the clips written before, and kept so (a
+  // defaulted field would change the text of every older record read back, PLAN.md follow-up (o)).
+  captureLatencyMs: optional(nullable(captureLatency)),
+  encodeLatencyMs: optional(nullable(latencyPercentiles)),
+  motionPeakMs: optional(nullable(num())),
+  motionSpreadMs: optional(nullable(num({ min: 0 }))),
+  motionLagMs: optional(nullable(num())),
   // Since T3.3, and only once the clip's MP4 was deleted from the device after its upload: absent,
   // the file is there.
   local: optional(bool),
@@ -911,6 +930,9 @@ const cameraClock = object<CameraClock>({
   clapperboardResidualMs: num({ min: 0 }),
   clapperboardSamples: int(0),
   samples: optional(list(object<ClapperboardSample>({ moveHostMs: num(), onsetHostMs: num() }))),
+  // Since T5.3, null when unknown; absent from the records written before.
+  motionPeakAtCheckMs: optional(nullable(num())),
+  captureLatencyAtCheckMs: optional(nullable(num())),
   // Since T4.0: the data channel's clock sync of a remote camera; a local camera has none.
   remote: optional(remoteClock),
 });

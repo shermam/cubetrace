@@ -97,16 +97,33 @@ export const GYRO: GyroSummary = {
 
 /**
  * The solved attempt with its two clips from the laptop's camera, the scramble's begun later than
- * asked (its start was older than the capture's buffer, T2.9), its gyro file, and a resync during
- * the solve (T3.7).
+ * asked (its start was older than the capture's buffer, T2.9), its gyro file, a resync during the
+ * solve (T3.7), and the clips' latencies and the solve's motion lag (T5.3).
  */
 export function attemptWithVideo(): AttemptRecord {
   const attempt = solvedAttempt();
   return {
     ...attempt,
     video: [
-      { ...clip('laptop', 'scramble'), truncatedStart: true },
-      { ...clip('laptop', 'solve'), audio: null, crop: null },
+      {
+        ...clip('laptop', 'scramble'),
+        truncatedStart: true,
+        captureLatencyMs: { p50: 4.2, p95: 11.8, basis: 'timestamp' },
+        encodeLatencyMs: null,
+        motionPeakMs: null,
+        motionSpreadMs: null,
+        motionLagMs: null,
+      },
+      {
+        ...clip('laptop', 'solve'),
+        audio: null,
+        crop: null,
+        captureLatencyMs: { p50: 3.9, p95: 10.5, basis: 'capture-time' },
+        encodeLatencyMs: { p50: 18.3, p95: 26.1 },
+        motionPeakMs: 62.4,
+        motionSpreadMs: 48.5,
+        motionLagMs: 56.4,
+      },
     ],
     gyro: { ...GYRO },
     resyncs: [
@@ -204,7 +221,7 @@ export function sessionWithCamera(): SessionRecord {
     clock: {
       ...s.clock,
       cameras: {
-        laptop: CAMERA_CLOCK,
+        laptop: { ...CAMERA_CLOCK, motionPeakAtCheckMs: 47.5, captureLatencyAtCheckMs: 3.6 },
         'phone-rear': {
           ...CAMERA_CLOCK,
           rttMs: REMOTE_CLOCK.rttMs,
