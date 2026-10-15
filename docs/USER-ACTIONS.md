@@ -242,6 +242,28 @@ adds items; the owner ticks them when done (date and any detail that others need
   `users/` (the clips and the records; `features/` stays Standard, read by every training) → Create.
   The app and the functions need no change: a signed upload writes Standard, and the rule moves the
   file a month later.
+- [ ] **The `v0.5.0` release**, once T5.4's pull request is merged, from the GitHub UI (the
+  coordinator's session cannot push tags), as `v0.4.0`'s above (still to make on 16ad587: the tags
+  stop at `v0.3.0`): Releases → Draft a new release → Choose a tag: type `v0.5.0` and choose "Create
+  new tag on publish", Target: the merge commit of T5.4's pull request (the coordinator writes it here
+  once merged; under Target → Recent commits, or `main` while nothing has been merged after it), title
+  `cubetrace 0.5.0`, the notes from the 0.5.0 section of `docs/CHANGELOG.md` → Publish release.
+- [ ] **The "After T5" round (the whole rig, 0.5.0)**, the owner's next action: on
+  https://shermam.github.io/cubetrace/ once its footer reads `cubetrace 0.5.0 · <commit>` on the
+  MacBook and on both phones' Camera pages, set the rig up as `README.md`, "The desk rig", says (the
+  MacBook with its FaceTime camera and the USB webcam both on and the GAN 12 ui, the ThinkPhone and the
+  Moto g60 paired on their tripods, no name typed on either, the lamp), signed in on all three with
+  Settings → Account → Diagnostics on (the default), and go through "After T5" in
+  `docs/MANUAL-TESTS.md` in its order, in one session: the four pictures, the four sync checks, each
+  phone's controls from the MacBook, a drift provoked on the Moto g60 from its console, forty solves or
+  more, the phones' health over twenty minutes (the heat routine if a pressure or hot word comes), the
+  latency words, and the uploads. The "After T5.1" to "After T5.6" items above are its parts: where
+  they overlap, the round does them. Write down only what its items ask beside the events (the four
+  lags, the numbers beside the Moto's distance, the phones' temperature by hand, the attempts where a
+  latency word came), and open an issue for anything that fails. The coordinator then reads the round
+  from the events (`npm run round-report`, items 5.4.1–5.4.8), fills `docs/DEVICES.md`'s cells it
+  measures (the MacBook's capture latency over a session, the USB webcam's, the MacBook with two
+  cameras, the phones' rows), and says on issue #67 what the meter found.
 
 ## Later
 
