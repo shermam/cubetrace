@@ -2566,7 +2566,7 @@ sign in the app (issue #67).
 |---|---|---|---|
 | T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | ✅ 2026-10-09 (#68) |
 | T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | ✅ 2026-10-09 (#69) |
-| T5.2a | `web`, `capture`: the watchdog's baseline is what the camera reports after applying (the Moto g60 reports `none` for a manual exposure and `1/x` for a focus distance `x`: 37 false drifts and 4 give-ups on 2026-10-10 to 10-12); the panel shows what the app applied; the evidence in `docs/DEVICES.md` | T5.2 | 🔄 PR #71 |
+| T5.2a | `web`, `capture`: the watchdog's baseline is what the camera reports after applying (the Moto g60 reports `none` for a manual exposure and `1/x` for a focus distance `x`: 37 false drifts and 4 give-ups on 2026-10-10 to 10-12); the panel shows what the app applied; the evidence in `docs/DEVICES.md` | T5.2 | ✅ 2026-10-15 (#71) |
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | ✅ 2026-10-15 (#70) |
 | T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | – |
 | T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | – |
@@ -2777,6 +2777,33 @@ a camera that reports `1/x` for a focus distance `x`, a camera that resets the o
 torch, and a camera that really changes its focus mode (still a drift after two readings); the e2e's
 synthetic camera given the reciprocal quirk, the host sets a focus distance and no `controls.drift`
 follows in 10 s, then a provoked drift is caught. Lint, unit and e2e green.
+
+**Outcome (2026-10-15).** As contracted, PR #71, with these choices. `ControlsWatch.applied(names)`
+takes the camera's `getSettings()` right after an apply resolves (the device's own panel, a
+`set-controls`, the kept controls applied as the camera opens) and holds the group to it once the
+next reading agrees; until then the group is not judged and what was counted of it is forgotten; a
+group nothing was applied to keeps the mode it opened in; a mode drifts only when it changes kind
+(automatic against not, `isAutomaticMode` in `capture`), so the Moto's `none` for a manual exposure
+and its `1/x` for a focus distance are what is expected, while a focus going manual by itself is
+still a drift after two readings. **The watchdog's own re-application takes no new reading** (a
+change from the contract): a reading after it can be the drift come straight back or a refusal, and
+taking either as the baseline would mean the give-up after three never came (a unit test holds it).
+A change to `applied` the watch was not told of is learnt from the next readings as an announced
+apply is. The panel shows the applied value, with "the camera reports 8.33" beside it when the
+reading differs beyond the tolerance, and a manual exposure the camera calls `none` as Manual; the
+Reset beside a phone's line sends the applied zoom, not the camera's reading. `controls.drift` gains
+`baseline` (`reading` | `applied`), one event per outcome and baseline; the give-up word names the
+control ("The camera keeps setting the exposure to none: left as it is"); the line's tooltip says
+"(it held X)". The e2e's synthetic camera reads a distance as its reciprocal: a distance set from the
+host holds 10 s with no drift, then a real change is caught; with T5.2's rule put back the test fails
+at the hold. `docs/DEVICES.md` "Control quirks" (the exposure mode reported as `none`, the focus
+distance's reciprocal, the torch resetting the groups), `docs/RTC.md` §11, `docs/MANUAL-TESTS.md` and
+`docs/USER-ACTIONS.md` "After T5.2a", the round report's items 5.2a.1–5.2a.4. Tests: 1,475 package
+tests (1,472 before) and 941 app tests (930); the e2e 83 in 9.9 min; the initial bundle unchanged
+(265.11 kB). **Open**: whether Chrome for Android refreshes `getSettings()` for a change the camera
+makes on its own (every drift of the first week came after an apply); the unit of the Moto's focus
+range; `setControl` reopens the camera only when the reading is `manual`, so a camera that names its
+manual exposure `none` and refuses Auto would not be reopened (not seen in the events).
 
 ### T5.3 — the host's capture latency, measured per attempt (issue #67)
 
