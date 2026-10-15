@@ -226,8 +226,8 @@ export type ClipAttachment = 'kept' | 'saved' | 'gone';
  * a phone by its installation id only while its page is open (no record keeps one): after a reload,
  * two phones whose cameras the browser names alike ("camera 0, facing back") are still two devices
  * by their models, each getting its label back as it pairs again in whatever order; two phones of
- * one model, or without one, by the name alone, as before. (An entry recorded before T5.6 has no
- * `model`: `cameraIdentities` names it as the camera to label, matching it by the name alone.)
+ * one model, or without one, by the name alone, as before (`SessionService`'s `labelIn` has the
+ * order of the rules: an entry without a model, recorded before T5.6, is matched by the name alone).
  */
 export function identityName(camera: Pick<CameraInfo, 'deviceLabel' | 'remote'>): string {
   const model = camera.remote?.model ?? null;
@@ -1052,11 +1052,7 @@ export class SessionService {
     if (session === null) {
       return null;
     }
-    const label = labelFor(this.cameraIdentities(session, camera), {
-      ...camera,
-      deviceLabel: identityName(camera),
-      deviceId,
-    });
+    const label = this.labelIn(session, camera, deviceId);
     const entry: CameraInfo = { ...camera, label };
     if (deviceId !== null) {
       this.rememberCameraId(session.id, label, deviceId);
@@ -1181,26 +1177,54 @@ export class SessionService {
 
   /**
    * The cameras of `session` as `labelFor` tells them apart: with their device ids known here, and a
-   * remote camera's name with its phone's model (`identityName`, T5.6). A remote camera's entry
-   * recorded before T5.6, without `model`, takes the model of `camera`, the camera to label: a phone
-   * of a session that spans the update gets its label back by its name alone, as it did before.
+   * remote camera's name with its phone's model (`identityName`, T5.6). With `loose`, the camera to
+   * label, a remote camera's entry is named by the name alone, as before T5.6, when it or `loose` has
+   * no model (written before T5.6, or by a phone whose browser had not said its model yet).
    */
   private cameraIdentities(
     session: SessionRecord,
-    camera: Pick<CameraInfo, 'remote'> | null = null,
+    loose: Pick<CameraInfo, 'remote'> | null = null,
   ): CameraIdentity[] {
     const known = this.cameraIdsSignal();
     const ids = known?.session === session.id ? known.ids : null;
-    const model = camera?.remote?.model;
+    const model = loose?.remote?.model ?? null;
     return session.cameras.map((entry) => ({
       label: entry.label,
-      deviceLabel: identityName(
-        entry.remote !== undefined && entry.remote.model === undefined && model !== undefined
-          ? { ...entry, remote: { ...entry.remote, model } }
-          : entry,
-      ),
+      deviceLabel:
+        loose !== null && entry.remote !== undefined && (model === null || !entry.remote.model)
+          ? identityName({ ...entry, remote: { ...entry.remote, model } })
+          : identityName(entry),
       deviceId: ids?.get(entry.label) ?? null,
     }));
+  }
+
+  /**
+   * The label that the session gives `camera`, of device id `deviceId` (`labelFor`, T2.14), as T5.6
+   * tells phones apart: that of the entry of the same device id, known on this page, and the same
+   * browser name, whatever the models say (a phone's model can come after its first hello); else
+   * that of the entry of the same name and model (`identityName`: phones of two models, after a
+   * reload of this page); else, for a remote camera, that of a remote camera's entry of the same name
+   * where one of the two has no model (a phone recorded before T5.6, or before its browser said its
+   * model), as before T5.6; else a new one.
+   */
+  private labelIn(session: SessionRecord, camera: CameraInfo, deviceId: string | null): string {
+    const known = this.cameraIdsSignal();
+    const ids = known?.session === session.id ? known.ids : null;
+    const same =
+      deviceId === null
+        ? undefined
+        : session.cameras.find(
+            (entry) =>
+              ids?.get(entry.label) === deviceId && entry.deviceLabel === camera.deviceLabel,
+          );
+    if (same !== undefined) {
+      return same.label;
+    }
+    const own: CameraIdentity = { ...camera, deviceLabel: identityName(camera), deviceId };
+    const exact = labelFor(this.cameraIdentities(session), own);
+    return camera.remote === undefined || session.cameras.some((entry) => entry.label === exact)
+      ? exact
+      : labelFor(this.cameraIdentities(session, camera), own);
   }
 
   /** Keeps `deviceId` as the device id of the camera `label` of session `sessionId` (T2.14). */
