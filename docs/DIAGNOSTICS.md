@@ -21,7 +21,7 @@ event's time as 13 digits, a dash and 8 random hex digits, so that a device's id
   "schema": 1,
   "tsMs": 1790000012345.5,                       // host ms on the device's clock (§1 of the data model)
   "kind": "attempt.done",                         // the catalogue below
-  "app": {"version": "0.4.0", "commit": "abc1234"}, // the build that wrote it
+  "app": {"version": "0.5.0", "commit": "abc1234"}, // the build that wrote it
   "device": {"label": "office-mbp", "platform": "macOS", "installed": false,
              "installation": "0a1b2c3d"},          // T5.6; and "model" where the browser gives one
   "session": "3f1c…",                             // when it belongs to a session

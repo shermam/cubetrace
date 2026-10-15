@@ -324,8 +324,8 @@ once). The phone: `checkPairing(token)` reads the session document's `pairing` a
 whose first `sendDescription` creates the peer document with the offer and the hash.
 
 A `Signaling` is one peer connection's path for one role: `sendDescription` (the caller's offer,
-which creates the document, or replaces its offer and clears the answer at an ICE restart; the
-callee's answer), `sendCandidate`, `onDescription` (the other side's, the one known when the handler
+which creates the document, or replaces its offer and clears the answer at an ICE restart, the same
+offer sent again writing nothing, T5.4; the callee's answer), `sendCandidate`, `onDescription` (the other side's, the one known when the handler
 subscribes first, then each change), `onCandidate` (each of the other side's, the ones already there
 first; told apart by document id), `onClosed` (the other side left, or the documents are gone),
 `onError` (the backend's refusals) and `close`: the phone marks its document `closed`, the host
@@ -611,8 +611,9 @@ phone under it (`docs/PLAN.md` T4.3 and T5.1 have the contracts):
    added to it (`docs/DATA-MODEL.md` §6). It goes into `clock.cameras[label]` beside the clock sync's
    record (`remote`: the record there, or, when there is none yet, the clock estimate at the check's
    end; `rttMs` and `driftPpm` repeat it), which the clock sync's later records keep, and
-   the phone's later clips take it as their `syncResidualMs` (`withSyncResidual`), as T2.8 gives a
-   local camera's clips theirs. The end-to-end pair (two pages of one browser, a synthetic camera
+   the phone's later clips take it as their `syncResidualMs` (`withCameraLag` of `session-service.ts`,
+   which since T5.3 also gives a solve clip its `motionLagMs` from the check's motion peak), as T2.8
+   gives a local camera's clips theirs. The end-to-end pair (two pages of one browser, a synthetic camera
    whose square flips 120 ms after each of the demo cube's turns, the phone's clock 5 s ahead) finds
    126 and 135 ms: the frame that first shows a flip comes with the canvas's next capture, up to a
    frame later, and reaches the worker a few ms after.
@@ -628,7 +629,8 @@ phone under it (`docs/PLAN.md` T4.3 and T5.1 have the contracts):
    otherwise, its framing rectangle over it. Since T5.1 in one of two layouts, "Pictures from
    phones" (Camera settings → Cameras; `remotePicturesLayout` in `timer-layout.ts`):
    - **same size as mine** (`equal`, the default on a host that is not a phone): each phone's
-     picture in a cell of its own as large as the host's picture (a box of 16:9 of the same width,
+     picture in a cell of its own as large as the host's picture, after a cell for each of the host's
+     own cameras since T5.5 (a box of 16:9 of the same width,
      the phone's upright frames between bars, its framing rectangle drawn as on the host's own, the
      whole frame when the phone's rectangle is the whole frame), its label over the corner and its
      status line under it (item 7). The cells are those of one grid with the host's own
@@ -716,7 +718,8 @@ controls {drift: []} ─▶  (once a reading agrees)          the words go
    over, a control set on the phone's own panel), never twice the same but for those answers.
 2. **The host's panel.** Camera settings → Cameras: under each phone, "Camera controls" is the
    controls panel of the host's own camera (`app-camera-controls`, T2.1) over the phone's
-   `RemoteControlsSource` (a `ControlsSource`, as `CameraService.controlsSource` is the host's own),
+   `RemoteControlsSource` (a `ControlsSource`, as each of the host's own cameras has one,
+   `HostCamera.controlsSource` since T5.5),
    from its last `controls`: the same groups, the same Reset to auto. The panel (on either device)
    shows what the app applied (`applied`): a slider at the value set, with "the camera reports 8.33"
    beside it when the camera's reading (`values`) differs by more than the watchdog's tolerance (the
@@ -738,15 +741,15 @@ controls {drift: []} ─▶  (once a reading agrees)          the words go
    value the camera refuses (`applyConstraints` rejects) is `controls-failed` with its words, then
    `controls`; so is a camera that is not on. A value is fitted to the camera first (`fitControls`:
    a mode it lists, a number in its range and on its steps).
-4. **The watchdog** (`ControlsWatch`, `apps/web/src/app/camera/controls-watch.ts`, run by
-   `CameraService` on the open camera in both roles, the host's own camera too). `applied` is what
+4. **The watchdog** (`ControlsWatch`, `apps/web/src/app/camera/controls-watch.ts`, run by each open
+   camera in both roles: `HostCamera`, one per camera of the host since T5.5, and the phone's one). `applied` is what
    the app applied: as the camera opens, the mode each group opened in (its own automatic choice:
    `continuous` on every phone probed; Chrome's fake camera opens in `manual`, which is then no
    drift) with the controls kept for the camera applied over them, then each control set (a mode to
    auto replaces its group's values; the torch is never held, as Settings never keep it). It names
    the controls held: each mode the camera has, the values of a group that is not automatic (in
    `manual`, or `none`), the zoom. **What each is held to is the camera's own reading of it** once
-   the app applied its group (T5.2a; `ControlsWatch.applied`, after `CameraService.setControl`
+   the app applied its group (T5.2a; `ControlsWatch.applied`, after `HostCamera.setControl`
    applied a change from the device's panel or a `set-controls`, and after the controls kept for
    the camera were applied as it opened): the track's `getSettings()` as the apply resolves, held to
    once the next reading agrees with it (a camera still on its way is not judged until two readings

@@ -47,7 +47,12 @@ back): in `attempt.json`, a clip's `captureLatencyMs`, `encodeLatencyMs`, `motio
 and `captureLatencyAtCheckMs` (§6). T5.6 (two phones of one name) added, optional and kept absent
 when read in the same way, a remote camera's `remote.model` in `session.json` (§6), and the
 device's `installation` and `model` in the diagnostics events (§10); no record holds an installation
-id.
+id. T5.1, T5.2, T5.2a and T5.5 added no field to the records (the phone's picture and its status
+line, the remote controls and their watchdog are the data channel's and the diagnostics', `docs/RTC.md`
+§1 and §11): since T5.5 a session's `cameras` may hold several of the host's own cameras that recorded
+at once, `laptop` and `laptop-2`, whose clips are all in each attempt's folder, with sound only in
+the clips of the camera the microphone records with, the first (§5, §6), which the schema always
+allowed.
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -228,7 +233,7 @@ with two phones paired beside them an attempt has eight clips (sixteen files and
   "schema": 2,
   "id": "3f1c…",                         // UUID
   "createdMs": 1730640000000.0,          // host clock at creation
-  "app": {"version": "0.4.0", "commit": "abc1234"},
+  "app": {"version": "0.5.0", "commit": "abc1234"},
   "host": {"label": "office-mbp", "userAgent": "…", "platform": "macOS", "isPhone": false},
   "cube": {"model": "GAN 12 ui FreePlay", "hardware": "…", "firmware": "…", "gyro": true,
            "productDate": null},        // T3.7: the production date, when the cube says it
@@ -456,7 +461,7 @@ check; the clock sync's records of each minute keep them as they are.
   "schema": 2,
   "session": "3f1c…",
   "index": 17,
-  "app": {"version": "0.4.0", "commit": "abc1234"},   // T3.7: the build that wrote the record
+  "app": {"version": "0.5.0", "commit": "abc1234"},   // T3.7: the build that wrote the record
   "scramble": "F2 U2 R B2 D' L B' L' B U2 L2 F2 U F2 U R2 D2 B2 U' L2 D'",
   "scrambledFacelets": "…54 chars…",
   "crossFace": "D",                      // null if DNF before cross
@@ -680,7 +685,7 @@ clip (phase 2):
   "schema": 2,
   "camera": "laptop",
   "segment": "solve",
-  "app": {"version": "0.4.0", "commit": "abc1234"},   // T3.7: the build that wrote the file
+  "app": {"version": "0.5.0", "commit": "abc1234"},   // T3.7: the build that wrote the file
   "t0HostMs": 1730640017211.9,           // the first frame, on the host clock
   "dtMs": [0, 33.4, 33.3, 33.3, 66.7, 33.3, …],   // per frame, the time since the previous one
   "keyframes": [0, 30, 60, …],           // the frames a decoder can start at
@@ -719,7 +724,7 @@ when the other is:
   "schema": 2,
   "camera": "phone-rear",
   "segment": "solve",
-  "app": {"version": "0.4.0", "commit": "abc1234"},
+  "app": {"version": "0.5.0", "commit": "abc1234"},
   "t0HostMs": 1730640017190.4,           // the first frame on the host clock, through `remote`
   "t0RemoteMs": 1730640020317.8,         // T4.2: the first frame on the phone's own clock
   "dtMs": [0, 33.3, 33.4, …],
@@ -1077,7 +1082,7 @@ coordinator's round report reads as the evidence of the manual rounds and the QA
   "schema": 1,
   "tsMs": 1790000012345.5,                       // when it happened: host ms (§1) on the device's clock
   "kind": "attempt.done",                         // what: a dotted lowercase name of the catalogue, ≤ 64 characters
-  "app": {"version": "0.4.0", "commit": "abc1234"}, // the build that wrote it, as session.json's app
+  "app": {"version": "0.5.0", "commit": "abc1234"}, // the build that wrote it, as session.json's app
   "device": {"label": "office-mbp", "platform": "macOS", "installed": false,
              "installation": "0a1b2c3d"},          // T5.6; and "model" where the browser gives one
   "session": "3f1c…",                             // the session it belongs to, when it belongs to one
@@ -1235,7 +1240,7 @@ it. Its schema version, 1, is its own (`packages/core/schema/gyro.schema.json`; 
   "schema": 1,
   "session": "3f1c…",
   "index": 17,
-  "app": {"version": "0.4.0", "commit": "abc1234"},   // the build that wrote the file
+  "app": {"version": "0.5.0", "commit": "abc1234"},   // the build that wrote the file
   "t0HostMs": 1730639998012.5,           // the first sample, on the host clock
   "dtMs": [0, 20.1, 19.9, …],            // per sample, the time since the previous one (§9's convention)
   "q": [x, y, z, w, x, y, z, w, …],      // unit quaternions, flat, four per sample, to 5 decimals

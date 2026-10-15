@@ -209,7 +209,10 @@ A phone joins a session as a camera (`docs/PLAN.md`, the phase 4 board; the cont
 and one `RTCPeerConnection` to the host with a reliable ordered data channel, made with Google's
 public STUN server and no TURN (the two devices on one Wi-Fi). T4.0 built what needs no page,
 `packages/rtc`; T4.1 the pages and the connection's services, T4.2 the cuts and the clips, T4.3 the
-sync check of a phone's camera and the live preview:
+sync check of a phone's camera and the live preview; phase 5 the phone's picture at the host's
+picture's size with its status line (T5.1), its camera's controls from the host and the watchdog of
+the camera's modes (T5.2, T5.2a), its capture latency and its solves' motion (T5.3), and a phone
+known by its installation id (T5.6):
 
 ```
 host (the session's device)                                                 phone (the camera device)
@@ -615,6 +618,8 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
     HostCamera (its watchdog of the open camera's modes): controls.drift
   the capture latency (T5.3): CameraRecording: recording.latency / restarted (each own camera);
     RemoteCamerasService: recording.latency (a phone's, from its state)
+  every event (T5.6): the device's installation (its id's first 8 characters) and model; the host's
+    rtc.paired / connected / clock and remote.controls name the phone's (peerInstallation)
 the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the
   router), settings.changed (the settings the checklists name), wake.lock, storage.persistence, network.changed
 ```
@@ -774,7 +779,13 @@ the test ─▶ the emulators' REST APIs (the Auth accounts; the documents, past
 The fast suite pairs its two pages through a `BroadcastChannel` signaling instead
 (`apps/web/e2e/helpers/signaling.ts`, "Remote cameras" above); the cloud project's pairing
 (`remote-camera.cloud.spec.ts`) checks the pairing in the session's document and the peer document
-with its offer, answer and candidates, deleted at Leave.
+with its offer, answer and candidates, deleted at Leave. Its two pages are tabs of one browser, whose
+Firestore clients share one cache in IndexedDB (`persistentMultipleTabManager`): each tab sees the
+other's writes as soon as they are made, before the emulator has them (they reach it through one
+tab's write stream), and the connection over the loopback interface opens milliseconds after the
+answer, so the test waits for the documents to reach the emulator (`expect.poll`) instead of reading
+them once both pages say connected, which read the peer document still `offered` three times in CI
+(T5.4). Two devices never see each other's writes before the server has them.
 
 - **Development builds only.** `ACCOUNT_LOADER` reads `window.cubetraceE2eEmulators` only when
   `isDevMode()`, as it reads the fake's loader; `connectFirebase` then starts the app under the
