@@ -274,6 +274,8 @@ export class CaptureWorker {
   #seriesPoints: SeriesPoint[] = [];
   /** The costs of its last frames, ms. */
   #seriesCosts: number[] = [];
+  /** Above this cost a frame, ms, it goes off for the recording (the start's config). */
+  #motionCostLimitMs = MOTION_COST_LIMIT_MS;
 
   #audioEncoder: AudioEncoderLike | undefined;
   #audioConfig: AudioEncoderConfig | undefined;
@@ -423,6 +425,7 @@ export class CaptureWorker {
     this.#clips = clips;
     this.#latency = new LatencyMeter(latencyFloorMs);
     this.#quality = config.quality;
+    this.#motionCostLimitMs = config.motionCostLimitMs;
     this.#audioAsked = audio !== null;
     this.#buffer = new RingBuffer({
       maxSeconds: config.bufferSeconds,
@@ -862,11 +865,11 @@ export class CaptureWorker {
     if (
       cost !== null &&
       this.#seriesCosts.length >= MOTION_COST_MIN_FRAMES &&
-      cost > MOTION_COST_LIMIT_MS
+      cost > this.#motionCostLimitMs
     ) {
       this.#stopSeries(
         'costly',
-        `it took ${cost.toFixed(1)} ms a frame (more than ${String(MOTION_COST_LIMIT_MS)}).`,
+        `it took ${cost.toFixed(1)} ms a frame (more than ${String(this.#motionCostLimitMs)}).`,
       );
     }
   }

@@ -38,6 +38,7 @@ import { CubeService } from '../cube/cube-service';
 import { BROWSER_GLOBALS, hostNow } from '../device/browser-globals';
 import { STORAGE_STOP_PERCENT, StorageService } from '../device/storage-service';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
+import { e2eCapture } from '../rtc/e2e-remote';
 import { ClipsInFlight } from '../session/clips-in-flight';
 import {
   SessionService,
@@ -580,7 +581,11 @@ export class RecordingService {
     const audioTrack = microphone?.stream.getAudioTracks().at(0) ?? null;
     let handle: CaptureHandle;
     try {
-      handle = this.starter.start(video, audioTrack, { audio: audioTrack !== null, quality });
+      handle = this.starter.start(video, audioTrack, {
+        audio: audioTrack !== null,
+        quality,
+        ...e2eCapture(this.globals),
+      });
     } catch (error: unknown) {
       this.fail(generation, `Recording could not start: ${errorMessage(error)}`);
       return;

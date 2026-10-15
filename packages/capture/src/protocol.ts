@@ -27,6 +27,11 @@ export interface CaptureConfig {
   readonly bufferSeconds?: number;
   /** The most encoded bytes (video and audio) kept in memory. Default 160 MB (10^6 bytes). */
   readonly bufferBytes?: number;
+  /**
+   * The solves' motion meter goes off for the recording above this cost per frame, ms (T5.3).
+   * Default `MOTION_COST_LIMIT_MS`; the end-to-end suite raises it on its loaded machines.
+   */
+  readonly motionCostLimitMs?: number;
 }
 
 /** A `CaptureConfig` with the defaults filled in: what the worker receives. */
@@ -38,6 +43,7 @@ export function resolveCaptureConfig(config: CaptureConfig = {}): ResolvedCaptur
     quality: config.quality ?? 'standard',
     bufferSeconds: config.bufferSeconds ?? DEFAULT_BOUNDS.maxSeconds,
     bufferBytes: config.bufferBytes ?? DEFAULT_BOUNDS.maxBytes,
+    motionCostLimitMs: config.motionCostLimitMs ?? MOTION_COST_LIMIT_MS,
   };
 }
 

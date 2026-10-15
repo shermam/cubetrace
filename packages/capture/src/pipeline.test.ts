@@ -196,7 +196,13 @@ describe('startCapture', () => {
     expect(startMessage).toMatchObject({
       type: 'start',
       frameRate: 30,
-      config: { audio: true, quality: 'standard', bufferSeconds: 90, bufferBytes: 160_000_000 },
+      config: {
+        audio: true,
+        quality: 'standard',
+        bufferSeconds: 90,
+        bufferBytes: 160_000_000,
+        motionCostLimitMs: 3,
+      },
     });
     expect(transfer).toEqual([startMessage.video, startMessage.audio, startMessage.clips]);
     // The other end of the capture worker's channel goes to the clip worker.

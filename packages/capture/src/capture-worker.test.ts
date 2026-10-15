@@ -287,6 +287,8 @@ function harness(
     latencyFloorMs?: number | null;
     /** The ring buffer's seconds; 90 by default. */
     bufferSeconds?: number;
+    /** The solves' motion meter's cost limit (T5.3); 3 ms by default. */
+    motionCostLimitMs?: number;
   } = {},
 ): Harness {
   const posted: WorkerToWindow[] = [];
@@ -316,7 +318,11 @@ function harness(
   void worker.start(
     video.stream,
     options.audio === true ? audio.stream : null,
-    resolveCaptureConfig({ quality: options.quality, bufferSeconds: options.bufferSeconds }),
+    resolveCaptureConfig({
+      quality: options.quality,
+      bufferSeconds: options.bufferSeconds,
+      motionCostLimitMs: options.motionCostLimitMs,
+    }),
     options.frameRate ?? 30,
     clipPort(jobs),
     options.latencyFloorMs ?? null,
@@ -1500,5 +1506,14 @@ describe('CaptureWorker: the capture latency and the solves’ motion (T5.3)', (
     expect(blind.stats(arrivalOf(3) + 6).motion.state).toBe('unreadable');
     // Recording goes on.
     expect(blind.encoder().encoded.length).toBeGreaterThan(0);
+
+    // A limit raised by the start's config (the end-to-end suite's loaded machines): it stays on.
+    const lenient = harness({ motionCostLimitMs: 50 });
+    lenient.worker.handle({ type: 'motion-meter', on: true, rect: null });
+    await feedLate(lenient, 0, 14, () => 5, {
+      make: (index, pixels) => new SlowFrame(timestampOf(index), pixels),
+    });
+    expect(lenient.errors()).toEqual([]);
+    expect(lenient.stats(arrivalOf(14) + 6).motion.state).toBe('on');
   });
 });

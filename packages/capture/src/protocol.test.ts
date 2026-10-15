@@ -86,18 +86,21 @@ describe('resolveCaptureConfig', () => {
       quality: 'standard',
       bufferSeconds: 90,
       bufferBytes: 160_000_000,
+      motionCostLimitMs: 3,
     });
     expect(resolveCaptureConfig({ audio: false, bufferSeconds: 30 })).toEqual({
       audio: false,
       quality: 'standard',
       bufferSeconds: 30,
       bufferBytes: 160_000_000,
+      motionCostLimitMs: 3,
     });
     expect(resolveCaptureConfig({ quality: 'high' })).toEqual({
       audio: true,
       quality: 'high',
       bufferSeconds: 90,
       bufferBytes: 160_000_000,
+      motionCostLimitMs: 3,
     });
   });
 });

@@ -19,6 +19,7 @@ import { openMicrophone } from '../camera/microphone';
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { STORAGE_STOP_PERCENT, StorageService } from '../device/storage-service';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
+import { e2eCapture } from '../rtc/e2e-remote';
 import { SettingsService } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 
@@ -275,7 +276,11 @@ export class CameraDeviceCapture {
     const audioTrack = microphone?.stream?.getAudioTracks().at(0) ?? null;
     let handle: CaptureHandle;
     try {
-      handle = this.starter.start(video, audioTrack, { audio: audioTrack !== null, quality });
+      handle = this.starter.start(video, audioTrack, {
+        audio: audioTrack !== null,
+        quality,
+        ...e2eCapture(this.globals),
+      });
     } catch (error: unknown) {
       this.fail(generation, `Recording could not start: ${errorMessage(error)}`);
       return;
