@@ -100,3 +100,19 @@ export {
 // T2.10 — the video quality: the encoder's bitrate, which the app also shows for each quality.
 export type { VideoQuality } from './bitrate';
 export { BITRATE_AT_1080P30, videoBitrate } from './bitrate';
+
+// T5.3 — the capture latency (issue #67): the meter of each frame's way from its capture to the
+// capture worker and to its encoded chunk, which the worker reports every second and per clip, and
+// the drift of it from the camera's sync check.
+export type { FrameTiming, LatencyDriftEvent, LatencyReading } from './latency';
+export {
+  CAPTURE_TIME_LIMIT_MS,
+  DRIFT_EVENT_INTERVAL_MS,
+  DRIFT_HOLD_MS,
+  DRIFT_THRESHOLD_MS,
+  DRIFT_WINDOW_MS,
+  LatencyDrift,
+  LatencyMeter,
+  captureTimeOf,
+  percentiles,
+} from './latency';
