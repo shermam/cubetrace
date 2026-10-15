@@ -644,6 +644,7 @@ packages/capture/  @cubetrace/capture: the camera and the recording
   src/capture-worker.ts, ring-buffer.ts, cut.ts   the capture worker: the encoders, the last 90 s in memory, the cuts
   src/clip-worker.ts, mux.ts, clip-writer.ts      the clip worker: MP4 muxing with mediabunny, the files written into OPFS
   src/motion.ts, clapperboard.ts            the sync check: the motion in the framing rectangle, and the lag it gives
+  src/latency.ts, motion-lag.ts             the capture latency of each frame, and a solve's lag from its own moves (T5.3)
 firebase/          the Firestore rules and their tests (firebase.json and .firebaserc at the root: the project cubetrace-cacd9)
 functions/         the Cloud Functions: signUpload and confirmUpload, the signed uploads into the bucket (functions/README.md)
 bucket/            the bucket's CORS policies, for Google Cloud Storage and Cloudflare R2, and how to set the bucket up
@@ -690,7 +691,11 @@ The packages are plain TypeScript, tested in Node, and never import Angular.
   only: the cube's whole record (0.4.0, T3.7: a `gyro.json` per attempt, each move's counter, the
   resyncs, the battery, the build in every file) and a paired phone's camera (0.4.0, phase 4: its
   entry with `remote`, its clock sync in `clock.cameras[label].remote`, and in its clips' frames
-  files the phone's own time, `t0RemoteMs`, with the clock estimate, `remote`). Records of version 1
+  files the phone's own time, `t0RemoteMs`, with the clock estimate, `remote`), and each clip's
+  capture latency and a solve clip's lag from its own moves (0.5.0, T5.3: `captureLatencyMs`,
+  `encodeLatencyMs`, `motionPeakMs`, `motionSpreadMs`, `motionLagMs`, anchored by a sync check's
+  `motionPeakAtCheckMs` and `captureLatencyAtCheckMs`) and a phone's model (0.5.0, T5.6:
+  `remote.model`). Records of version 1
   (written by 0.1.0) are read as version 2 and never rewritten; [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)
   has every field.
 - **Fixtures.** `fixtures/solves.json` holds 300 real solves from the owner's Cubeast export: the
