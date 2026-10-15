@@ -1601,6 +1601,272 @@ describe('the checklist after T5.2', () => {
   });
 });
 
+describe('the checklist after T5.3', () => {
+  const MIN = 60_000;
+  const t0 = NOW - 4 * HOUR;
+  /** Attempt `i`'s solve clip, saved a minute after the last. */
+  const clipAt = (i: number): number => t0 + i * MIN;
+
+  /**
+   * An evening on the rig after T5.3, as the MacBook's events tell it: both checks with their
+   * anchors (and an earlier check of the phone's without a clear peak); forty-two solves, the
+   * laptop's motion lag 5 ms over its check's, the phone's 1.8; the laptop's capture latency drifts by
+   * 74.6 ms before attempt 38, the recording restarts after attempt 39 and recovers, so that the
+   * solve clips of 38 and 39 lag 80 ms more; the phone's latency in each minute's record, and one
+   * drift of its own.
+   */
+  function latencyEvening(): ReportEvent[] {
+    const scope = (attempt?: number) => ({ session: SESSION, attempt });
+    const check = (tsMs: number, data: Record<string, unknown>) =>
+      at(
+        tsMs,
+        'sync.check',
+        { outcome: 'ok', spreadMs: 40, matched: 9, of: 10, kept: 7, wide: false, ...data },
+        LAPTOP,
+        scope(),
+      );
+    const events: ReportEvent[] = [
+      check(t0 - 3 * MIN, {
+        camera: 'laptop',
+        offsetMs: 58.4,
+        motionPeakMs: 63.1,
+        motionSpreadMs: 30,
+        captureLatencyMs: 9.2,
+      }),
+      check(t0 - 2 * MIN, {
+        camera: 'phone-rear',
+        remote: true,
+        peer: 'Moto g60',
+        offsetMs: 28,
+        motionPeakMs: null,
+        motionSpreadMs: null,
+        captureLatencyMs: 25,
+      }),
+      check(t0 - MIN, {
+        camera: 'phone-rear',
+        remote: true,
+        peer: 'Moto g60',
+        offsetMs: 30.2,
+        motionPeakMs: 41.5,
+        motionSpreadMs: 35,
+        captureLatencyMs: 25,
+      }),
+    ];
+    for (let i = 1; i <= 42; i++) {
+      const late = i === 38 || i === 39;
+      events.push(
+        // A scramble clip has no motion lag: not a solve's.
+        at(
+          clipAt(i) - 20_000,
+          'clip.saved',
+          {
+            segment: 'scramble',
+            camera: 'laptop',
+            syncResidualMs: 58.4,
+            captureLatencyMs: { p50: 9.2, p95: 12, basis: 'timestamp' },
+            motionLagMs: null,
+          },
+          LAPTOP,
+          scope(i),
+        ),
+        at(
+          clipAt(i),
+          'clip.saved',
+          {
+            segment: 'solve',
+            camera: 'laptop',
+            syncResidualMs: 58.4,
+            captureLatencyMs: { p50: late ? 84 : 9.2, p95: late ? 96 : 12, basis: 'timestamp' },
+            encodeLatencyMs: { p50: 3, p95: 5 },
+            frameIntervalMs: late ? 34.1 : 33.3,
+            motionPeakMs: late ? 143.1 : 68.1,
+            motionSpreadMs: 30,
+            motionLagMs: late ? 138.4 : 63.4,
+          },
+          LAPTOP,
+          scope(i),
+        ),
+        at(
+          clipAt(i) + 2000,
+          'remote.clip',
+          {
+            segment: 'solve',
+            camera: 'phone-rear',
+            peer: 'Moto g60',
+            syncResidualMs: 30.2,
+            captureLatencyMs: { p50: 24 + (i % 3), p95: 31, basis: 'capture-time' },
+            motionLagMs: 32,
+          },
+          LAPTOP,
+          scope(i),
+        ),
+      );
+    }
+    for (let m = 0; m < 10; m++) {
+      events.push(
+        at(t0 + m * 4 * MIN, 'rtc.clock', {
+          camera: 'phone-rear',
+          peer: 'Moto g60',
+          why: 'minute',
+          converged: true,
+          report: { fps: 30, sharpness: 50, soft: false, latencyMs: 24.5 + (m % 2) },
+        }),
+      );
+    }
+    events.push(
+      // A phone's build before T5.3: no latency in its report.
+      at(t0 - 10 * MIN, 'rtc.clock', {
+        camera: 'phone-rear',
+        peer: 'Moto g60',
+        why: 'minute',
+        converged: true,
+        report: { fps: 30, sharpness: 50, soft: false, latencyMs: null },
+      }),
+      at(clipAt(37) + 30_000, 'recording.latency', {
+        camera: 'laptop',
+        why: 'drift',
+        baselineMs: 9.2,
+        p50Ms: 83.8,
+        p95Ms: 96.1,
+        deltaMs: 74.6,
+        basis: 'timestamp',
+        encodeP50Ms: 3.1,
+        waiting: 29,
+        fps: 29,
+        queueMax: 2,
+        pending: 1,
+        frameIntervalMs: 34.1,
+        restartOn: true,
+      }),
+      at(clipAt(20), 'recording.latency', {
+        camera: 'phone-rear',
+        peer: 'Moto g60',
+        remote: true,
+        why: 'drift',
+        baselineMs: 25,
+        p50Ms: 61,
+        p95Ms: null,
+        deltaMs: 36,
+      }),
+      at(
+        clipAt(39) + 10_000,
+        'recording.restarted',
+        {
+          why: 'latency',
+          camera: 'laptop',
+          deltaMs: 74.6,
+          baselineMs: 9.2,
+          p50Ms: 83.8,
+          p95Ms: 96.1,
+        },
+        LAPTOP,
+        scope(39),
+      ),
+      at(clipAt(39) + 12_000, 'recording.started', { camera: 'laptop', codec: 'avc1.640028' }),
+      at(clipAt(39) + 30_000, 'recording.latency', {
+        camera: 'laptop',
+        why: 'recovered',
+        baselineMs: 9.2,
+        p50Ms: 10.4,
+        p95Ms: 13,
+        deltaMs: 1.2,
+        basis: 'timestamp',
+      }),
+    );
+    return events;
+  }
+
+  it('ticks the checks’ anchors, forty solves with their motion lag, the drift, the restart and the phone’s latency', () => {
+    const results = new Map(evaluate(latencyEvening(), NOW).map((item) => [item.id, item.result]));
+    const status = (id: string): string | undefined => results.get(id)?.status;
+    const facts = (id: string): string => results.get(id)?.facts ?? '';
+
+    expect(status('5.3.1')).toBe('ok');
+    expect(facts('5.3.1')).toBe(
+      'laptop on office-mbp: lag 58.4 ms, motion peak 63.1 ms, capture latency 9.2 ms; phone-rear (Moto g60): lag 30.2 ms, motion peak 41.5 ms, capture latency 25 ms; 1 check on office-mbp without a motion peak',
+    );
+    expect(status('5.3.2')).toBe('ok');
+    expect(facts('5.3.2')).toBe(
+      "laptop: 42 solve clips, 42 with a motion lag, +5 ms from the check's at the median, 40 within 30 ms; capture latency 9.2 ms at the median (timestamp), 9.2 to 84; phone-rear (Moto g60): 42 solve clips, 42 with a motion lag, +1.8 ms from the check's at the median, 42 within 30 ms; capture latency 25 ms at the median (capture-time), 24 to 26",
+    );
+    expect(status('5.3.3')).toBe('ok');
+    expect(facts('5.3.3')).toBe(
+      "1 drift on office-mbp, 1 recovered; 2026-10-02 14:37:30 office-mbp: laptop +74.6 ms from 9.2 (p95 96.1, timestamp); 29 of 29 frames waiting, the encoder's queue 2 at most, 1 held, frames 34.1 ms apart; 2 of 42 solve clips of the host's own cameras with a motion lag more than 30 ms from their check's",
+    );
+    expect(status('5.3.4')).toBe('ok');
+    expect(facts('5.3.4')).toBe(
+      '1 restart on office-mbp: 2026-10-02 14:39:10 office-mbp: laptop +74.6 ms, started again in 2 s, recovered 20 s after',
+    );
+    expect(status('5.3.5')).toBe('ok');
+    expect(facts('5.3.5')).toBe(
+      'Moto g60: 10 of 11 reports with a latency, 25 ms at the median (24.5 to 25.5), 1 drift',
+    );
+
+    // Nothing of it without the events.
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result]));
+    for (const id of ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5']) {
+      expect(empty.get(id)?.status, id).toBe('none');
+    }
+    expect(empty.get('5.3.2')?.facts).toBe(
+      'no solve clip with a motion lag recorded (a build before T5.3)',
+    );
+    expect(empty.get('5.3.3')?.facts).toBe(
+      "no drift of a host's own camera; 0 of 0 solve clips of the host's own cameras with a motion lag more than 30 ms from their check's",
+    );
+
+    // Nor from builds before T5.3, whose events have none of its facts.
+    const T53_FACTS = new Set([
+      'motionPeakMs',
+      'motionSpreadMs',
+      'captureLatencyMs',
+      'encodeLatencyMs',
+      'frameIntervalMs',
+      'motionLagMs',
+    ]);
+    const before = latencyEvening()
+      .filter((e) => !['recording.latency', 'recording.restarted'].includes(e.kind))
+      .map((e) => {
+        const data = Object.fromEntries(
+          Object.entries(e.data).filter(([key]) => !T53_FACTS.has(key)),
+        );
+        const report = e.data['report'];
+        if (typeof report === 'object' && report !== null) {
+          data['report'] = Object.fromEntries(
+            Object.entries(report).filter(([key]) => key !== 'latencyMs'),
+          );
+        }
+        return { ...e, data };
+      });
+    const old = new Map(evaluate(before, NOW).map((item) => [item.id, item.result]));
+    for (const id of ['5.3.1', '5.3.2', '5.3.3', '5.3.4', '5.3.5']) {
+      expect(old.get(id)?.status, id).toBe('none');
+    }
+    expect(old.get('5.3.1')?.facts).toBe('no sync check with a motion peak');
+
+    // The laptop's check alone, thirty solves, no drift (the latency held, the lags with it).
+    const resultOf = (events: ReportEvent[], id: string) =>
+      evaluate(events, NOW).find((item) => item.id === id)?.result;
+    const laptopOnly = latencyEvening().filter(
+      (e) => !(e.kind === 'sync.check' && e.data['remote'] === true),
+    );
+    expect(resultOf(laptopOnly, '5.3.1')).toEqual({
+      status: 'none',
+      facts: 'laptop on office-mbp: lag 58.4 ms, motion peak 63.1 ms, capture latency 9.2 ms',
+    });
+    const thirty = latencyEvening().filter((e) => e.attempt === null || e.attempt <= 30);
+    expect(resultOf(thirty, '5.3.2')?.status).toBe('none');
+    expect(resultOf(thirty, '5.3.2')?.facts).toContain('laptop: 30 solve clips');
+    const held = latencyEvening().filter(
+      (e) => !(e.kind === 'recording.latency' && e.data['remote'] !== true),
+    );
+    expect(resultOf(held, '5.3.3')).toEqual({
+      status: 'none',
+      facts:
+        "no drift of a host's own camera; 2 of 42 solve clips of the host's own cameras with a motion lag more than 30 ms from their check's",
+    });
+  });
+});
+
 describe('roundReport', () => {
   it('prints the events per device and day, the checklists and the failures, as Markdown', () => {
     const report = roundReport(fixture(), { days: 7, nowMs: NOW });
