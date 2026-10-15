@@ -198,6 +198,14 @@ adds items; the owner ticks them when done (date and any detail that others need
   ThinkPhone as the host, its own camera's drift. Write down what the items ask beside the events;
   the coordinator reads the rest from the MacBook's `remote.controls` and the phones' `controls.drift`
   (`npm run round-report`).
+- [ ] **The "After T5.2a" items (the watchdog against the camera's own readings)**, once T5.2a is
+  merged and the deployed footer names a commit after it: the Moto g60 paired to the MacBook as in
+  "After T4", and go through "After T5.2a" in `docs/MANUAL-TESTS.md`: a focus distance and then a
+  manual exposure set from the MacBook and left for two minutes each (no word on either device), the
+  torch on and off with the focus set, and the drift provoked from the phone's console as in "After
+  T5.2" still caught. Write down the two numbers beside the distance on the panels and what the
+  phone said after the torch; the coordinator reads the rest from the events (`npm run
+  round-report`).
 
 ## Later
 
