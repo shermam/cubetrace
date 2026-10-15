@@ -450,7 +450,7 @@ measurements:
   (h)), a setting changed right before one among them, or the wake lock's or the storage
   persistence's change; and a switch toggled before the account is attached waits in memory, which
   turning Diagnostics off then clears (follow-up (i)). With the whole rig a device writes about 20
-  events per attempt, so a day of more than about 200 attempts reaches the cap of 5,000 events a day
+  events per attempt, so a day of more than about 600 attempts reaches the cap of 12,000 events a day
   per device, past which only errors are recorded (`docs/DIAGNOSTICS.md`): the round report then
   misses the rest of that day.
 - "attempt N could not be indexed: Missing or insufficient permissions" can still come into a
@@ -537,7 +537,7 @@ saved or failed, the sync checks, the uploads' progress, the settings changed an
 meets, each with the device's label, never a MAC address, an email, a video or a user agent. The
 owner's round report reads it in place of the manual test checklists. Settings → Account →
 Diagnostics, on by default, turns it off; nothing is kept while signed out either way, and a device
-writes at most 5,000 events a day.
+writes at most 12,000 events a day.
 
 **The policies**, in Settings → Uploads: Upload sessions turns the uploads off; Wi-Fi only, on a
 phone whose browser tells Wi-Fi from mobile data (on by default there), waits for Wi-Fi; Keep local
