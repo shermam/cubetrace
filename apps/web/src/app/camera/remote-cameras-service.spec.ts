@@ -413,6 +413,102 @@ describe('RemoteCamerasService', () => {
     });
   });
 
+  it('tells two phones of one name and one camera name apart by their installation ids: phone-rear and phone-rear-2, each told its label; one paired again gets its label back; one without an id is known by its name (T5.6)', async () => {
+    const thinkPhone = new Phone(r, 'Android phone');
+    thinkPhone.id = '1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b';
+    thinkPhone.model = 'ThinkPhone by motorola';
+    await paired(thinkPhone);
+    const moto = new Phone(r, 'Android phone', 2345.6);
+    moto.id = '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d';
+    moto.model = 'moto g60';
+    await paired(moto);
+    // The same name, the same camera's name: two cameras, each told its label.
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual([
+      'phone-rear',
+      'phone-rear-2',
+    ]);
+    expect(thinkPhone.of('label')).toEqual([{ type: 'label', camera: 'phone-rear' }]);
+    expect(moto.of('label')).toEqual([{ type: 'label', camera: 'phone-rear-2' }]);
+    // The session has both, each with its model, and no installation id anywhere in it.
+    const session = r.s.service.session();
+    expect(session?.cameras.map((camera) => [camera.label, camera.remote])).toEqual([
+      [
+        'phone-rear',
+        { label: 'Android phone', platform: 'Android', model: 'ThinkPhone by motorola' },
+      ],
+      ['phone-rear-2', { label: 'Android phone', platform: 'Android', model: 'moto g60' }],
+    ]);
+    expect(JSON.stringify(session)).not.toContain('1f2e3d4c');
+    expect(JSON.stringify(session)).not.toContain('9a8b7c6d');
+    // The Timer page's entries: the installation's first eight characters and the model.
+    const registry = TestBed.inject(RemoteCameraRegistry);
+    expect(
+      registry.cameras().map((camera) => [camera.label, camera.installation, camera.model]),
+    ).toEqual([
+      ['phone-rear', '1f2e3d4c', 'ThinkPhone by motorola'],
+      ['phone-rear-2', '9a8b7c6d', 'moto g60'],
+    ]);
+    // The events say which phone each pairing was.
+    let all = await events();
+    expect(
+      all
+        .filter((event) => event.kind === 'rtc.paired')
+        .map((event) => [
+          event.data['camera'],
+          event.data['peerInstallation'],
+          event.data['peerModel'],
+        ]),
+    ).toEqual([
+      ['phone-rear', '1f2e3d4c', 'ThinkPhone by motorola'],
+      ['phone-rear-2', '9a8b7c6d', 'moto g60'],
+    ]);
+
+    // The ThinkPhone leaves and pairs again with a new code: its label back, told again.
+    thinkPhone.leave();
+    await pump(r.s, 10);
+    thinkPhone.drop();
+    await pump(r.s, 10);
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual(['phone-rear-2']);
+    const again = new Phone(r, 'Android phone');
+    again.id = thinkPhone.id;
+    again.model = thinkPhone.model;
+    await paired(again);
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual([
+      'phone-rear-2',
+      'phone-rear',
+    ]);
+    expect(again.of('label')).toEqual([{ type: 'label', camera: 'phone-rear' }]);
+    expect(r.s.service.session()?.cameras.map((camera) => camera.label)).toEqual([
+      'phone-rear',
+      'phone-rear-2',
+    ]);
+
+    // Two phones of a build before T5.6, of that name too: known by their name alone, as before
+    // (one camera to the session, `phone-rear-3`), apart from those that say who they are.
+    const older = new Phone(r, 'Android phone');
+    await paired(older);
+    const twin = new Phone(r, 'Android phone');
+    await paired(twin);
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual([
+      'phone-rear-2',
+      'phone-rear',
+      'phone-rear-3',
+      'phone-rear-3',
+    ]);
+    expect(r.service.cameras()[2].device).toEqual({
+      label: 'Android phone',
+      platform: 'Android',
+      id: null,
+      model: null,
+    });
+    all = await events();
+    expect(all.filter((event) => event.kind === 'rtc.paired').at(-1)?.data).toMatchObject({
+      camera: 'phone-rear-3',
+      peerInstallation: null,
+      peerModel: null,
+    });
+  });
+
   it('refuses a second phone with the token once taken, and a wrong token: their documents go', async () => {
     await r.service.addCamera();
     const token = r.service.pairing()?.token ?? '';

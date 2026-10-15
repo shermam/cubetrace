@@ -418,6 +418,14 @@ describe('SettingsPage', () => {
     const fixture = await render();
     const host = input(fixture, '#host-label');
     expect(host.placeholder).toBe('Linux laptop');
+    // This installation's id, its first eight characters only (T5.6); no model from this browser.
+    const id = TestBed.inject(SettingsService).installationId();
+    expect(
+      (fixture.nativeElement as HTMLElement)
+        .querySelector('[data-testid="device-installation"]')
+        ?.textContent.trim(),
+    ).toBe(`Installation ${id.slice(0, 8)}.`);
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain(id);
 
     type(host, 'office-mbp');
     const [inspection, autoAdvance] = Array.from(

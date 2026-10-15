@@ -5,6 +5,7 @@ import {
   type GyroSummary,
   type Quat,
   VIEWER_DEFAULT,
+  type CameraInfo,
   type VideoClip,
   type ViewerChoice,
   clipHostMs,
@@ -906,6 +907,55 @@ describe('ClipViewer', () => {
       'laptop.scramble.mp4: 1920×1080, 150 frames, 1.2 MB, vp09.00.40.08, opus. It begins later ' +
         'than asked: its start was older than the 90 s kept in memory.',
     );
+  });
+
+  it('names the phones on the buttons by their labels and the models their session records: six buttons for two phones of one name (T5.6)', async () => {
+    const element = await render();
+    const phone = (label: string, segment: 'scramble' | 'solve', firstFrameHostMs: number) => ({
+      ...clip(segment, firstFrameHostMs, null, label),
+      file: `${label}.${segment}.mp4`,
+      framesFile: `${label}.${segment}.frames.json`,
+    });
+    const entry = (label: string, model: string | null): CameraInfo => ({
+      label,
+      local: false,
+      facing: 'environment',
+      deviceLabel: 'camera 0, facing back',
+      settings: {},
+      capabilities: {},
+      constraints: {},
+      crop: null,
+      mode: 'full',
+      microphone: null,
+      remote: { label: 'Android phone', platform: 'Android', model },
+    });
+    fixture.componentRef.setInput('cameras', [
+      entry('phone-rear', 'ThinkPhone by motorola'),
+      entry('phone-rear-2', 'moto g60'),
+    ]);
+    fixture.componentRef.setInput('attempt', {
+      ...ATTEMPT,
+      video: [
+        ...ATTEMPT.video,
+        phone('phone-rear', 'scramble', -2100),
+        phone('phone-rear', 'solve', -1100),
+        phone('phone-rear-2', 'scramble', -2100),
+        phone('phone-rear-2', 'solve', -1100),
+      ],
+    });
+    await update();
+    expect(
+      Array.from(element.querySelectorAll('[data-testid="clip-segment"]'), (button) =>
+        button.textContent.replace(/\s+/g, ' ').trim(),
+      ),
+    ).toEqual([
+      'Scramble · laptop',
+      'Solve · laptop',
+      'Scramble · phone-rear · ThinkPhone by motorola',
+      'Solve · phone-rear · ThinkPhone by motorola',
+      'Scramble · phone-rear-2 · moto g60',
+      'Solve · phone-rear-2 · moto g60',
+    ]);
   });
 
   it('names the camera on each clip’s button when the attempt has a phone’s clips too, and plays the one chosen (T4.2)', async () => {

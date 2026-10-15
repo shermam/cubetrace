@@ -577,6 +577,78 @@ describe('RemoteCutsService', () => {
     });
   });
 
+  it('asks every phone for its clips, two phones of one name and one camera name too, and stores each under its label (T5.6)', async () => {
+    const thinkPhone = new Phone(r, 'Android phone');
+    thinkPhone.id = '1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b';
+    thinkPhone.model = 'ThinkPhone by motorola';
+    await paired(thinkPhone);
+    const moto = new Phone(r, 'Android phone');
+    moto.id = '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d';
+    moto.model = 'moto g60';
+    moto.offsetMs = OFFSET_MS + 1000;
+    await paired(moto);
+    expect(r.cameras.cameras().map((camera) => camera.label)).toEqual([
+      'phone-rear',
+      'phone-rear-2',
+    ]);
+    await scrambled();
+    await solved();
+    // One cut of each segment to each phone, named after its own label.
+    for (const [phone, label] of [
+      [thinkPhone, 'phone-rear'],
+      [moto, 'phone-rear-2'],
+    ] as const) {
+      expect(phone.of('cut').map((cut) => `${cut.camera} ${cut.segment}`)).toEqual([
+        `${label} scramble`,
+        `${label} solve`,
+      ]);
+    }
+    // Each phone's clock is its own: the Moto's window is a second later on its clock.
+    expect(moto.cut('solve').fromRemoteMs - thinkPhone.cut('solve').fromRemoteMs).toBeCloseTo(
+      1000,
+      0,
+    );
+    // The attempt waits for the four clips; both phones send theirs (small ones: four files of the
+    // usual size take longer than the test's time); all four stored.
+    expect(r.inFlight.has(sessionId(), 1)).toBe(true);
+    const small = mp4(4096);
+    for (const phone of [thinkPhone, moto]) {
+      for (const segment of ['scramble', 'solve'] as const) {
+        expect(await drive(phone.deliver(phone.cut(segment), small))).toEqual([
+          'frames from 0',
+          'mp4 from 0',
+        ]);
+      }
+    }
+    await pump(r.s, 20);
+    expect(r.inFlight.has(sessionId(), 1)).toBe(false);
+    expect(
+      record()
+        .video.map((clip) => `${clip.file} ${clip.framesFile}`)
+        .sort(),
+    ).toEqual([
+      'phone-rear-2.scramble.mp4 phone-rear-2.scramble.frames.json',
+      'phone-rear-2.solve.mp4 phone-rear-2.solve.frames.json',
+      'phone-rear.scramble.mp4 phone-rear.scramble.frames.json',
+      'phone-rear.solve.mp4 phone-rear.solve.frames.json',
+    ]);
+    for (const name of [
+      'phone-rear.scramble.mp4',
+      'phone-rear.solve.mp4',
+      'phone-rear-2.scramble.mp4',
+      'phone-rear-2.solve.mp4',
+    ]) {
+      expect(r.written.get(`1/${name}`), name).toEqual(small);
+    }
+    expect(writtenFrames('phone-rear-2.solve.frames.json').camera).toBe('phone-rear-2');
+    expect(writtenFrames('phone-rear-2.solve.frames.json').t0HostMs).toBeCloseTo(
+      moto.cut('solve').fromRemoteMs + 600 - (OFFSET_MS + 1000),
+      2,
+    );
+    expect(thinkPhone.of('clip-ack').map((ack) => ack.stored)).toEqual([true, true]);
+    expect(moto.of('clip-ack').map((ack) => ack.stored)).toEqual([true, true]);
+  });
+
   it("converts a clip's times with the estimate of its cut, whatever the phone's clock did before its files came (T4.3)", async () => {
     const phone = await paired();
     await scrambled();
