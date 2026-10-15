@@ -7,6 +7,7 @@ import {
   type ControlRange,
   type ControlValues,
   type MeteringMode,
+  type ModeControl,
 } from '@cubetrace/capture';
 
 import {
@@ -21,6 +22,7 @@ import {
   zoomText,
 } from './camera-format';
 import { driftSentence, type ControlsSource } from './controls-source';
+import { agrees } from './controls-watch';
 
 /** A control's slider, as shown. */
 interface SliderView {
@@ -30,6 +32,12 @@ interface SliderView {
   readonly log: boolean;
   readonly position: number;
   readonly text: string;
+  /**
+   * What the camera reports of the control, where it differs from the value applied (which the slider
+   * shows) by more than the watchdog's tolerance (T5.2a: the Moto g60 reports 8.33 for a focus
+   * distance of 0.12 m); null otherwise.
+   */
+  readonly reported: string | null;
 }
 
 /** Exposure, focus or white balance: a mode and the values it holds in manual. */
@@ -56,7 +64,10 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
  * exposure (Auto or Manual, with the exposure time and the ISO), focus (with the distance), white
  * balance (with the colour temperature), zoom, the torch, and "Reset to auto". In automatic mode a
  * slider shows what the camera chose (the exposure time tells whether fast turns will blur), and
- * moving it switches its group to manual. A slider applies its value when it is let go. Since T5.2 a
+ * moving it switches its group to manual. A slider applies its value when it is let go; since T5.2a
+ * it shows the value applied, with the camera's reading beside it when the camera reports another
+ * (a focus distance as its reciprocal), and a mode shows as set while the camera holds its kind (a
+ * manual exposure the camera calls `none`), else as the camera has it. Since T5.2 a
  * view over a `ControlsSource` (`source`): this device's open camera (`CameraService.controlsSource`,
  * Camera settings and the phone's own Camera page), or a phone's over the connection (the Cameras
  * section's `RemoteControlsSource`); a change in flight disables the controls (for a phone, until its
@@ -118,9 +129,19 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
                 (input)="preview(slider, range.value)"
                 (change)="apply(slider, range.value)"
               />
-              <output [attr.data-testid]="'control-' + slider.name + '-value'">{{
-                shown(slider)
-              }}</output>
+              <span class="value">
+                <output [attr.data-testid]="'control-' + slider.name + '-value'">{{
+                  shown(slider)
+                }}</output>
+                @if (slider.reported; as reported) {
+                  <small
+                    class="reported"
+                    [attr.data-testid]="'control-' + slider.name + '-reported'"
+                    title="What the camera's settings say of it: some cameras report a value rounded or in another unit (the Moto g60 a focus distance as its reciprocal). The slider shows what was set; the watchdog holds the camera to this reading."
+                    >the camera reports {{ reported }}</small
+                  >
+                }
+              </span>
             </label>
           }
         </fieldset>
@@ -178,11 +199,23 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
       align-items: center;
     }
 
-    output {
+    .value {
+      display: flex;
+      flex-wrap: wrap;
       grid-column: 2;
+      gap: 0 var(--space-2);
+      align-items: baseline;
+    }
+
+    output {
       color: var(--text-muted);
       font-family: var(--font-mono);
       font-size: 0.8125rem;
+    }
+
+    .reported {
+      color: var(--text-muted);
+      font-size: 0.75rem;
     }
 
     .switch {
@@ -229,7 +262,7 @@ export class CameraControls {
     return controls === null || !hasControls(controls);
   });
   protected readonly groups = computed(() =>
-    controlGroups(this.source().controls(), this.source().values()),
+    controlGroups(this.source().controls(), this.source().values(), this.source().applied()),
   );
   /** Whether the torch is on; null when the camera has none. */
   protected readonly torch = computed(() =>
@@ -282,21 +315,35 @@ export class CameraControls {
   }
 }
 
-/** The groups of controls the camera has, with their current values. */
-export function controlGroups(controls: Controls | null, values: ControlValues): GroupView[] {
+/**
+ * The groups of controls the camera has, as shown (T5.2a): what the app applied (`applied`) where
+ * the camera holds it, with the camera's reading (`values`) beside a value it reports otherwise; a
+ * group whose mode the camera changed in kind (a drift, said in red) as the camera has it, as T5.2
+ * shows a drift left; a value nothing was applied to (an automatic group's) as the camera chose it.
+ */
+export function controlGroups(
+  controls: Controls | null,
+  values: ControlValues,
+  applied: ControlValues = {},
+): GroupView[] {
   if (controls === null) {
     return [];
   }
   const groups: GroupView[] = [];
   const add = (
     title: string,
-    modeName: ControlName,
+    modeName: ModeControl,
     modes: readonly MeteringMode[],
     sliders: readonly (readonly [ControlName, string, ControlRange | null])[],
   ): void => {
-    const current = (values[modeName] as MeteringMode | undefined) ?? null;
+    const reading = values[modeName] ?? null;
+    const set = applied[modeName] ?? null;
+    const held = set === null || reading === null || agrees(modeName, set, reading, controls);
+    const current = held ? (set ?? reading) : reading;
     const views = sliders.flatMap(([name, label, range]) =>
-      range === null ? [] : [slider(name, label, range, values[name])],
+      range === null
+        ? []
+        : [slider(name, label, range, values[name], held ? applied[name] : undefined, controls)],
     );
     if (modes.length > 0 || views.length > 0) {
       groups.push({
@@ -321,22 +368,40 @@ export function controlGroups(controls: Controls | null, values: ControlValues):
     groups.push({
       title: 'Zoom',
       mode: null,
-      sliders: [slider('zoom', 'Zoom', controls.zoom, values.zoom)],
+      sliders: [slider('zoom', 'Zoom', controls.zoom, values.zoom, applied.zoom, controls)],
     });
   }
   return groups;
 }
 
-function slider(name: ControlName, label: string, range: ControlRange, value: unknown): SliderView {
-  const current = typeof value === 'number' ? value : range.min;
+/**
+ * A slider at the value applied (`set`), else at the camera's (`reading`); with the reading beside
+ * it when the two disagree beyond the watchdog's tolerance.
+ */
+function slider(
+  name: ControlName,
+  label: string,
+  range: ControlRange,
+  reading: unknown,
+  set: unknown,
+  controls: Controls,
+): SliderView {
+  const current = typeof set === 'number' ? set : typeof reading === 'number' ? reading : range.min;
   const log = logarithmic(range, name);
+  const format = FORMATS[name] ?? String;
   return {
     name,
     label,
     range,
     log,
     position: toSlider(current, range, log),
-    text: (FORMATS[name] ?? String)(current),
+    text: format(current),
+    reported:
+      typeof set === 'number' &&
+      typeof reading === 'number' &&
+      !agrees(name, set, reading, controls)
+        ? format(reading)
+        : null,
   };
 }
 
