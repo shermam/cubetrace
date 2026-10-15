@@ -1321,3 +1321,80 @@ model, which is now its default name.
   apart by their models), and the next attempt's clips come under those labels.
 - [ ] The round report of the day (the coordinator: `npm run round-report`): a section of the Events
   table per phone, each with its installation and its model, and the "After T5.6" items ticked.
+
+## After T5 — the rig's eyes and hands
+
+The whole rig once, for 0.5.0 (`docs/PLAN.md` T5.4), as `README.md`, "The desk rig", sets it up: on
+https://shermam.github.io/cubetrace/ once its footer reads `cubetrace 0.5.0 · <commit>`, on the
+MacBook and on both phones' Camera pages, the MacBook as the host (the GAN 12 ui, signed in, Upload
+sessions and Diagnostics on) with its FaceTime camera and the USB webcam (the Logitech C930e, on a
+stand of its own) both on, and the ThinkPhone and the Moto g60 as its cameras (the same account, each
+on its tripod and plugged in, no name typed in Settings → This device), all on the home Wi-Fi;
+"Record remote cameras", "Live preview from phones" and "Pictures from phones" on "Same size as mine"
+(Camera settings → Cameras), "Keep the camera's modes", "Measure the motion during solves" and
+"Restart the recording when its latency drifts" on (all the defaults); the lamp on. Go through the
+items in this order, in one session but for the uploads; the "After T5.1" to "After T5.6" items above
+are the detail of each part, and the known limitations in `README.md` are expected. The events say
+most of it (`docs/DIAGNOSTICS.md`, "After T5"); write down what they cannot show, next to the item,
+with the device and what happened. The coordinator then reads the round with `npm run round-report`
+and fills the cells of `docs/DEVICES.md` it measures: the MacBook's capture latency over a session,
+the MacBook with two cameras, the USB webcam's and the Moto g60's rows.
+
+The round is phase 5's brief: the two sessions of 2026-10-09, in which the Moto g60's focus went
+manual by itself at solve 31 and blurred twenty solves before it was seen in a tile the size of a
+stamp, a phone ran hot, and the MacBook's frames came 75 ms later from the 38th attempt with no sign
+in the app; and the second phone's clips that never came, and the USB webcam beside the FaceTime
+camera, of 2026-10-15. Four cameras, eight clips in every attempt.
+
+- [ ] The rig paired (5.4.1): in Camera settings on the MacBook, both cameras' switches on, `laptop`
+  (the FaceTime camera, first in the list) and `laptop-2` (the webcam), each with its framing
+  rectangle drawn around the cube and the hands; Add camera and the QR code scanned with the
+  ThinkPhone, then Add camera again and the Moto g60: the Cameras list names them `phone-rear ·
+  <model>` and `phone-rear-2 · <model>` (in the order they paired), each phone's Camera page says
+  "you are … here", and each phone's framing rectangle is drawn there. On the Timer page, four
+  pictures of one size, the MacBook's two first, each with its caption over its corner and its line
+  under it: two to a row beside the time in a window of 1,552 px or more, one under the other in a
+  narrower one. Write the window's width, whether the four pictures were the same size, and the
+  model each phone's entry names.
+- [ ] The four sync checks (5.4.2): the FaceTime camera's, due by itself before the first scramble;
+  then, from the lines under the pictures, one at a time, `laptop-2`'s and each phone's ("Sync: …
+  has no check in this session", then Sync check): all four pass. Write the four lags
+  (`docs/DEVICES.md`: the FaceTime camera 20 to 40 ms, the webcam 177 ms, the ThinkPhone's rear
+  camera 25 ms, the Moto g60 about 30 ms by its video against 37 to 92 ms by its checks of
+  2026-10-09).
+- [ ] The controls from the MacBook (5.4.3), on each phone in turn (Camera settings → Cameras → the
+  phone's "Camera controls"): Focus → Manual, and the Distance slider until the cube is sharp on the
+  phone's picture, then two minutes without touching anything (no red word on its line, nothing on
+  its Camera page); then the Zoom slider (its picture zooms) and back; the Torch on for 5 s and off
+  (on the Moto g60 the torch resets the focus, which the phone sets back by itself within 4 s); then
+  Reset to auto (the phone's camera opens again, every control automatic). Write anything a panel
+  said in red, and the two numbers beside the distance on the Moto g60's panel ("the camera reports
+  …").
+- [ ] A drift provoked (5.4.4): on the Moto g60, its focus automatic again, the console line of
+  "After T5.2" through `chrome://inspect` (its focus set to manual behind the app's back): within 4 s
+  the phone sets it back and its Camera page says "The camera set the focus to manual by itself: set
+  back to continuous.", and the MacBook's line under its picture says "focus went manual on the
+  phone" in red for a moment. Write what each device said.
+- [ ] Forty solves or more (5.4.5) in the same session, as on 2026-10-09 (a pause of a few minutes
+  is fine, New session is not): every solve's badge says "8 clips" and nothing is noted missing in
+  the session; the clip viewer of one attempt has eight buttons, from `Scramble · laptop` to `Solve ·
+  phone-rear-2 · <model>`, and the webcam's clips play without sound. Write the attempts whose badge
+  said fewer than eight.
+- [ ] The health lines (5.4.6) over twenty minutes or more of those solves, a glance at each phone's
+  line after each set: its frame rate, its battery (`charging`), and the `pressure …` word where its
+  Chrome has the Compute Pressure API (the Moto g60's has none: whether the ThinkPhone's has is the
+  round's to tell); `hot: the frame rate dropped` if its frame rate fell. If a pressure word in amber
+  or red, or `hot`, comes: the heat routine of `README.md`, "The desk rig" (the live preview off:
+  "Pictures from phones" on "Small tiles" and "Live preview from phones" off; the phone's screen
+  dimmed; its stand away from the lamp; a break before the next set), and write whether the word
+  went. At the end, write each phone's temperature by hand (cool, warm, hot).
+- [ ] The latency words (5.4.7) over the forty solves: after each solve, a glance at the four lines
+  for `latency +… ms`, `motion lag … ms (check …)` and `restarted`, in amber ("After T5.3" says what
+  each means and what to do; a line without them is the good outcome), and `encodes N of M fps` on a
+  MacBook camera's line ("After T5.5": lower that camera's resolution). Write the attempt numbers
+  where a word came and where it went, and on which camera; nothing otherwise.
+- [ ] The uploads (5.4.8), Upload sessions on: once the solves are done, the Sessions page says Up to
+  date (an attempt of eight clips is eighteen files with `gyro.json`, about 85 MB, nineteen with
+  `session.json`), and no "Paused until …" for the quota came. Write how many attempts the day had
+  on all the devices: the coordinator compares the day's count in `users/{uid}.quota` with the 8,000
+  files and 40 GB of the day's quota.

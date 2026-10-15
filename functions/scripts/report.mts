@@ -481,6 +481,8 @@ const T55 = 'After T5.5';
 const HOST_CAMERAS = "T5.5 — the MacBook's two cameras";
 const T56 = 'After T5.6';
 const PHONES = 'T5.6 — two phones of one name';
+const T5 = 'After T5';
+const RIG5 = "T5.4 — the rig's eyes and hands";
 
 /**
  * The laptops' pairings of phones that said who they are (T5.6: `peerInstallation`), by session:
@@ -668,6 +670,28 @@ function healthFacts(
   return `${peer}: ${String(reports.length)} ${reports.length === 1 ? 'report' : 'reports'}, ${middle('fps')} fps, sharpness ${middle('sharpness')}, battery ${middle('batteryLevel', 100)}% (medians)`;
 }
 
+/**
+ * `pressure nominal (12), fair (3) from thermals`: the Compute Pressure states of a phone's reports
+ * (T5.1), each with its count, and their sources; or that there were none (the API absent or refused).
+ */
+function pressureFacts(reports: readonly { report: Readonly<Record<string, unknown>> }[]): string {
+  const states = new Map<string, number>();
+  const sources = new Set<string>();
+  for (const { report } of reports) {
+    const pressure = report['pressure'];
+    if (typeof pressure === 'string') {
+      states.set(pressure, (states.get(pressure) ?? 0) + 1);
+    }
+    const source = report['pressureSource'];
+    if (typeof source === 'string') {
+      sources.add(source);
+    }
+  }
+  return states.size === 0
+    ? 'no pressure (the API absent or refused)'
+    : `pressure ${[...states.entries()].map(([state, n]) => `${state} (${String(n)})`).join(', ')} from ${[...sources].join(', ')}`;
+}
+
 /** The controls a host's `remote.controls` set (T5.2): its `set`, a list read as one text. */
 function controlsSet(event: ReportEvent): string[] {
   return (text(event, 'set') ?? '')
@@ -678,12 +702,15 @@ function controlsSet(event: ReportEvent): string[] {
 
 /**
  * What the laptops' `remote.controls` say of each phone (T5.2): the controls set and answered (`ok`),
- * and the changes refused or unanswered, by the phone's host label.
+ * and the changes refused or unanswered, by the phone's host label (or by `phoneOf`'s name of it).
  */
-function controlsByPhone(q: Query): Map<string, { ok: Set<string>; failures: string[] }> {
+function controlsByPhone(
+  q: Query,
+  phoneOf: (event: ReportEvent) => string = (event) => text(event, 'peer') ?? '?',
+): Map<string, { ok: Set<string>; failures: string[] }> {
   const out = new Map<string, { ok: Set<string>; failures: string[] }>();
   for (const event of q.onLaptop('remote.controls')) {
-    const peer = text(event, 'peer') ?? '?';
+    const peer = phoneOf(event);
     const entry = out.get(peer) ?? { ok: new Set<string>(), failures: [] };
     out.set(peer, entry);
     const outcome = text(event, 'outcome');
@@ -770,17 +797,26 @@ interface HeldChange {
   readonly held: boolean;
 }
 
+/**
+ * Whether two of the host's events name one phone: the same `peer` and, when both say one (T5.6),
+ * the same `peerInstallation`.
+ */
+function samePeer(a: ReportEvent, b: ReportEvent): boolean {
+  const one = text(a, 'peerInstallation');
+  const other = text(b, 'peerInstallation');
+  return text(a, 'peer') === text(b, 'peer') && (one === null || other === null || one === other);
+}
+
 /** The laptops' changes of `values` answered by a phone, each with {@link HeldChange}'s facts. */
 function heldChanges(q: Query, values: readonly string[], group: readonly string[]): HeldChange[] {
   const answered = q.onLaptop('remote.controls', (e) => text(e, 'outcome') === 'ok');
   return answered
     .filter((e) => controlsSet(e).some((name) => values.includes(name)))
     .map((change) => {
-      const peer = text(change, 'peer');
       const again = answered.find(
         (e) =>
           e.tsMs > change.tsMs &&
-          text(e, 'peer') === peer &&
+          samePeer(e, change) &&
           controlsSet(e).some((name) => name === 'reset' || group.includes(name)),
       );
       const end = Math.min(change.tsMs + 2 * MINUTE, again?.tsMs ?? Number.POSITIVE_INFINITY);
@@ -789,11 +825,11 @@ function heldChanges(q: Query, values: readonly string[], group: readonly string
           .onPhone(
             'controls.drift',
             (e) =>
-              e.device.label === peer && e.tsMs > change.tsMs && e.tsMs <= end && driftOf(e, group),
+              namesPhone(change, e) && e.tsMs > change.tsMs && e.tsMs <= end && driftOf(e, group),
           )
           .at(0) ?? null;
       const paired = q
-        .onLaptop('rtc.clock', (e) => text(e, 'peer') === peer)
+        .onLaptop('rtc.clock', (e) => samePeer(e, change))
         .some((e) => e.tsMs >= change.tsMs + 2 * MINUTE && e.tsMs <= change.tsMs + 4 * MINUTE);
       return { change, drift, held: drift === null && paired && end - change.tsMs >= 2 * MINUTE };
     });
@@ -1032,10 +1068,79 @@ function cadenceFps(events: readonly ReportEvent[], camera: string): number | nu
   return middle === null ? null : 1000 / middle;
 }
 
+/** A phone paired in a session, as the host's `rtc.paired` said it (T5.6, {@link phonesBySession}). */
+interface PairedPhone {
+  readonly installation: string;
+  readonly peer: string;
+  readonly model: string | null;
+  readonly camera: string;
+}
+
+/** An event's session with its account, `uid/session`, as the rig's helpers key them. */
+function sessionKey(event: ReportEvent): string {
+  return `${event.uid}/${event.session ?? '?'}`;
+}
+
+/**
+ * The sessions of the whole rig (T5.4, "After T5"): the host's sessions with two of its own cameras
+ * recording or more (T5.5, {@link ownRecordings}) and two phones or more paired that said who they
+ * are (T5.6, {@link phonesBySession}), by {@link sessionKey}, with the labels of the host's cameras
+ * in the order they first recorded and the phones.
+ */
+function rigSessions(q: Query): Map<string, { own: string[]; phones: PairedPhone[] }> {
+  const phones = phonesBySession(q);
+  const out = new Map<string, { own: string[]; phones: PairedPhone[] }>();
+  for (const [key, cameras] of ownRecordings(q)) {
+    const paired = phones.get(key) ?? [];
+    if (cameras.size >= 2 && paired.length >= 2) {
+      out.set(key, { own: [...cameras.keys()], phones: paired });
+    }
+  }
+  return out;
+}
+
+/**
+ * `office-mbp 0.5.0 · abc1234, moto g60 0.5.0 · abc1234`: the builds of a rig session's devices, the
+ * host's from its own events of the session, each phone's from the host's `rtc.paired` of it.
+ */
+function rigBuilds(q: Query, key: string): string {
+  const builds = new Map<string, Set<string>>();
+  const add = (device: string, build: string): void => {
+    builds.set(device, (builds.get(device) ?? new Set<string>()).add(build));
+  };
+  for (const e of q.events) {
+    if (isPhone(e) || sessionKey(e) !== key) {
+      continue;
+    }
+    add(e.device.label, `${e.app.version} · ${e.app.commit}`);
+    const version = text(e, 'version');
+    if (e.kind === 'rtc.paired' && version !== null) {
+      add(text(e, 'peer') ?? '?', `${version} · ${text(e, 'commit') ?? '?'}`);
+    }
+  }
+  return [...builds.entries()]
+    .map(([device, seen]) => `${device} ${[...seen].join(' and ')}`)
+    .join(', ');
+}
+
+/**
+ * The upload quota per account and UTC day since T5.5 (`QUOTA_FILES_PER_DAY` and
+ * `QUOTA_BYTES_PER_DAY` in functions/.env, which the deploy reads; the report reads no file of the
+ * functions): what item 5.4.8 weighs a day's uploads against.
+ */
+const QUOTA_FILES = 8000;
+const QUOTA_BYTES = 40e9;
+
+/** `81 GB`, `3.8 GB`: bytes as gigabytes, to a tenth. */
+function gigabytes(bytes: number): string {
+  return `${round(bytes / 1e9, 1)} GB`;
+}
+
 /**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
  * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3, the items after T3.7, T4.1, T4.2 and
- * T4.3, the desk rig's after T4, and the items after T5.1, T5.2, T5.2a and T5.3.
+ * T4.3, the desk rig's after T4, the items after T5.1, T5.2, T5.2a, T5.3, T5.5 and T5.6, and the
+ * whole rig's after T5.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -3901,22 +4006,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
     check: (q) => {
       const phones = [...phoneReports(q).entries()].map(([peer, reports]) => {
         const spanMs = (reports.at(-1)?.event.tsMs ?? 0) - (reports[0]?.event.tsMs ?? 0);
-        const states = new Map<string, number>();
-        const sources = new Set<string>();
-        for (const { report } of reports) {
-          const pressure = report['pressure'];
-          if (typeof pressure === 'string') {
-            states.set(pressure, (states.get(pressure) ?? 0) + 1);
-          }
-          const source = report['pressureSource'];
-          if (typeof source === 'string') {
-            sources.add(source);
-          }
-        }
-        const pressure =
-          states.size === 0
-            ? 'no pressure (the API absent or refused)'
-            : `pressure ${[...states.entries()].map(([state, n]) => `${state} (${String(n)})`).join(', ')} from ${[...sources].join(', ')}`;
+        const pressure = pressureFacts(reports);
         const throttled = reports.filter(({ report }) => report['thermal'] === 'throttled').length;
         return {
           long: spanMs >= 20 * MINUTE,
@@ -4604,6 +4694,315 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       return phones.size >= 2
         ? ok(facts)
         : none(phones.size === 0 ? 'no phone with an installation (a build before T5.6)' : facts);
+    },
+  },
+  // ---- After T5: the rig's eyes and hands, the whole rig once ----
+  {
+    id: '5.4.1',
+    round: T5,
+    section: RIG5,
+    title:
+      "The rig paired: the MacBook's FaceTime camera and USB webcam both on and recording (laptop, laptop-2), the ThinkPhone and the Moto g60 paired in the same session, each under a label of its own with its model; each device's build",
+    kinds: ['recording.started', 'rtc.paired'],
+    eyes: "the four pictures the same size on the MacBook's window (two to a row from 1,552 px, one under the other in a narrower one), each with its caption and its status line",
+    check: (q) => {
+      const rigs = [...rigSessions(q).entries()];
+      if (rigs.length === 0) {
+        const own = [...ownRecordings(q).values()].filter((cameras) => cameras.size >= 2).length;
+        const phones = [...phonesBySession(q).values()].filter((paired) => paired.length >= 2);
+        return none(
+          `no session with two of the host's cameras recording and two phones paired (${String(own)} with two of the host's cameras, ${String(phones.length)} with two phones)`,
+        );
+      }
+      const facts = rigs
+        .slice(-3)
+        .map(
+          ([key, rig]) =>
+            `${rig.own.join(', ')} with ${rig.phones.map(phoneFacts).join(', ')} (builds: ${rigBuilds(q, key)})`,
+        )
+        .join('; ');
+      return ok(
+        `${String(rigs.length)} ${rigs.length === 1 ? 'session' : 'sessions'} of the whole rig: ${facts}`,
+      );
+    },
+  },
+  {
+    id: '5.4.2',
+    round: T5,
+    section: RIG5,
+    title:
+      "Each camera's sync check in that session: the FaceTime camera's due by itself before the first scramble, the webcam's and each phone's from its line under its picture: four passed, each with its lag",
+    kinds: ['sync.check'],
+    eyes: "the four lines under the pictures, and the lags against docs/DEVICES.md's",
+    check: (q) => {
+      let best: Map<string, ReportEvent> | null = null;
+      const failures: string[] = [];
+      for (const key of rigSessions(q).keys()) {
+        const checks = q.onLaptop('sync.check', (e) => sessionKey(e) === key);
+        const passed = new Map<string, ReportEvent>();
+        for (const e of checks.filter((check) => text(check, 'outcome') === 'ok')) {
+          passed.set(text(e, 'camera') ?? '?', e);
+        }
+        for (const e of checks.filter(isFailure)) {
+          const camera = text(e, 'camera') ?? '?';
+          if (!passed.has(camera)) {
+            failures.push(`${camera}: ${failureMessage(e)}`);
+          }
+        }
+        if (best === null || passed.size > best.size) {
+          best = passed;
+        }
+      }
+      if (best === null) {
+        return none('no session of the whole rig');
+      }
+      const lags = [...best.entries()].map(([camera, e]) => {
+        const phone = flag(e, 'remote') === true ? `, ${text(e, 'peer') ?? '?'}` : '';
+        return `${camera} ${round(num(e, 'offsetMs') ?? 0, 1)} ms (±${round(num(e, 'spreadMs') ?? 0, 1)}${phone})`;
+      });
+      const facts = `${String(best.size)} ${best.size === 1 ? 'camera' : 'cameras'} with a check passed in one session${lags.length === 0 ? '' : `: ${lags.join(', ')}`}${failures.length === 0 ? '' : `; only failed: ${failures.slice(-3).join('; ')}`}`;
+      if (best.size >= 4) {
+        return ok(facts);
+      }
+      return failures.length > 0 ? failed(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.4.3',
+    round: T5,
+    section: RIG5,
+    title:
+      "From the MacBook, each phone's camera controls (Camera settings → Cameras): its focus set to manual and a distance chosen and left two minutes, Reset to auto, the zoom, the torch: each answered, and no drift from a change made on the MacBook",
+    kinds: ['remote.controls', 'controls.drift', 'rtc.clock'],
+    eyes: 'each change on the phone\'s picture, and the distance on both panels with "the camera reports …" beside it',
+    check: (q) => {
+      const shared = sharedLabels(
+        q
+          .onLaptop('remote.controls')
+          .map((e) => [text(e, 'peer') ?? '?', text(e, 'peerInstallation')] as const),
+      );
+      const phoneOf = (e: ReportEvent): string =>
+        named(text(e, 'peer') ?? '?', text(e, 'peerInstallation'), shared);
+      const held = heldChanges(q, ['focusDistance'], FOCUS_GROUP);
+      const phones = [...controlsByPhone(q, phoneOf).entries()].map(
+        ([phone, { ok: set, failures }]) => {
+          const missing = REMOTE_CHANGES.filter(([, has]) => !has(set)).map(([what]) => what);
+          const mine = held.filter((change) => phoneOf(change.change) === phone);
+          const kept = mine.filter((change) => change.held).length;
+          const drifts = mine.flatMap((change) =>
+            change.drift === null ? [] : [driftText(change.drift)],
+          );
+          return {
+            complete: missing.length === 0 && kept > 0,
+            falseDrift:
+              kept === 0 &&
+              mine.some(
+                (change) => change.drift !== null && text(change.drift, 'baseline') !== null,
+              ),
+            facts: `${phone}: ${missing.length === 0 ? 'the focus, Reset to auto, the zoom and the torch answered' : `${[...set].sort().join(', ') || 'nothing'} answered, not ${missing.join(', ')}`}; ${String(kept)} of ${String(mine.length)} ${mine.length === 1 ? 'distance' : 'distances'} held two minutes without a drift${drifts.length === 0 ? '' : ` (a drift after ${String(drifts.length)}: ${drifts.join('; ')})`}${failures.length === 0 ? '' : `; ${failures.join('; ')}`}`,
+          };
+        },
+      );
+      const facts = phones.map((phone) => phone.facts).join('; ');
+      if (phones.filter((phone) => phone.complete).length >= 2) {
+        return ok(facts);
+      }
+      if (phones.some((phone) => phone.falseDrift)) {
+        return failed(facts);
+      }
+      return none(facts || 'no change of a phone’s controls from the MacBook');
+    },
+  },
+  {
+    id: '5.4.4',
+    round: T5,
+    section: RIG5,
+    title:
+      "A drift provoked on a phone from its console (its focus set to manual behind the app's back) with Keep the camera's modes on: set back within 4 s, and said",
+    kinds: ['controls.drift'],
+    eyes: "the words on the phone's Camera page, and the red word with Reset on the MacBook's line under its picture",
+    check: (q) => {
+      const back = phoneDrifts(
+        q,
+        (e) => text(e, 'baseline') !== null && automaticLost(e) && flag(e, 'reapplied') === true,
+      );
+      const shown = back.slice(0, 3).map(driftText);
+      return found(
+        back,
+        `${count(back, 'drift')} set back: ${shown.join('; ')}${back.length > shown.length ? `; and ${String(back.length - shown.length)} more` : ''}`,
+        'no drift of an automatic mode set back on a phone of a build after T5.2a',
+      );
+    },
+  },
+  {
+    id: '5.4.5',
+    round: T5,
+    section: RIG5,
+    title:
+      "Forty solves or more in one session of the whole rig: every attempt with eight clips (the scramble's and the solve's of each of the four cameras), none missing; the clip viewer's eight buttons",
+    kinds: ['attempt.done', 'remote.clip.missing', 'clips.viewed'],
+    eyes: "the solve list's badge (\"8 clips\"), the clip viewer's eight buttons, the webcam's clips silent",
+    check: (q) => {
+      const sessions = new Map<string, { all: number; eight: number }>();
+      for (const e of q.realAttempts().filter((attempt) => !isPhone(attempt))) {
+        const key = sessionKey(e);
+        const known = sessions.get(key) ?? { all: 0, eight: 0 };
+        sessions.set(key, {
+          all: known.all + 1,
+          eight: known.eight + ((num(e, 'clips') ?? 0) >= 8 ? 1 : 0),
+        });
+      }
+      let best: { key: string; all: number; eight: number } | null = null;
+      for (const [key, counts] of sessions) {
+        if (best === null || counts.eight > best.eight) {
+          best = { key, ...counts };
+        }
+      }
+      if (best === null || best.eight === 0) {
+        return none('no attempt with eight clips or more');
+      }
+      const session = best.key;
+      const missing = q.onLaptop('remote.clip.missing', (e) => sessionKey(e) === session);
+      const views = q.onLaptop('clips.viewed', (e) => (num(e, 'clips') ?? 0) >= 8);
+      const facts = `${String(best.eight)} of the ${String(best.all)} attempts of one session with eight clips or more; ${String(missing.length)} ${missing.length === 1 ? "phone's clip" : "phones' clips"} missing in it; ${count(views, 'viewing')} of eight clips or more`;
+      return best.eight >= 40 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.4.6',
+    round: T5,
+    section: RIG5,
+    title:
+      "Twenty minutes or more of those solves: each phone's health on its line, from the MacBook's minute records of it: its frame rate, its battery, the pressure word where its Chrome has the Compute Pressure API, the frame rate dropped if it did",
+    kinds: ['rtc.clock'],
+    eyes: "each phone's temperature by hand after twenty minutes, and, if a pressure or a hot word came, what the heat routine of README's desk rig did to it",
+    check: (q) => {
+      const rigs = rigSessions(q);
+      const phones = [...phoneReports(q).entries()].flatMap(([peer, all]) => {
+        const reports = all.filter(({ event }) => rigs.has(sessionKey(event)));
+        if (reports.length === 0) {
+          return [];
+        }
+        const spanMs = (reports.at(-1)?.event.tsMs ?? 0) - (reports[0]?.event.tsMs ?? 0);
+        const values = (key: string): number[] =>
+          reports.flatMap(({ report }) => {
+            const value = reportNum(report, key);
+            return value === null ? [] : [value];
+          });
+        const fps = median(values('fps'));
+        const levels = values('batteryLevel');
+        const throttled = reports.filter(({ report }) => report['thermal'] === 'throttled').length;
+        const [least, most] = [Math.min(...levels), Math.max(...levels)];
+        const charging = reports.filter(({ report }) => report['batteryCharging'] === true).length;
+        const battery =
+          levels.length === 0
+            ? 'no battery'
+            : `battery ${round(least * 100)}%${most === least ? '' : ` to ${round(most * 100)}%`}, ${charging === reports.length ? 'charging' : charging === 0 ? 'unplugged' : `charging in ${String(charging)} of ${String(reports.length)}`}`;
+        return [
+          {
+            long: spanMs >= 20 * MINUTE,
+            facts: `${peer}: ${round(spanMs / MINUTE, 1)} minutes of reports, ${fps === null ? '?' : round(fps, 1)} fps at the median, ${battery}, ${pressureFacts(reports)}, the frame rate dropped in ${String(throttled)}`,
+          },
+        ];
+      });
+      const facts = phones.map((phone) => phone.facts).join('; ');
+      if (phones.filter((phone) => phone.long).length >= 2) {
+        return ok(facts);
+      }
+      return none(
+        facts ||
+          (rigs.size === 0
+            ? 'no session of the whole rig'
+            : "no phone's report in the rig's sessions"),
+      );
+    },
+  },
+  {
+    id: '5.4.7',
+    round: T5,
+    section: RIG5,
+    title:
+      "The forty solves' latency, camera by camera: each solve clip with its capture latency and its motion lag against its check's lag, the words on the lines (latency +75 ms, motion lag … (check …)) where a drift came, and the restarts",
+    kinds: ['clip.saved', 'remote.clip', 'recording.latency', 'recording.restarted'],
+    eyes: 'the lines under the pictures after each solve: the attempts where a word came, and where it went',
+    check: (q) => {
+      // The session with the most cameras of forty solve clips or more, then the most clips.
+      let best: {
+        session: string;
+        cameras: Map<string, SolveClip[]>;
+        forty: number;
+        clips: number;
+      } | null = null;
+      for (const [session, cameras] of solveClips(q)) {
+        const lists = [...cameras.values()];
+        const forty = lists.filter((clips) => clips.length >= 40).length;
+        const clips = lists.reduce((sum, list) => sum + list.length, 0);
+        if (best === null || forty > best.forty || (forty === best.forty && clips > best.clips)) {
+          best = { session, cameras, forty, clips };
+        }
+      }
+      if (best === null) {
+        return none('no solve clip with a motion lag recorded (a build before T5.3)');
+      }
+      const session = best.session;
+      const drifts = q.where(
+        'recording.latency',
+        (e) => e.session === session && text(e, 'why') === 'drift',
+      );
+      const own = drifts.filter((e) => flag(e, 'remote') !== true).length;
+      const restarts = q.where(
+        'recording.restarted',
+        (e) => e.session === session && text(e, 'why') === 'latency',
+      );
+      const facts = [
+        ...[...best.cameras.entries()].map(([camera, clips]) => solveClipFacts(camera, clips)),
+        `${String(drifts.length)} ${drifts.length === 1 ? 'drift' : 'drifts'} of a capture latency (${String(own)} of the host's own cameras, ${String(drifts.length - own)} of the phones'), ${String(restarts.length)} ${restarts.length === 1 ? 'restart' : 'restarts'}`,
+      ].join('; ');
+      return best.forty >= 4 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.4.8',
+    round: T5,
+    section: RIG5,
+    title:
+      "Upload sessions on: every file of the rig's attempts uploaded (eighteen with gyro.json, nineteen with session.json), each day's uploads within the 8,000 files and 40 GB of the raised quota",
+    kinds: ['upload.state', 'upload.paused'],
+    eyes: "the day's count in users/{uid}.quota (the coordinator)",
+    check: (q) => {
+      const whole = uploadsWith(q, 8);
+      const days = new Map<string, { rig: number; files: number; bytes: number }>();
+      for (const e of whole) {
+        const day = utcDay(e.tsMs);
+        const known = days.get(day) ?? { rig: 0, files: 0, bytes: 0 };
+        days.set(day, { ...known, rig: known.rig + 1 });
+      }
+      // Every upload done on those days, of every device: what the day's quota counted (but for the
+      // signatures of session.json, which no event counts).
+      for (const e of q.where('upload.state', (upload) => text(upload, 'state') === 'done')) {
+        const known = days.get(utcDay(e.tsMs));
+        if (known !== undefined) {
+          known.files += num(e, 'files') ?? 0;
+          known.bytes += num(e, 'bytes') ?? 0;
+        }
+      }
+      const quota = q.where(
+        'upload.paused',
+        (e) => text(e, 'reason') === 'quota' && days.has(utcDay(e.tsMs)),
+      );
+      const facts = [...days.entries()]
+        .sort(([one], [other]) => one.localeCompare(other))
+        .map(
+          ([day, d]) =>
+            `${day}: ${String(d.rig)} ${d.rig === 1 ? 'upload' : 'uploads'} of eight clips or more with every file; the day's uploads ${String(d.files)} files (${round((100 * d.files) / QUOTA_FILES)}% of ${QUOTA_FILES.toLocaleString('en-US')}) and ${gigabytes(d.bytes)} (${round((100 * d.bytes) / QUOTA_BYTES)}% of ${gigabytes(QUOTA_BYTES)})`,
+        )
+        .join('; ');
+      if (quota.length > 0) {
+        return failed(`${facts}; ${count(quota, 'pause')} for the quota`);
+      }
+      return whole.length > 0
+        ? ok(facts)
+        : none('no upload of eight clips or more with every file');
     },
   },
 ];
