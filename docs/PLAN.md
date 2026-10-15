@@ -2569,7 +2569,7 @@ sign in the app (issue #67).
 | T5.2a | `web`, `capture`: the watchdog's baseline is what the camera reports after applying (the Moto g60 reports `none` for a manual exposure and `1/x` for a focus distance `x`: 37 false drifts and 4 give-ups on 2026-10-10 to 10-12); the panel shows what the app applied; the evidence in `docs/DEVICES.md` | T5.2 | ✅ 2026-10-15 (#71) |
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | ✅ 2026-10-15 (#70) |
 | T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | ✅ 2026-10-15 (#72) |
-| T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | 🔄 PR #73 |
+| T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | ✅ 2026-10-15 (#73) |
 | T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | – |
 
 Waves: T5.1 → T5.2 → T5.3 → T5.2a → T5.6 → T5.5 → T5.4, one agent at a time (T5.2a added on 2026-10-15 from the first week's events; T5.5 and T5.6 the same day from the owner's asks: the USB webcam beside the built-in camera, and the second phone's clips).
@@ -3012,6 +3012,45 @@ check, the status lines over twenty minutes, the upload's count and the quota; `
 **Acceptance.** Unit tests of the cameras list and its switches, the labels per device, the
 pipelines per camera (clips per camera and attempt, the microphone on one), the sync check per
 camera, the grid's cells; the e2e above; lint, unit and e2e green; the bundle's chunks noted.
+
+**Outcome (2026-10-15).** As contracted, PR #73, with these choices. **The design**: `CameraService`'s
+one camera became `HostCamera`, one per open device (its stream, own mode, controls, watchdog,
+framing, sharpness); `HostCamerasService` turns `Settings.camerasOn` (one switch per device, by its
+name; two devices of one name switch together; "turn on" with nothing on turns on the first device;
+settings version 3 replaces `cameraOn`, still written for older builds) and `cameraModes` (the
+resolution and frame rate per camera, Settings' own as the default) into cameras in device-list
+order, closing an unplugged camera and reopening it on `devicechange` (a camera switched on but not
+connected never falls back to another device: it stays listed "(not connected)");
+`RecordingService` coordinates one `CameraRecording` per camera (its own workers, ring buffer,
+encoder, T5.3's meters and restart), the microphone with the first camera only, moving to the next
+when the first goes off; `SessionService.cameraLabels` gives `laptop`, `laptop-2` in list order from
+the moment a camera opens; `SyncService` runs one check per camera, only the first due by itself,
+the others started from their lines under the pictures; `CameraPreview` has one cell per camera,
+then the phones'; `CameraService` stays the facade (the first host camera, or the phone page's
+single camera); no new record fields. **The load notice** compares each pipeline's encoded fps with
+its track's nominal rate (under 80% for 10 s while another camera records), once per recording run.
+**The upload quota** is `QUOTA_FILES_PER_DAY=8000` and `QUOTA_BYTES_PER_DAY=40000000000` in
+`functions/.env` (not `DAILY_CAP`, which caps the diagnostics events), deployed by the Firebase
+workflow at the merge; the refusal names the counts ("7,990 files and 39.98 GB … of the 8,000 files
+and 40 GB a day; this call asks 19 files and 85.2 MB more"); `MAX_FILES_PER_CALL` stays 33, enough
+for seven cameras' clips. **The e2e**: Chrome's `device-count=2` is no use (`fake_device_1` sends Y16
+frames the encoder refuses, and fake cameras never pass a sync check), so `syntheticCamera(page,
+{devices})` lists named devices, each with its own canvas and planted lag: planting 60 and 150 ms,
+the checks measured 68/169, 63/176 and 93/176 ms in three runs, the second camera's 15–25 ms further
+above its planted lag than the first's (frames may queue behind two encoders; the owner's round with
+the real rig will show whether it does the same); the new `host-cameras.spec.ts` once ran into T2.8's
+second of stillness and now waits for the timer; no phone in that spec (`remote-clips.spec.ts` covers
+the phones' clips, a unit test the cells' order). On a phone host, front and rear are now two
+switches, but most Android phones cannot open both at once: the second shows its error and the first
+keeps recording. `recording.stopped`, `recording.notice`, `clip.failed` and `audio.missing` name their
+camera; `settings.changed` covers `camerasOn`; the round report's items 5.5.1–5.5.6. Tests: 1,496
+package tests (1,494 before) and 980 app tests (962); the e2e 85 in 10.9 min; CI green on its second
+attempt (the first failed only the known `remote-camera.cloud.spec.ts:33` flake, the third time on
+2026-10-09–15). Bundle (raw): initial 265.24 kB (265.22), the shared camera-services chunk 46.62 kB
+(39.50), `camera-panel` 23.48 kB (19.75), `camera-preview` 12.59 kB (10.81); all JS +19.6 kB.
+**Open**: whether the MacBook encodes two 1080p30 cameras plus two phone previews (the load notice
+will say; `docs/DEVICES.md`'s table waits for the "After T5.5" round); whether the switches should be
+exclusive on a phone host; the quota went live at the merge.
 
 ### T5.4 — docs, "After T5", `0.5.0`
 
