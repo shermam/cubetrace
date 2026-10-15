@@ -2567,7 +2567,7 @@ sign in the app (issue #67).
 | T5.1 | `web`, `rtc`: the phone's picture at the host's picture's size on the Timer page, with its status line (frame rate, sharpness, recording, battery, pressure or thermal, connection) and the layout setting; the Compute Pressure state in the phone's `state` and in the minute's `rtc.clock` event | T4.4 | ✅ 2026-10-09 (#68) |
 | T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | ✅ 2026-10-09 (#69) |
 | T5.2a | `web`, `capture`: the watchdog's baseline is what the camera reports after applying (the Moto g60 reports `none` for a manual exposure and `1/x` for a focus distance `x`: 37 false drifts and 4 give-ups on 2026-10-10 to 10-12); the panel shows what the app applied; the evidence in `docs/DEVICES.md` | T5.2 | – |
-| T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | 🔄 PR #70 |
+| T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | ✅ 2026-10-15 (#70) |
 | T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | – |
 | T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | – |
 | T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | – |
@@ -2814,6 +2814,58 @@ the words on the line, the recorded `motionLagMs` against the sync check's numbe
 **Acceptance.** Unit tests of the meter's statistics and the drift rule, and of the motion estimator on
 synthetic frames with a known delay (a planted motion a known number of frames after each turn); the
 e2e's recording has the fields; the forty-attempt run is the owner's, in the "After T5" round (T5.4).
+
+**Outcome (2026-10-15).** As contracted, PR #70 (`Refs #67`: the cause is not found; the
+instruments are in), with these choices. The work was begun by an agent cut off on 2026-10-10 (the
+Opus weekly limit) with its 1,270 lines uncommitted, and finished by a second one from the same
+worktree five days later; the inherited design was kept. **The meter** (`latency.ts`): per frame,
+from its capture to its arrival in the capture worker (the host time the clips' frame times come
+from) and from the arrival to its encoded chunk; the capture time is `VideoFrame.metadata().
+captureTime` where Chrome fills it (`basis: 'capture-time'`), else the frame's `timestamp` measured
+beyond the lowest `arrival − timestamp` seen on the track (`basis: 'timestamp'`), kept across pipeline
+restarts so that a restart cannot hide a drift; p50/p95 in the per-second counters, in each clip's
+entry (`captureLatencyMs`, `encodeLatencyMs`), in `clip.saved` and `remote.clip`; the counters also
+say how many frames were already waiting when read, the encoder's queue and the page thread's delay
+(`mainDelayMs`), so that a drift's place is read from them. **The drift**: the 10 s running median
+more than 30 ms from its value at the camera's last check (`captureLatencyAtCheckMs`, in
+`clock.cameras`) for 5 s: `recording.latency`, and `latency +75 ms` in amber on the line until it
+returns. **The lag per clip** (`motion-lag.ts`): the motion of the frames averaged around all of the
+solve's moves (10 ms bins from −150 to +300 ms, baseline and spread by median and MAD, a clear peak
+at 3 spreads, refined by a parabola), `motionPeakMs` and `motionSpreadMs` per solve clip, anchored
+to the check by the same estimator run on the check's own turns (`motionPeakAtCheckMs`):
+`motionLagMs = offsetMs + motionPeakMs − motionPeakAtCheckMs`; the phone's solve motion travels with
+its `cut-done` (at most 3,600 frames, about 60 kB), so the phones' clips get it too; the line says
+`motion lag 133 ms (check 58)` in amber when it sits more than 30 ms from the check's. The solve
+meter turns itself off above 3 ms per frame (a setting on the capture's config); it starts afresh
+after a sync check. **The mitigation**: "Restart the recording when its latency drifts" (Settings →
+Camera, on by default) restarts the pipeline once per drift, after the solve clip of an attempt the
+drift held through (`recording.restarted`, a session note, `restarted` on the line); it restarts on
+the meter's drift only, not on the motion lag, since a pipeline restart does not reopen the camera.
+**The e2e's planted lag**: the check found 127.8 ms for 120 planted (the peak 123.3; the capture
+latency 0.6 ms: the fake camera's delay is in the picture, so the meter rightly saw nothing); a solve
+with 75 ms more came out at `motionLagMs` 220.3 and the word in amber, the next at 140.9 with none;
+the difference 79.4 ms (73.2 in an earlier run); capture latency p50 0.8 ms on the timestamp basis
+(the fake camera gives no capture time), encode p50 5 ms, no frame waiting, the encoder's queue empty.
+**The suspects, as the code shows them**: the ring buffer's eviction, the cut, the encoder's queue,
+the OPFS writes, the clips' transfer and the uploads all run after the arrival is stamped or on other
+threads, so they can only delay frames before the worker if the stream passes through the page's
+thread, which `mainDelayMs` and the waiting share would show; the 2026-10-09 cadence fell from 30.3
+to 29.3 fps by the frames' own timestamps, which points at or before the timestamps, inside the
+camera or the OS, where only the motion lag can see it; the phone's sync checks have no code path
+into the host's pipeline (they paused the attempts for two minutes). The owner's round decides it:
+`latency …` with the drift means after the timestamps (the counters say where; the restart clears
+it); `motion lag …` without `latency …` means the camera, and "After T5.3" asks for the camera
+turned off and on. **Bugs fixed on the way**: `clip.saved`'s `syncResidualMs` was always null (item
+2.5.6 could never tick); a phone's minute clock record dropped the check's anchors. Tests: 1,472
+package tests (1,421 before) and 930 app tests (909); the e2e 83 passed in 9.6 min. Bundle (raw):
+initial unchanged (265.11 kB), `camera-device-page` 55.58 kB (54.15), `remote-cameras` 53.77 kB
+(52.08), the shared chunk with `CameraService`/`RecordingService` 38.27 kB (32.60), `rtc` 30.49 kB
+(29.52), the capture worker 26.93 kB, the clip worker 128.28 kB. **Open**: whether Chrome fills
+`captureTime` for the FaceTime camera (`basis` in `clip.saved` will say); a restart cuts the next
+attempt's scramble clip short when that scramble starts within a few seconds of the solve's end
+(marked, noted, once per drift); if the round shows the delay inside the camera, the mitigation
+should reopen the camera (not built); the MacBook's row in `docs/DEVICES.md` "Capture latency over a
+session" waits for the round; the round report's items 5.3.1–5.3.5 came with this task.
 
 ### T5.6 — every phone's clips: a phone is who it is, not what it is called
 
