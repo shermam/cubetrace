@@ -12,6 +12,13 @@ export const NO_CAMERA_API =
 export const CAMERA_ENDED =
   'The camera stopped: it was unplugged, or another app took it. Turn it on again when it is back.';
 
+/**
+ * When one of the host's cameras (T5.5) is not there as it opens: unplugged since it was listed. It
+ * is not replaced by the default camera, which is another of the host's cameras.
+ */
+export const CAMERA_NOT_CONNECTED =
+  'This camera is not connected: plug it in again, or turn it off in Camera settings.';
+
 /** One sentence or two about why the camera could not be opened, and what to do. */
 export function describeCameraError(error: unknown): string {
   const name = stringMember(error, 'name') ?? '';

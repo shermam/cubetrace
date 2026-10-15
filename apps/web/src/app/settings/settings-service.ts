@@ -70,6 +70,12 @@ export type CameraFrameRate = 'best' | '60' | '30';
 export const CAMERA_RESOLUTIONS: readonly CameraResolution[] = ['1080p', '720p'];
 export const CAMERA_FRAME_RATES: readonly CameraFrameRate[] = ['best', '60', '30'];
 
+/** The resolution and the frame rate a camera is asked for. */
+export interface CameraMode {
+  readonly resolution: CameraResolution;
+  readonly frameRate: CameraFrameRate;
+}
+
 /** How the resolutions read in Settings and in the Timer page's Camera settings. */
 export const CAMERA_RESOLUTION_TEXT: Readonly<Record<CameraResolution, string>> = {
   '1080p': '1920×1080',
