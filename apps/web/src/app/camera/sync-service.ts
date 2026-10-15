@@ -274,10 +274,7 @@ export class SyncService {
    * while it is not on.
    */
   labelOf(camera: HostCamera): string | null {
-    const identity = camera.identity();
-    return camera.status() === 'on' && identity !== null
-      ? this.session.cameraLabel(identity)
-      : null;
+    return camera.status() === 'on' ? this.recording.labelOf(camera) : null;
   }
 
   /** The clock sync of this device's camera `camera` in the current session; null if none. */

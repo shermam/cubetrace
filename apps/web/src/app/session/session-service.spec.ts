@@ -1253,6 +1253,41 @@ describe('SessionService', () => {
       expect((await s.store.exportSession(session)).session.cameras).toHaveLength(4);
     });
 
+    it("gives the host's cameras their labels in their order before their entries are in, and those the session gave after (T5.5)", async () => {
+      const s = setup();
+      const facetime = camera('FaceTime HD Camera (3A71:F4B5)');
+      const logitech = camera('Logitech Webcam C930e (046d:0843)');
+      // Without a session: the order decides; a camera not open has none.
+      expect(s.service.cameraLabels([facetime, null, logitech])).toEqual([
+        'laptop',
+        null,
+        'laptop-2',
+      ]);
+      await ready(s);
+      expect(s.service.cameraLabels([facetime, logitech])).toEqual(['laptop', 'laptop-2']);
+      expect(s.service.cameraLabels([logitech, facetime])).toEqual(['laptop', 'laptop-2']);
+      // Once in the session: the labels it gave, whatever the order asked, and a new camera after.
+      s.service.putCamera(logitech, true);
+      s.service.putCamera(facetime, true);
+      expect(s.service.cameraLabels([facetime, logitech])).toEqual(['laptop-2', 'laptop']);
+      expect(s.service.cameraLabels([facetime, camera('Studio Display Camera'), logitech])).toEqual(
+        ['laptop-2', 'laptop-3', 'laptop'],
+      );
+      // Two cameras of one name, told apart by their device ids.
+      const usb = camera('USB Camera (1234:5678)');
+      expect(
+        s.service.cameraLabels([
+          { ...usb, deviceId: 'usb-a' },
+          { ...usb, deviceId: 'usb-b' },
+        ]),
+      ).toEqual(['laptop-3', 'laptop-4']);
+      // Asking puts nothing in the session.
+      expect(s.service.session()?.cameras.map((entry) => entry.label)).toEqual([
+        'laptop',
+        'laptop-2',
+      ]);
+    });
+
     it('gives the cameras of a resumed session their labels back by their names (T2.14)', async () => {
       const store = new MemorySessionStore();
       const facetime = camera('FaceTime HD Camera (3A71:F4B5)');

@@ -35,16 +35,51 @@ dt {
   gap: var(--space-3);
 }
 
-.bar,
-.picker {
+.bar {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   align-items: center;
 }
 
-.picker select {
-  max-width: 100%;
+// This device's cameras (T5.5): a row each, its switch and name, then its resolution and frame rate,
+// which wrap under them where the row is narrow.
+.devices {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.device {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  min-width: 0;
+
+  .switch {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+// A camera on (T5.5): its facts, framing, sharpness and controls, as one block.
+.host-camera {
+  display: grid;
+  gap: var(--space-3);
+
+  h3 {
+    margin: 0;
+    font-size: 1rem;
+    overflow-wrap: anywhere;
+  }
+
+  & + .host-camera {
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--line);
+  }
 }
 
 p {
@@ -93,8 +128,8 @@ dd {
   text-decoration: underline;
 }
 
-// Resolution, frame rate, video quality, audio and microphone: the settings of Settings → Camera,
-// here too.
+// Resolution and frame rate (a camera's own, T5.5), video quality, audio and microphone: the
+// settings of Settings → Camera, here too.
 // A choice wider than a phone (the video quality's) is cut short rather than widen the page: the
 // group, its labels and their selects may be narrower than their contents.
 .mode {

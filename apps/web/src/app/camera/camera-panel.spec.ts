@@ -232,9 +232,12 @@ describe('CameraPanel', () => {
     expect(camera.framingEditing()).toBe(false);
   });
 
-  it('has the resolution, frame rate, video quality, audio and microphone of Settings', async () => {
+  it('has a resolution and frame rate per camera (T5.5), and the video quality, audio and microphone of Settings', async () => {
     await render();
     const settings = TestBed.inject(SettingsService);
+    // Before the browser names the cameras (before the permission), no camera to set.
+    expect(element('camera-panel-resolution')).toBeNull();
+    await turnOn();
     const resolution = element('camera-panel-resolution') as HTMLSelectElement;
     const rate = element('camera-panel-frame-rate') as HTMLSelectElement;
     const quality = element('camera-panel-video-quality') as HTMLSelectElement;
@@ -242,6 +245,9 @@ describe('CameraPanel', () => {
     const microphone = element('camera-panel-microphone') as HTMLSelectElement;
     const options = (select: HTMLSelectElement): string[] =>
       Array.from(select.options, (option) => option.text.trim());
+    expect(
+      resolution.closest('[data-testid="camera-device-row"]')?.getAttribute('data-device'),
+    ).toBe('fake_device_0');
     expect(options(resolution)).toEqual(['1920×1080', '1280×720']);
     expect(options(quality)).toEqual([
       'Standard (4 Mbps, ≈ 20 MB per attempt)',
@@ -263,8 +269,10 @@ describe('CameraPanel', () => {
       element('camera-panel-microphone-hint')?.id,
     );
 
+    // The camera's own resolution and frame rate: Settings' stay as they were.
     resolution.value = '720p';
     resolution.dispatchEvent(new Event('change'));
+    await update();
     rate.value = '30';
     rate.dispatchEvent(new Event('change'));
     quality.value = 'maximum';
@@ -273,12 +281,20 @@ describe('CameraPanel', () => {
     microphone.value = 'voice';
     microphone.dispatchEvent(new Event('change'));
     await update();
-    expect(settings.cameraResolution()).toBe('720p');
-    expect(settings.cameraFrameRate()).toBe('30');
+    expect(settings.cameraModeOwn('fake_device_0')).toEqual({
+      resolution: '720p',
+      frameRate: '30',
+    });
+    expect(settings.cameraResolution()).toBe('1080p');
+    expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.videoQuality()).toBe('maximum');
     expect(settings.recordAudio()).toBe(false);
     expect(settings.microphoneProcessing()).toBe('voice');
-    // The choices follow the resolution and frame rate.
+    // The camera opened again in its mode; the choices follow the first camera's mode.
+    expect(media.requests.at(-1)?.video).toMatchObject({
+      width: { ideal: 1280 },
+      frameRate: { ideal: 30 },
+    });
     expect(options(quality)).toEqual([
       'Standard (1.8 Mbps, ≈ 9 MB per attempt)',
       'High (3.6 Mbps, ≈ 18 MB per attempt)',
@@ -287,26 +303,90 @@ describe('CameraPanel', () => {
     expect(quality.value).toBe('maximum');
   });
 
-  it('names the cameras Front and Rear on a phone, and mirrors only the front one', async () => {
+  it('lists every camera with a switch of its own, a block for each one on; names Front and Rear on a phone, and mirrors only the front one (T5.5)', async () => {
     await render([FAKE_PHONE_FRONT, FAKE_PHONE_REAR], ANDROID);
     await turnOn();
-
-    const select = element('camera-device') as HTMLSelectElement;
-    expect(Array.from(select.options, (option) => option.text.trim())).toEqual([
-      'Front camera',
-      'Rear camera',
+    const rows = (): (string | null)[][] =>
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll(
+          '[data-testid="camera-device-row"]',
+        ),
+        (row) => [
+          row.querySelector('[data-testid="camera-device-name"]')?.textContent.trim() ?? null,
+          String((row.querySelector('[data-testid="camera-switch"]') as HTMLInputElement).checked),
+        ],
+      );
+    const blocks = (): Element[] =>
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="host-camera"]'),
+      );
+    expect(rows()).toEqual([
+      ['Front camera', 'true'],
+      ['Rear camera', 'false'],
     ]);
-    expect(select.value).toBe('phone-front');
+    expect(blocks()).toHaveLength(1);
+    // One camera: its block is not named.
+    expect(element('host-camera-name')).toBeNull();
     await edit();
     expect(element('camera-frame')?.classList.contains('mirrored')).toBe(true);
-
-    select.value = 'phone-rear';
-    select.dispatchEvent(new Event('change'));
-    await update();
-    expect(TestBed.inject(CameraService).label()).toBe('camera 0, facing back');
-    // Another camera (T5.5: each has its framing editor): Edit opens the rear one's.
     await edit();
+
+    // The rear one's switch: both on, a block each, named, the front one first.
+    const switches = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>(
+      '[data-testid="camera-switch"]',
+    );
+    switches.item(1).click();
+    await update();
+    await update();
+    expect(rows()).toEqual([
+      ['Front camera', 'true'],
+      ['Rear camera', 'true'],
+    ]);
+    expect(blocks().map((block) => block.getAttribute('data-device'))).toEqual([
+      'camera 1, facing front',
+      'camera 0, facing back',
+    ]);
+    expect(
+      blocks().map((block) =>
+        block.querySelector('[data-testid="host-camera-name"]')?.textContent.trim(),
+      ),
+    ).toEqual(['phone-front · Front camera', 'phone-rear · Rear camera']);
+    expect(text('camera-state')).toBe('2 of 2 cameras on');
+    // The rear camera's framing editor: not mirrored.
+    blocks()[1].querySelector<HTMLButtonElement>('[data-testid="camera-framing-edit"]')?.click();
+    await update();
     expect(element('camera-frame')?.classList.contains('mirrored')).toBe(false);
+
+    // The front one off: the rear one alone.
+    switches.item(0).click();
+    await update();
+    expect(rows()).toEqual([
+      ['Front camera', 'false'],
+      ['Rear camera', 'true'],
+    ]);
+    expect(TestBed.inject(CameraService).label()).toBe('camera 0, facing back');
+    expect(media.liveTracks().map((track) => track.label)).toEqual(['camera 0, facing back']);
+  });
+
+  it('lists a camera on that is not connected, to turn it off (T5.5)', async () => {
+    await render([FAKE_WEBCAM]);
+    await turnOn();
+    TestBed.inject(SettingsService).setCamerasOn(['fake_device_0', 'USB webcam']);
+    await update();
+    expect(
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll(
+          '[data-testid="camera-device-name"]',
+        ),
+        (name) => name.textContent.trim(),
+      ),
+    ).toEqual(['fake_device_0', 'USB webcam (not connected)']);
+    (fixture.nativeElement as HTMLElement)
+      .querySelectorAll<HTMLInputElement>('[data-testid="camera-switch"]')
+      .item(1)
+      .click();
+    await update();
+    expect(TestBed.inject(SettingsService).camerasOn()).toEqual(['fake_device_0']);
   });
 
   it('shows only the controls a camera has', async () => {

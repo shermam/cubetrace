@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
-import { FAKE_WEBCAM, FakeMediaDevices, settle } from '../device/fake-browser';
+import { FAKE_FACETIME, FAKE_WEBCAM, FakeMediaDevices, settle } from '../device/fake-browser';
 import { ready, setup, turn } from '../session/session-harness';
 import { SettingsService } from '../settings/settings-service';
 import { CameraService } from './camera-service';
+import { HostCamerasService } from './host-cameras-service';
 import { RecordingPanel } from './recording-panel';
 import {
   CAPTURE_STARTER,
@@ -15,8 +16,8 @@ import {
 import { FakeCaptureStarter, statsOf } from './recording-testing';
 
 describe('RecordingPanel', () => {
-  async function render() {
-    const media = new FakeMediaDevices([FAKE_WEBCAM]);
+  async function render(cameras = [FAKE_WEBCAM]) {
+    const media = new FakeMediaDevices(cameras);
     const starter = new FakeCaptureStarter();
     const s = setup({
       navigator: { ...bluetoothNavigator(true), mediaDevices: media },
@@ -64,6 +65,49 @@ describe('RecordingPanel', () => {
     expect(text(element, 'recording-buffer')).toBe('12.3 s, 1.5 MB');
     expect(text(element, 'recording-codecs')).toBe('vp09.00.40.08 at 4 Mbps, opus, mic raw');
     expect(element.querySelector('[data-testid="storage-meter"]')).not.toBeNull();
+  });
+
+  it("says each camera's recording on its own, named; the sound with the first; an attempt's size all of theirs (T5.5)", async () => {
+    const { s, starter, element, update, camera } = await render([FAKE_WEBCAM, FAKE_FACETIME]);
+    await camera.start();
+    const hosts = TestBed.inject(HostCamerasService);
+    const facetime = hosts.devices().find((device) => device.deviceId === 'facetime');
+    if (facetime === undefined) {
+      throw new Error('No FaceTime camera.');
+    }
+    await hosts.setOn(facetime, true);
+    await ready(s);
+    await update();
+    for (const capture of starter.started) {
+      capture.emitStats(statsOf(5));
+    }
+    await update();
+    const blocks = [...element.querySelectorAll('[data-testid="recording-camera"]')];
+    expect(blocks.map((block) => block.getAttribute('data-label'))).toEqual(['laptop', 'laptop-2']);
+    expect(
+      blocks.map(
+        (block) => block.querySelector('[data-testid="recording-camera-name"]')?.textContent,
+      ),
+    ).toEqual(['laptop', 'laptop-2']);
+    expect(
+      blocks.map((block) =>
+        block.querySelector('[data-testid="recording-codecs"]')?.textContent.trim(),
+      ),
+    ).toEqual([
+      'vp09.00.40.08 at 4 Mbps, opus, mic raw',
+      'vp09.00.40.08 at 4 Mbps, no sound (the microphone records with laptop)',
+    ]);
+    expect(
+      blocks.map((block) =>
+        block.querySelector('[data-testid="recording-state"]')?.textContent.trim(),
+      ),
+    ).toEqual([
+      'Recording: every attempt gets its clips.',
+      'Recording: every attempt gets its clips.',
+    ]);
+    expect(text(element, 'recording-estimate')).toBe(
+      '≈ 40 MB per attempt at this quality, 2 cameras',
+    );
   });
 
   it("says the video's bitrate and what an attempt takes at the video quality", async () => {

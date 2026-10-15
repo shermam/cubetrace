@@ -1,15 +1,19 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, input } from '@angular/core';
 
 import { SettingsService } from '../settings/settings-service';
 import { sharpnessBar, sharpnessText } from './camera-format';
 import { CameraService } from './camera-service';
+import type { HostCamera } from './host-camera';
+
+/** What the meter reads of a camera (a `HostCamera`, or the facade). */
+export type SharpnessCamera = Pick<HostCamera, 'sharpness' | 'sharpnessSamples' | 'sharpnessGood'>;
 
 /**
  * The sharpness meter (docs/PLAN.md, T2.1): the variance of the Laplacian of the framing rectangle,
  * measured on the preview twice a second by `CameraService`, on a logarithmic bar against the
  * threshold of Settings, with the value and the verdict (good from the threshold up, soft under it).
- * Camera settings show it on the Timer page, and the Camera page of a phone that films for a host
- * (T4.1).
+ * Camera settings show it on the Timer page, one per camera of the host (T5.5, `camera`), and the
+ * Camera page of a phone that films for a host (T4.1: its camera, `CameraService`, by default).
  */
 @Component({
   selector: 'app-sharpness-meter',
@@ -17,8 +21,8 @@ import { CameraService } from './camera-service';
     <div
       class="sharpness"
       data-testid="camera-sharpness"
-      [attr.data-samples]="camera.sharpnessSamples()"
-      [attr.data-good]="camera.sharpnessGood()"
+      [attr.data-samples]="camera().sharpnessSamples()"
+      [attr.data-good]="camera().sharpnessGood()"
     >
       <span id="camera-sharpness-label">Sharpness</span>
       <meter
@@ -34,7 +38,7 @@ import { CameraService } from './camera-service';
       <span
         class="verdict"
         data-testid="camera-sharpness-verdict"
-        [class.good]="camera.sharpnessGood()"
+        [class.good]="camera().sharpnessGood()"
         >{{ verdict() }}</span
       >
     </div>
@@ -71,23 +75,24 @@ import { CameraService } from './camera-service';
   `,
 })
 export class SharpnessMeter {
-  protected readonly camera = inject(CameraService);
+  /** The camera it measures: the Camera page's by default. */
+  readonly camera = input<SharpnessCamera>(inject(CameraService));
   private readonly prefs = inject(SettingsService);
 
   protected readonly value = computed(() => {
-    const value = this.camera.sharpness();
+    const value = this.camera().sharpness();
     return value === null ? '–' : sharpnessText(value);
   });
   protected readonly bar = computed(() =>
-    sharpnessBar(this.camera.sharpness() ?? 0, this.prefs.sharpnessThreshold()),
+    sharpnessBar(this.camera().sharpness() ?? 0, this.prefs.sharpnessThreshold()),
   );
   protected readonly thresholdBar = computed(() =>
     sharpnessBar(this.prefs.sharpnessThreshold(), this.prefs.sharpnessThreshold()),
   );
   protected readonly verdict = computed(() => {
-    if (this.camera.sharpness() === null) {
+    if (this.camera().sharpness() === null) {
       return '';
     }
-    return this.camera.sharpnessGood() ? 'good' : 'soft';
+    return this.camera().sharpnessGood() ? 'good' : 'soft';
   });
 }

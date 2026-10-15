@@ -254,6 +254,22 @@ export class RecordingService {
     });
   }
 
+  /**
+   * The labels of the host's cameras in the session under way (`laptop`, `laptop-2`), in their
+   * order, as the session gives them once their entries are in (`SessionService.cameraLabels`), and
+   * before.
+   */
+  private readonly labels = computed(() => {
+    const cameras = this.hosts.cameras();
+    const labels = this.session.cameraLabels(cameras.map((camera) => camera.identity()));
+    return new Map(cameras.map((camera, k) => [camera, labels[k]]));
+  });
+
+  /** The label of the host's camera `camera` in the session (T5.5); null while it is not open. */
+  labelOf(camera: HostCamera): string | null {
+    return this.labels().get(camera) ?? null;
+  }
+
   /** The recording of `camera`; null when it has none (it is not one of the host's cameras on). */
   recordingOf(camera: HostCamera): CameraRecording | null {
     return this.recordingsSignal().find((recording) => recording.camera === camera) ?? null;

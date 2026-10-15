@@ -165,6 +165,12 @@ export class HostCamerasService {
     await this.reconcile();
   }
 
+  /** Forgets the camera called `label` from the cameras on: one on that is not connected any more. */
+  forget(label: string): void {
+    this.prefs.setCamerasOn(this.prefs.camerasOn().filter((camera) => camera !== label));
+    void this.reconcile();
+  }
+
   /** The device `deviceId` alone on (a single camera chosen, as before T5.5). */
   async only(deviceId: string): Promise<void> {
     const device = this.devicesSignal().find((candidate) => candidate.deviceId === deviceId);
