@@ -1214,8 +1214,7 @@ export class CameraRecording {
 
   private setTimer(callback: () => void, ms: number): number {
     const set =
-      this.context.globals.setTimeout ??
-      ((cb: () => void, delay: number) => setTimeout(cb, delay));
+      this.context.globals.setTimeout ?? ((cb: () => void, delay: number) => setTimeout(cb, delay));
     return set(callback, ms);
   }
 

@@ -226,9 +226,7 @@ export class RecordingService {
         const camera = recording.camera;
         const identity = camera.identity();
         const label =
-          identity === null || camera.status() !== 'on'
-            ? null
-            : this.session.cameraLabel(identity);
+          identity === null || camera.status() !== 'on' ? null : this.session.cameraLabel(identity);
         const check = label === null || session === null ? undefined : session.clock.cameras[label];
         const baseline =
           check === undefined || check.clapperboardSamples === 0
