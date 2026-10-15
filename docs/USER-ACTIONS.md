@@ -214,6 +214,34 @@ adds items; the owner ticks them when done (date and any detail that others need
   and models in the Cameras list and under the pictures, ten solves with six clips each, the clip
   viewer's six buttons, one phone paired again. Write down the two models and installations; the
   coordinator reads the rest from the events (`npm run round-report`).
+- [ ] **The "After T5.5" items (two cameras of the MacBook, eight clips an attempt)**, once T5.5 is
+  merged and the deployed footer names a commit after it: a USB webcam plugged into the MacBook
+  beside its FaceTime camera, the ThinkPhone and the Moto g60 paired as in "After T4", and go through
+  "After T5.5" in `docs/MANUAL-TESTS.md`: both of the MacBook's cameras turned on in Camera settings,
+  eight clips in every attempt, the four pictures, each camera's sync check, the status lines over
+  twenty minutes, the webcam turned off and on mid-session, the upload's count against the day's
+  quota. Write down the webcam's model, its resolution and frame rate, and what the MacBook's lines
+  said of the load; the coordinator reads the rest from the events (`npm run round-report`) and
+  writes the MacBook's figures with two cameras into `docs/DEVICES.md`.
+- [x] 2026-10-15 — **The upload quota raised to 8,000 files and 40 GB a day** (confirmed by the owner;
+  T5.5): `QUOTA_FILES_PER_DAY` and `QUOTA_BYTES_PER_DAY` in `functions/.env`, deployed by the
+  Firebase workflow when T5.5 merges; nothing to do by hand. An attempt with four cameras is 19
+  files and about 85 MB, so the cap holds about 420 such attempts a day; the refusal names the
+  counts ("7,990 files and 39.98 GB signed on … of the 8,000 files and 40 GB a day; this call asks
+  19 files and 85.2 MB more").
+- [ ] **The bucket's cost, and a lifecycle rule for the clips**, whenever the owner chooses (the
+  bound is the GCP trial's US$ 300 credit). The bucket is in the Standard class in us-central1,
+  US$ 0.02 per GB-month: the 54 GB of 2026-10-15 cost about US$ 1.10 a month, and a day of two
+  cameras (10 to 13 GB) adds about US$ 0.25 a month to every month after it; four cameras in every
+  attempt (about 85 MB each) double that. Clips older than 30 days are read again only by a features
+  run over old sessions, so moving them to the Nearline class, about half the price, roughly halves
+  the bill once the features of those sessions are extracted (the features run reads the clips, and
+  Nearline charges for every GB read back and keeps a file at least 30 days). In the Cloud console:
+  Cloud Storage → Buckets → `cubetrace-data` → Lifecycle → Add a rule → Action "Set storage class to
+  Nearline" → Conditions: Age 30 days, Storage class matches Standard, Object name matches prefix
+  `users/` (the clips and the records; `features/` stays Standard, read by every training) → Create.
+  The app and the functions need no change: a signed upload writes Standard, and the rule moves the
+  file a month later.
 
 ## Later
 

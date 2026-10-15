@@ -283,6 +283,20 @@ drift came (`waiting` frames, the encoder's queue, the frame interval).
 | MacBook Pro 2021, FaceTime HD, 1080p30, forty solves or more on the rig | | | | | | |
 | Chrome's fake camera in the end-to-end suite (`capture-latency.spec.ts`: a synthetic square stepped 120 ms after each of the demo cube's turns, then 75 ms more), for scale | 2026-10-15, T5.3's e2e, two runs | 127.8 and 141.4 ms / 123.3 and 136.4 ms / 0.6 and 0.3 ms (`timestamp`: the fake camera's frames have no capture time) | 0.3 to 0.8 ms at the median, 5.7 at the 95th percentile; the encoder 3 to 5 ms at the median | none: the latency held, the lag being planted in the picture itself, before the frames were timed | 140.9 and 147.6 ms at the check's planted lag, 220.3 and 220.8 ms with 75 ms more: 79.4 and 73.2 ms apart | none waited: no frame there before the worker asked for it (`waitingShare` 0), the encoder's queue empty when given one, the page's thread 0.4 ms to take the counters |
 
+## Two cameras of the laptop
+
+What a laptop does with two of its cameras recording at once (T5.5: a pipeline per camera, each its
+own encoder; the microphone with the first). The coordinator fills a row from the owner's round
+(`docs/MANUAL-TESTS.md`, "After T5.5", and its events, `docs/DIAGNOSTICS.md`): each camera's track
+and the frame rate its clips were encoded at (`clip.saved`'s `frameIntervalMs`), the load notices if
+any came (`recording.notice`: a camera encoded under 80% of its frame rate for 10 s), the encoders
+Chrome chose, each camera's sync check, and an attempt's size and files with the phones beside.
+
+| Cameras | Date, measured by | Each camera: track asked / delivered, encoded fps by its clips | Load notices, and what lowered them | Encoders | Sync checks | One attempt: clips, files, size |
+|---|---|---|---|---|---|---|
+| MacBook Pro 2021: FaceTime HD and a USB webcam (the Logitech C930e of issue #40), with the ThinkPhone and the Moto g60 | | | | | | |
+| Two synthetic cameras in the end-to-end suite (`host-cameras.spec.ts`: two canvases of 640×360 at 30 fps, each square stepped its own planted lag after the demo cube's turns, 60 and 150 ms), for scale | 2026-10-15, T5.5's e2e, three runs in the development container | 640×360 at 30 each | not measured | not recorded | 68.3 and 169.3 ms, 62.8 and 176.2 ms, 92.8 and 175.7 ms: the second check 83 to 113 ms after the first, for 90 planted | four clips (the first camera's two with sound), nine files with `attempt.json` (no gyroscope on the demo cube) |
+
 ## Manual round 2 (v0.2.0)
 
 What the owner's second round measures on each camera (`docs/MANUAL-TESTS.md`, "Round 2"), to fill
