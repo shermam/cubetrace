@@ -13,7 +13,9 @@ import { framingPercent } from '@cubetrace/capture';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
+import { SessionService } from '../session/session-service';
 import { SettingsService, type RemotePictures } from '../settings/settings-service';
+import { motionLagOff, solveClipOf } from './latency-words';
 import { RemoteCameraRegistry, type RemoteCameraEntry } from './remote-camera-registry';
 import { remoteStatusLine, shortParts, type StatusPart } from './remote-status';
 import { StatusParts } from './status-parts';
@@ -418,6 +420,7 @@ export class RemotePreviews {
 
   private readonly registry = inject(RemoteCameraRegistry);
   private readonly settings = inject(SettingsService);
+  private readonly session = inject(SessionService);
   private readonly timers = inject(RTC_TIMERS);
   private readonly localVideo = viewChild<ElementRef<HTMLVideoElement>>('localVideo');
   /** The camera chosen as the main picture; null for this device's own. */
@@ -450,6 +453,8 @@ export class RemotePreviews {
   private readonly lines = computed(() => {
     const nowMs = this.now();
     const sharpnessThreshold = this.settings.sharpnessThreshold();
+    // The last attempt's clips: a phone's motion lag far from its check's is said (T5.3).
+    const last = this.session.lastResult();
     return new Map(
       this.cameras().map((camera) => [
         camera.id,
@@ -462,6 +467,8 @@ export class RemotePreviews {
           converged: camera.converged,
           sharpnessThreshold,
           drift: camera.drift,
+          latencyDeltaMs: camera.latencyDeltaMs,
+          motionLag: motionLagOff(solveClipOf(last, camera.label)),
         }),
       ]),
     );

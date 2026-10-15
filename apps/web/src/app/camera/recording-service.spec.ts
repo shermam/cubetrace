@@ -1,7 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 
 import { APP_BUILD } from '../../environments/version';
-import { NO_AUDIO_DATA } from '@cubetrace/capture';
+import { NO_AUDIO_DATA, type CaptureStats, type ClipMotion } from '@cubetrace/capture';
+import type { FakeCube } from '@cubetrace/gan';
 import {
   ATTEMPT_SCHEMA,
   CLOUD_ATTEMPT_SCHEMA,
@@ -18,6 +19,7 @@ import {
 import { Ajv2020 } from 'ajv/dist/2020';
 
 import { bluetoothNavigator } from '../cube/cube-testing';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import {
   FAKE_FACETIME,
   FAKE_WEBCAM,
@@ -28,6 +30,7 @@ import {
 import { StorageService } from '../device/storage-service';
 import { ClipsInFlight } from '../session/clips-in-flight';
 import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
+import { SettingsService } from '../settings/settings-service';
 import { CameraService } from './camera-service';
 import {
   CAPTURE_STARTER,
@@ -38,6 +41,7 @@ import {
   SCRAMBLE_LEAD_MS,
   SOLVE_LEAD_MS,
   STORAGE_FULL,
+  pipelineSummary,
 } from './recording-service';
 import { FakeCaptureStarter, statsOf, type FakeCapture } from './recording-testing';
 
@@ -1014,3 +1018,308 @@ describe('RecordingService', () => {
     expect(capture.saves.map((save) => save.params.segment)).toEqual(['scramble']);
   });
 });
+
+describe('RecordingService: the capture latency and the motion lag (T5.3)', () => {
+  const FRAMING = { x: 480, y: 270, w: 960, h: 540 };
+  /** The laptop's sync check, with the anchors T5.3 keeps. */
+  const CHECK: CameraClock = {
+    offsetMs: 58.4,
+    rttMs: 0,
+    driftPpm: 0,
+    clapperboardResidualMs: 30.5,
+    clapperboardSamples: 8,
+    motionPeakAtCheckMs: 72.3,
+    captureLatencyAtCheckMs: 3.2,
+  };
+  /** A solve's first moves, which undo each other, before the scramble's inverse. */
+  const PAD = "R R' R R' R R' R R' R R'";
+  /** The solve's moves come irregularly apart, ms, as a solve's do. */
+  const GAPS = [180, 260, 150, 290, 210, 170, 240, 300, 160, 220, 190, 250, 280];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The diagnostics' events from now on, as kind and facts. */
+  function spyEvents(): [string, Record<string, unknown>][] {
+    const events: [string, Record<string, unknown>][] = [];
+    vi.spyOn(TestBed.inject(DiagnosticsService), 'record').mockImplementation((kind, data = {}) => {
+      events.push([kind, { ...data }]);
+    });
+    return events;
+  }
+
+  /** The counters of a second whose frames came `p50` ms beyond the track's floor. */
+  function latencyStats(seconds: number, p50: number): CaptureStats {
+    return statsOf(seconds, {
+      latency: {
+        capture: { p50, p95: p50 + 7, basis: 'timestamp' },
+        encode: { p50: 14, p95: 22 },
+        floorMs: 1_790_000_000_000,
+        queueMax: 2,
+        pending: 1,
+        waiting: p50 > 30 ? 28 : 0,
+        frameIntervalMs: p50 > 30 ? 34.6 : 32.9,
+      },
+    });
+  }
+
+  /** `seconds` of counters, one a second on the fake clock, at `p50`. */
+  function feed(capture: FakeCapture, r: Rig, seconds: number, p50: number): void {
+    for (let k = 0; k < seconds; k++) {
+      r.s.perf.advance(1000);
+      capture.emitStats(latencyStats(5 + k, p50));
+    }
+  }
+
+  /** The attempt's scramble turned: the attempt is armed. Returns the scramble. */
+  function scramble(r: Rig, fake: FakeCube): string {
+    const moves = r.s.service.attempt()?.scramble ?? '';
+    turn(r.s, fake, moves);
+    return moves;
+  }
+
+  /** The solve of `scrambled`: ten moves that undo each other, then its inverse, irregularly apart. */
+  function solve(r: Rig, fake: FakeCube, scrambled: string): void {
+    [...PAD.split(' '), ...inverse(scrambled).split(' ')].forEach((move, k) => {
+      turn(r.s, fake, move, GAPS[k % GAPS.length]);
+    });
+  }
+
+  /**
+   * The motion a solve clip of `record` shows at 30 fps: its square changes in the frame that comes
+   * `afterMs` (to a frame later) after each of the solve's moves; a little noise elsewhere.
+   */
+  function motionOf(record: AttemptRecord, afterMs: number): ClipMotion {
+    const moves = record.moves.filter((move) => move.phase === 'solve').map((m) => m.hostMs);
+    const t0 = (record.events.solveStart ?? 0) - SOLVE_LEAD_MS;
+    const end = (record.events.solveEnd ?? 0) + CLIP_TAIL_MS;
+    const atMs: number[] = [];
+    const changed: number[] = [];
+    for (let k = 0; t0 + (k * 1000) / 30 <= end; k++) {
+      const at = t0 + (k * 1000) / 30;
+      atMs.push(Math.round(((k * 1000) / 30) * 10) / 10);
+      const shows = moves.some((move) => at - move >= afterMs && at - move < afterMs + 1000 / 30);
+      changed.push(shows ? 0.2 : 0.0004 * (k % 3));
+    }
+    return { t0HostMs: t0, atMs, changed, costMs: 0.7 };
+  }
+
+  it("measures each solve's motion from its armed scramble to its clip, which says where it peaked and the camera's lag from it; clip.saved says the latencies, the cadence and the pipeline", async () => {
+    const r = rig();
+    const events = spyEvents();
+    const { fake, capture } = await recording(r);
+    r.camera.setFraming(FRAMING);
+    r.s.service.putCameraClock('laptop', CHECK);
+    TestBed.tick();
+    feed(capture, r, 3, 4.1);
+
+    // The scramble done: the attempt is armed, and the meter goes on in the framing rectangle.
+    const scrambled = scramble(r, fake);
+    expect(capture.meters).toEqual([{ on: true, rect: FRAMING }]);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    await settle();
+    solve(r, fake, scrambled);
+    const record = r.s.service.attempts()[0];
+    expect(record.result.status).toBe('solved');
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext(
+      {
+        captureLatencyMs: { p50: 4.1, p95: 11.1, basis: 'timestamp' },
+        encodeLatencyMs: { p50: 14, p95: 22 },
+      },
+      { frameIntervalMs: 33.3 },
+      motionOf(record, 80),
+    );
+    await settle();
+    await r.s.service.whenSaved();
+    // Off once the solve clip is saved.
+    expect(capture.meters.at(-1)).toEqual({ on: false, rect: null });
+
+    const [stored] = (await r.s.store.exportSession(sessionId(r))).attempts;
+    const clip = stored.video.find((c) => c.segment === 'solve');
+    // The change shows 80 to 113 ms after each move: its middle, about 97 ms.
+    expect(clip?.motionPeakMs).toBeGreaterThan(85);
+    expect(clip?.motionPeakMs).toBeLessThan(110);
+    expect(clip?.motionSpreadMs).toBeGreaterThan(0);
+    // Anchored to the check: its lag plus how far the peak moved from the check's own.
+    expect(clip?.syncResidualMs).toBe(58.4);
+    expect(clip?.motionLagMs).toBe(Math.round((58.4 + (clip?.motionPeakMs ?? 0) - 72.3) * 10) / 10);
+    // The scramble clip has none.
+    expect(stored.video.find((c) => c.segment === 'scramble')).toMatchObject({
+      motionPeakMs: null,
+      motionLagMs: null,
+    });
+    const saved = events.filter(([kind]) => kind === 'clip.saved').map(([, data]) => data);
+    expect(saved).toHaveLength(2);
+    expect(saved[1]).toMatchObject({
+      segment: 'solve',
+      // The sync check's lag, which the event lacked before T5.3.
+      syncResidualMs: 58.4,
+      captureLatencyMs: { p50: 4.1, p95: 11.1, basis: 'timestamp' },
+      encodeLatencyMs: { p50: 14, p95: 22 },
+      frameIntervalMs: 33.3,
+      motionPeakMs: clip?.motionPeakMs,
+      motionLagMs: clip?.motionLagMs,
+      pipeline: { waitingShare: 0, queueMax: 2, pendingMax: 1 },
+    });
+  });
+
+  it('measures nothing with "Measure the motion during solves" off: the clip has no peak', async () => {
+    const r = rig();
+    TestBed.inject(SettingsService).setMotionMeter(false);
+    const { fake, capture } = await recording(r);
+    const scrambled = scramble(r, fake);
+    expect(capture.meters).toEqual([]);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    solve(r, fake, scrambled);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    await settle();
+    await r.s.service.whenSaved();
+    const [stored] = (await r.s.store.exportSession(sessionId(r))).attempts;
+    expect(stored.video.map((c) => c.motionPeakMs)).toEqual([null, null]);
+    expect(capture.meters).toEqual([]);
+  });
+
+  it("says when the capture latency drifts from the check's, records it, restarts the recording after an attempt it held through, and says it recovered", async () => {
+    const r = rig();
+    const events = spyEvents();
+    const { fake, capture } = await recording(r);
+    r.s.service.putCameraClock('laptop', CHECK);
+    TestBed.tick();
+    feed(capture, r, 12, 4.1);
+    expect(r.recording.latencyDrift()).toBeNull();
+    expect(r.recording.captureLatencyMs()).toBe(4.1);
+    // The step of 2026-10-09: 75 ms more from now on.
+    feed(capture, r, 12, 79.2);
+    expect(r.recording.latencyDrift()).toBe(76);
+    const latency = events.filter(([kind]) => kind === 'recording.latency').map(([, d]) => d);
+    expect(latency).toEqual([
+      expect.objectContaining({
+        camera: 'laptop',
+        why: 'drift',
+        baselineMs: 3.2,
+        p50Ms: 79.2,
+        p95Ms: 86.2,
+        deltaMs: 76,
+        basis: 'timestamp',
+        waiting: 28,
+        frameIntervalMs: 34.6,
+        restartOn: true,
+      }),
+    ]);
+
+    // An attempt through the drift: once its solve clip is saved, the recording starts again.
+    const scrambled = scramble(r, fake);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    solve(r, fake, scrambled);
+    await wait(r, SAVE_AFTER_MS);
+    expect(r.starter.started).toHaveLength(1);
+    capture.saveNext();
+    await settle();
+    await sync(r);
+    expect(capture.stopped).toBe(true);
+    expect(r.starter.started).toHaveLength(2);
+    expect(r.recording.restarted()).toMatchObject({ deltaMs: 76 });
+    expect(events.filter(([kind]) => kind === 'recording.restarted').map(([, d]) => d)).toEqual([
+      { why: 'latency', camera: 'laptop', deltaMs: 76, baselineMs: 3.2, p50Ms: 79.2, p95Ms: 86.2 },
+    ]);
+    expect(r.s.service.session()?.notes).toContain(
+      'recording restarted: the capture latency of laptop was +76 ms from its sync check',
+    );
+
+    // The new run's frames come as before the step: recovered, said once a minute after the drift.
+    const next = r.starter.last;
+    feed(next, r, 70, 4.3);
+    expect(r.recording.latencyDrift()).toBeNull();
+    expect(r.recording.restarted()).toBeNull();
+    expect(
+      events.filter(([kind]) => kind === 'recording.latency').map(([, d]) => d['why']),
+    ).toEqual(['drift', 'recovered']);
+  });
+
+  it('does not restart for a drift that began during the attempt, once per drift, nor with the setting off', async () => {
+    const r = rig();
+    const events = spyEvents();
+    const { fake, capture } = await recording(r);
+    r.s.service.putCameraClock('laptop', CHECK);
+    TestBed.tick();
+    feed(capture, r, 12, 4.1);
+    // The scramble turned before the drift: it did not hold for the whole attempt.
+    const first = scramble(r, fake);
+    feed(capture, r, 12, 79.2);
+    expect(r.recording.latencyDrift()).toBe(76);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    solve(r, fake, first);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    await settle();
+    await sync(r);
+    expect(r.starter.started).toHaveLength(1);
+
+    // The setting off: the next attempt, through the drift, does not restart either.
+    TestBed.inject(SettingsService).setRestartOnLatencyDrift(false);
+    await wait(r, 5000);
+    const second = scramble(r, fake);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    solve(r, fake, second);
+    await wait(r, SAVE_AFTER_MS);
+    capture.saveNext();
+    await settle();
+    await sync(r);
+    expect(r.starter.started).toHaveLength(1);
+    expect(events.filter(([kind]) => kind === 'recording.restarted')).toEqual([]);
+  });
+
+  it("summarises the pipeline's counters over a clip's span", () => {
+    const at = (atMs: number, waiting: number, delay: number, queueMax = 1): StatsEntryLike => ({
+      atMs,
+      stats: {
+        ...latencyStats(1, 4),
+        fps: 30,
+        postedHostMs: atMs - delay,
+        latency: {
+          capture: null,
+          encode: null,
+          floorMs: null,
+          queueMax,
+          pending: queueMax,
+          waiting,
+          frameIntervalMs: 33.3,
+        },
+      },
+    });
+    const entries = [
+      at(900, 30, 9),
+      at(1000, 0, 1),
+      at(2000, 29, 2, 5),
+      at(3000, 30, 3),
+      at(5000, 0, 50),
+    ];
+    expect(pipelineSummary(entries, 1000, 3000)).toEqual({
+      waitingShare: 0.97,
+      queueMax: 5,
+      pendingMax: 5,
+      mainDelayMs: 2,
+      seconds: 3,
+    });
+    expect(pipelineSummary(entries, 6000, 7000)).toEqual({
+      waitingShare: null,
+      queueMax: null,
+      pendingMax: null,
+      mainDelayMs: null,
+      seconds: 0,
+    });
+  });
+});
+
+interface StatsEntryLike {
+  readonly atMs: number;
+  readonly stats: CaptureStats;
+}

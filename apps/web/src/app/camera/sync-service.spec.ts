@@ -1,6 +1,8 @@
+import { TestBed } from '@angular/core/testing';
 import type { FakeCube } from '@cubetrace/gan';
 
 import { FAKE_FACETIME, FAKE_WEBCAM } from '../device/fake-browser';
+import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SYNC_GRACE_MS, SYNC_SETTLE_MS } from '../session/session-service';
 import { inverse, ready, turn } from '../session/session-harness';
 import { statsOf, type FakeCapture } from './recording-testing';
@@ -106,6 +108,51 @@ describe('SyncService', () => {
     await update(r);
     expect(r.sync.visible()).toBe(false);
     expect(capture.watches).toHaveLength(1);
+  });
+
+  it("keeps what anchors the lag measured later from the solves: the check's own motion peak and the capture latency then (T5.3)", async () => {
+    const r = rig();
+    const events: [string, Record<string, unknown>][] = [];
+    vi.spyOn(TestBed.inject(DiagnosticsService), 'record').mockImplementation((kind, data = {}) => {
+      events.push([kind, { ...data }]);
+    });
+    const { fake, capture } = await recording(r);
+    // The meter's counters: the frames came 3.9 ms beyond the track's floor.
+    const latency = (seconds: number): ReturnType<typeof statsOf> =>
+      statsOf(seconds, {
+        latency: {
+          capture: { p50: 3.9, p95: 9.5, basis: 'capture-time' },
+          encode: null,
+          floorMs: null,
+          queueMax: 0,
+          pending: 0,
+          waiting: 0,
+          frameIntervalMs: 33.3,
+        },
+      });
+    for (let k = 0; k < 5; k++) {
+      capture.emitStats(latency(5 + k));
+    }
+    // Ten turns, each one's motion centred 60 ms after it.
+    const { turns, energy } = clapperboard(
+      r.s.perf.hostMs,
+      Array.from({ length: 10 }, () => 60),
+    );
+    await film(r, capture, fake, 14_000, energy, turns);
+    expect(r.sync.run()?.state()).toBe('done');
+    const clock = r.s.service.session()?.clock.cameras['laptop'];
+    expect(clock?.offsetMs).toBe(60);
+    // The solves' estimator on the check's frames: its turns' motion, five frames about their middle.
+    expect(clock?.motionPeakAtCheckMs).toBeGreaterThan(50);
+    expect(clock?.motionPeakAtCheckMs).toBeLessThan(70);
+    expect(clock?.captureLatencyAtCheckMs).toBe(3.9);
+    const check = events.find(([kind]) => kind === 'sync.check')?.[1];
+    expect(check).toMatchObject({
+      outcome: 'ok',
+      motionPeakMs: clock?.motionPeakAtCheckMs,
+      captureLatencyMs: 3.9,
+    });
+    expect(check?.['motionSpreadMs']).toBeGreaterThan(0);
   });
 
   it("suspends the timer while it runs and until the cube is still: the turns become no attempt's, which begins again after it with its scramble and number", async () => {

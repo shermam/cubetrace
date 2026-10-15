@@ -30,6 +30,7 @@ const REPORT: RemoteReport = {
   pressure: 'nominal',
   pressureSource: 'thermals',
   pendingClips: 0,
+  latencyMs: 3.1,
 };
 
 /** A stream of tracks, as the browser's `MediaStream` makes one (jsdom has none). */
@@ -57,6 +58,7 @@ function camera(id: string, changes: Partial<RemoteCameraEntry> = {}): RemoteCam
     report: null,
     reportMs: null,
     drift: [],
+    latencyDeltaMs: null,
     ...changes,
   };
 }
@@ -86,6 +88,7 @@ describe('RemotePreviews', () => {
       cameras,
       watchMotion: () => null,
       clockRecord: () => null,
+      latencyOf: () => null,
       resetDrift: (id) => {
         resets.push(id);
       },

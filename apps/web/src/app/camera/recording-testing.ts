@@ -81,6 +81,12 @@ export function clipFor(params: SaveClipParams): VideoClip {
     framesFile: `${params.camera}.${params.segment}.frames.json`,
     syncResidualMs: null,
     truncatedStart: false,
+    // T5.3: as the clip writer leaves them, for the capture's latencies and the window's motion.
+    captureLatencyMs: null,
+    encodeLatencyMs: null,
+    motionPeakMs: null,
+    motionSpreadMs: null,
+    motionLagMs: null,
   };
 }
 

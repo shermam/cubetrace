@@ -491,6 +491,8 @@ describe('RemoteCamerasService', () => {
       thermal: 'ok',
       pressure: 'nominal',
       pressureSource: 'cpu',
+      // T5.3: its capture latency.
+      latencyMs: 3.1,
       ageMs: 'number',
     });
     const minute = r.s.service.session()?.clock.cameras['phone-rear'].remote;
@@ -546,6 +548,7 @@ describe('RemoteCamerasService', () => {
       thermal: 'throttled',
       pressure: 'serious',
       pressureSource: 'thermals',
+      latencyMs: 4.3,
       ageMs: 2500,
     });
     // A phone of 0.4.0: no pressure; a browser without a battery or a sharpness yet.
@@ -558,6 +561,7 @@ describe('RemoteCamerasService', () => {
             battery: null,
             pressure: null,
             pressureSource: null,
+            latencyMs: null,
           },
           reportMs: 1000,
         },
@@ -571,7 +575,58 @@ describe('RemoteCamerasService', () => {
       batteryCharging: null,
       pressure: null,
       pressureSource: null,
+      latencyMs: null,
       ageMs: 0,
+    });
+  });
+
+  it("watches the phone's capture latency from its reports against its check's: the drift on its entry and in recording.latency; the minute's record keeps the check's anchors (T5.3)", async () => {
+    const phone = await paired();
+    await pass(r.s, 2000);
+    // The phone's sync check, as SyncService keeps it beside its clock sync.
+    const check = r.s.service.session()?.clock.cameras['phone-rear'];
+    r.s.service.putCameraClock('phone-rear', {
+      offsetMs: 61.3,
+      rttMs: check?.rttMs ?? 0,
+      driftPpm: check?.driftPpm ?? 0,
+      clapperboardResidualMs: 22.5,
+      clapperboardSamples: 8,
+      motionPeakAtCheckMs: 81.2,
+      captureLatencyAtCheckMs: 30.5,
+      ...(check?.remote === undefined ? {} : { remote: check.remote }),
+    });
+    // Its reports every 2 s: at the check's latency, then 75 ms more.
+    for (let k = 0; k < 6; k++) {
+      phone.sendState({ latencyMs: 31 });
+      await pass(r.s, 2000);
+    }
+    expect(r.service.cameras()[0].latencyDeltaMs).toBeNull();
+    expect(TestBed.inject(RemoteCameraRegistry).latencyOf(r.service.cameras()[0].id)).toBe(31);
+    for (let k = 0; k < 8; k++) {
+      phone.sendState({ latencyMs: 106 });
+      await pass(r.s, 2000);
+    }
+    expect(r.service.cameras()[0].latencyDeltaMs).toBe(76);
+    expect(TestBed.inject(RemoteCameraRegistry).cameras()[0].latencyDeltaMs).toBe(76);
+    const all = await events();
+    expect(all.filter((e) => e.kind === 'recording.latency').map((e) => e.data)).toEqual([
+      {
+        camera: 'phone-rear',
+        peer: 'ThinkPhone',
+        remote: true,
+        why: 'drift',
+        baselineMs: 30.5,
+        p50Ms: 106,
+        p95Ms: null,
+        deltaMs: 76,
+      },
+    ]);
+    // A minute's record of the clock sync keeps the check's anchors as they were.
+    await pass(r.s, CLOCK_RECORD_MS);
+    expect(r.s.service.session()?.clock.cameras['phone-rear']).toMatchObject({
+      offsetMs: 61.3,
+      motionPeakAtCheckMs: 81.2,
+      captureLatencyAtCheckMs: 30.5,
     });
   });
 
@@ -948,6 +1003,8 @@ describe('RemoteCamerasService', () => {
         reportMs: r.service.cameras()[0].reportMs,
         // What its camera changed by itself (T5.2): nothing.
         drift: [],
+        // Its capture latency's drift (T5.3): none, without a check.
+        latencyDeltaMs: null,
       },
     ]);
     expect(registry.cameras()[0].report).toMatchObject({ pressure: 'nominal', fps: 29.9 });

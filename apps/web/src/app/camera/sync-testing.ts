@@ -227,6 +227,13 @@ export class FakeRemoteSource implements RemoteCameraSource {
     return this.clock;
   }
 
+  /** The phone's capture latency now, as its reports gave it (T5.3); null by default. */
+  latency: number | null = null;
+
+  latencyOf(): number | null {
+    return this.latency;
+  }
+
   /** The cameras whose drift was reset (T5.2), in order. */
   readonly resets: string[] = [];
 
@@ -268,6 +275,7 @@ export function remotePhone(
     report: null,
     reportMs: null,
     drift: [],
+    latencyDeltaMs: null,
     ...changes,
   };
 }

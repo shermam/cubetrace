@@ -179,6 +179,7 @@ export class RemoteCameras {
         converged: camera.sync?.converged ?? false,
         sharpnessThreshold: this.settings.sharpnessThreshold(),
         drift: camera.drift,
+        latencyDeltaMs: camera.latencyDeltaMs,
       },
       'list',
     );

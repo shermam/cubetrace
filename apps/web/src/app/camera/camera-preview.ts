@@ -15,6 +15,13 @@ import { SettingsService, type RemotePictures } from '../settings/settings-servi
 import { fpsText, sharpnessText } from './camera-format';
 import { CameraService } from './camera-service';
 import { driftWords } from './controls-source';
+import {
+  MOTION_LAG_LIMIT_MS,
+  latencyWords,
+  motionLagOff,
+  motionLagWords,
+  solveClipOf,
+} from './latency-words';
 import { RecordingService } from './recording-service';
 import { RemoteCameraRegistry } from './remote-camera-registry';
 import { RemotePreviews } from './remote-previews';
@@ -31,7 +38,11 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
  * a front camera like the Camera settings' picture, with the framing rectangle drawn on it (it is
  * moved and resized in Camera settings), and under it one line: the frame rate measured, the
  * sharpness (green when good, amber when soft), what the recording is doing, how full storage
- * is and, in red, a mode the camera changed by itself (T5.2: "focus went manual"). It measures the frames for `CameraService` (`watchPreview`), holding the sharpness meter while
+ * is and, in red, a mode the camera changed by itself (T5.2: "focus went manual"); in amber, the
+ * capture latency's drift from the camera's sync check (T5.3: `latency +75 ms`), `restarted` when
+ * the recording started again for it, and the last solve clip's motion lag when it sits more than
+ * 30 ms from the check's (T5.3: `motion lag 133 ms (check 58)`). It measures the frames for
+ * `CameraService` (`watchPreview`), holding the sharpness meter while
  * an attempt is armed or solving, so that drawing a frame never delays a move of the solve. Under
  * them, the sync check (T2.5, `SyncCheck`): its countdown and its result are where the solver looks
  * while turning the cube in front of the camera. On a phone with the scramble over the picture
@@ -144,6 +155,33 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
                 @for (words of drift(); track $index) {
                   ·
                   <span class="drift" data-testid="camera-status-drift">{{ words }}</span>
+                }
+                @if (latency(); as words) {
+                  ·
+                  <span
+                    class="warn"
+                    data-testid="camera-status-latency"
+                    title="The camera's frames reach the recording this much later than when its sync check ran, for 5 s and more: the clips' labels would be late by as much. A sync check measures the lag again."
+                    >{{ words }}</span
+                  >
+                }
+                @if (restarted()) {
+                  ·
+                  <span
+                    class="warn"
+                    data-testid="camera-status-restarted"
+                    title="The recording started again after the last solve: its latency had drifted for a whole attempt (Settings → Camera)."
+                    >restarted</span
+                  >
+                }
+                @if (motionLag(); as words) {
+                  ·
+                  <span
+                    class="warn"
+                    data-testid="camera-status-motion-lag"
+                    [title]="motionLagTitle"
+                    >{{ words }}</span
+                  >
                 }
               </p>
             }
@@ -302,6 +340,10 @@ export type RecordingWord = 'idle' | 'starting' | 'recording' | 'saving' | 'stop
       color: var(--danger);
     }
 
+    .warn {
+      color: var(--warn);
+    }
+
     /* Pinned at the top of a phone's Timer page, the scramble over its lower part (T2.13): the
        frames' proportions rather than 16:9, so that nothing but a phone's upright frames needs bars,
        and the line over the picture, small and on a dark ground of its own. */
@@ -430,6 +472,27 @@ export class CameraPreview {
    * in red, a part per control, as a phone's line says its own.
    */
   protected readonly drift = computed(() => this.camera.drift().map((drift) => driftWords(drift)));
+  /** The capture latency's drift from the camera's sync check (T5.3), "latency +75 ms"; null otherwise. */
+  protected readonly latency = computed(() => {
+    const delta = this.recorder.latencyDrift();
+    return delta === null ? null : latencyWords(delta);
+  });
+  /** The recording started again for its drifting latency (T5.3), while the drift lasts. */
+  protected readonly restarted = computed(() => this.recorder.restarted() !== null);
+  /**
+   * The last solve clip of this camera, when its lag from the solve's own moves sits more than 30 ms
+   * from its sync check's (T5.3): "motion lag 133 ms (check 58)"; null otherwise.
+   */
+  protected readonly motionLag = computed(() => {
+    const identity = this.camera.identity();
+    const label = identity === null ? null : this.session.cameraLabel(identity);
+    const off = motionLagOff(solveClipOf(this.session.lastResult(), label));
+    return off === null ? null : motionLagWords(off);
+  });
+  protected readonly motionLagTitle =
+    `In the last solve the camera's picture lagged the cube by this much by the motion around its ` +
+    `turns, more than ${String(MOTION_LAG_LIMIT_MS)} ms from its sync check's: the clip keeps both. ` +
+    'A sync check measures the lag again.';
   /** "12%": whole percents, down, as the storage meter says it; null while unknown. */
   protected readonly storagePercent = computed(() => {
     const percent = this.storage.percent();
