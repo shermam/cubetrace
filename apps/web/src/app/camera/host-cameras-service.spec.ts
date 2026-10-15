@@ -251,7 +251,7 @@ describe('HostCamerasService', () => {
     expect(hosts.cameras().map((camera) => camera.deviceId())).toEqual(['facetime']);
   });
 
-  it('leaves a camera on that is not connected closed, and opens it when it is plugged in', async () => {
+  it('leaves a camera on that is not connected closed, opens it when it is plugged in, and closes it when unplugged', async () => {
     const hosts = load({
       cameras: [FAKE_FACETIME],
       stored: { camerasOn: [FAKE_FACETIME.label, USB_WEBCAM.label] },
@@ -267,6 +267,16 @@ describe('HostCamerasService', () => {
       USB_WEBCAM.label,
     ]);
     expect(media.requests[1].video).toMatchObject({ deviceId: { exact: 'usb-webcam' } });
+
+    // Unplugged while open: it closes and the other goes on; its switch stays on, for its return.
+    media.setCameras([FAKE_FACETIME]);
+    await update();
+    expect(hosts.cameras().map((camera) => camera.label())).toEqual([FAKE_FACETIME.label]);
+    expect(media.liveTracks().map((track) => track.label)).toEqual([FAKE_FACETIME.label]);
+    expect(settings().camerasOn()).toEqual([FAKE_FACETIME.label, USB_WEBCAM.label]);
+    media.setCameras([FAKE_FACETIME, USB_WEBCAM]);
+    await update();
+    expect(hosts.cameras().map((camera) => camera.status())).toEqual(['on', 'on']);
   });
 
   it('says a camera gone as it opens is not connected, and opens no other camera in its place', async () => {
