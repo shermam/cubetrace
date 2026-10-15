@@ -32,10 +32,12 @@ import { ClipsInFlight } from '../session/clips-in-flight';
 import { inverse, ready, setup, turn, type Setup } from '../session/session-harness';
 import { SettingsService } from '../settings/settings-service';
 import { CameraService } from './camera-service';
+import { HostCamerasService } from './host-cameras-service';
 import {
   CAPTURE_STARTER,
   CLIP_TAIL_MS,
   ENCODER_SETTLE_MS,
+  LOAD_ADVICE,
   RecordingService,
   SCRAMBLE_CLIP_MAX_MS,
   SCRAMBLE_LEAD_MS,
@@ -142,6 +144,50 @@ async function recording(r: Rig) {
 
 function sessionId(r: Rig): string {
   return r.s.service.session()?.id ?? '';
+}
+
+/** The FaceTime camera's name, the second camera of the rig's laptop. */
+const FACETIME = 'FaceTime HD Camera (3A71:F4B5)';
+
+/**
+ * Turns the camera called `label` on (or off) with its switch (T5.5), the cameras listed once the
+ * first one opened, and lets the recording follow.
+ */
+async function switchCamera(r: Rig, label: string, on: boolean): Promise<void> {
+  const hosts = TestBed.inject(HostCamerasService);
+  const device = hosts.devices().find((candidate) => candidate.label === label);
+  if (device === undefined) {
+    throw new Error(`No camera ${label}.`);
+  }
+  await hosts.setOn(device, on);
+  await sync(r);
+}
+
+/**
+ * The pipeline running on the `k`-th camera of the host, the last one started on it (the cameras'
+ * pipelines start in no set order: the first one waits for the microphone).
+ */
+function pipelineOf(r: Rig, k: number): FakeCapture {
+  const track = TestBed.inject(HostCamerasService).cameras()[k]?.stream()?.getVideoTracks()[0];
+  const capture = r.starter.started.filter((started) => started.video === track).at(-1);
+  if (track === undefined || capture === undefined) {
+    throw new Error(`No pipeline on camera ${String(k)}.`);
+  }
+  return capture;
+}
+
+/** Both cameras of the rig on (the default one, then the FaceTime camera), a session under way. */
+async function bothRecording(r: Rig) {
+  await r.camera.start();
+  await switchCamera(r, FACETIME, true);
+  const fake = await ready(r.s);
+  await sync(r);
+  const first = pipelineOf(r, 0);
+  const second = pipelineOf(r, 1);
+  first.emitStats(statsOf(5));
+  second.emitStats(statsOf(5));
+  TestBed.tick();
+  return { fake, first, second };
 }
 
 /** Everything but the clips: the attempt's timing, moves, phases and result. */
@@ -1016,6 +1062,192 @@ describe('RecordingService', () => {
     );
     await wait(r, SAVE_AFTER_MS);
     expect(capture.saves.map((save) => save.params.segment)).toEqual(['scramble']);
+  });
+
+  describe('with two cameras of the laptop (T5.5)', () => {
+    it('records each, the first with the microphone; an attempt gets two clips from each, under their labels', async () => {
+      const r = rig();
+      const { fake, first, second } = await bothRecording(r);
+      const hosts = TestBed.inject(HostCamerasService);
+      expect(r.starter.started).toHaveLength(2);
+      expect(hosts.cameras().map((camera) => camera.label())).toEqual(['fake_device_0', FACETIME]);
+      // The microphone once, with the first camera's clips; the second's without sound.
+      expect(first.audio).toBe(r.media.audioTracks[0]);
+      expect(first.config).toEqual({ audio: true, quality: 'standard' });
+      expect(second.audio).toBeNull();
+      expect(second.config).toEqual({ audio: false, quality: 'standard' });
+      expect(microphoneRequests(r.media)).toEqual([RAW_REQUEST]);
+      const recordings = r.recording.recordings();
+      expect(recordings.map((recording) => recording.status())).toEqual(['recording', 'recording']);
+      expect(recordings.map((recording) => recording.audio())).toEqual([true, false]);
+      expect(recordings.map((recording) => recording.microphone())).toEqual([RAW_MICROPHONE, null]);
+      expect(r.recording.recordingOf(hosts.cameras()[1])).toBe(recordings[1]);
+      expect(r.recording.primary()).toBe(recordings[0]);
+      expect(r.recording.status()).toBe('recording');
+      // An entry each in the session, in the cameras' order; the session records sound.
+      const session = r.s.service.session();
+      expect(
+        session?.cameras.map((entry) => [entry.label, entry.deviceLabel, entry.microphone]),
+      ).toEqual([
+        ['laptop', 'fake_device_0', RAW_MICROPHONE],
+        ['laptop-2', FACETIME, null],
+      ]);
+      expect(session?.audio).toBe(true);
+
+      const scramble = r.s.service.attempt()?.scramble ?? '';
+      turn(r.s, fake, scramble);
+      await wait(r, SAVE_AFTER_MS);
+      const asked = (capture: FakeCapture) =>
+        capture.saves.map((save) => [
+          save.params.camera,
+          save.params.segment,
+          save.params.fpsNominal,
+        ]);
+      expect(asked(first)).toEqual([['laptop', 'scramble', 20]]);
+      expect(asked(second)).toEqual([['laptop-2', 'scramble', 30]]);
+      first.saveNext();
+      second.saveNext({ audio: null });
+      await settle();
+      turn(r.s, fake, inverse(scramble), 500);
+      await wait(r, SAVE_AFTER_MS);
+      expect(asked(first)).toEqual([['laptop', 'solve', 20]]);
+      expect(asked(second)).toEqual([['laptop-2', 'solve', 30]]);
+      first.saveNext();
+      second.saveNext({ audio: null });
+      await settle();
+      await r.s.service.whenSaved();
+      const [stored] = (await r.s.store.exportSession(sessionId(r))).attempts;
+      expect(
+        stored.video
+          .map((clip) => [clip.camera, clip.segment, clip.file, clip.framesFile, clip.audio])
+          .sort(),
+      ).toEqual([
+        ['laptop', 'scramble', 'laptop.scramble.mp4', 'laptop.scramble.frames.json', 'opus'],
+        ['laptop', 'solve', 'laptop.solve.mp4', 'laptop.solve.frames.json', 'opus'],
+        ['laptop-2', 'scramble', 'laptop-2.scramble.mp4', 'laptop-2.scramble.frames.json', null],
+        ['laptop-2', 'solve', 'laptop-2.solve.mp4', 'laptop-2.solve.frames.json', null],
+      ]);
+      // The recording's words name the clip's camera while several record.
+      expect(r.recording.lastClip()?.clip.camera).toMatch(/^laptop(-2)?$/u);
+    });
+
+    it('labels the cameras in their order, whichever pipeline starts first', async () => {
+      const r = rig();
+      await r.camera.start();
+      await switchCamera(r, FACETIME, true);
+      // The microphone's prompt holds the first camera's pipeline: the second one starts first.
+      r.media.hold();
+      await ready(r.s);
+      TestBed.tick();
+      await settle();
+      expect(r.starter.started.map((capture) => capture.audio)).toEqual([null]);
+      expect(
+        r.s.service.session()?.cameras.map((entry) => [entry.label, entry.deviceLabel]),
+      ).toEqual([
+        ['laptop', 'fake_device_0'],
+        ['laptop-2', FACETIME],
+      ]);
+      r.media.release();
+      await sync(r);
+      expect(r.starter.started).toHaveLength(2);
+      expect(r.starter.started[1].audio).toBe(r.media.audioTracks[0]);
+      expect(r.s.service.session()?.cameras.map((entry) => entry.label)).toEqual([
+        'laptop',
+        'laptop-2',
+      ]);
+    });
+
+    it('a camera turned off mid-session: its clips stop, the records stay right; the microphone goes with the first camera', async () => {
+      const r = rig();
+      const { fake, first, second } = await bothRecording(r);
+
+      // The second camera off between two attempts: its pipeline stops; the next attempt has the
+      // first camera's clips only, and the session keeps both entries.
+      await switchCamera(r, FACETIME, false);
+      expect(second.stopped).toBe(true);
+      expect(first.stopped).toBe(false);
+      expect(r.recording.recordings()).toHaveLength(1);
+      const scramble = r.s.service.attempt()?.scramble ?? '';
+      turn(r.s, fake, scramble);
+      await wait(r, SAVE_AFTER_MS);
+      first.saveNext();
+      await settle();
+      turn(r.s, fake, inverse(scramble), 500);
+      await wait(r, SAVE_AFTER_MS);
+      first.saveNext();
+      await settle();
+      await r.s.service.whenSaved();
+      const exported = await r.s.store.exportSession(sessionId(r));
+      expect(exported.attempts[0].video.map((clip) => [clip.camera, clip.segment])).toEqual([
+        ['laptop', 'scramble'],
+        ['laptop', 'solve'],
+      ]);
+      expect(exported.session.cameras.map((entry) => entry.label)).toEqual(['laptop', 'laptop-2']);
+
+      // Back on, then the first one off: the FaceTime camera is the first now, and its pipeline
+      // starts again with the microphone, under its own label still.
+      await switchCamera(r, FACETIME, true);
+      const third = pipelineOf(r, 1);
+      expect(third.config.audio).toBe(false);
+      await switchCamera(r, 'fake_device_0', false);
+      expect(first.stopped).toBe(true);
+      expect(third.stopped).toBe(true);
+      const fourth = pipelineOf(r, 0);
+      expect(fourth.config.audio).toBe(true);
+      expect(fourth.audio).not.toBeNull();
+      fourth.emitStats(statsOf(5));
+      TestBed.tick();
+      expect(
+        r.s.service.session()?.cameras.map((entry) => [entry.label, entry.microphone]),
+      ).toEqual([
+        ['laptop', RAW_MICROPHONE],
+        ['laptop-2', RAW_MICROPHONE],
+      ]);
+    });
+
+    it('says once per recording when a camera encodes under 80% of its frame rate for 10 s, and never with one camera', async () => {
+      const r = rig();
+      const events: [string, Record<string, unknown>][] = [];
+      vi.spyOn(TestBed.inject(DiagnosticsService), 'record').mockImplementation(
+        (kind, data = {}) => {
+          events.push([kind, { ...data }]);
+        },
+      );
+      const { first, second } = await bothRecording(r);
+      const [, facetime] = r.recording.recordings();
+      // The FaceTime camera's track says 30 fps; it encodes 20 of them, second after second.
+      const seconds = async (count: number, encodedFps: number): Promise<void> => {
+        for (let k = 0; k < count; k++) {
+          await wait(r, 1000);
+          first.emitStats(statsOf(5));
+          second.emitStats(statsOf(5, { encodedFps }));
+        }
+        TestBed.tick();
+      };
+      await seconds(10, 20);
+      expect(facetime.notices()).toEqual([]);
+      expect(facetime.load()).toBeNull();
+      await seconds(1, 20);
+      const words = `laptop-2 records 20 of its 30 frames a second. ${LOAD_ADVICE}`;
+      expect(facetime.notices()).toEqual([words]);
+      expect(facetime.load()).toEqual({ encodedFps: 20, nominalFps: 30 });
+      expect(r.recording.recordings()[0].notices()).toEqual([]);
+      await seconds(15, 21);
+      expect(facetime.notices()).toEqual([words]);
+      expect(events.filter(([kind]) => kind === 'recording.notice')).toEqual([
+        ['recording.notice', { message: words, camera: 'laptop-2' }],
+      ]);
+      // Back to its rate: the line's word goes; the notice stays with the recording.
+      await seconds(1, 30);
+      expect(facetime.load()).toBeNull();
+      expect(facetime.notices()).toEqual([words]);
+
+      // One camera alone, however slow, is not the laptop's load.
+      await switchCamera(r, FACETIME, false);
+      await seconds(12, 10);
+      expect(r.recording.recordings()[0].notices()).toEqual([]);
+      expect(r.recording.recordings()[0].load()).toBeNull();
+    });
   });
 });
 
