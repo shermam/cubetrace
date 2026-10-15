@@ -10,8 +10,9 @@ export type SharpnessCamera = Pick<HostCamera, 'sharpness' | 'sharpnessSamples' 
 
 /**
  * The sharpness meter (docs/PLAN.md, T2.1): the variance of the Laplacian of the framing rectangle,
- * measured on the preview twice a second by `CameraService`, on a logarithmic bar against the
- * threshold of Settings, with the value and the verdict (good from the threshold up, soft under it).
+ * measured on its camera's picture twice a second (`HostCamera.watchPreview`), on a logarithmic bar
+ * against the threshold of Settings, with the value and the verdict (good from the threshold up, soft
+ * under it).
  * Camera settings show it on the Timer page, one per camera of the host (T5.5, `camera`), and the
  * Camera page of a phone that films for a host (T4.1: its camera, `CameraService`, by default).
  */

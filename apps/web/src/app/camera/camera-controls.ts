@@ -68,11 +68,11 @@ const FORMATS: Partial<Record<ControlName, (value: number) => string>> = {
  * it shows the value applied, with the camera's reading beside it when the camera reports another
  * (a focus distance as its reciprocal), and a mode shows as set while the camera holds its kind (a
  * manual exposure the camera calls `none`), else as the camera has it. Since T5.2 a
- * view over a `ControlsSource` (`source`): this device's open camera (`CameraService.controlsSource`,
- * Camera settings and the phone's own Camera page), or a phone's over the connection (the Cameras
- * section's `RemoteControlsSource`); a change in flight disables the controls (for a phone, until its
- * answer, 3 s at most), a control the camera changed by itself is said in red, and why a change did
- * not take. A slider held or moved tells the source (`adjusting`), whose watchdog then waits.
+ * view over a `ControlsSource` (`source`): an open camera of this device (`HostCamera.controlsSource`,
+ * a panel per camera in Camera settings since T5.5, and the phone's own Camera page), or a phone's
+ * over the connection (the Cameras section's `RemoteControlsSource`); a change in flight disables the
+ * controls (for a phone, until its answer, 3 s at most), a control the camera changed by itself is
+ * said in red, and why a change did not take. A slider held or moved tells the source (`adjusting`), whose watchdog then waits.
  */
 @Component({
   selector: 'app-camera-controls',
