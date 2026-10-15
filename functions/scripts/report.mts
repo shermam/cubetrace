@@ -17,6 +17,13 @@ export interface ReportEvent {
     readonly label: string;
     readonly platform: string;
     readonly installed: boolean;
+    /**
+     * The first eight characters of the device's installation id (T5.6), which tells two devices
+     * of one label apart; null (or absent, in a fixture) from a build before T5.6.
+     */
+    readonly installation?: string | null;
+    /** The device's model where its browser gives it (T5.6); null (or absent) otherwise. */
+    readonly model?: string | null;
   };
   readonly session: string | null;
   readonly attempt: number | null;
@@ -114,6 +121,8 @@ export function readEvent(uid: string, id: string, document: unknown): ReportEve
       label: typeof device['label'] === 'string' ? device['label'] : '?',
       platform: typeof device['platform'] === 'string' ? device['platform'] : '',
       installed: device['installed'] === true,
+      installation: typeof device['installation'] === 'string' ? device['installation'] : null,
+      model: typeof device['model'] === 'string' ? device['model'] : null,
     },
     session: typeof session === 'string' && session !== '' ? session : null,
     attempt: typeof attempt === 'number' && Number.isInteger(attempt) ? attempt : null,
@@ -195,9 +204,77 @@ function median(values: readonly number[]): number | null {
   return sorted.length % 2 === 1 ? sorted[half] : (sorted[half - 1] + sorted[half]) / 2;
 }
 
-/** `3 events on office-mbp, ThinkPhone`. */
+/**
+ * A device as the report tells it from the others (T5.6): its account, its label and its
+ * installation, so that two phones that both say "Android phone" are two devices; the events of a
+ * build before T5.6 have no installation, and their devices are told apart by their labels alone.
+ */
+export function deviceKey(event: ReportEvent): string {
+  return `${event.uid}\u0000${event.device.label}\u0000${event.device.installation ?? ''}`;
+}
+
+/** Whether `a` and `b` were seen by one device ({@link deviceKey}). */
+function sameDevice(a: ReportEvent, b: ReportEvent): boolean {
+  return deviceKey(a) === deviceKey(b);
+}
+
+/**
+ * The labels of `pairs` (a label and an installation each) that more than one installation has: two
+ * devices of one name (T5.6), which the report names with their installations.
+ */
+function sharedLabels(
+  pairs: Iterable<readonly [string, string | null | undefined]>,
+): ReadonlySet<string> {
+  const installations = new Map<string, Set<string>>();
+  for (const [label, installation] of pairs) {
+    const known = installations.get(label) ?? new Set<string>();
+    known.add(installation ?? '');
+    installations.set(label, known);
+  }
+  return new Set(
+    [...installations.entries()].filter(([, known]) => known.size > 1).map(([label]) => label),
+  );
+}
+
+/**
+ * A device's name in the facts: its label, with its installation when another device of `shared`'s
+ * labels has that label (T5.6: `Android phone (1f2e3d4c)`, `Android phone (before T5.6)`).
+ */
+function named(
+  label: string,
+  installation: string | null | undefined,
+  shared: ReadonlySet<string>,
+): string {
+  if (!shared.has(label)) {
+    return label;
+  }
+  return `${label} (${installation ?? 'before T5.6'})`;
+}
+
+/** The names of the devices of `events`, each once, sorted ({@link named}). */
+function deviceNames(events: readonly ReportEvent[]): string[] {
+  const shared = sharedLabels(events.map((e) => [e.device.label, e.device.installation] as const));
+  return [
+    ...new Set(events.map((e) => named(e.device.label, e.device.installation, shared))),
+  ].sort();
+}
+
+/**
+ * Whether the host's event `e` names the phone that recorded `phoneEvent`: its `peer` is the phone's
+ * label and, when both say one (T5.6), its `peerInstallation` the phone's installation.
+ */
+function namesPhone(e: ReportEvent, phoneEvent: ReportEvent): boolean {
+  const installation = text(e, 'peerInstallation');
+  const own = phoneEvent.device.installation ?? null;
+  return (
+    text(e, 'peer') === phoneEvent.device.label &&
+    (installation === null || own === null || installation === own)
+  );
+}
+
+/** `3 events on office-mbp, ThinkPhone`: two devices of one label named with their installations. */
 function count(events: readonly ReportEvent[], what = 'event'): string {
-  const devices = [...new Set(events.map((event) => event.device.label))].sort();
+  const devices = deviceNames(events);
   const n = events.length;
   return `${String(n)} ${what}${n === 1 ? '' : 's'}${devices.length === 0 ? '' : ` on ${devices.join(', ')}`}`;
 }
@@ -272,8 +349,7 @@ export class Query {
     return (
       this.of(kind).find(
         (event) =>
-          event.device.label === after.device.label &&
-          event.uid === after.uid &&
+          sameDevice(event, after) &&
           event.tsMs > after.tsMs &&
           event.tsMs - after.tsMs <= withinMs &&
           pred(event),
@@ -290,8 +366,7 @@ export class Query {
   ): ReportEvent | null {
     const earlier = this.of(kind).filter(
       (event) =>
-        event.device.label === before.device.label &&
-        event.uid === before.uid &&
+        sameDevice(event, before) &&
         event.tsMs < before.tsMs &&
         before.tsMs - event.tsMs <= withinMs &&
         pred(event),
@@ -402,6 +477,73 @@ const T52A = 'After T5.2a';
 const READINGS = "T5.2a — the watchdog against the camera's own readings";
 const T53 = 'After T5.3';
 const LATENCY = 'T5.3 — the capture latency and the motion lag';
+const T56 = 'After T5.6';
+const PHONES = 'T5.6 — two phones of one name';
+
+/**
+ * The laptops' pairings of phones that said who they are (T5.6: `peerInstallation`), by session:
+ * each phone's installation, name and model, and the label the session gave its camera.
+ */
+function phonesBySession(
+  q: Query,
+): Map<string, { installation: string; peer: string; model: string | null; camera: string }[]> {
+  const out = new Map<
+    string,
+    { installation: string; peer: string; model: string | null; camera: string }[]
+  >();
+  for (const e of q.onLaptop('rtc.paired')) {
+    const installation = text(e, 'peerInstallation');
+    if (installation === null || e.session === null) {
+      continue;
+    }
+    const key = `${e.uid}/${e.session}`;
+    const known = out.get(key) ?? [];
+    if (!known.some((phone) => phone.installation === installation)) {
+      known.push({
+        installation,
+        peer: text(e, 'peer') ?? '?',
+        model: text(e, 'peerModel'),
+        camera: text(e, 'camera') ?? '?',
+      });
+    }
+    out.set(key, known);
+  }
+  return out;
+}
+
+/** `moto g60 (9a8b7c6d) as phone-rear-2`, the model after a typed name. */
+function phoneFacts(phone: {
+  installation: string;
+  peer: string;
+  model: string | null;
+  camera: string;
+}): string {
+  const model = phone.model === null || phone.model === phone.peer ? '' : ` · ${phone.model}`;
+  return `${phone.peer}${model} (${phone.installation}) as ${phone.camera}`;
+}
+
+/**
+ * The laptops' attempts with both clips (the scramble's and the solve's) of `phones` remote cameras
+ * or more (`remote.clip`), by attempt.
+ */
+function attemptsWithPhones(q: Query, phones: number): string[] {
+  const byAttempt = new Map<string, Map<string, Set<string>>>();
+  for (const e of q.onLaptop('remote.clip')) {
+    const key = `${e.uid}/${e.session ?? '?'}/${String(e.attempt ?? 0)}`;
+    const cameras = byAttempt.get(key) ?? new Map<string, Set<string>>();
+    const camera = text(e, 'camera') ?? '?';
+    const segments = cameras.get(camera) ?? new Set<string>();
+    segments.add(text(e, 'segment') ?? '?');
+    cameras.set(camera, segments);
+    byAttempt.set(key, cameras);
+  }
+  return [...byAttempt.entries()]
+    .filter(
+      ([, cameras]) =>
+        [...cameras.values()].filter((s) => s.has('scramble') && s.has('solve')).length >= phones,
+    )
+    .map(([key]) => key);
+}
 
 /** A median of `values` in ms as seconds, to one decimal, or `?` without one. */
 function seconds(values: readonly number[]): string {
@@ -477,23 +619,33 @@ function reportNum(report: Readonly<Record<string, unknown>>, key: string): numb
 }
 
 /**
- * The laptops' `rtc.clock` events with a phone's report (T5.1), by the phone's host label, oldest
- * first: a phone's health over its sessions, a record a minute.
+ * The laptops' `rtc.clock` events with a phone's report (T5.1), by the phone's host label (with its
+ * installation, T5.6, when two phones share the label), oldest first: a phone's health over its
+ * sessions, a record a minute.
  */
 function phoneReports(
   q: Query,
 ): Map<string, { event: ReportEvent; report: Readonly<Record<string, unknown>> }[]> {
+  const reported = q.onLaptop('rtc.clock').flatMap((event) => {
+    const report = reportOf(event);
+    return report === null ? [] : [{ event, report }];
+  });
+  const shared = sharedLabels(
+    reported.map(
+      ({ event }) => [text(event, 'peer') ?? '?', text(event, 'peerInstallation')] as const,
+    ),
+  );
   const out = new Map<
     string,
     { event: ReportEvent; report: Readonly<Record<string, unknown>> }[]
   >();
-  for (const event of q.onLaptop('rtc.clock')) {
-    const report = reportOf(event);
-    if (report === null) {
-      continue;
-    }
-    const peer = text(event, 'peer') ?? '?';
-    out.set(peer, [...(out.get(peer) ?? []), { event, report }]);
+  for (const entry of reported) {
+    const peer = named(
+      text(entry.event, 'peer') ?? '?',
+      text(entry.event, 'peerInstallation'),
+      shared,
+    );
+    out.set(peer, [...(out.get(peer) ?? []), entry]);
   }
   return out;
 }
@@ -3343,11 +3495,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
           .filter((e) => flag(e, 'remote') === true)
           .filter((p) =>
             passed.some(
-              (e) =>
-                flag(e, 'remote') !== true &&
-                e.uid === p.uid &&
-                e.device.label === p.device.label &&
-                e.session === p.session,
+              (e) => flag(e, 'remote') !== true && sameDevice(e, p) && e.session === p.session,
             ),
           )
           .map((e) => e.session),
@@ -3764,7 +3912,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
       const reset = left.filter((drift) =>
         q
           .onLaptop('remote.controls', (e) => text(e, 'outcome') === 'ok')
-          .some((e) => e.tsMs > drift.tsMs && text(e, 'peer') === drift.device.label),
+          .some((e) => e.tsMs > drift.tsMs && namesPhone(e, drift)),
       );
       const facts = `${count(off, 'switch')} off, ${count(left, 'drift')} left, ${String(reset.length)} reset from the MacBook after`;
       return off.length > 0 && reset.length > 0 ? ok(facts) : none(facts);
@@ -3857,7 +4005,7 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         q.onPhone(
           'controls.drift',
           (e) =>
-            e.device.label === text(torch, 'peer') &&
+            namesPhone(torch, e) &&
             e.tsMs > torch.tsMs &&
             e.tsMs - torch.tsMs <= MINUTE &&
             driftOf(e, FOCUS_GROUP) &&
@@ -4046,6 +4194,94 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         : none("no phone's report with a capture latency (a phone's build before T5.3)");
     },
   },
+  // ---- After T5.6: two phones of one name ----
+  {
+    id: '5.6.1',
+    round: T56,
+    section: PHONES,
+    title:
+      'The ThinkPhone and the Moto g60 paired at once with their default names (their models): each listed with a label of its own (phone-rear, phone-rear-2), two pictures with their status lines on the MacBook, each phone\'s Camera page saying "you are … here"',
+    kinds: ['rtc.paired'],
+    eyes: "the two pictures and their lines on the MacBook, each caption naming its phone's model; the words on each phone's Camera page",
+    check: (q) => {
+      const sessions = [...phonesBySession(q).values()].filter((phones) => phones.length >= 2);
+      const merged = sessions.filter(
+        (phones) => new Set(phones.map((phone) => phone.camera)).size < phones.length,
+      );
+      const facts = sessions
+        .map((phones) => phones.map(phoneFacts).join(', '))
+        .slice(-3)
+        .join('; ');
+      if (merged.length > 0) {
+        return failed(`two phones under one label in a session: ${facts}`);
+      }
+      return sessions.length > 0
+        ? ok(
+            `${String(sessions.length)} ${sessions.length === 1 ? 'session' : 'sessions'} with two phones or more: ${facts}`,
+          )
+        : none('no session with two phones that say who they are (a build of T5.6 on both)');
+    },
+  },
+  {
+    id: '5.6.2',
+    round: T56,
+    section: PHONES,
+    title:
+      "Every attempt with the two phones paired: four remote clips, two of each phone under its own label, beside the MacBook's two, uploaded with every file",
+    kinds: ['remote.clip', 'attempt.done', 'upload.state'],
+    eyes: null,
+    check: (q) => {
+      const four = attemptsWithPhones(q, 2);
+      const six = q.realAttempts().filter((e) => !isPhone(e) && (num(e, 'clips') ?? 0) >= 6);
+      const whole = uploadsWith(q, 6);
+      return four.length > 0
+        ? ok(
+            `${String(four.length)} ${four.length === 1 ? 'attempt' : 'attempts'} with both clips of two phones; ${count(six, 'real attempt')} with six clips or more; ${count(whole, 'upload')} with every file`,
+          )
+        : none('no attempt with both clips of two phones');
+    },
+  },
+  {
+    id: '5.6.3',
+    round: T56,
+    section: PHONES,
+    title:
+      "The clip viewer of such an attempt: six buttons, the MacBook's two and each phone's two, each phone named by its label and its model",
+    kinds: ['clips.viewed'],
+    eyes: "the buttons' names",
+    check: (q) => {
+      const views = q.onLaptop('clips.viewed', (e) => (num(e, 'clips') ?? 0) >= 6);
+      return found(views, count(views, 'view'), 'no clip viewer opened on six clips or more');
+    },
+  },
+  {
+    id: '5.6.4',
+    round: T56,
+    section: PHONES,
+    title:
+      'The round report with the two phones: a section of the Events table per phone, each with its installation and its model, and their items telling them apart',
+    kinds: ['app.start'],
+    eyes: 'the sections of this report',
+    check: (q) => {
+      const phones = new Map<string, ReportEvent>();
+      for (const e of q.events) {
+        if (isPhone(e) && (e.device.installation ?? null) !== null) {
+          phones.set(deviceKey(e), e);
+        }
+      }
+      const shared = sharedLabels(
+        [...phones.values()].map((e) => [e.device.label, e.device.installation] as const),
+      );
+      const names = [...phones.values()].map((e) => {
+        const model = e.device.model ?? null;
+        return `${e.device.label} (installation ${e.device.installation ?? '?'}${model === null || model === e.device.label ? '' : `, model ${model}`})`;
+      });
+      const facts = `${String(phones.size)} ${phones.size === 1 ? 'phone' : 'phones'} by installation: ${names.sort().join(', ')}${shared.size === 0 ? '' : `; of one name: ${[...shared].join(', ')}`}`;
+      return phones.size >= 2
+        ? ok(facts)
+        : none(phones.size === 0 ? 'no phone with an installation (a build before T5.6)' : facts);
+    },
+  },
 ];
 
 /** The checklist against the events: each item with its result. */
@@ -4064,21 +4300,26 @@ function cell(value: string): string {
     .trim();
 }
 
-/** The events of every account per device and day, as Markdown tables. */
+/**
+ * The events of every account per device and day, as Markdown tables: one section per device, told
+ * apart by its label and, since T5.6, its installation (two phones that both say "Android phone" are
+ * two sections), with the model its events carry.
+ */
 function deviceTables(events: readonly ReportEvent[]): string[] {
   const lines: string[] = [];
   const byDevice = new Map<string, ReportEvent[]>();
   for (const event of events) {
-    const key = `${event.uid}\u0000${event.device.label}`;
+    const key = deviceKey(event);
     byDevice.set(key, [...(byDevice.get(key) ?? []), event]);
   }
   for (const [key, list] of [...byDevice.entries()].sort(([p], [q]) => p.localeCompare(q))) {
-    const [uid, label] = key.split('\u0000');
+    const [uid, label, installation] = key.split('\u0000');
     const last = list[list.length - 1];
     const starts = list.filter((e) => e.kind === 'app.start');
     const lastStart = starts.at(-1);
+    const model = list.findLast((e) => (e.device.model ?? null) !== null)?.device.model ?? null;
     lines.push(
-      `### ${label} (${last.device.platform || 'unknown platform'}${last.device.installed ? ', installed' : ''}; account ${uid.slice(0, 6)}…)`,
+      `### ${label} (${last.device.platform || 'unknown platform'}${last.device.installed ? ', installed' : ''}; ${installation === '' ? '' : `installation ${installation}; `}${model === null ? '' : `model ${model}; `}account ${uid.slice(0, 6)}…)`,
       '',
       lastStart === undefined
         ? 'No start among these events.'
@@ -4117,7 +4358,8 @@ function deviceTables(events: readonly ReportEvent[]): string[] {
 export function roundReport(events: readonly ReportEvent[], options: ReportOptions): string {
   const { days, nowMs } = options;
   const accounts = new Set(events.map((event) => event.uid));
-  const devices = new Set(events.map((event) => `${event.uid}/${event.device.label}`));
+  const devices = new Set(events.map(deviceKey));
+  const shared = sharedLabels(events.map((e) => [e.device.label, e.device.installation] as const));
   const lines: string[] = [
     `# cubetrace round report: the last ${String(days)} days, to ${when(nowMs)} UTC`,
     '',
@@ -4171,7 +4413,7 @@ export function roundReport(events: readonly ReportEvent[], options: ReportOptio
     );
     for (const event of failures) {
       lines.push(
-        `| ${when(event.tsMs)} | ${cell(event.device.label)} | \`${event.kind}\` | ${event.session === null ? '–' : `${event.session.slice(0, 8)}…${event.attempt === null ? '' : ` / ${String(event.attempt)}`}`} | ${cell(failureMessage(event)) || '–'} |`,
+        `| ${when(event.tsMs)} | ${cell(named(event.device.label, event.device.installation, shared))} | \`${event.kind}\` | ${event.session === null ? '–' : `${event.session.slice(0, 8)}…${event.attempt === null ? '' : ` / ${String(event.attempt)}`}`} | ${cell(failureMessage(event)) || '–'} |`,
       );
     }
     lines.push('');

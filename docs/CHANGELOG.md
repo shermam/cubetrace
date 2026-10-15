@@ -79,8 +79,30 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   `sync.check` its motion peak and the camera's latency, the phone's report in `rtc.clock` its
   `latencyMs`; `settings.changed` names `motionMeter` and `restartOnLatencyDrift`; the round report's
   "After T5.3" items read them.
+- A phone's default name is its model (T5.6): where Chrome gives the device's model (on Android:
+  "moto g60", "ThinkPhone by motorola"), Settings → This device's default label is it rather than
+  "Android phone"; a typed name still wins. The section also shows this browser's installation (the
+  first eight characters of an id it made once) and the model. The cameras chosen under the old
+  default name follow the new one.
 
 ### Fixed
+
+- Two phones paired at once were one camera when they had one name and one camera name (T5.6;
+  `docs/RTC.md` §1): the ThinkPhone and the Moto g60, both "Android phone" with a rear camera Chrome
+  calls "camera 0, facing back", got one label, `phone-rear`, so each attempt asked one of them for
+  its clips and the other's never came; and the diagnostics took them for one device. Each phone
+  now says its installation id in `hello` (made once by its browser, kept in its Settings, never in a
+  record) beside its model, and the laptop knows its camera by it: the second phone is
+  `phone-rear-2`, with its own picture, status line and clips in every attempt, and a phone paired
+  again gets its label back. A phone's Camera page says its label ("you are phone-rear-2 here", from
+  the new `label` message); the Cameras section, the pictures' captions, the clip viewer's buttons
+  and the session page name each phone by its label and model ("phone-rear-2 · moto g60"), and say
+  "named only" for a phone on a build before this one, still known by its name alone.
+  `session.json`'s `cameras[].remote` gains `model`. Diagnostics: every event's device gains
+  `installation` (the id's first eight characters) and `model`; the laptop's `rtc.paired`,
+  `rtc.connected`, `rtc.clock` and `remote.controls` name the phone's installation; the round report
+  gives each installation a section of its Events table and names two devices of one name apart, and
+  its "After T5.6" items read a session of the two phones.
 
 - `clip.saved`'s `syncResidualMs` was always null: the event read the clip as the capture saved it,
   before its record had the camera's lag (found with T5.3; the round report's item 2.5.6 could not

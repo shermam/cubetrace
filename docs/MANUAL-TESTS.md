@@ -1225,3 +1225,41 @@ without them is the good outcome.
 - [ ] The phone's line under its picture says the same of the phone's camera: `latency …` from the
   phone's own reports, `motion lag …` from its solve clips. Nothing restarts a phone's recording
   for it; write the attempts where a word came, as for the MacBook.
+
+## After T5.6 — two phones of one name
+
+On https://shermam.github.io/cubetrace/ once its footer names a commit after T5.6, the rig as in
+"After T4" (the MacBook as the host, its FaceTime camera on, the GAN 12 ui, signed in, Upload
+sessions on) with both phones as its cameras: the ThinkPhone and the Moto g60, each on its stand and
+plugged in, each with its Camera page naming the same commit, and **neither with a name typed** in
+Settings → This device (clear the field if one was typed for "After T4": the default is what this
+round is about), "Pictures from phones" on "Same size as mine". The events say most of it
+(`docs/DIAGNOSTICS.md`, "After T5.6": the MacBook's `rtc.paired` of each phone with its installation
+and its model, each attempt's `remote.clip`s, the clip viewer's `clips.viewed`, and every event's
+device with its installation); write down what they cannot show, next to the item, with what
+happened.
+
+The round is 2026-10-15's: both phones said "Android phone" and both rear cameras "camera 0, facing
+back", so they were one camera to the session and only the first phone's clips came with each
+attempt. Since T5.6 each phone says who it is (an installation id its browser made once) and its
+model, which is now its default name.
+
+- [ ] The names: on each phone, Settings → This device shows its model as the default host label
+  ("moto g60"; the ThinkPhone's Chrome may say "ThinkPhone by motorola" or another name: write it),
+  and under it "Installation" with eight characters, different on the two phones. Write both.
+- [ ] Both phones paired at once (Add camera on the MacBook, the QR on the first phone; Add camera
+  again, the QR on the second): the Cameras list names each by its label and its model,
+  `phone-rear · <model>` and `phone-rear-2 · <model>`, neither saying "Named only"; each phone's
+  Camera page says "you are phone-rear here" or "you are phone-rear-2 here" beside the host. On the
+  Timer page two pictures beside the MacBook's own, each with its caption (label and model) and its
+  status line.
+- [ ] Ten solves or more: every attempt gets six clips (the MacBook's two and two of each phone: the
+  solve list's badge says "6 clips"), nothing noted missing in the session. Upload sessions on:
+  every file goes (the Sessions page says Up to date).
+- [ ] The clip viewer of one of them: six buttons, `Scramble · laptop`, `Solve · laptop`, and each
+  phone's two named `phone-rear · <model>` and `phone-rear-2 · <model>`; each plays its own
+  phone's picture.
+- [ ] One phone's Leave, then Add camera and its QR again: it comes back under the same label
+  (`phone-rear-2` stays the Moto's if it was), and the next attempt's clips come from both.
+- [ ] The round report of the day (the coordinator: `npm run round-report`): a section of the Events
+  table per phone, each with its installation and its model, and the "After T5.6" items ticked.

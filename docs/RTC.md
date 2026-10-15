@@ -11,7 +11,9 @@ the phone's Camera page run it), the cuts and the clips' transfer with T4.2 (§9
 the phone's camera and the live preview with T4.3 (§10), the phone's picture at the host's
 picture's size with its status line with T5.1 (§10), and the phone's camera controls set from the
 host, with the watchdog of the camera's modes, with T5.2 (§11); the phone's capture latency and its
-solve clips' motion, for the host to see the phone's lag drift, with T5.3 (§9, §10).
+solve clips' motion, for the host to see the phone's lag drift, with T5.3 (§9, §10); each phone's
+installation id and model in `hello`, which tell two phones of one name apart, and its label told
+to it, with T5.6 (§1, §6, §8).
 `docs/ARCHITECTURE.md` ("Remote cameras") places it in the app.
 
 **Stream for control, record locally for data.** One `RTCPeerConnection` between the two devices,
@@ -43,7 +45,7 @@ file name without a path; the remote controls' values as `@cubetrace/capture` de
 
 | Message | From | Fields | When |
 |---|---|---|---|
-| `hello` | both | `v` (1), `role` (`host`, `camera`), `device: {label, platform}`, `app: {version, commit}`, `camera` (the phone's camera as its own session.json would describe it: a `CameraInfo`, read by core's `parseCameraInfo`; null from the host) | the phone once its channel opens, the host in answer (T4.2b); the phone again when its camera changes |
+| `hello` | both | `v` (1), `role` (`host`, `camera`), `device: {label, platform, id, model}` (since T5.6, additive: `id`, the device's installation id, a UUID v4 its browser made once and keeps in Settings, 8 to 64 letters, digits and hyphens, which the host knows a phone by and never records; `model`, the device's model where its browser gives it, at most 100 characters, an empty one read as none; both null from a build before T5.6), `app: {version, commit}`, `camera` (the phone's camera as its own session.json would describe it: a `CameraInfo`, read by core's `parseCameraInfo`; null from the host) | the phone once its channel opens, the host in answer (T4.2b); the phone again when its camera changes, and when its name does (T5.6: the default name, its model, comes a moment after the page loads the first time) |
 | `ping` | host | `t1`, the host clock | every 500 ms until the clock sync converges, for a minute at most, then every 2 s (`PING_INTERVAL_MS`, §4) |
 | `pong` | phone | `t1` back, `t2` (when the ping came) and `t3` (when the answer goes), on the phone's clock | at once, for each ping |
 | `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
@@ -53,6 +55,7 @@ file name without a path; the remote controls' values as `@cubetrace/capture` de
 | `cut-done` | phone | `attempt`, `scrambleShown`, `segment`, `files: [{name, bytes, kind}]` (the frames file first), `clip` (what the capture said of it: `codec`, `audio`, `width`, `height`, `fpsNominal`, `frames`, `crop`, `truncatedStart`, `lateMs`, `bufferSeconds`, `audioMissing`; since T5.3, additive: `captureLatencyMs` (`{p50, p95, basis}`) and `encodeLatencyMs` (`{p50, p95}`) of its frames, null when none was timed, and `motion` (a solve clip's: `{atMs, changed}`, each frame's time after the clip's first frame by the frames' own timestamps and its changed area inside the framing rectangle, as many of one as of the other, at most 3,600 frames, `MAX_CLIP_MOTION_FRAMES`), null without the meter, §9) | the clip is muxed and staged; offered again over each connection until the host's `clip-ack` |
 | `cut-failed` | phone | `attempt`, `scrambleShown`, `segment`, `reason` | the capture could not cut it: the phone not recording, an encoder error, no room |
 | `clip-ack` | host | `attempt`, `scrambleShown`, `segment`, `stored` (the clip is in the attempt's folder and record), `reason` (why not) | the clip is stored, or will not be taken (its attempt gone, its frames file unreadable): the phone deletes its copy either way |
+| `label` | host | `camera` (the label the session gives the phone's camera, `phone-rear-2`: its clips' files' first name; a camera label as `cut`'s) | since T5.6 (additive): once the hellos are exchanged and the camera is in the session, over each connection, and again when it changes (the phone's camera changed); the phone's page says it ("you are phone-rear-2 here") |
 | `file-begin` | sender | `id` (this connection's number for the file), `name`, `bytes`, `kind` (`mp4`, `frames`), `attempt`, `segment` (null for a file of neither) | a file starts, or starts again after a reconnection |
 | `file-resume` | receiver | `id`, `offset` | the answer to `file-begin` (the bytes it already holds: 0 for a new file), and to a `file-done` whose checksum did not match (0: again from the start) |
 | `file-chunk` | sender | `id`, `offset`, `bytes` (binary: a 13-byte header, the kind `0x01`, the id as 4 bytes, the offset as 8 bytes, big-endian, then the bytes) | every chunk |
@@ -86,7 +89,12 @@ no remote controls", §11); a host of 0.4.0 drops the phone's `controls`. Their 
 `@cubetrace/capture`'s vocabulary of a camera's controls (`CameraControls`, `ControlValues`,
 `ControlDrift`): a value is one of its control (`isControlValue`: a mode of the four, a finite
 number, the torch's boolean), and a key that names no control is ignored, as a later build may add
-one. `state`'s `latencyMs` and the `clip` fields of `cut-done` came with T5.3 (0.5.0), additive the
+one. `hello`'s `device.id` and `device.model`, and `label`, came with T5.6 (0.5.0), additive the same
+way: a host reads the hello of a phone before T5.6 with both null and knows that phone by its label
+alone, as before (two such phones of one name are one camera to it, which its Cameras section says:
+"named only"), and a phone before T5.6 drops `label` (`onError`); a phone after T5.6 also takes a
+`cut`'s `camera` as its label, from a host before T5.6. `state`'s `latencyMs` and the `clip` fields
+of `cut-done` came with T5.3 (0.5.0), additive the
 same way: a host reads a phone of a build before T5.3 with them null (no latency known, no motion:
 its clips get no motion lag), and a host before T5.3 ignores them. A clip's motion is bounded so
 that a `cut-done` stays within one message of the data channel (3,600 frames are about 60 kB of
@@ -340,12 +348,17 @@ means to join, and that the host wants it now.
 ## 6. The records (`docs/DATA-MODEL.md` §6, §10)
 
 The schemas stay at version 2 with new optional fields, as T3.7's: in `session.json` a camera's
-`local` may be false, and then `remote: {label, platform}` names the device it runs on (its host
-label and platform, as its own records have them); a camera clock may carry `remote`, the clock
+`local` may be false, and then `remote: {label, platform, model}` names the device it runs on (its
+host label and platform, as its own records have them, and since T5.6 its model where its browser
+gives it, null otherwise; never its installation id); a camera clock may carry `remote`, the clock
 fit's record above, beside the clapperboard's result (`rttMs` and `driftPpm` repeat the fit's; the
 lag of the phone's own sync check since T4.3, §10, `docs/DATA-MODEL.md` §6 says what it means). The
 host gives a remote camera its label with `labelFor`, as any camera (`phone-rear`, a second phone
-`phone-rear-2`, two phones told apart by their host labels); its clips are `video[]` entries like
+`phone-rear-2`): the phone is known by its installation id (T5.6: `remote:<id>` as the camera's
+device id, beside the browser's name for the camera, in the host's memory only), so that two phones
+of one name and one camera name are two cameras and a phone paired again in the session gets its
+label back; a phone before T5.6 sends no id and is known by its host label (`remote:<label>`), as
+before; its clips are `video[]` entries like
 any other, named after it. In Firestore the session's document gains `pairing`, the peer documents
 and their candidates get schemas of their own (`cloud-peer.schema.json`,
 `cloud-candidate.schema.json`) and readers (`parseCloudPeer`, `parseCloudCandidate`,
@@ -425,8 +438,9 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    deadline was the end of the pairing before); a code the check refuses (wrong, expired, taken) is
    still refused at once.
 4. **Connected.** The host puts the camera into the session (`SessionService.putCamera`:
-   `local: false`, `remote: {label, platform}` from the phone's hello, the label the session gives
-   the device, `phone-rear` or `phone-rear-2`, two phones told apart by their host labels), pings
+   `local: false`, `remote: {label, platform, model}` from the phone's hello, the label the session
+   gives the device, `phone-rear` or `phone-rear-2`, two phones told apart by their installation ids
+   since T5.6, by their host labels before), tells the phone its label (`label`, T5.6), pings
    (`ClockPinger`, one `RemoteClockFit` per phone, kept across its reconnections: every 500 ms until
    the fit converges, then every 2 s, §4) and sends `clock` after each answer; when the fit
    converges, and every minute after, the fit's record goes into `clock.cameras[label].remote` (the
@@ -435,8 +449,10 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    converged or not, the sync goes into the diagnostics (`rtc.clock`, with the window's round trips
    since T4.2b). The phone answers the pings, sends `state` and a `thumbnail` (a JPEG of at most 320
    px from its preview) every 2 s, and `hello` again when its camera changes (another camera, the
-   framing). The host's list shows the name, the label, the state, the sync, the latest report and
-   the picture; the phone shows the host, the state, the clock as reported, the battery, a thermal
+   framing). The host's list shows the name, the label and the model (T5.6; "named only" for a
+   phone that says no installation id), the state, the sync, the latest report and the picture; the
+   phone shows the host, its label in the session ("you are phone-rear-2 here", T5.6), the state,
+   the clock as reported, the battery, a thermal
    hint (the frame rate under 80% of the camera's nominal) and, since T5.1, its Compute Pressure
    state where its browser has one (§10), and holds the wake lock.
 5. **A drop.** The transport restarts ICE by itself (§2). Once it ends without a `leave`, the host

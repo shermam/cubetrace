@@ -568,6 +568,7 @@ export class RemoteCamerasService {
           this.diagnostics.record('remote.controls', {
             camera: peer.camera.label,
             peer: peer.camera.device.label,
+            peerInstallation: installationOf(peer.camera.device),
             set: outcome.set,
             outcome: outcome.outcome,
             message: outcome.message,
@@ -758,7 +759,7 @@ export class RemoteCamerasService {
       platform: hello.device.platform,
       // T5.6: which phone, of two of one name (the first eight characters of its installation id;
       // null from a build before T5.6), and its model.
-      peerInstallation: hello.device.id === null ? null : shortInstallation(hello.device.id),
+      peerInstallation: installationOf(hello.device),
       peerModel: hello.device.model,
       camera: peer.camera.label,
       ms: Math.round(now - started),
@@ -1108,6 +1109,8 @@ export class RemoteCamerasService {
     const window = peer.fit.window;
     this.diagnostics.record('rtc.clock', {
       peer: peer.camera.device.label,
+      // T5.6: which phone, of two of one name.
+      peerInstallation: installationOf(peer.camera.device),
       camera: peer.camera.label,
       why,
       converged: peer.converged,
@@ -1382,12 +1385,20 @@ export function remoteIdentity(device: Pick<DeviceInfo, 'label' | 'id'>): string
   return device.id === null ? `remote:${device.label}` : `remote:${device.id}`;
 }
 
+/**
+ * The first eight characters of a phone's installation id (T5.6), which the Timer page and the
+ * diagnostics name it by; null for a phone of a build before T5.6.
+ */
+function installationOf(device: Pick<DeviceInfo, 'id'>): string | null {
+  return device.id === null ? null : shortInstallation(device.id);
+}
+
 /** A camera of the list as the Timer page's preview area and the sync check see it (T4.3). */
 function entryOf(camera: RemoteCamera): RemoteCameraEntry {
   return {
     id: camera.id,
     name: camera.device.label,
-    installation: camera.device.id === null ? null : shortInstallation(camera.device.id),
+    installation: installationOf(camera.device),
     model: camera.device.model,
     label: camera.label,
     session: camera.session,

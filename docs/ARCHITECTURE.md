@@ -205,7 +205,10 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   replaced); `TRANSPORT_CONNECTOR` (`WebRtcTransport.connect`, or the unit tests' memory pairs:
   `rtc-testing.ts`'s `MemoryConnector` plays the SDP dance over the signaling and joins
   `MemoryTransport` pairs); `RTC_TIMERS` (the host clock and the browser's timers, through
-  BROWSER_GLOBALS); `thisDevice` (the host label and the platform of `hello` and of `remote`).
+  BROWSER_GLOBALS); `thisDevice` (the host label and the platform of `hello` and of `remote`, and
+  since T5.6 the installation id and the model, from `SettingsService`: the host knows a phone by
+  its installation id, `remote:<id>`, so that two phones of one name are two cameras of the session,
+  and tells it its label with `label`; the id is never recorded).
 - The host: `RemoteCamerasService` (`apps/web/src/app/camera/`) owns the pairing, the peers (one
   `MessageLink`, `ClockPinger` and `RemoteClockFit` each, the fit kept across reconnections), the
   session's entries (`SessionService.putCamera` with `local: false` and `remote`, `putCameraClock`

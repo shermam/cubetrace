@@ -194,14 +194,18 @@ the code under it; on the phone, scan it with the camera app, or open cubetrace 
 the code or paste the link. The phone turns its rear camera on, keeps the last 90 s in memory from
 then on, and connects to the host directly over the Wi-Fi (WebRTC, Google's STUN server, no relay: a
 guest network with client isolation does not connect). The host lists it in the Cameras section with
-its name (the phone's host label), a picture every 2 s, its state, what it reports (recording, frame
+its name (the phone's host label: by default its model where Chrome gives it, such as "moto g60"),
+its label and its model, a picture every 2 s, its state, what it reports (recording, frame
 rate, sharpness, framing, battery) and the clock sync: the host measures the offset and the drift of
 the phone's clock with pings (every 500 ms until it is synced, then every 2 s), from the answers of
 least round trip, and calls it synced once ten of them over ten seconds agree within 5 ms; the phone
 shows the same line. The camera goes into the session's `cameras[]` with `remote` naming the phone,
 and its clock fit into `clock.cameras[<label>].remote`, as `docs/DATA-MODEL.md` §6 has them; its
-label is the session's (`phone-rear`, a second phone `phone-rear-2`), the phone's host label telling
-two phones apart. The phone keeps the screen on and asks to be plugged in; a connection that drops
+label is the session's (`phone-rear`, a second phone `phone-rear-2`; the phone's Camera page says it,
+"you are phone-rear-2 here"), each phone known by an installation id its browser made once (Settings →
+This device shows its first characters), so that two phones of one name are two cameras, and a
+phone paired again gets its label back; a phone on an older build is known by its name alone ("named
+only" in the list: update it). The phone keeps the screen on and asks to be plugged in; a connection that drops
 is made again by itself for five minutes (the host lists the camera as reconnecting meanwhile), then
 the phone says the host is gone and the host lets the camera go; Leave on the phone, Remove on the
 host or the session's end part the two at once (New session right after a solve keeps the phone
