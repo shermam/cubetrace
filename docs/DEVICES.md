@@ -244,7 +244,9 @@ office MacBook with the GAN 12 ui (issue #40): a USB webcam, with its own compre
 the browser, lags about 140 ms more than the FaceTime camera; the lag is the camera's, not the cube's.
 Both cameras are `laptop` by the host; since T2.14, a laptop's built-in camera and a USB webcam such
 as this one used in one session are `laptop` and `laptop-2` there (the first one used is `laptop`),
-each with its own sync check and clips (`docs/PLAN.md` T2.14, `docs/DATA-MODEL.md` §6).
+each with its own sync check and clips (`docs/PLAN.md` T2.14, `docs/DATA-MODEL.md` §6); since T5.5
+both record at once. The Moto g60's checks as a remote camera, which read 7 to 62 ms more than its
+video says, are in its row of "Phones as remote cameras" below.
 
 Chrome's fake camera cannot give a lag, since nothing in its test pattern turns with the cube, but
 it gives the cost: in Playwright's Chromium 141 on the containers' four CPUs, while the same worker
@@ -280,7 +282,8 @@ drift came (`waiting` frames, the encoder's queue, the frame interval).
 | Camera | Date, measured by | At the check: lag / motion peak / capture latency (basis) | The capture latency over the session: the first attempts / the most / the last | Drifts and restarts | The solves' motion lag against the check | Where the frames waited during a drift |
 |---|---|---|---|---|---|---|
 | MacBook Pro 2021, FaceTime HD, 1080p30, before T5.3 | 2026-10-09, the coordinator from the recordings (issue #67; two sessions of 42 and 55 attempts, with the ThinkPhone and with the Moto g60) | 50.2 ms (afternoon) and 58.4 ms (evening) / not measured / not measured | not measured | nothing said: no event of the recording in either session | the motion 12 to 25 ms after each turn plus the check's lag in attempts 1 to 37, about 90 ms from attempt 38 on, in both sessions; back at attempt 54 of the evening, right after four sync checks of the phone; to the session's end in the afternoon | not measured; the frame interval from 32.9 ms to 34.0 to 34.6 ms with it (30.3 to 29.3 fps), no gap over 50 ms |
-| MacBook Pro 2021, FaceTime HD, 1080p30, forty solves or more on the rig | | | | | | |
+| MacBook Pro 2021, FaceTime HD, 1080p30, forty solves or more on the rig | the "After T5" round (`docs/MANUAL-TESTS.md`, items 5.4.2 and 5.4.7), to be filled | | | | | |
+| MacBook Pro 2021, the USB webcam (Logitech C930e) beside the FaceTime camera, forty solves or more on the rig | the "After T5" round, to be filled | | | | | |
 | Chrome's fake camera in the end-to-end suite (`capture-latency.spec.ts`: a synthetic square stepped 120 ms after each of the demo cube's turns, then 75 ms more), for scale | 2026-10-15, T5.3's e2e, two runs | 127.8 and 141.4 ms / 123.3 and 136.4 ms / 0.6 and 0.3 ms (`timestamp`: the fake camera's frames have no capture time) | 0.3 to 0.8 ms at the median, 5.7 at the 95th percentile; the encoder 3 to 5 ms at the median | none: the latency held, the lag being planted in the picture itself, before the frames were timed | 140.9 and 147.6 ms at the check's planted lag, 220.3 and 220.8 ms with 75 ms more: 79.4 and 73.2 ms apart | none waited: no frame there before the worker asked for it (`waitingShare` 0), the encoder's queue empty when given one, the page's thread 0.4 ms to take the counters |
 
 ## Two cameras of the laptop
@@ -294,7 +297,7 @@ Chrome chose, each camera's sync check, and an attempt's size and files with the
 
 | Cameras | Date, measured by | Each camera: track asked / delivered, encoded fps by its clips | Load notices, and what lowered them | Encoders | Sync checks | One attempt: clips, files, size |
 |---|---|---|---|---|---|---|
-| MacBook Pro 2021: FaceTime HD and a USB webcam (the Logitech C930e of issue #40), with the ThinkPhone and the Moto g60 | | | | | | |
+| MacBook Pro 2021: FaceTime HD and a USB webcam (the Logitech C930e of issue #40), with the ThinkPhone and the Moto g60 | the "After T5" round (`docs/MANUAL-TESTS.md`, items 5.4.1, 5.4.5 and 5.4.7), to be filled | | | | | |
 | Two synthetic cameras in the end-to-end suite (`host-cameras.spec.ts`: two canvases of 640×360 at 30 fps, each square stepped its own planted lag after the demo cube's turns, 60 and 150 ms), for scale | 2026-10-15, T5.5's e2e, three runs in the development container | 640×360 at 30 each | not measured | not recorded | 68.3 and 169.3 ms, 62.8 and 176.2 ms, 92.8 and 175.7 ms: the second check 83 to 113 ms after the first, for 90 planted | four clips (the first camera's two with sound), nine files with `attempt.json` (no gyroscope on the demo cube) |
 
 ## Manual round 2 (v0.2.0)
@@ -376,6 +379,20 @@ The live preview's cost on the phone (T4.3: a fifth of the camera's resolution, 
 |---|---|---|---|---|
 | ThinkPhone, the rear camera at 1080p30 | 2026-10-05, the coordinator from `preview.stopped` (a span of 1,271 s ended by the session's end; the preview was never switched off, so the span without it is not measured) | not measured | 30 fps (29 the least), 30 encoded, none dropped | 216 × 384 at 14.9 fps, 298 kbps, 3.9 ms a frame (`libvpx`), never held back by the CPU |
 | Two pages of one browser (the end-to-end pair: a still 640 × 360 canvas), for scale | 2026-10-04, T4.3's e2e | – | 30.2 fps (29 the least), none dropped | 128 × 72 at 15 fps, 4 kbps, 0.36 ms a frame (`libvpx`), never held back |
+
+## Phones as remote cameras
+
+What each phone does as a camera of the MacBook's sessions (phases 4 and 5), one row per phone, from
+the probes and the rounds above and the diagnostics events; a cell no round has measured yet says
+so, and the "After T5" round (`docs/MANUAL-TESTS.md`) fills what it can. The lag by the video is the
+coordinator's, from the recordings: the motion of the phone's frames around the cube's turns, and
+its cross-correlation with the MacBook camera's motion, a method that agreed with the ThinkPhone's
+own sync checks within 6 to 8 ms.
+
+| Phone, camera | Frames, frame rate (nominal / measured), bitrate | Frame intervals | Lag by its sync checks | Lag by the video | Controls | Compute Pressure API | After 20 minutes |
+|---|---|---|---|---|---|---|---|
+| ThinkPhone, rear camera | 1080 × 1920 (portrait) at 60 nominal and 30 measured (the probe of 2026-09-27); 4 Mbps asked (Standard, T2.10), its clips' rate not measured | steady: `mediaTime` steps of 33.32 ms, no frame dropped in 10 s (the probe) | 25 ms ± 46, 6 kept of 10, as its own host (2026-10-06); as a remote camera, not measured yet | not measured | exposure (to 0.08 ms, ISO 100 to 1594), focus (manual, single-shot, continuous), white balance, zoom 1 to 8×, the torch | not known yet (T5.1's open question) | not noted |
+| Moto g60, rear camera (new on 2026-10-09) | 1080 × 1920 (portrait) at 60 nominal and 30 measured; about 5 Mbps in its clips (2026-10-09, from the recordings) | less regular than the ThinkPhone's: 1% of the gaps over 50 ms, the largest 134 ms | 37 to 92 ms in its checks of 2026-10-09, each matching 5 to 7 of the 10 turns | about 30 ms (2026-10-09): its checks read 7 to 62 ms high | a manual exposure reads `none`, a focus distance its reciprocal, the torch resets the focus and the white balance (Control quirks, below) | none: its reports carry no pressure | not noted |
 
 ## Control quirks
 
