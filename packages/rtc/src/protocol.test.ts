@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CHUNK_HEADER_BYTES,
+  MAX_CLIP_MOTION_FRAMES,
   MAX_CONTROLS_MESSAGE,
   PROTOCOL_VERSION,
   ProtocolError,
@@ -103,6 +104,7 @@ const MESSAGES: Message[] = [
     pressure: 'fair',
     pressureSource: 'thermals',
     pendingClips: 2,
+    latencyMs: 3.2,
   },
   {
     type: 'state',
@@ -117,6 +119,7 @@ const MESSAGES: Message[] = [
     pressure: 'critical',
     pressureSource: 'cpu',
     pendingClips: 0,
+    latencyMs: 0,
   },
   {
     type: 'state',
@@ -131,6 +134,7 @@ const MESSAGES: Message[] = [
     pressure: null,
     pressureSource: null,
     pendingClips: 0,
+    latencyMs: null,
   },
   {
     type: 'thumbnail',
@@ -170,6 +174,9 @@ const MESSAGES: Message[] = [
       lateMs: 0,
       bufferSeconds: 90,
       audioMissing: null,
+      captureLatencyMs: { p50: 4.1, p95: 9.8, basis: 'timestamp' },
+      encodeLatencyMs: { p50: 21.5, p95: 30.2 },
+      motion: { atMs: [33.3, 66.7, 100], changed: [0, 0.004123, 0.25] },
     },
   },
   {
@@ -190,6 +197,9 @@ const MESSAGES: Message[] = [
       lateMs: 2100.5,
       bufferSeconds: 12.4,
       audioMissing: 'no audio data from the microphone',
+      captureLatencyMs: null,
+      encodeLatencyMs: null,
+      motion: null,
     },
   },
   {
@@ -340,6 +350,31 @@ const MESSAGES: Message[] = [
   },
 ];
 
+/** A `cut-done` of a solve clip whose `clip` has `changes`, as text. */
+function cutDoneWith(changes: Record<string, unknown>): string {
+  return JSON.stringify({
+    type: 'cut-done',
+    attempt: 1,
+    scrambleShown: 5,
+    segment: 'solve',
+    files: [],
+    clip: {
+      codec: 'avc1.640028',
+      audio: null,
+      width: 1,
+      height: 1,
+      fpsNominal: 30,
+      frames: 1,
+      crop: null,
+      truncatedStart: false,
+      lateMs: 0,
+      bufferSeconds: 90,
+      audioMissing: null,
+      ...changes,
+    },
+  });
+}
+
 describe('the protocol', () => {
   it.each(MESSAGES.map((message): [string, Message] => [message.type, message]))(
     'encodes and decodes a %s message both ways',
@@ -440,6 +475,7 @@ describe('the protocol', () => {
       pressure: null,
       pressureSource: null,
       pendingClips: 0,
+      latencyMs: null,
     });
     // A build before T5.1 sends its state without the pressure: the host reads it as unknown.
     const before = JSON.stringify({
@@ -461,6 +497,33 @@ describe('the protocol', () => {
       pressure: null,
       pressureSource: null,
       pendingClips: 1,
+      // Nor the capture latency, before T5.3.
+      latencyMs: null,
+    });
+    // A clip of a build before T5.3: no latencies, no motion.
+    const older = JSON.stringify({
+      type: 'cut-done',
+      attempt: 2,
+      scrambleShown: 5,
+      segment: 'solve',
+      files: [],
+      clip: {
+        codec: 'avc1.640028',
+        audio: null,
+        width: 1080,
+        height: 1920,
+        fpsNominal: 30,
+        frames: 400,
+        crop: null,
+        truncatedStart: false,
+        lateMs: 0,
+        bufferSeconds: 90,
+        audioMissing: null,
+      },
+    });
+    expect(decode(older)).toMatchObject({
+      type: 'cut-done',
+      clip: { frames: 400, captureLatencyMs: null, encodeLatencyMs: null, motion: null },
     });
     // T5.2's controls: a control a later build may add, and fields of a drift, are left out.
     const later = controlsWith({
@@ -586,6 +649,52 @@ describe('the protocol', () => {
         },
       }),
       /fpsNominal must be a number > 0/,
+    ],
+    [
+      'a state whose capture latency is negative',
+      JSON.stringify({
+        type: 'state',
+        remoteMs: 1,
+        recording: true,
+        pendingClips: 0,
+        latencyMs: -3,
+      }),
+      /latencyMs must be a number ≥ 0/,
+    ],
+    [
+      "a cut-done whose clip's capture latency has an unknown basis",
+      cutDoneWith({ captureLatencyMs: { p50: 1, p95: 2, basis: 'arrival' } }),
+      /basis must be one of capture-time, timestamp/,
+    ],
+    [
+      "a cut-done whose clip's encode latency has no p95",
+      cutDoneWith({ encodeLatencyMs: { p50: 1 } }),
+      /p95 must be a number ≥ 0/,
+    ],
+    [
+      "a cut-done whose clip's motion has more times than areas",
+      cutDoneWith({ motion: { atMs: [1, 2], changed: [0.1] } }),
+      /motion must have as many times as areas/,
+    ],
+    [
+      "a cut-done whose clip's motion is too long",
+      cutDoneWith({
+        motion: {
+          atMs: Array.from({ length: MAX_CLIP_MOTION_FRAMES + 1 }, (_, k) => k * 33.3),
+          changed: Array.from({ length: MAX_CLIP_MOTION_FRAMES + 1 }, () => 0),
+        },
+      }),
+      /motion must hold at most 3600 frames/,
+    ],
+    [
+      "a cut-done whose clip's motion has an area over 1",
+      cutDoneWith({ motion: { atMs: [1], changed: [1.5] } }),
+      /motion.changed must hold numbers from 0 to 1/,
+    ],
+    [
+      "a cut-done whose clip's motion has a time that is text",
+      cutDoneWith({ motion: { atMs: ['1'], changed: [0.5] } }),
+      /motion.atMs must hold numbers ≥ 0/,
     ],
     [
       'a clip-ack whose stored is text',

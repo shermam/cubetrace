@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import type { SaveClipParams, SavedClip } from '@cubetrace/capture';
+import type { ClipMotion, FramingRect, SaveClipParams, SavedClip } from '@cubetrace/capture';
 import type { CameraInfo, FramesJson } from '@cubetrace/core';
 import {
   Crc32,
@@ -25,8 +25,9 @@ import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { E2E_REMOTE, type E2eRemote } from '../rtc/e2e-remote';
 import { rtcTimers } from '../rtc/rtc-testing';
 import { RTC_TIMERS } from '../rtc/rtc-timers';
+import { SettingsService } from '../settings/settings-service';
 import { CameraDeviceCapture } from './camera-device-capture';
-import { CameraDeviceClips } from './camera-device-clips';
+import { CameraDeviceClips, MOTION_METER_MAX_MS, cutMotion } from './camera-device-clips';
 import {
   CLIP_STAGING,
   OpfsClipStaging,
@@ -73,6 +74,8 @@ interface Rig {
   readonly saves: PendingSave[];
   readonly events: { kind: string; data: Record<string, unknown> }[];
   readonly clips: CameraDeviceClips;
+  /** The solves' motion meter as the clips turned it on and off (T5.3), in order. */
+  readonly meters: { readonly on: boolean; readonly rect: FramingRect | null }[];
 }
 
 /** A file as the host of the test holds it, across connections until it is complete. */
@@ -187,6 +190,7 @@ describe('CameraDeviceClips', () => {
     const staging = new OpfsClipStaging(() => Promise.resolve(root));
     const saves: PendingSave[] = [];
     const events: Rig['events'] = [];
+    const meters: Rig['meters'] = [];
     const globals = {
       performance: perf,
       setTimeout: timers.setTimeout,
@@ -210,9 +214,15 @@ describe('CameraDeviceClips', () => {
               new Promise<SavedClip>((resolve, reject) => {
                 saves.push({ params, resolve, reject });
               }),
+            meterMotion: (on: boolean, rect: FramingRect | null) => {
+              meters.push({ on, rect });
+            },
           },
         },
-        { provide: CameraService, useValue: { cameraInfo: () => PHONE_CAMERA } },
+        {
+          provide: CameraService,
+          useValue: { cameraInfo: () => PHONE_CAMERA, framing: () => PHONE_CAMERA.crop },
+        },
         {
           provide: DiagnosticsService,
           useValue: {
@@ -223,7 +233,16 @@ describe('CameraDeviceClips', () => {
         },
       ],
     });
-    return { perf, timers, root, staging, saves, events, clips: TestBed.inject(CameraDeviceClips) };
+    return {
+      perf,
+      timers,
+      root,
+      staging,
+      saves,
+      events,
+      meters,
+      clips: TestBed.inject(CameraDeviceClips),
+    };
   }
 
   /**
@@ -277,7 +296,10 @@ describe('CameraDeviceClips', () => {
    * Answers the oldest save as the clip worker does: its files planted in the staging folder, then
    * the clip resolved. Returns the files' content.
    */
-  async function saveNext(mp4Bytes = 100_000): Promise<{ frames: string; mp4: string }> {
+  async function saveNext(
+    mp4Bytes = 100_000,
+    motion: ClipMotion | null = null,
+  ): Promise<{ frames: string; mp4: string }> {
     const pending = r.saves.shift();
     if (pending === undefined) {
       throw new Error('No clip was asked for.');
@@ -291,7 +313,7 @@ describe('CameraDeviceClips', () => {
     pending.resolve({
       clip: { ...clipFor(params), bytes: mp4Bytes },
       report: CLIP_AS_ASKED,
-      motion: null,
+      motion,
     });
     await pump(0);
     return { frames, mp4 };
@@ -338,6 +360,9 @@ describe('CameraDeviceClips', () => {
         lateMs: 0,
         bufferSeconds: 90,
         audioMissing: null,
+        captureLatencyMs: null,
+        encodeLatencyMs: null,
+        motion: null,
       },
       files: [
         { name: 'phone-rear.solve.frames.json', bytes: 3, kind: 'frames' },
@@ -405,6 +430,10 @@ describe('CameraDeviceClips', () => {
         lateMs: 0,
         bufferSeconds: 90,
         audioMissing: null,
+        // T5.3: what the capture measured of the clip's frames (none here), and no motion.
+        captureLatencyMs: null,
+        encodeLatencyMs: null,
+        motion: null,
       },
     });
     // The frames file first, then the MP4, each whole.
@@ -439,6 +468,99 @@ describe('CameraDeviceClips', () => {
     expect(r.clips.pending()).toBe(0);
     expect(stagedFiles()).toEqual(['index.json']);
     expect(index()).toEqual([]);
+  });
+
+  it("measures the solve's motion from its scramble's cut to its solve clip, and sends it with the clip's latencies (T5.3)", async () => {
+    const host = new Host(r);
+    r.clips.join(SESSION);
+    r.clips.attach(host.connect());
+    await pump(10);
+    // The scramble's cut comes when the attempt is armed: the meter goes on, in the framing.
+    host.send(cutOf('scramble', 1000));
+    await pump(10);
+    expect(r.meters).toEqual([{ on: true, rect: PHONE_CAMERA.crop }]);
+    await pump(1000 + ENCODER_SETTLE_MS);
+    await saveNext(1000);
+    await pump(100);
+    // The solve's cut, then its clip with the motion the capture measured and its latencies.
+    const solve = cutOf('solve', 1000);
+    host.send(solve);
+    await pump(1000 + ENCODER_SETTLE_MS + 10);
+    const motion: ClipMotion = {
+      t0HostMs: solve.fromRemoteMs,
+      atMs: [33.3, 66.7, 100],
+      changed: [0.0012, 0.25, 0],
+      costMs: 0.6,
+    };
+    const pending = r.saves.shift();
+    if (pending === undefined) {
+      throw new Error('No solve clip was asked for.');
+    }
+    const params = pending.params;
+    // Its files, as the clip worker would have written them, then the clip.
+    const folder = `${STAGING_FOLDER}/sessions/${SESSION}/attempts/0001`;
+    await r.root.plant(`${folder}/phone-rear.solve.frames.json`, JSON.stringify(framesOf(params)));
+    await r.root.plant(`${folder}/phone-rear.solve.mp4`, mp4Text(1000));
+    pending.resolve({
+      clip: {
+        ...clipFor(params),
+        captureLatencyMs: { p50: 4.1, p95: 9.8, basis: 'timestamp' },
+        encodeLatencyMs: { p50: 21.5, p95: 30.2 },
+      },
+      report: CLIP_AS_ASKED,
+      motion,
+    });
+    await pump(200);
+    const done = host.of('cut-done').find((message) => message.segment === 'solve');
+    expect(done?.clip).toMatchObject({
+      captureLatencyMs: { p50: 4.1, p95: 9.8, basis: 'timestamp' },
+      encodeLatencyMs: { p50: 21.5, p95: 30.2 },
+      motion: { atMs: [33.3, 66.7, 100], changed: [0.0012, 0.25, 0] },
+    });
+    // The scramble clip carries no motion; the meter is off once the solve clip is saved.
+    const scramble = host.of('cut-done').find((message) => message.segment === 'scramble');
+    expect(scramble?.clip.motion).toBeNull();
+    expect(r.meters).toEqual([
+      { on: true, rect: PHONE_CAMERA.crop },
+      { on: false, rect: null },
+    ]);
+  });
+
+  it('turns the meter on for a fresh scramble cut only, with the setting on, and off after ten minutes without a solve (T5.3)', async () => {
+    const host = new Host(r);
+    r.clips.join(SESSION);
+    r.clips.attach(host.connect());
+    await pump(10);
+    // A scramble's cut sent again for an attempt long over (its window ended a minute ago).
+    host.send(cutOf('scramble', -60_000));
+    await pump(10);
+    expect(r.meters).toEqual([]);
+    // A fresh one: on; no solve comes (a skip): off ten minutes later.
+    host.send(cutOf('scramble', 1000, 2_000_000));
+    await pump(10);
+    expect(r.meters).toEqual([{ on: true, rect: PHONE_CAMERA.crop }]);
+    r.timers.advance(MOTION_METER_MAX_MS);
+    await settle();
+    expect(r.meters.at(-1)).toEqual({ on: false, rect: null });
+    // "Measure the motion during solves" off: none.
+    TestBed.inject(SettingsService).setMotionMeter(false);
+    host.send(cutOf('scramble', 1000, 3_000_000));
+    await pump(10);
+    expect(r.meters).toHaveLength(2);
+  });
+
+  it("puts a solve's motion in cut-done whole, or not at all past the protocol's bound (T5.3)", () => {
+    const motion = (frames: number): ClipMotion => ({
+      t0HostMs: 1000,
+      atMs: Array.from({ length: frames }, (_, k) => k * 33.3),
+      changed: Array.from({ length: frames }, () => 0.01),
+      costMs: 0.5,
+    });
+    expect(cutMotion(motion(3))).toEqual({ atMs: [0, 33.3, 66.6], changed: [0.01, 0.01, 0.01] });
+    expect(cutMotion(motion(3600))?.atMs).toHaveLength(3600);
+    expect(cutMotion(motion(3601))).toBeNull();
+    expect(cutMotion(motion(0))).toBeNull();
+    expect(cutMotion(null)).toBeNull();
   });
 
   it('cuts a cut asked again once, and replaces the clip of an attempt begun again', async () => {

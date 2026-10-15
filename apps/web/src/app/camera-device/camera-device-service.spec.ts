@@ -506,6 +506,31 @@ describe('CameraDeviceService', () => {
     expect(r.service.thermal()).toBeNull();
   });
 
+  it('sends its capture latency in each state, the median since the last, null without one (T5.3)', async () => {
+    const host = await joined();
+    TestBed.inject(CameraDeviceCapture).setWanted(true);
+    await pump(10);
+    const withLatency = (p50: number): ReturnType<typeof statsOf> =>
+      statsOf(3, {
+        latency: {
+          capture: { p50, p95: p50 + 5, basis: 'capture-time' },
+          encode: null,
+          floorMs: null,
+          queueMax: 0,
+          pending: 0,
+          waiting: 0,
+          frameIntervalMs: 33.3,
+        },
+      });
+    r.starter.last.emitStats(withLatency(31.5));
+    r.starter.last.emitStats(withLatency(33.5));
+    await pass(REPORT_INTERVAL_MS + 100);
+    expect(host.of('state').at(-1)?.latencyMs).toBe(32.5);
+    // No counters since: none.
+    await pass(REPORT_INTERVAL_MS);
+    expect(host.of('state').at(-1)?.latencyMs).toBeNull();
+  });
+
   it('sends its camera again when it changes', async () => {
     const host = await joined();
     await r.camera.select(FAKE_PHONE_FRONT.deviceId);

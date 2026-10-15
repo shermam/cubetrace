@@ -427,6 +427,8 @@ export class DiagnosticsService {
       livePreviewFromPhones: () => settings.livePreviewFromPhones(),
       remotePictures: () => settings.remotePictures(),
       keepCameraModes: () => settings.keepCameraModes(),
+      motionMeter: () => settings.motionMeter(),
+      restartOnLatencyDrift: () => settings.restartOnLatencyDrift(),
     };
     let last: Record<string, string | number | boolean> | null = null;
     effect(() => {

@@ -296,6 +296,40 @@
   </p>
   <label class="switch">
     <input
+      #motionMeterBox
+      type="checkbox"
+      data-testid="motion-meter"
+      aria-describedby="motion-meter-hint"
+      [checked]="settings.motionMeter()"
+      (change)="settings.setMotionMeter(motionMeterBox.checked)"
+    />
+    Measure the motion during solves
+  </label>
+  <p class="hint" id="motion-meter-hint">
+    During each solve the recording measures how much the picture moves in the framing rectangle,
+    frame by frame, as the sync check does: each solve's clip then says where the camera's lag was
+    (the motion around the cube's turns), and the line under the preview says when it moved more
+    than 30 ms from the sync check's. About a millisecond a frame; off by itself on a device where
+    it costs more than 3. The same on a phone filming for another device.
+  </p>
+  <label class="switch">
+    <input
+      #restartBox
+      type="checkbox"
+      data-testid="restart-on-latency-drift"
+      aria-describedby="restart-on-latency-drift-hint"
+      [checked]="settings.restartOnLatencyDrift()"
+      (change)="settings.setRestartOnLatencyDrift(restartBox.checked)"
+    />
+    Restart the recording when its latency drifts
+  </label>
+  <p class="hint" id="restart-on-latency-drift-hint">
+    The recording measures how late the camera's frames reach it; when that sat more than 30 ms from
+    the sync check's for a whole attempt, the recording starts again before the next one (a second
+    or so after the solve's clip is saved), and the line under the preview says so.
+  </p>
+  <label class="switch">
+    <input
       #audioBox
       type="checkbox"
       data-testid="record-audio"

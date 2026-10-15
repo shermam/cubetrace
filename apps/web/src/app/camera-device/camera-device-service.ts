@@ -766,6 +766,8 @@ export class CameraDeviceService {
       pressure: this.pressureSignal()?.state ?? null,
       pressureSource: this.pressureSignal()?.source ?? null,
       pendingClips: this.clips.pending(),
+      // T5.3: the capture latency since the last state, for the host to watch it drift.
+      latencyMs: this.capture.takeLatency(),
     });
     if (sent) {
       this.reportsSignal.update((count) => count + 1);

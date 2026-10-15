@@ -212,6 +212,7 @@ describe('RemoteCameras', () => {
       pressure: null,
       pressureSource: null,
       pendingClips: 0,
+      latencyMs: null,
     });
     await pump(10);
     expect(text('remote-camera-report')).toBe(
@@ -235,6 +236,7 @@ describe('RemoteCameras', () => {
       pressure: null,
       pressureSource: null,
       pendingClips: 2,
+      latencyMs: null,
     });
     await pump(10);
     expect(text('remote-camera-report')).toBe(

@@ -351,6 +351,21 @@ describe('SettingsPage', () => {
     expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? 'null')).toMatchObject({
       keepCameraModes: false,
     });
+
+    // T5.3: the motion meter of the solves and the restart of a drifting recording, both on.
+    const meter = input(fixture, '[data-testid="motion-meter"]');
+    expect(meter.closest('label')?.textContent.trim()).toBe('Measure the motion during solves');
+    expect(meter.checked).toBe(true);
+    const restart = input(fixture, '[data-testid="restart-on-latency-drift"]');
+    expect(restart.closest('label')?.textContent.trim()).toBe(
+      'Restart the recording when its latency drifts',
+    );
+    expect(restart.checked).toBe(true);
+    meter.click();
+    restart.click();
+    await update(fixture);
+    expect(TestBed.inject(SettingsService).motionMeter()).toBe(false);
+    expect(TestBed.inject(SettingsService).restartOnLatencyDrift()).toBe(false);
   });
 
   it('keeps Scramble over the picture, a switch of the Timer section, on by default', async () => {

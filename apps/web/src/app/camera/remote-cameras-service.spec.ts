@@ -138,7 +138,9 @@ class Phone {
     }
   }
 
-  sendState(changes: { recording?: boolean; fps?: number | null } = {}): void {
+  sendState(
+    changes: { recording?: boolean; fps?: number | null; latencyMs?: number | null } = {},
+  ): void {
     this.link?.send({
       type: 'state',
       remoteMs: this.r.s.perf.hostMs + this.offsetMs,
@@ -152,6 +154,7 @@ class Phone {
       pressure: 'nominal',
       pressureSource: 'cpu',
       pendingClips: 0,
+      latencyMs: changes.latencyMs === undefined ? 3.1 : changes.latencyMs,
     });
   }
 
@@ -531,6 +534,7 @@ describe('RemoteCamerasService', () => {
       pressure: 'serious' as const,
       pressureSource: 'thermals' as const,
       pendingClips: 0,
+      latencyMs: 4.25,
     };
     expect(reportFacts({ report, reportMs: 1000 }, 3499.6, 20)).toEqual({
       fps: 24.4,

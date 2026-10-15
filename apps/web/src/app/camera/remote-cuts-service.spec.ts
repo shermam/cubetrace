@@ -50,6 +50,9 @@ const CLIP: CutClip = {
   lateMs: 0,
   bufferSeconds: 90,
   audioMissing: null,
+  captureLatencyMs: { p50: 4.2, p95: 9.6, basis: 'timestamp' },
+  encodeLatencyMs: { p50: 21.3, p95: 28.8 },
+  motion: null,
 };
 
 /** An MP4's bytes, as many as `bytes`: five chunks of 64 KB and a bit, for the resumed transfer. */

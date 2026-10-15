@@ -13,6 +13,7 @@ export type {
   Cut,
   CutClip,
   CutDone,
+  CutMotion,
   CutFailed,
   DeviceInfo,
   DeviceRole,
@@ -45,6 +46,7 @@ export type {
 } from './protocol';
 export {
   CHUNK_HEADER_BYTES,
+  MAX_CLIP_MOTION_FRAMES,
   MAX_CONTROLS_MESSAGE,
   MAX_MOTION_FRAMES,
   PRESSURE_STATES,
