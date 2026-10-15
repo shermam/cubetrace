@@ -446,9 +446,9 @@ panel is what the app applied, and no drift.
 
 From 2026-10-10 to 10-12 the phones' watchdogs called 37 drifts, 4 given up, and none was a change the
 camera made by itself: every focus distance and manual exposure set from the MacBook on the Moto g60
-(and the manual exposure on the ThinkPhone's front camera as a host) was re-applied three times and
-given up, since the cameras report them otherwise than they were set (`docs/DEVICES.md`, "Control
-quirks"). After T5.2a a change held for two minutes leaves no `controls.drift` at all; a drift that
+(and the manual exposure on the ThinkPhone's front camera as a host) was taken for a drift and set
+again, up to three times before it was given up, since the cameras report them otherwise than they
+were set (`docs/DEVICES.md`, "Control quirks"). After T5.2a a change held for two minutes leaves no `controls.drift` at all; a drift that
 comes says how what the camera was held to was taken (`baseline`). The phone's presence over the
 two minutes is the MacBook's minute `rtc.clock` of it; a drift without `baseline` is from a build
 before T5.2a, and no evidence either way.
