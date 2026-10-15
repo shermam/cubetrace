@@ -94,7 +94,8 @@ Toward 0.5.0, phase 5 of `docs/PLAN.md`: the rig's eyes and hands.
   now says its installation id in `hello` (made once by its browser, kept in its Settings, never in a
   record) beside its model, and the laptop knows its camera by it: the second phone is
   `phone-rear-2`, with its own picture, status line and clips in every attempt, and a phone paired
-  again gets its label back. A phone's Camera page says its label ("you are phone-rear-2 here", from
+  again gets its label back (after a reload of the laptop's page, by its model; a phone's first
+  hello waits for its browser to say it, 2 s at most). A phone's Camera page says its label ("you are phone-rear-2 here", from
   the new `label` message); the Cameras section, the pictures' captions, the clip viewer's buttons
   and the session page name each phone by its label and model ("phone-rear-2 · moto g60"), and say
   "named only" for a phone on a build before this one, still known by its name alone.

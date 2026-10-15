@@ -45,7 +45,7 @@ file name without a path; the remote controls' values as `@cubetrace/capture` de
 
 | Message | From | Fields | When |
 |---|---|---|---|
-| `hello` | both | `v` (1), `role` (`host`, `camera`), `device: {label, platform, id, model}` (since T5.6, additive: `id`, the device's installation id, a UUID v4 its browser made once and keeps in Settings, 8 to 64 letters, digits and hyphens, which the host knows a phone by and never records; `model`, the device's model where its browser gives it, at most 100 characters, an empty one read as none; both null from a build before T5.6), `app: {version, commit}`, `camera` (the phone's camera as its own session.json would describe it: a `CameraInfo`, read by core's `parseCameraInfo`; null from the host) | the phone once its channel opens, the host in answer (T4.2b); the phone again when its camera changes, and when its name does (T5.6: the default name, its model, comes a moment after the page loads the first time) |
+| `hello` | both | `v` (1), `role` (`host`, `camera`), `device: {label, platform, id, model}` (since T5.6, additive: `id`, the device's installation id, a UUID v4 its browser made once and keeps in Settings, 8 to 64 letters, digits and hyphens, which the host knows a phone by and never records; `model`, the device's model where its browser gives it, at most 100 characters, an empty one read as none; both null from a build before T5.6), `app: {version, commit}`, `camera` (the phone's camera as its own session.json would describe it: a `CameraInfo`, read by core's `parseCameraInfo`; null from the host) | the phone once its channel opens, the host in answer (T4.2b); the phone again when its camera changes, and when its name does (T5.6: the default name is its model, which its browser says a moment after the page loads; the first call waits for it, 2 s at most, so that every hello names it alike) |
 | `ping` | host | `t1`, the host clock | every 500 ms until the clock sync converges, for a minute at most, then every 2 s (`PING_INTERVAL_MS`, §4) |
 | `pong` | phone | `t1` back, `t2` (when the ping came) and `t3` (when the answer goes), on the phone's clock | at once, for each ping |
 | `clock` | host | `converged`, `offsetMs` (the phone's clock minus the host's), `rttMs` (the least round trip kept): the sync as the host measures it, for the phone to show (T4.1; additive within version 1) | after each answer it took |
@@ -415,7 +415,8 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
    Signed out, it keeps the code and shows Sign in. It turns the camera on (the rear one by default:
    the camera device has a choice of its own in Settings, apart from the Timer page's), runs the
    capture pipeline from then on (the ring buffer, so that T4.2's first cut has its margin), checks
-   the pairing, calls (`call`, `WebRtcTransport.connect` as the caller) and sends `hello` with its
+   the pairing, waits for its browser to say its model (T5.6: within milliseconds of the page's
+   start, `MODEL_WAIT_MS` = 2 s at most), calls (`call`, `WebRtcTransport.connect` as the caller) and sends `hello` with its
    camera as its own session.json would describe it (`local: true`; the host relabels it). Since
    T4.3 its transport carries the live preview's transceiver (§2), and the host says whether it wants
    the picture (`preview`) as soon as the hellos are exchanged.
@@ -440,7 +441,9 @@ Camera page (`apps/web/src/app/camera-device/camera-device-service.ts`) run the 
 4. **Connected.** The host puts the camera into the session (`SessionService.putCamera`:
    `local: false`, `remote: {label, platform, model}` from the phone's hello, the label the session
    gives the device, `phone-rear` or `phone-rear-2`, two phones told apart by their installation ids
-   since T5.6, by their host labels before), tells the phone its label (`label`, T5.6), pings
+   since T5.6, by their host labels before; after a reload of the host's page, which knows no
+   installation id then, by their cameras' names with their models, `docs/DATA-MODEL.md` §6), tells
+   the phone its label (`label`, T5.6), pings
    (`ClockPinger`, one `RemoteClockFit` per phone, kept across its reconnections: every 500 ms until
    the fit converges, then every 2 s, §4) and sends `clock` after each answer; when the fit
    converges, and every minute after, the fit's record goes into `clock.cameras[label].remote` (the

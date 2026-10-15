@@ -1261,5 +1261,8 @@ model, which is now its default name.
   phone's picture.
 - [ ] One phone's Leave, then Add camera and its QR again: it comes back under the same label
   (`phone-rear-2` stays the Moto's if it was), and the next attempt's clips come from both.
+- [ ] Reload the MacBook's page (the session goes on), then Add camera for each phone again, the one
+  that was `phone-rear-2` first: each gets its own label back (after a reload the host tells them
+  apart by their models), and the next attempt's clips come under those labels.
 - [ ] The round report of the day (the coordinator: `npm run round-report`): a section of the Events
   table per phone, each with its installation and its model, and the "After T5.6" items ticked.
