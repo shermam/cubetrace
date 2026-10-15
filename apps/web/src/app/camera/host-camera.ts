@@ -258,8 +258,6 @@ export class HostCamera {
   private readonly framingEditingSignal = signal(false);
   /** What the app applied to the open camera (T5.2): `openingApplied`, then each change. */
   private readonly appliedSignal = signal<ControlValues>({});
-  /** The mode the camera was last opened in, as `modeKey` writes it; null before. */
-  private openedMode: string | null = null;
   /** The watchdog of the open camera's modes (T5.2), which runs while it is on. */
   private readonly watch = new ControlsWatch();
   /** A slider of a controls panel is held (T5.2); and when one last moved, on the host clock. */
@@ -441,11 +439,6 @@ export class HostCamera {
     return `${mode.resolution} ${mode.frameRate}`;
   }
 
-  /** The mode the camera was last opened in (`modeKey` then); null before its first opening. */
-  openedModeKey(): string | null {
-    return this.openedMode;
-  }
-
   /**
    * Opens the camera the target names in the mode it asks for, closing the one that is open; each
    * failure that `fallbackChoice` knows a way around tries that way, and the notice says what it did.
@@ -456,7 +449,6 @@ export class HostCamera {
     this.statusSignal.set('starting');
     this.errorSignal.set(null);
     this.noticeSignal.set(null);
-    this.openedMode = this.modeKey();
     const media = this.media;
     if (media === null) {
       this.fail(generation, NO_CAMERA_API);

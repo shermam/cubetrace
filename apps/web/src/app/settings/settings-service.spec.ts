@@ -4,6 +4,7 @@ import { MAX_VIEWER_CHOICES, VIEWER_DEFAULT } from '@cubetrace/core';
 import { BROWSER_GLOBALS, type BrowserGlobals } from '../device/browser-globals';
 import { FakeLocalStorage, FakePerformance, settle } from '../device/fake-browser';
 import {
+  DEFAULT_CAMERA,
   SETTINGS_STORAGE_KEY,
   SettingsService,
   defaultHostLabel,
@@ -57,6 +58,7 @@ describe('SettingsService', () => {
     expect(settings.scrambleOverPicture()).toBe(true);
     expect(settings.idleDisconnectMinutes()).toBe(5);
     expect(settings.cameraOn()).toBe(false);
+    expect(settings.camerasOn()).toEqual([]);
     expect(settings.cameraResolution()).toBe('1080p');
     expect(settings.cameraFrameRate()).toBe('best');
     expect(settings.sharpnessThreshold()).toBe(20);
@@ -126,7 +128,7 @@ describe('SettingsService', () => {
     settings.setAutoAdvance(false);
     settings.setScrambleOverPicture(false);
     expect(settings.setIdleDisconnectMinutes(12)).toBe(true);
-    settings.setCameraOn(true);
+    settings.setCamerasOn(['FaceTime HD Camera', 'USB webcam']);
     settings.setCameraResolution('720p');
     settings.setCameraFrameRate('60');
     expect(settings.setSharpnessThreshold(35.5)).toBe(true);
@@ -141,6 +143,7 @@ describe('SettingsService', () => {
       { width: 1920, height: 1080 },
       { x: 480, y: 270, w: 960, h: 540 },
     );
+    settings.setCameraMode('USB webcam', { resolution: '1080p', frameRate: '30' });
     settings.setUploadSessions(false);
     settings.setWifiOnly(true);
     settings.setKeepLocalCopies(false);
@@ -154,7 +157,7 @@ describe('SettingsService', () => {
     settings.setRestartOnLatencyDrift(false);
 
     expect(stored()).toEqual({
-      version: 2,
+      version: 3,
       hostLabel: 'office-mbp',
       // T5.6: no installation id until one is read; no model from a laptop's browser.
       installationId: null,
@@ -165,6 +168,8 @@ describe('SettingsService', () => {
       autoAdvance: false,
       scrambleOverPicture: false,
       idleDisconnectMinutes: 12,
+      camerasOn: ['FaceTime HD Camera', 'USB webcam'],
+      // T5.5: written for a build before it, which reads `cameraOn`.
       cameraOn: true,
       cameraResolution: '720p',
       cameraFrameRate: '60',
@@ -185,6 +190,7 @@ describe('SettingsService', () => {
           rect: { x: 480, y: 270, w: 960, h: 540 },
         },
       ],
+      cameraModes: [{ camera: 'USB webcam', resolution: '1080p', frameRate: '30' }],
       uploadSessions: false,
       wifiOnly: true,
       keepLocalCopies: false,
@@ -220,6 +226,12 @@ describe('SettingsService', () => {
     expect(reloaded.scrambleOverPicture()).toBe(false);
     expect(reloaded.idleDisconnectMinutes()).toBe(12);
     expect(reloaded.cameraOn()).toBe(true);
+    expect(reloaded.camerasOn()).toEqual(['FaceTime HD Camera', 'USB webcam']);
+    expect(reloaded.cameraModeFor('USB webcam')).toEqual({ resolution: '1080p', frameRate: '30' });
+    expect(reloaded.cameraModeFor('FaceTime HD Camera')).toEqual({
+      resolution: '720p',
+      frameRate: '60',
+    });
     expect(reloaded.cameraResolution()).toBe('720p');
     expect(reloaded.cameraFrameRate()).toBe('60');
     expect(reloaded.sharpnessThreshold()).toBe(35.5);
@@ -404,6 +416,78 @@ describe('SettingsService', () => {
     });
     storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ viewer: ['laptop'] }));
     expect(load().viewerChoices()).toEqual({});
+  });
+
+  it('keeps the cameras on, each once, the first first; stored before T5.5, the camera on and picked (T5.5)', () => {
+    const settings = load();
+    settings.setCamerasOn(['FaceTime HD Camera', 'USB webcam', 'FaceTime HD Camera']);
+    expect(settings.camerasOn()).toEqual(['FaceTime HD Camera', 'USB webcam']);
+    expect(settings.cameraOn()).toBe(true);
+    settings.setCamerasOn([]);
+    expect(settings.cameraOn()).toBe(false);
+    expect(load().camerasOn()).toEqual([]);
+    // At most twelve.
+    settings.setCamerasOn(Array.from({ length: 20 }, (_, k) => `camera ${String(k)}`));
+    expect(settings.camerasOn()).toHaveLength(12);
+
+    // Stored before T5.5: the camera on, and the one picked on this host (by its label, the
+    // typed one or this device's default) is the camera on; picked on another host, the default
+    // camera, whose name comes when it opens; off, none.
+    const before = (stored: object): string[] => {
+      storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(stored));
+      return [...load().camerasOn()];
+    };
+    const picks = [
+      { host: 'office-mbp', deviceId: 'id-1', label: 'USB webcam' },
+      { host: 'macOS laptop', deviceId: 'id-2', label: 'FaceTime HD Camera' },
+    ];
+    expect(before({ version: 2, cameraOn: true, cameraPicks: picks })).toEqual([
+      'FaceTime HD Camera',
+    ]);
+    expect(
+      before({ version: 2, hostLabel: 'office-mbp', cameraOn: true, cameraPicks: picks }),
+    ).toEqual(['USB webcam']);
+    expect(before({ version: 2, cameraOn: true, cameraPicks: [picks[0]] })).toEqual([
+      DEFAULT_CAMERA,
+    ]);
+    expect(before({ version: 2, cameraOn: false, cameraPicks: picks })).toEqual([]);
+    expect(before({ version: 2 })).toEqual([]);
+    // A list stored is read as it is (strings only, each once).
+    expect(before({ camerasOn: ['b', 7, 'a', 'b'], cameraOn: false })).toEqual(['b', 'a']);
+  });
+
+  it('keeps a resolution and frame rate per camera; a camera without its own takes Settings’ (T5.5)', () => {
+    const settings = load();
+    expect(settings.cameraModeFor('USB webcam')).toEqual({
+      resolution: '1080p',
+      frameRate: 'best',
+    });
+    expect(settings.cameraModeOwn('USB webcam')).toBeNull();
+    settings.setCameraMode('USB webcam', { resolution: '720p', frameRate: '30' });
+    settings.setCameraResolution('720p');
+    settings.setCameraFrameRate('60');
+    expect(settings.cameraModeFor('USB webcam')).toEqual({ resolution: '720p', frameRate: '30' });
+    expect(settings.cameraModeFor('FaceTime HD Camera')).toEqual({
+      resolution: '720p',
+      frameRate: '60',
+    });
+    // The default camera before its name is known has none of its own.
+    settings.setCameraMode(DEFAULT_CAMERA, { resolution: '1080p', frameRate: '30' });
+    expect(settings.cameraModeOwn(DEFAULT_CAMERA)).toBeNull();
+    expect(load().cameraModeOwn('USB webcam')).toEqual({ resolution: '720p', frameRate: '30' });
+    // What cannot be read is dropped.
+    storage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        cameraModes: [
+          { camera: 'a', resolution: '4k', frameRate: '30' },
+          { camera: 'b', resolution: '720p', frameRate: '30' },
+          { resolution: '720p', frameRate: '30' },
+        ],
+      }),
+    );
+    expect(load().cameraModeOwn('b')).toEqual({ resolution: '720p', frameRate: '30' });
+    expect(load().cameraModeOwn('a')).toBeNull();
   });
 
   it('keeps the camera chosen on each host, and forgets nothing else when it changes', () => {
@@ -798,7 +882,7 @@ describe('SettingsService', () => {
     expect(settings.saveError()).toBeNull();
     // Written back at once, with the rest as it was: a later read finds the same time.
     expect(stored()).toMatchObject({
-      version: 2,
+      version: 3,
       hostLabel: 'thinkphone',
       cubeMacs: migrated,
       inspection: true,

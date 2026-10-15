@@ -304,6 +304,8 @@ describe('CameraPanel', () => {
     select.dispatchEvent(new Event('change'));
     await update();
     expect(TestBed.inject(CameraService).label()).toBe('camera 0, facing back');
+    // Another camera (T5.5: each has its framing editor): Edit opens the rear one's.
+    await edit();
     expect(element('camera-frame')?.classList.contains('mirrored')).toBe(false);
   });
 

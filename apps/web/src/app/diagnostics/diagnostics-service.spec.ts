@@ -467,6 +467,8 @@ describe('DiagnosticsService', () => {
     settings.setIdleDisconnectMinutes(1);
     settings.setVideoQuality('high');
     settings.setHostLabel('office-mbp');
+    // The cameras of this device on (T5.5): how many.
+    settings.setCamerasOn(['FaceTime HD Camera', 'USB webcam']);
     // Pictures from phones (T5.1): chosen as the default is no change; tiles is one.
     settings.setRemotePictures('equal');
     TestBed.tick();
@@ -491,6 +493,7 @@ describe('DiagnosticsService', () => {
       { key: 'hostLabel', value: 'office-mbp' },
       { key: 'inspection', value: true },
       { key: 'idleDisconnectMinutes', value: 1 },
+      { key: 'camerasOn', value: 2 },
       { key: 'videoQuality', value: 'high' },
       { key: 'remotePictures', value: 'tiles' },
       { key: 'keepCameraModes', value: false },

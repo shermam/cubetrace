@@ -321,7 +321,9 @@ describe('CameraDevicePage', () => {
   it('leaves the camera as it found it when the page goes: the host’s role, and off if it was off', async () => {
     await render();
     const camera = TestBed.inject(CameraService);
-    expect(TestBed.inject(SettingsService).cameraOn()).toBe(true);
+    // The page's camera is its own (T5.5): the host's cameras stay off, as Settings say.
+    expect(camera.status()).toBe('on');
+    expect(TestBed.inject(SettingsService).cameraOn()).toBe(false);
     fixture.destroy();
     await settle();
     await settle();

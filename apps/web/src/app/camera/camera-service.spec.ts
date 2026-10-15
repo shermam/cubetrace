@@ -164,7 +164,7 @@ describe('CameraService', () => {
     ]);
   });
 
-  it('turns on: the front camera at 1920×1080, ideally 60 fps, remembered for this host', async () => {
+  it('turns on: the front camera at 1920×1080, ideally 60 fps, remembered on by its name', async () => {
     const camera = load();
     media.hold();
     const starting = camera.start();
@@ -196,11 +196,9 @@ describe('CameraService', () => {
     expect(camera.frameSize()).toEqual({ width: 1920, height: 1080 });
     expect(camera.mirrored()).toBe(false);
     expect(settings().cameraOn()).toBe(true);
-    expect(settings().cameraPickFor('macOS laptop')).toEqual({
-      host: 'macOS laptop',
-      deviceId: 'fake-webcam',
-      label: 'fake_device_0',
-    });
+    // T5.5: the default camera, named once it opened, is the camera on.
+    expect(settings().camerasOn()).toEqual(['fake_device_0']);
+    expect(camera.selectedId()).toBe('fake-webcam');
   });
 
   it('turns off and stays off after a reload; turned on, it opens again when the page loads', async () => {
@@ -219,54 +217,43 @@ describe('CameraService', () => {
     expect(camera.status()).toBe('off');
     expect(media.requests).toEqual([]);
 
-    settings().setCameraOn(true);
+    settings().setCamerasOn(['fake_device_0']);
     camera = load();
     await settle();
     expect(camera.status()).toBe('on');
     expect(media.liveTracks()).toHaveLength(1);
   });
 
-  it('opens the camera chosen on this host, by its id, else by its label', async () => {
+  it('opens the camera on by its name, at the id the browser lists for it now (T5.5)', async () => {
     const cameras = [FAKE_PHONE_FRONT, FAKE_PHONE_REAR];
-    const pick = { host: 'Android phone', deviceId: 'phone-rear', label: 'camera 0, facing back' };
-    let camera = load({
+    // The rear camera on since an earlier load: it opens with the page, by its id.
+    const camera = load({
       cameras,
       granted: true,
       userAgent: ANDROID,
-      stored: { cameraPicks: [pick] },
+      stored: { camerasOn: ['camera 0, facing back'] },
     });
     await camera.start();
+    expect(media.requests).toHaveLength(1);
     expect(media.requests[0].video).toMatchObject({ deviceId: { exact: 'phone-rear' } });
     expect(camera.label()).toBe('camera 0, facing back');
     expect(camera.facing()).toBe('environment');
-
-    // Site data cleared: the ids changed, the label did not.
-    camera = load({
-      cameras,
-      granted: true,
-      userAgent: ANDROID,
-      stored: { cameraPicks: [{ ...pick, deviceId: 'old-id' }] },
-    });
-    await camera.start();
-    expect(media.requests[0].video).toMatchObject({ deviceId: { exact: 'phone-rear' } });
     expect(camera.notice()).toBeNull();
   });
 
-  it('opens the default camera when the chosen one is gone, and says so', async () => {
-    const camera = load({
-      stored: { cameraPicks: [{ host: 'macOS laptop', deviceId: 'usb-cam', label: 'USB cam' }] },
-    });
-    await camera.start();
+  it('opens no camera on that is not connected; Turn on then turns on the first one too (T5.5)', async () => {
+    const camera = load({ granted: true, stored: { camerasOn: ['USB cam'] } });
+    await settle();
+    expect(media.requests).toEqual([]);
+    expect(camera.status()).toBe('off');
 
+    await camera.start();
     expect(media.requests.map((request) => request.video)).toEqual([
-      expect.objectContaining({ deviceId: { exact: 'usb-cam' } }),
-      expect.objectContaining({ facingMode: { ideal: 'user' } }),
+      expect.objectContaining({ deviceId: { exact: 'fake-webcam' } }),
     ]);
     expect(camera.status()).toBe('on');
-    expect(camera.notice()).toBe(
-      'The camera chosen before is not connected: the default camera is on instead.',
-    );
-    expect(settings().cameraPickFor('macOS laptop')?.deviceId).toBe('fake-webcam');
+    expect(camera.notice()).toBeNull();
+    expect(settings().camerasOn()).toEqual(['USB cam', 'fake_device_0']);
   });
 
   it('asks for exactly 60 fps when Settings says so; without it, the best rate, and says so', async () => {
@@ -340,7 +327,7 @@ describe('CameraService', () => {
     expect(none.error()).toBe(NO_CAMERA_API);
   });
 
-  it('switches to the camera chosen while on; one chosen while off opens next time', async () => {
+  it('switches to the camera chosen: that one alone on (the host, T5.5)', async () => {
     const camera = load({ cameras: [FAKE_PHONE_FRONT, FAKE_PHONE_REAR], userAgent: ANDROID });
     await camera.start();
     await settle();
@@ -353,11 +340,10 @@ describe('CameraService', () => {
     expect(camera.label()).toBe('camera 0, facing back');
     expect(camera.mirrored()).toBe(false);
     expect(camera.selectedId()).toBe('phone-rear');
+    expect(settings().camerasOn()).toEqual(['camera 0, facing back']);
 
     camera.stop();
-    await camera.select('phone-front');
     expect(camera.status()).toBe('off');
-    expect(media.requests).toHaveLength(2);
     await camera.start();
     expect(media.requests[2].video).toMatchObject({ deviceId: { exact: 'phone-front' } });
   });

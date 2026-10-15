@@ -1,13 +1,4 @@
-import {
-  DestroyRef,
-  Injectable,
-  computed,
-  effect,
-  inject,
-  signal,
-  untracked,
-  type Signal,
-} from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import type {
   ControlDrift,
   ControlName,
@@ -23,12 +14,11 @@ import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SettingsService } from '../settings/settings-service';
 import type { ControlsSource } from './controls-source';
 import type { DriftOutcome } from './controls-watch';
+import { HostCamerasService } from './host-cameras-service';
 import {
   HostCamera,
   LUMA_SAMPLER,
-  cameraDevices,
   mediaDevicesOf,
-  type CameraDevice,
   type CameraRole,
   type CameraStatus,
 } from './host-camera';
@@ -46,44 +36,45 @@ export {
 } from './host-camera';
 
 /**
- * The host's own camera (docs/PLAN.md, T2.1): the cameras of this device, the one chosen (per host
- * label, in Settings), opened at the resolution and frame rate that Settings asks for, with fallbacks
- * that say what they did (a camera that is gone, a frame rate it does not have, a mode it cannot
- * start in); its settings and capabilities as the track reports them, its manual controls (applied,
- * and kept per camera in Settings, by the browser's name for it), the frame rate and frame size
- * measured on the preview, the sharpness meter and the framing rectangle (kept by the same name and
- * the frame size). "Camera on" is a setting: the camera opens again when the Timer page loads, and
- * stays open across pages, like the cube's connection. `cameraInfo()` is the session's `cameras[]`
- * entry (T2.4 stores it, under the label the session gives the device: T2.14). The camera itself is
- * a `HostCamera` (T5.5), whose signals this service gives.
+ * This device's camera where a single one is meant (docs/PLAN.md T2.1; since T5.5 a facade): in the
+ * `host` role, the first of the host's cameras (`HostCamerasService.primary`, the cameras of the
+ * laptop turned on, each a `HostCamera`), which a phone's pinned picture shows (T2.13) and whose
+ * clips have the microphone's sound; in the `camera-device` role (T4.1: a phone filming for another
+ * host, on its Camera page), the camera of that page, a `HostCamera` of its own: the camera chosen
+ * for the role (kept per host label in Settings, the rear one by default), while the host's cameras
+ * are closed (`HostCamerasService.suspend`). The signals are those of that camera: its status, its
+ * stream, its settings and capabilities, its manual controls and their watchdog (T5.2), the frame
+ * rate, frame size and sharpness measured on its preview, its framing rectangle; `cameraInfo()` is
+ * the session's `cameras[]` entry (T2.4 stores it, under the label the session gives the device:
+ * T2.14). Turn on and Turn off are the host's (`HostCamerasService.turnOn`, kept across loads) or the
+ * Camera page's.
  *
  * The browser is read through BROWSER_GLOBALS (`navigator.mediaDevices`), which the unit tests
  * fake; the frames are measured on the preview `<video>` that the Camera preview beside the clock
- * (T2.7) hands to `watchPreview`.
+ * (T2.7) or the Camera page hands to `watchPreview`.
  */
 @Injectable({ providedIn: 'root' })
 export class CameraService {
   private readonly globals = inject(BROWSER_GLOBALS);
   private readonly prefs = inject(SettingsService);
-  private readonly media = mediaDevicesOf(this.globals);
+  private readonly hosts = inject(HostCamerasService);
 
-  private readonly devicesSignal = signal<readonly CameraDevice[]>([]);
   private readonly roleSignal = signal<CameraRole>('host');
 
-  /** The camera, as the role has it. */
-  private readonly camera = new HostCamera(
+  /** The camera device's camera (T4.1): the one chosen for the role, the rear one by default. */
+  private readonly deviceCamera = new HostCamera(
     {
       globals: this.globals,
       prefs: this.prefs,
       diagnostics: inject(DiagnosticsService),
       sampler: inject(LUMA_SAMPLER),
-      media: this.media,
+      media: mediaDevicesOf(this.globals),
       refreshDevices: () => this.refreshDevices(),
     },
     {
-      role: () => this.roleSignal(),
+      role: () => 'camera-device',
       device: () => this.chosenDeviceId(),
-      facing: () => (this.roleSignal() === 'camera-device' ? 'environment' : 'user'),
+      facing: () => 'environment',
       mode: () => ({
         resolution: this.prefs.cameraResolution(),
         frameRate: this.prefs.cameraFrameRate(),
@@ -94,11 +85,13 @@ export class CameraService {
       },
     },
   );
-  /** The camera the facade gives; null when there is none. */
-  private readonly current: Signal<HostCamera | null> = signal(this.camera).asReadonly();
+  /** The camera the facade gives, as the role has it; null when there is none. */
+  private readonly current = computed<HostCamera | null>(() =>
+    this.roleSignal() === 'host' ? this.hosts.primary() : this.deviceCamera,
+  );
 
   /** This device's cameras (see `cameraDevices`). */
-  readonly devices = this.devicesSignal.asReadonly();
+  readonly devices = this.hosts.devices;
   readonly status = computed<CameraStatus>(() => this.current()?.status() ?? 'off');
   /** Why the camera is not on, in plain words; null unless `status` is `error`. */
   readonly error = computed(() => this.current()?.error() ?? null);
@@ -162,8 +155,15 @@ export class CameraService {
   private readonly pickHost = computed(() =>
     this.roleSignal() === 'host' ? this.prefs.hostLabel() : `${this.prefs.hostLabel()} (camera)`,
   );
-  /** The camera chosen on this host, for the role: the open one, or the one that opens next. */
-  readonly selectedId = computed(() => this.prefs.cameraPickFor(this.pickHost())?.deviceId ?? null);
+  /**
+   * The camera chosen for the role: the camera device's (kept per host label), or the device of the
+   * host's first camera on.
+   */
+  readonly selectedId = computed(() =>
+    this.roleSignal() === 'host'
+      ? (this.hosts.primary()?.deviceId() ?? null)
+      : (this.prefs.cameraPickFor(this.pickHost())?.deviceId ?? null),
+  );
   readonly facing = computed(() => this.current()?.facing() ?? 'unknown');
   /** The preview is mirrored, like a mirror, for a front camera; the frames never are. */
   readonly mirrored = computed(() => this.current()?.mirrored() ?? false);
@@ -187,86 +187,89 @@ export class CameraService {
   readonly sharpnessGood = computed(() => this.current()?.sharpnessGood() ?? false);
 
   constructor() {
-    const destroyRef = inject(DestroyRef);
-    const media = this.media;
-    if (media !== null) {
-      const onDeviceChange = (): void => {
-        void this.refreshDevices();
-      };
-      media.addEventListener('devicechange', onDeviceChange);
-      destroyRef.onDestroy(() => {
-        media.removeEventListener('devicechange', onDeviceChange);
-      });
-    }
-    destroyRef.onDestroy(() => {
-      this.camera.destroy();
+    inject(DestroyRef).onDestroy(() => {
+      this.deviceCamera.destroy();
     });
-    void this.refreshDevices();
-    if (this.prefs.cameraOn()) {
-      void this.camera.open();
-    }
-    // A new resolution or frame rate in Settings applies at once to a camera that is on.
-    let mode = this.camera.modeKey();
+    // A new resolution or frame rate in Settings applies at once to the camera device's camera on
+    // (the host's cameras follow their own: HostCamerasService).
+    let mode = this.deviceCamera.modeKey();
     effect(() => {
-      const next = this.camera.modeKey();
+      const next = this.deviceCamera.modeKey();
       untracked(() => {
         if (next !== mode) {
           mode = next;
-          if (this.camera.status() !== 'off') {
-            void this.camera.open();
+          if (this.deviceCamera.status() !== 'off') {
+            void this.deviceCamera.open();
           }
         }
       });
     });
   }
 
-  /** Lists this device's cameras again (names appear once the camera is allowed). */
-  async refreshDevices(): Promise<void> {
-    if (this.media === null) {
-      return;
-    }
-    try {
-      this.devicesSignal.set(cameraDevices(await this.media.enumerateDevices()));
-    } catch {
-      // The list stays as it was.
-    }
+  /** Lists this device's cameras again (names appear once a camera is allowed). */
+  refreshDevices(): Promise<void> {
+    return this.hosts.refreshDevices();
   }
 
-  /** Turns the camera on (the permission prompt, the first time) and keeps it on across loads. */
+  /**
+   * Turns the camera on (the permission prompt, the first time): the host's (the first device, with
+   * none on; kept on across loads), or the camera device's.
+   */
   async start(): Promise<void> {
-    this.prefs.setCameraOn(true);
-    await this.camera.open();
+    if (this.roleSignal() === 'host') {
+      await this.hosts.turnOn();
+    } else {
+      await this.deviceCamera.open();
+    }
   }
 
-  /** Turns the camera off, and keeps it off across loads. */
+  /** Turns the camera off: the host's cameras (kept off across loads), or the camera device's. */
   stop(): void {
-    this.prefs.setCameraOn(false);
-    this.camera.stop();
+    if (this.roleSignal() === 'host') {
+      this.hosts.turnOff();
+    } else {
+      this.deviceCamera.stop();
+    }
   }
 
-  /** Chooses the camera `deviceId` on this host, for the role; a camera that is on switches to it. */
+  /**
+   * Chooses the camera `deviceId` for the role: the camera device's (kept for it; one that is on
+   * switches to it), or the host's camera alone on.
+   */
   async select(deviceId: string): Promise<void> {
-    const device = this.devicesSignal().find((candidate) => candidate.deviceId === deviceId);
+    const device = this.devices().find((candidate) => candidate.deviceId === deviceId);
     if (device === undefined) {
       return;
     }
+    if (this.roleSignal() === 'host') {
+      await this.hosts.only(device.deviceId);
+      return;
+    }
     this.prefs.setCameraPick(this.pickHost(), device.deviceId, device.label);
-    if (this.camera.status() !== 'off') {
-      await this.camera.open();
+    if (this.deviceCamera.status() !== 'off') {
+      await this.deviceCamera.open();
     }
   }
 
   /**
    * Sets the role the camera plays (T4.1): the Camera page makes it the camera device's while it is
-   * shown, and the host's again when it goes. A camera that is on opens again with the role's choice.
+   * shown, and the host's again when it goes. The host's cameras are closed meanwhile; a camera that
+   * was on opens with the role's choice.
    */
   async setRole(role: CameraRole): Promise<void> {
     if (this.roleSignal() === role) {
       return;
     }
+    const wasOn = this.status() !== 'off';
     this.roleSignal.set(role);
-    if (this.camera.status() !== 'off') {
-      await this.camera.open();
+    if (role === 'camera-device') {
+      await this.hosts.suspend(true);
+      if (wasOn) {
+        await this.deviceCamera.open();
+      }
+    } else {
+      this.deviceCamera.stop();
+      await this.hosts.suspend(false);
     }
   }
 
@@ -306,11 +309,10 @@ export class CameraService {
   }
 
   /**
-   * The camera chosen on this host for the role: its stored id when this device lists it, else the
+   * The camera chosen for the camera device: its stored id when this device lists it, else the
    * camera with its label (ids change when site data is cleared), else the stored id anyway (before
    * the permission, the list has no ids; an id that is gone falls back to the default camera). Null
-   * when none was chosen: the default camera, the front one on a phone (the rear one for the camera
-   * device).
+   * when none was chosen: the default camera, the rear one.
    */
   private async chosenDeviceId(): Promise<string | null> {
     const pick = this.prefs.cameraPickFor(this.pickHost());
@@ -318,7 +320,7 @@ export class CameraService {
       return null;
     }
     await this.refreshDevices();
-    const devices = this.devicesSignal();
+    const devices = this.devices();
     if (devices.some((device) => device.deviceId === pick.deviceId)) {
       return pick.deviceId;
     }
