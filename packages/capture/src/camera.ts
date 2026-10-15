@@ -289,9 +289,19 @@ export function hasControls(controls: CameraControls): boolean {
   );
 }
 
+/**
+ * Whether `mode` is an automatic one, `continuous` or `single-shot`; `manual` and `none` are not.
+ * A camera may name a mode otherwise than it was set (docs/DEVICES.md, "Control quirks": Chrome for
+ * Android reports a manual exposure as `none`, the automatic exposure off), so a change of mode is
+ * a change of kind (docs/PLAN.md T5.2a).
+ */
+export function isAutomaticMode(mode: MeteringMode): boolean {
+  return mode === 'continuous' || mode === 'single-shot';
+}
+
 /** The automatic mode among `modes`: `continuous`, else `single-shot`; null if neither. */
 export function autoModeOf(modes: readonly MeteringMode[]): MeteringMode | null {
-  return modes.find((mode) => mode === 'continuous' || mode === 'single-shot') ?? null;
+  return modes.find(isAutomaticMode) ?? null;
 }
 
 /** Values of the manual controls, as `applyControls` takes them and Settings keeps them. */
