@@ -671,7 +671,7 @@ T5.5: an attempt of four cameras is 18 files and about 85 MB; 15 GB and 3,000 fr
 and 1,200 before; parameters, and a refusal names the counts): `users/{uid}.quota = {day, bytes, files}`, reserved in the same transaction that records
 the intent, every signature counted, a call that does not fit refused whole with when the day resets.
 It is a ceiling on what a runaway client can cost while there is one solver, not the community quotas
-of phase 5. The URLs are signed before the transaction, so a bucket that cannot sign counts nothing.
+of phase 6. The URLs are signed before the transaction, so a bucket that cannot sign counts nothing.
 
 **What the index says.** The attempt's `upload` (`docs/DATA-MODEL.md` §10) goes `pending` (T3.1) →
 `uploading` (signUpload) → `done` (confirmUpload, every file there with its size); a file signed again

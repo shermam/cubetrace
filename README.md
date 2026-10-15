@@ -8,11 +8,15 @@ on the cube's, its phases and, with the device's camera on, two video clips of i
 moves. Signed in, the sessions of every device end up in one dataset in the cloud, and a phone can
 film a laptop's session as a second camera, from another angle.
 
-**Status:** version 0.4.0: phase 4 of the [plan](docs/PLAN.md) (remote cameras: a phone signed in to
-the same account joins a laptop's session by a QR code, and its clips of each attempt come into the
-attempt on the laptop's clock) on top of phases 1 (the timer), 2 (the device's own camera) and 3
-(the cloud), before the owner's round on the desk rig ([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md),
-"After T4"). What each version does is listed in [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+**Status:** version 0.5.0: phase 5 of the [plan](docs/PLAN.md) (the rig's eyes and hands: every
+camera of the laptop records at once, every phone paired gets its own clips, each phone's picture is
+as large as the laptop's own with its health under it, its camera's controls are set from the laptop,
+and each camera's capture latency is measured per attempt) on top of phases 1 (the timer), 2 (the
+device's own camera), 3 (the cloud) and 4 (remote cameras: a phone signed in to the same account
+joins a laptop's session by a QR code, and its clips of each attempt come into the attempt on the
+laptop's clock), before the owner's round on the whole rig
+([`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), "After T5"). What each version does is listed in
+[`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 ## Use it
 
@@ -258,119 +262,179 @@ always has tiles. "Live preview from phones" (on by default) turns the live pict
 
 ## The desk rig
 
-The owner's rig at his desk (phase 4): the MacBook hosts the session with its own camera and the GAN
-12 ui, the ThinkPhone films from another angle as `phone-rear`, and a second phone, when one is at
-hand, as `phone-rear-2`. [`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), "After T4", goes through
-the whole rig once as a checklist.
+The owner's rig at his desk, as phase 5 left it: the MacBook hosts the session with the GAN 12 ui
+and two cameras of its own, its built-in FaceTime camera (`laptop`) and a USB webcam on a stand of its
+own (`laptop-2`, a Logitech C930e), and two phones film from other angles, the ThinkPhone and the Moto
+g60 (`phone-rear` and `phone-rear-2`, in the order they pair): four cameras, eight clips in every
+attempt. What the owner needs to see of the phones while he solves is on the MacBook's Timer page,
+each phone's picture as large as the MacBook's own with its health under it, and what he needs to
+change on them (focus, exposure, white balance, zoom, the torch) he changes from the MacBook, the
+phones staying on their tripods out of reach. [`docs/MANUAL-TESTS.md`](docs/MANUAL-TESTS.md), "After
+T5", goes through the whole rig once as a checklist.
 
-**Before pairing.** Both devices on one Wi-Fi (the home network: a guest network that keeps its
-devices apart does not connect them), signed in to the same account, and the phone plugged in. Each
-device goes by its name, Settings → This device: the MacBook lists a phone by it and tells two phones
-apart by it, so a second phone needs a name other than the first's (every phone starts as "Android
-phone"). On the MacBook, connect the cube (the session begins with it) and turn the camera on.
+**Before pairing.** All the devices on one Wi-Fi (the home network: a guest network that keeps its
+devices apart does not connect them), signed in to the same account, the phones plugged in. Each
+phone is known by an installation id its browser made once (Settings → This device: "Installation
+1f2e3d4c · model moto g60") and named by its model where Chrome gives it ("moto g60"), so two phones
+need no name typed to be told apart; a name typed there still wins. On the MacBook, connect the cube
+(the session begins with it) and turn both cameras on: Camera settings lists each camera of the
+MacBook with its switch, its resolution and its frame rate (Two cameras of the laptop, above).
 
-**Pair the phone.** On the MacBook, Camera settings → Cameras → Add camera shows a QR code, its link
+**Pair the phones.** On the MacBook, Camera settings → Cameras → Add camera shows a QR code, its link
 and its 8-character code, "Good for 10 min, for one phone". Scan the QR code with the phone's camera
 app: cubetrace's Camera page opens there (in Chrome, or in the installed app), asks once for the
 camera, the rear one, and the microphone, and connects: its line says "Connected · <the MacBook's
-name> (macOS)", and its Clock line "syncing · …", then "synced · round trip … · offset …". Without
-the camera app, open https://shermam.github.io/cubetrace/camera on the phone and type the code (in
-any case, with or without the space). The MacBook lists the phone with its name, `phone-rear`,
-"connected for …", its picture every 2 s, what it reports ("recording · 29.9 fps · sharpness … ·
-framing … · battery …") and the clock sync, "syncing · n samples · round trip …" until "synced ·
-round trip … · offset … · drift … ppm": within seconds on a quiet Wi-Fi (10.5 to 12 s in a simulation
-of the owner's, `docs/RTC.md` §4). On a busy Wi-Fi, or with the phone saving power on it, the sync
+name> (macOS)", "you are phone-rear here", and its Clock line "syncing · …", then "synced · round trip
+… · offset …". Without the camera app, open https://shermam.github.io/cubetrace/camera on the phone
+and type the code (in any case, with or without the space). The MacBook lists the phone by its label
+and its model, `phone-rear · moto g60`, "connected for …", its picture every 2 s, what it reports
+("recording · 29.9 fps · sharpness … · framing … · battery …") and the clock sync, "syncing · n samples
+· round trip …" until "synced · round trip … · offset … · drift … ppm": within seconds on a quiet
+Wi-Fi (11 s after pairing on the owner's home Wi-Fi, where it then stayed synced for the 21 minutes
+of the pairing, `docs/DEVICES.md`). On a busy Wi-Fi, or with the phone saving power on it, the sync
 may stay syncing: the clips are cut all the same, their windows widened by the clock estimate's
-margin (half a second or more on each side), and the records say the sync had not converged.
+margin (half a second or more on each side), and the records say the sync had not converged. Then
+Add camera again for the second phone, while the first is connected: `phone-rear-2`.
 
-**Where to put the phone.** On a stand (a tripod with a phone clamp), at an angle the MacBook's
-camera does not have: from above, which sees every face as it turns, or from the side at about 45°,
-which sees the hands' grip; mark the stand's place on the desk, so that the next sessions look the
-same. On the phone's Camera page, Camera settings → Edit the framing: drag its framing rectangle
-around the cube and the hands, as on the MacBook (its sharpness meter measures inside it, and its
-sync check watches it). The phone's picture is beside the MacBook's preview on the Timer page, the
-same size, with its framing rectangle ("Live preview from phones" on and "Pictures from phones" on
-the same size, both the MacBook's defaults): side by side in a window of 1,552 px or more, one under
-the other in a narrower one; keep the cube inside the rectangle on both pictures while scrambling and
-solving. The line under the phone's picture is the phone's state from 2 s ago: a sharpness gone
-amber (soft) is a focus to fix (from the MacBook: Camera settings → Cameras → the phone's Camera
-controls, the focus back to auto; a mode the phone's camera changed by itself is said in red on the
-line, "focus went manual on the phone", with Reset beside it, and the phone sets it back by itself
-while its "Keep the camera's modes" is on, `docs/RTC.md` §11), a
-battery in amber or red a charger to plug in, `hot: the frame rate dropped` or a pressure in amber
-or red a phone to let cool (the live preview off, the screen dimmed, a break between sets), and
-`no report for N s` in red a phone that stopped talking (its page in front again, or Leave and pair
-again).
+**Where to put the cameras.** Each phone on a stand (a tripod with a phone clamp), at an angle the
+MacBook's cameras do not have: from above, which sees every face as it turns, or from the side at
+about 45°, which sees the hands' grip; the webcam on a stand of its own at a third angle; mark each
+stand's place on the desk, so that the next sessions look the same. Each camera has its framing
+rectangle around the cube and the hands: the MacBook's two in their own sections of Camera settings
+(Framing → Edit), each phone's on its Camera page (Camera settings → Edit the framing); its sharpness
+meter measures inside it, and its sync check watches it.
+
+**The pictures.** On the Timer page, the four cameras' pictures are the same size, the MacBook's two
+first, each with its label (and a phone's model) over its corner and its line under it: two to a row
+beside the time in a window of 1,552 px or more, one under the other in a narrower one ("Pictures
+from phones" on "Same size as mine" and "Live preview from phones" on, Camera settings → Cameras,
+the MacBook's defaults). Keep the cube inside the framing rectangle on all four while scrambling and
+solving. A phone's picture is its live preview (a fifth of its camera's resolution, at most 15 fps
+and 300 kbps): what it records is not touched.
+
+**The lines under the pictures** are each camera's health, a phone's from its report of 2 s before:
+its frame rate; its sharpness, green when good and amber when soft, a focus to fix (from its controls,
+below); whether it records; for a phone, its battery (amber under 20% and unplugged, red under 10%: a
+charger to plug in); and, in amber or red, what went wrong: `focus went manual on the phone` (a mode
+its camera changed by itself, with Reset beside the line, below), `hot: the frame rate dropped` or a
+Compute Pressure word, `pressure fair`, `serious` or `critical` (a phone to let cool, below),
+`latency +75 ms` and `motion lag 133 ms (check 58)` (the latency words, below), `encodes 21 of 30 fps`
+on a MacBook camera's line (Two cameras on the MacBook, below), `reconnecting…`, and `no report for N
+s` in red, a phone that stopped talking (its page in front again, or Leave and pair again). A line
+with none of them is the good outcome.
+
+**The phones' controls from the MacBook.** Camera settings → Cameras: under each phone, "Camera
+controls" is the panel of its camera (exposure and ISO, focus, white balance, zoom, the torch, Reset
+to auto), each change applied on the phone within a second and kept for its camera as its own panel's
+changes are, "The phone did not answer." after 3 s if it does not (`docs/RTC.md` §11). Once the cube
+is sharp, set the focus to manual at that distance, so that it does not hunt while the hands move:
+the panel keeps the distance set, with "the camera reports …" beside it where the camera reads it
+otherwise (the Moto g60 gives its reciprocal, `docs/DEVICES.md`, "Control quirks"). The torch resets
+the Moto g60's focus and white balance, which the phone sets back by itself. A mode the phone's
+camera changes by itself (the Moto g60's focus went manual at solve 31 on 2026-10-09 and blurred twenty
+solves) is said in red on its line, `focus went manual on the phone`, with Reset beside it; with
+"Keep the camera's modes" on (the default; on the phone's Camera page and in Camera settings) the
+phone sets it back within seconds, three times a minute at most, then leaves it and says so.
 
 **The lamp.** Light makes sharp frames: in a bright scene the camera exposes each frame for less
 time, so a fast turn blurs less. A desk lamp with a diffuser, aimed at the cube and the hands from
-beside the cameras, until both sharpness meters say good (the MacBook's in the line under its
-preview, the phone's on its Camera page and in its report on the MacBook). The light must be steady:
-a lamp that flickers with the mains (some LED bulbs and dimmers pulse at twice its 50 or 60 Hz) makes
-the picture's brightness pulse from frame to frame, or roll through it in bands. The sync check
-counts a pixel as moving only when its brightness changes by more than 12 levels, which a faint
-flicker never does, but a flicker strong enough to see moves whole bands by more than that, which
-the check takes for motion; if bands roll through either picture, change the bulb, or turn the
-dimmer to full.
+beside the cameras, until every sharpness meter says good. The light must be steady: a lamp that
+flickers with the mains (some LED bulbs and dimmers pulse at twice its 50 or 60 Hz) makes the
+picture's brightness pulse from frame to frame, or roll through it in bands. The sync check counts a
+pixel as moving only when its brightness changes by more than 12 levels, which a faint flicker never
+does, but a flicker strong enough to see moves whole bands by more than that, which the check takes
+for motion; if bands roll through a picture, change the bulb, or turn the dimmer to full.
 
-**The sync checks.** Each camera has its own (Recording, above). The MacBook's is due by itself
-before the first scramble of each session; a phone's never is: start it from its line under the
-MacBook's preview ("Sync: phone-rear has no check in this session", then Sync check) once the
-phone's framing rectangle is drawn. Both go alike: hold the cube still in front of the cameras, then
-flick one face and back, five times. "Camera lags the cube by X ms (±Y)", or "phone-rear lags the
-cube by X ms (±Y)": X is how much later a turn shows in that camera's frames than the cube reports
-it, for the phone on the MacBook's clock once its frames' times are converted (so its delivery and
-the clock sync's error are in it), and the camera's later clips keep it as their `syncResidualMs`,
-for the training to subtract; Y is the range of the lags kept, and a check fails over 50 ms plus a
-frame (83 ms at 30 fps). Measured so far (`docs/DEVICES.md`): the MacBook's FaceTime camera about 20
-to 40 ms (19 and 38 ms in round 2), a USB webcam far more (the Logitech C930e: 177 ms, ±12); a
-phone's lag is the "After T4" round's to measure. A new session needs its checks again.
+**When a phone runs hot.** A phone that films for an hour beside a lamp warms up, and a hot phone
+drops frames. Its line says so: `hot: the frame rate dropped` when its frame rate fell under 80% of
+its camera's, and, where its Chrome has the Compute Pressure API, `pressure fair` in amber, `serious`
+or `critical` in red (the web platform has no temperature reading; the Moto g60's Chrome has no such
+API, and whether the ThinkPhone's has is the "After T5" round's to tell). Then: the live preview off
+(Camera settings → Cameras: "Pictures from phones" on "Small tiles", and "Live preview from phones"
+off, so that the phone stops encoding its picture for the MacBook; its thumbnail every 2 s stays),
+the phone's screen dimmed (its Camera page keeps the screen on), its stand away from the lamp's heat,
+and a break of a few minutes between sets.
 
-**Each attempt.** Solve as usual. The MacBook cuts its own two clips a second or so after each
-segment ends and asks the phone for its two at the same moments: the phone's Clips line says "1 clip
+**The sync checks.** Each camera has its own (Recording, above), each lag kept for that camera's
+clips. The FaceTime camera's is due by itself before the first scramble of each session; the
+webcam's and each phone's are started from their lines under the pictures ("Sync: laptop-2 has no
+check in this session", then Sync check; a phone's once its framing rectangle is drawn), one at a
+time. All go alike: hold the cube still in front of the cameras, then flick one face and back, five
+times. "Camera lags the cube by X ms (±Y)", or "phone-rear lags the cube by X ms (±Y)": X is how much
+later a turn shows in that camera's frames than the cube reports it, for a phone on the MacBook's
+clock once its frames' times are converted (so its delivery and the clock sync's error are in it),
+and the camera's later clips keep it as their `syncResidualMs`, for the training to subtract; Y is
+the range of the lags kept, and a check fails over 50 ms plus a frame (83 ms at 30 fps). Measured so
+far (`docs/DEVICES.md`): the FaceTime camera about 20 to 40 ms, the Logitech C930e 177 ms (±12), the
+ThinkPhone's rear camera 25 ms (±46, as its own host), the Moto g60 about 30 ms by its video, against
+37 to 92 ms by its checks of 2026-10-09, which matched only 5 to 7 of their 10 turns there. A new
+session needs its checks again.
+
+**The latency words** (issue #67). On 2026-10-09 the MacBook's frames came about 75 ms later from the
+38th attempt of both sessions, with nothing said. Each camera's line now says it in amber:
+`latency +75 ms` when the camera's capture latency (the time from the camera's own time for a frame
+to the frame's arrival in the recording) sits more than 30 ms from its value at the camera's sync
+check for 5 s, and `motion lag 133 ms (check 58)` when a solve's own turns put the camera's lag more
+than 30 ms from its check's. For the MacBook's cameras, "Restart the recording when its latency
+drifts" (Settings → Camera, on by default) starts that camera's recording again once the solve clip
+of an attempt the drift held through is saved (`restarted` on its line, and a note in the session).
+`motion lag …` without `latency …` beside it means the delay arose before the frames were timed,
+inside the camera or Chrome's capture, which the restart does not reach: Camera settings → Turn off,
+Turn on, and a new sync check. Nothing restarts a phone's recording; its line says the same words
+of its own camera.
+
+**Each attempt.** Solve as usual. The MacBook cuts its two cameras' clips a second or so after each
+segment ends and asks each phone for its two at the same moments: a phone's Clips line says "1 clip
 waits for the host; kept on this phone until it has them" until the clip is across, then "each
-attempt’s clips go to the host as they are cut" again (a clip took 1.8 s at the median and 8 s at
-most on the owner's Wi-Fi, `docs/DEVICES.md`), and the MacBook's report line counts the clips to send
-meanwhile. The attempt then has four clips, which its badge counts and the clip viewer names by
-camera: `laptop.scramble.mp4`, `laptop.solve.mp4`, `phone-rear.scramble.mp4` and
-`phone-rear.solve.mp4`, each with its frames file. Signed in, it uploads once the phone's clips are
-in: ten files with the cube's `gyro.json` (nine for a cube without a gyroscope), each a file of the
-day's quota (Cloud, below). A phone that misses a clip (out of reach, its Wi-Fi off) never holds an
-attempt back: two minutes after the attempt's end it goes without that clip, the session's notes
-saying which is missing, and a clip that comes later is added and uploaded then.
+attempt’s clips go to the host as they are cut" again (a clip took 1.4 s at the median and 5.7 s at
+most on the owner's Wi-Fi, `docs/DEVICES.md`). The attempt then has eight clips, which its badge
+counts and the clip viewer names by camera, `laptop.scramble.mp4` to `phone-rear-2.solve.mp4`, each
+with its frames file; the webcam's have no sound, the microphone recording with the FaceTime camera's
+alone. Signed in, it uploads once the phones' clips are in: eighteen files with the cube's
+`gyro.json` (seventeen for a cube without a gyroscope), nineteen with `session.json` now and then,
+about 85 MB, each a file of the day's quota (Cloud, below): 8,000 files and 40 GB a day hold about
+420 such attempts. A phone that misses a clip (out of reach, its Wi-Fi off) never holds an attempt
+back: two minutes after the attempt's end it goes without that clip, the session's notes saying
+which is missing, and a clip that comes later is added and uploaded then.
+
+**Two cameras on the MacBook.** Each of the MacBook's cameras has its own encoder: two at 1080p30,
+beside two phones' live pictures to decode, may be more than the MacBook does. A camera that encodes
+under 80% of its frame rate for 10 s says so once, `encodes 21 of 30 fps` on its line and in its
+recording block: lower that camera's resolution (its own, in the list of cameras; 1280×720 for the
+webcam) or turn it off. Whether the MacBook keeps both at 1080p30 is the "After T5" round's to
+measure (`docs/DEVICES.md`, "Two cameras of the laptop").
 
 **Ending a session.** New session lets the phones go, once their last clips are in: right after a
-solve, the MacBook lists the phone as "waiting for the phone's last clips (n)" for a few seconds (15 s
+solve, the MacBook lists a phone as "waiting for the phone's last clips (n)" for a few seconds (15 s
 at most), its clips go into the attempt just ended, and the phone says the host let it go. A phone
-belongs to the session it was paired in, so the next session needs Add camera again (on the phone,
-Join again with the new code, or the new QR code scanned). A reload of the MacBook's page needs a new
-code too, and the phone, paired again to the same session, first offers the clips the MacBook did not
-get. Leave on the phone, or Remove on the MacBook, part them at once; a connection that drops is made
-again by itself within five minutes, without a new code.
+belongs to the session it was paired in, so the next session needs Add camera again for each phone
+(on the phone, Join again with the new code, or the new QR code scanned); it gets the same label if
+it pairs in the same order. A reload of the MacBook's page needs new codes too, and a phone, paired
+again to the same session, first offers the clips the MacBook did not get, and gets its label back
+(after a reload the MacBook knows a phone by its model; two phones of one model may swap labels then,
+which a name typed on one of them avoids). Leave on the phone, or Remove on the MacBook, part them at
+once; a connection that drops is made again by itself within five minutes, without a new code.
 
-**A second phone**, with a name of its own (Before pairing, above), pairs with a second Add camera
-while the first is connected: it is listed as `phone-rear-2`, with a picture of its own beside the
-preview (three pictures, two to a row in a wide window) and a sync check of its own, and each attempt then has six clips and uploads fourteen files
-(with `gyro.json`).
-
-**A second camera of the MacBook** (a USB webcam on its own stand, at a third angle): its switch on
-in Camera settings, its framing drawn in its own section, its sync check from its line under the
-pictures (Two cameras of the laptop, above). With two phones beside it every attempt has eight
-clips and uploads eighteen files with `gyro.json`. The MacBook then encodes two cameras: if a line
-says "encodes N of M fps", lower that camera's resolution (its own, in the list of cameras) or turn
-it off.
-
-**What the records hold.** A phone's camera is a camera of the session like the MacBook's: its entry
-in `session.json`'s `cameras` names the phone (`remote`: its name and platform), its clock sync is in
-`clock.cameras["phone-rear"].remote` beside its sync check's lag, and each of its clips' frames files
-keeps the phone's own time of the first frame (`t0RemoteMs`) beside the MacBook's (`t0HostMs`), with
-the clock estimate that converted it (`remote`): [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) §5, §6,
-§7 and §9.
+**What the records hold.** A phone's camera is a camera of the session like the MacBook's two: its
+entry in `session.json`'s `cameras` names the phone (`remote`: its name, its platform and its
+model), its clock sync is in `clock.cameras["phone-rear"].remote` beside its sync check's lag, and
+each of its clips' frames files keeps the phone's own time of the first frame (`t0RemoteMs`) beside
+the MacBook's (`t0HostMs`), with the clock estimate that converted it (`remote`); each clip of each
+camera has its capture latency and, a solve's, its motion lag (`docs/DATA-MODEL.md` §5, §6, §7 and
+§9).
 
 ## Known limitations
 
-Open in [`docs/PLAN.md`](docs/PLAN.md)'s follow-ups, or waiting for measurements:
+Open in [`docs/PLAN.md`](docs/PLAN.md)'s follow-ups and its tasks' open questions, or waiting for
+measurements:
 
+- The MacBook's frames came 75 ms later from the 38th attempt of a session on 2026-10-09, and the
+  cause is not found (issue #67): the app now measures it and says so (The desk rig, the latency
+  words), and restarts a MacBook camera's recording for a drift after its timestamps; a delay inside
+  the camera is seen by the motion lag only, and a restart that reopened the camera is not built.
+  A restart can also begin the next attempt's scramble clip late, when that scramble starts within a
+  few seconds of the solve's end (marked, and noted). Whether Chrome gives the FaceTime camera's
+  frames a capture time is the round's to say.
 - A capture worker made after the laptop or the phone slept may count time apart from its page by
   the length of the sleep (each has its own time origin, and the monotonic clock stops in sleep), so
   that its clips' frame times are off by that much, which a sync check then reports as "frame times
@@ -389,20 +453,30 @@ Open in [`docs/PLAN.md`](docs/PLAN.md)'s follow-ups, or waiting for measurements
 - "attempt N could not be indexed: Missing or insufficient permissions" can still come into a
   session's notes when an older attempt is saved again in a later page load (a phone's clip that came
   after the MacBook's page reloaded): the attempt's document in the index then misses that change
-  (follow-up (n)).
+  (follow-up (n)); and an attempt's document can stay "uploading" although all its files are in the
+  bucket, which the QA view then counts as not uploaded (follow-up (r)).
 - An update whose reader adds a field to the records makes the uploads sign each older attempt's
   `attempt.json` once more, at the next load of its session, a file of the day's quota each
   (follow-up (o)).
-- The clock sync's convergence rule was set from the owner's home Wi-Fi as measured before T4.2b and
-  from simulations: whether a pairing there stays synced for twenty minutes is the "After T4" round's
-  to tell (issue #61); "synced" coming and going costs the clips nothing.
-- Measurements still to come from that round (`docs/DEVICES.md`, Remote cameras): the Wi-Fi's round
-  trips since T4.2b, a phone camera's lag, the transfer of the clips, what the live preview costs the
-  ThinkPhone's recording, and its warmth after twenty minutes.
+- The peer documents of a call no MacBook page took stay in Firestore (follow-up (p)); and the phone's
+  goodbye reads twice, "The host let this camera go: The host let the camera go: the session ended."
+  (follow-up (q)).
 - A phone's warmth is only what its browser says: the Compute Pressure API's state where its Chrome
-  has it (whether the ThinkPhone's and the Moto g60's do is the "After T5.1" round's to tell:
-  `'PressureObserver' in window` in the phone's console), and the frame rate dropping under 80% of
-  its camera's (T4.1); no temperature reading exists in the web platform.
+  has it (the Moto g60's has none; whether the ThinkPhone's has is the "After T5" round's to tell:
+  `'PressureObserver' in window` in its console), and the frame rate dropping under 80% of its
+  camera's; no temperature reading exists in the web platform.
+- The watchdog of the camera's modes was tried on the changes the app made, which it now takes as
+  the camera reports them (T5.2a); whether Chrome for Android reads a change the camera makes by
+  itself, as the focus of 2026-10-09, is the round's to show. A drift set back shows on the MacBook's
+  line for about 2 s only (the phone's page keeps it a minute), and a camera that called its manual
+  exposure `none` and refused Auto by a constraint would not be opened again when its exposure is set
+  back to Auto (not seen).
+- On a phone host, its front and rear cameras are two switches, but most Android phones cannot open
+  both at once: the second says it could not open, and the first keeps recording.
+- Measurements still to come from the "After T5" round (`docs/DEVICES.md`): the MacBook's capture
+  latency over forty solves, the MacBook with two cameras recording (its load), the USB webcam's
+  latency, the phones' lags as remote cameras, a phone's warmth after twenty minutes, and what the
+  live preview costs the ThinkPhone's recording (the span without it).
 
 ## Cloud
 
@@ -480,14 +554,16 @@ UTC day, and the panel says until when.
 `us-central1`) and the bucket `cubetrace-data` (Google Cloud Storage, `us-central1`), which is
 private and which only the functions' URLs write to. Each account reads and writes only its own
 documents (the Firestore rules, [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md) §10), and its uploads go
-into its own folder of the bucket alone. Anyone can sign in, but until phase 5 of the
+into its own folder of the bucket alone. Anyone can sign in, but until phase 6 of the
 [plan](docs/PLAN.md) brings a consent flow and a way to delete one's data, the cloud is meant for
 the owner's own devices.
 
 **Costs.** The project runs on a Google Cloud free trial whose credit pays, until 2026-12-27,
 Firestore, the functions, the bucket's storage and its egress: one solver's camera makes roughly 100
-to 130 GB a month, a few dollars of storage, and downloading the dataset to the training machine
-costs about US$ 0.12 per GiB. Before the trial ends, the owner chooses between Cloud Storage, paid,
+to 130 GB a month, a few dollars of storage (the bucket held 54 GB on 2026-10-15, after 13 days of
+one to two cameras; the desk rig's four make about 85 MB an attempt), and downloading the dataset to
+the training machine costs about US$ 0.12 per GiB; `docs/USER-ACTIONS.md` has the cost per month and
+a lifecycle rule that halves it for the clips older than 30 days. Before the trial ends, the owner chooses between Cloud Storage, paid,
 and Cloudflare R2, without egress fees, which the functions support by configuration
 (`BUCKET_PROVIDER`, [`functions/README.md`](functions/README.md)). Without a choice, the functions
 and the bucket stop with the trial: the uploads wait, and the app goes on recording on the device.
