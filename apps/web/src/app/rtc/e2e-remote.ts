@@ -38,7 +38,16 @@ export interface E2eRemote {
    * server, take longer than a laptop does.
    */
   readonly motionCostLimitMs?: number;
+  /**
+   * The camera device stages its clips in this folder of the origin private file system, in place of
+   * `camera-clips` (T5.6, `STAGING_FOLDER`): two pages of one browser share its file system, as they
+   * share its settings, and the suite wants two phones, each staging its own clips.
+   */
+  readonly stagingFolder?: string;
 }
+
+/** A staging folder's name as the suite may give one: a few letters, digits and hyphens. */
+const FOLDER_NAME = /^[a-z0-9-]{1,40}$/u;
 
 /** The capture's config as the suite bends it (T5.3): its motion meter's cost limit, when set. */
 export function e2eCapture(globals: BrowserGlobals): { readonly motionCostLimitMs?: number } {
@@ -60,6 +69,7 @@ export function e2eRemote(globals: BrowserGlobals): E2eRemote {
     return typeof field === 'number' && Number.isFinite(field) ? field : undefined;
   };
   const ignoreCuts: unknown = Reflect.get(value, 'ignoreCuts');
+  const stagingFolder: unknown = Reflect.get(value, 'stagingFolder');
   return {
     clockOffsetMs: number('clockOffsetMs'),
     closeAfterBytes: number('closeAfterBytes'),
@@ -67,5 +77,9 @@ export function e2eRemote(globals: BrowserGlobals): E2eRemote {
     clipWaitMs: number('clipWaitMs'),
     finishWaitMs: number('finishWaitMs'),
     motionCostLimitMs: number('motionCostLimitMs'),
+    stagingFolder:
+      typeof stagingFolder === 'string' && FOLDER_NAME.test(stagingFolder)
+        ? stagingFolder
+        : undefined,
   };
 }

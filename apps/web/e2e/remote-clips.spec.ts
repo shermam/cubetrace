@@ -437,9 +437,10 @@ test('two phones of one name and one camera name: two labels, two pictures, each
   // The host's own camera stays off: the two phones' pictures are the grid.
   await page.getByTestId('camera-section').locator('summary').click();
 
-  // Two phones, each a browser installation of its own (its id planted in its settings, the pages
-  // of one browser sharing their storage), of one name (the browser's default, the same on both: no
-  // model under Playwright) and one camera name: the owner's ThinkPhone and Moto g60 of 2026-10-15.
+  // Two phones, each a browser installation of its own (the pages of one browser share their storage:
+  // its id planted in its settings, its clips staged in a folder of its own, as on a phone of its
+  // own), of one name (the browser's default, the same on both: no model under Playwright) and one
+  // camera name: the owner's ThinkPhone and Moto g60 of 2026-10-15.
   const phones: Page[] = [];
   const since: number[] = [];
   for (const id of [THINKPHONE_ID, MOTO_ID]) {
@@ -448,6 +449,7 @@ test('two phones of one name and one camera name: two labels, two pictures, each
     const url = new URL((await page.getByTestId('pairing-url').textContent()) ?? '');
     const phone = await context.newPage();
     await installation(phone, id);
+    await bend(phone, { stagingFolder: `camera-clips-${id.slice(0, 8)}` });
     await syntheticCamera(phone, { label: REAR });
     await fakeAccount(phone);
     await fakeSignaling(phone);

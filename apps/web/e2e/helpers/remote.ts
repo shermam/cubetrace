@@ -14,7 +14,10 @@ const E2E_REMOTE = 'cubetraceE2eRemote';
 const CAMERA = '__cubetraceTestCamera';
 
 /** Sets what the suite bends on every load of `page` (src/app/rtc/e2e-remote.ts). */
-export async function bend(page: Page, settings: Record<string, number | boolean>): Promise<void> {
+export async function bend(
+  page: Page,
+  settings: Record<string, number | boolean | string>,
+): Promise<void> {
   await page.addInitScript(
     ({ key, value }) => {
       Reflect.set(window, key, value);

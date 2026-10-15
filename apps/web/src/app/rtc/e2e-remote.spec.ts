@@ -15,8 +15,18 @@ describe('e2eRemote', () => {
       clipWaitMs: undefined,
       finishWaitMs: undefined,
       motionCostLimitMs: 40,
+      stagingFolder: undefined,
     });
     expect(e2eRemote({})).toEqual({});
+  });
+
+  it('reads a staging folder of letters, digits and hyphens only (T5.6)', () => {
+    const folder = (stagingFolder: unknown): string | undefined =>
+      e2eRemote({ [E2E_REMOTE]: { stagingFolder } } as unknown as BrowserGlobals).stagingFolder;
+    expect(folder('camera-clips-moto')).toBe('camera-clips-moto');
+    expect(folder('../sessions')).toBeUndefined();
+    expect(folder('')).toBeUndefined();
+    expect(folder(2)).toBeUndefined();
   });
 
   it("gives the capture's config the motion meter's cost limit only when the suite set one (T5.3)", () => {
