@@ -39,6 +39,7 @@ import {
   CameraDeviceService,
   HELLO_TIMEOUT_MS,
   LEAVE_GRACE_MS,
+  MODEL_WAIT_MS,
   RECONNECT_WINDOW_MS,
   REFUSAL_TEXT,
   REPORT_INTERVAL_MS,
@@ -142,7 +143,7 @@ class Host {
         type: 'hello',
         v: PROTOCOL_VERSION,
         role: 'host',
-        device: { label: this.label, platform: 'macOS' },
+        device: { label: this.label, platform: 'macOS', id: null, model: null },
         app: { version: '0.4.0', commit: 'abc1234' },
         camera: null,
       });
@@ -196,7 +197,15 @@ class Host {
 describe('CameraDeviceService', () => {
   let r: Rig;
 
-  function rig(options: { signedIn?: boolean; pressure?: FakePressure } = {}): Rig {
+  function rig(
+    options: {
+      signedIn?: boolean;
+      pressure?: FakePressure;
+      model?: string;
+      /** The client hints' answer, when the test says (T5.6); `model`'s at once otherwise. */
+      answer?: Promise<unknown>;
+    } = {},
+  ): Rig {
     TestBed.resetTestingModule();
     const backend = new FakeAccountBackend();
     const localStorage = new FakeLocalStorage();
@@ -218,12 +227,26 @@ describe('CameraDeviceService', () => {
       },
     };
     const connector = new MemoryConnector({ delayMs: 4, timers: rtcTimers(perf, timers) });
+    // T5.6: the phone's model, as Chrome on Android gives it through the client hints.
+    const hints =
+      options.model === undefined && options.answer === undefined
+        ? {}
+        : {
+            userAgentData: {
+              platform: 'Android',
+              mobile: true,
+              getHighEntropyValues: (asked: string[]) =>
+                options.answer ??
+                Promise.resolve(asked.includes('model') ? { model: options.model } : {}),
+            },
+          };
     const globals: BrowserGlobals = {
       navigator: {
         userAgent: ANDROID,
         mediaDevices: media,
         wakeLock,
         storage: undefined,
+        ...(hints as Partial<Navigator>),
       },
       localStorage,
       performance: perf,
@@ -364,18 +387,33 @@ describe('CameraDeviceService', () => {
   it('joins by the QR’s URL: checks the code, calls, exchanges hellos with its camera, and holds the wake lock', async () => {
     const host = await joined();
     expect(r.service.joined()).toEqual({ sessionId: SESSION_A, token: host.token });
-    expect(r.service.hostDevice()).toEqual({ label: 'office-mbp', platform: 'macOS' });
+    expect(r.service.hostDevice()).toEqual({
+      label: 'office-mbp',
+      platform: 'macOS',
+      id: null,
+      model: null,
+    });
     expect(r.service.problem()).toBeNull();
     expect(r.wakeLock.held()).toBe(1);
     expect(host.connections).toBe(1);
-    // The phone's hello: its device, its build and its camera as its own session.json would have it.
+    // The phone's hello: its device (since T5.6 with its installation id, a UUID v4 kept in its
+    // Settings; no model where the browser gives none), its build and its camera as its own
+    // session.json would have it.
     const hello = host.of('hello');
     expect(hello).toHaveLength(1);
     expect(hello[0]).toMatchObject({
       v: PROTOCOL_VERSION,
       role: 'camera',
-      device: { label: 'Android phone', platform: 'Android' },
+      device: {
+        label: 'Android phone',
+        platform: 'Android',
+        id: TestBed.inject(SettingsService).installationId(),
+        model: null,
+      },
     });
+    expect(hello[0].device.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
     expect(hello[0].camera).toMatchObject({
       label: 'phone-rear',
       local: true,
@@ -389,6 +427,89 @@ describe('CameraDeviceService', () => {
       platform: 'macOS',
       session: SESSION_A,
     });
+  });
+
+  it("names itself by its model where the browser gives it, and says its label in the host's session (T5.6)", async () => {
+    r = rig({ model: 'moto g60' });
+    await settle();
+    await cameraOn();
+    const settings = TestBed.inject(SettingsService);
+    // The model, once the browser gave it, is the default label; the camera's own label is a
+    // phone's by the platform, whatever the label says.
+    expect(settings.model()).toBe('moto g60');
+    expect(settings.hostLabel()).toBe('moto g60');
+    expect(r.camera.cameraInfo()?.label).toBe('phone-rear');
+    const host = await joined();
+    expect(host.of('hello')[0].device).toEqual({
+      label: 'moto g60',
+      platform: 'Android',
+      id: settings.installationId(),
+      model: 'moto g60',
+    });
+    // The typed name wins, and a new hello says it.
+    settings.setHostLabel('Moto');
+    await pump(20);
+    expect(host.of('hello').map((hello) => hello.device.label)).toEqual(['moto g60', 'Moto']);
+    expect(host.of('hello')[1].device.model).toBe('moto g60');
+
+    // No label before the host says it; then the host's (`label`), and a cut's, which names it too.
+    expect(r.service.label()).toBeNull();
+    host.link?.send({ type: 'label', camera: 'phone-rear-2' });
+    await pump(20);
+    expect(r.service.label()).toBe('phone-rear-2');
+    host.link?.send({
+      type: 'cut',
+      attempt: 1,
+      scrambleShown: 1,
+      segment: 'scramble',
+      fromRemoteMs: 0,
+      toRemoteMs: 1,
+      reason: 'armed',
+      camera: 'phone-rear-3',
+    });
+    await pump(20);
+    expect(r.service.label()).toBe('phone-rear-3');
+    // A new code forgets it.
+    r.service.reset();
+    expect(r.service.label()).toBeNull();
+  });
+
+  it('makes its first call once the browser said its model, so that its first hello names it; 2 s at most (T5.6)', async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    r = rig({ answer: new Promise((resolve) => (answer = resolve)) });
+    await settle();
+    await cameraOn();
+    const host = new Host(r);
+    const token = await host.publish();
+    r.service.join({ sessionId: host.sessionId, token });
+    await pump(500);
+    // Checked and joining, but no call before the model.
+    expect(r.service.state()).toBe('joining');
+    expect(host.connections).toBe(0);
+    answer({ model: 'moto g60' });
+    await called(host, 1);
+    await pump(20);
+    expect(host.of('hello')[0].device.model).toBe('moto g60');
+    expect(host.of('hello')[0].device.label).toBe('moto g60');
+
+    // A browser that never says: the call goes after MODEL_WAIT_MS, without a model.
+    r = rig({ answer: new Promise(() => undefined) });
+    await settle();
+    await cameraOn();
+    const other = new Host(r);
+    const code = await other.publish();
+    r.service.join({ sessionId: other.sessionId, token: code });
+    // The code checked, the wait begins.
+    for (let k = 0; k < 50 && r.service.state() !== 'joining'; k++) {
+      await settle();
+    }
+    expect(r.service.state()).toBe('joining');
+    await pump(MODEL_WAIT_MS - 200);
+    expect(other.connections).toBe(0);
+    await pump(400);
+    await called(other, 1);
+    await pump(20);
+    expect(other.of('hello')[0].device).toMatchObject({ label: 'Android phone', model: null });
   });
 
   it('finds the session of a code typed alone among the account’s sessions', async () => {

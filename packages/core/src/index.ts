@@ -81,7 +81,7 @@ export type {
   SessionSettings,
   SessionSummary,
 } from './session';
-export { createSession, labelFor, sameCamera, summarize, withBattery } from './session';
+export { UUID_V4, createSession, labelFor, sameCamera, summarize, withBattery } from './session';
 export type { CubeClockParams } from './clock';
 export { CLOCK_FIT_WINDOW, CLOCK_RESTART_DRIFT, CLOCK_RESTART_MS, CubeClockFit } from './clock';
 // T4.0 — the clock sync of a remote camera: the offset and the drift of the phone's clock from pings
@@ -236,8 +236,10 @@ export type {
 export {
   EVENT_DATA_MAX_KEYS,
   EVENT_ID,
+  EVENT_INSTALLATION,
   EVENT_KIND,
   EVENT_KIND_MAX_LENGTH,
+  EVENT_MODEL_MAX_LENGTH,
   EVENT_TEXT_MAX_LENGTH,
   cloudEvent,
   eventId,

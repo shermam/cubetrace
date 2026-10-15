@@ -44,7 +44,10 @@ came, at its newest sample). T5.3 (the capture latency, issue #67) added, option
 but kept absent when read (a reader's default would change the text of every older record read
 back): in `attempt.json`, a clip's `captureLatencyMs`, `encodeLatencyMs`, `motionPeakMs`,
 `motionSpreadMs` and `motionLagMs` (§7); in `session.json`, a camera clock's `motionPeakAtCheckMs`
-and `captureLatencyAtCheckMs` (§6).
+and `captureLatencyAtCheckMs` (§6). T5.6 (two phones of one name) added, optional and kept absent
+when read in the same way, a remote camera's `remote.model` in `session.json` (§6), and the
+device's `installation` and `model` in the diagnostics events (§10); no record holds an installation
+id.
 
 The JSON Schemas (draft 2020-12) are in `packages/core/schema/`: `session.schema.json`,
 `attempt.schema.json` and `frames.schema.json` for version 2, `session.v1.schema.json` and
@@ -233,7 +236,7 @@ when its Camera page opens.
     {"label": "phone-rear", "local": false, "facing": "environment", "deviceLabel": "camera2 0, facing back",
      "settings": {"…": "…"}, "capabilities": {"…": "…"}, "constraints": {"…": "…"},
      "crop": null, "mode": "full", "microphone": null,
-     "remote": {"label": "Android phone", "platform": "Android"}}   // T4.0: a remote camera's device
+     "remote": {"label": "moto g60", "platform": "Android", "model": "moto g60"}}   // T4.0; model: T5.6
   ],
   "clock": {
     "cube": {"a": 1.0031, "b": 1730639990000.0, "residualP95Ms": 618.7, "samples": 1425},  // coarse
@@ -307,14 +310,18 @@ ended`, and one per remote clip that begins later than asked, `clip truncated: <
 `docs/RTC.md`), the remote cameras, phones paired over WebRTC that film from another angle and send
 the host their clips (`local: false`). A remote camera's entry has `remote`, the device it runs on:
 `label`, that device's host label (Settings → This device on the phone, `host.label` of its own
-records), and `platform`, its platform (`Android`); the entry's other fields are the phone's camera
+records; since T5.6 a phone's default label is its model), `platform`, its platform (`Android`), and
+since T5.6 `model`, the device's model where its browser gives it (Chrome on Android: `moto g60`;
+null where it gives none, absent from the files written before), never its installation id; the
+entry's other fields are the phone's camera
 as the phone's own session.json would describe it (its `hello` over the data channel carries them),
 relabelled by the host. A camera of the host's own has no `remote`, and the files written before
 phase 4 have none: `local` false without `remote`, or `remote` on a local camera, is refused. `label`
 names the camera in `clock.cameras`, in the clips' `camera` and in
 their file names (§5), and there is one per device within the session (`docs/PLAN.md` T2.14,
-`labelFor` in `packages/core/src/session.ts`). A camera's own label comes from the host label and
-where the camera faces: `laptop`, or `phone` when the host label says phone, followed by `-front` or
+`labelFor` in `packages/core/src/session.ts`). A camera's own label comes from the host and where
+the camera faces: `laptop`, or `phone` on a phone (its browser says it is one: since T5.6, whose
+default label is its model, `moto g60`) or when the host label says phone, followed by `-front` or
 `-rear` when the facing is known (`phone-front`). The first device of the session with an own label
 gets that label, and another device with the same one the first of `<label>-2`, `<label>-3`, …
 that the session has not given (a laptop's built-in camera and a USB webcam used in one session
@@ -324,7 +331,19 @@ and its clips always name the same device. The app tells two devices apart by th
 for them (`deviceLabel`) and, for two of one name (two webcams of one model), by the browser's id
 for them, which no record keeps (it identifies the browser's installation): it knows the ids of the
 cameras that recorded since the page loaded, so after a reload a camera of a shared name takes the
-first label of that name. A new session starts again from the camera's own label. In the files
+first label of that name. A remote camera's id, to the host, is its phone's installation id
+(`docs/RTC.md` §1, T5.6: a UUID v4 the phone's browser made once, which its `hello` carries), so that
+two phones of one name whose cameras the browser names alike (two phones that both say "Android
+phone", their rear cameras "camera 0, facing back") are two devices, `phone-rear` and `phone-rear-2`,
+and a phone paired again in the session gets its label back; a phone of a build before T5.6 says no
+id and is known by its host label, as before. The host knows the installation ids of the phones
+paired since its page loaded, and a phone of a known id keeps its label whatever its model says (its
+first hello can go before its browser said it); after a reload it tells a remote camera by the
+browser's name for it together with its phone's `model` (`identityName` and `labelIn` in
+`apps/web/src/app/session/session-service.ts`), so that phones of two models get their labels back
+in whatever order they pair again, and phones of one model take the labels of that name in the order
+they pair; an entry without `model` (written before T5.6, or by a phone whose model came late), or a
+phone that says none, is matched by the name alone, an entry of the same name and model first. A new session starts again from the camera's own label. In the files
 written before T2.14, a second device took the label of the first, whose entry it replaced, and the
 clips of both name it. `facing` is the camera's `facingMode` when the browser says it (`user` for
 a front camera, `environment` for a rear one), `unknown` otherwise; `deviceLabel` is the browser's
@@ -1039,7 +1058,8 @@ coordinator's round report reads as the evidence of the manual rounds and the QA
   "tsMs": 1790000012345.5,                       // when it happened: host ms (§1) on the device's clock
   "kind": "attempt.done",                         // what: a dotted lowercase name of the catalogue, ≤ 64 characters
   "app": {"version": "0.4.0", "commit": "abc1234"}, // the build that wrote it, as session.json's app
-  "device": {"label": "office-mbp", "platform": "macOS", "installed": false},
+  "device": {"label": "office-mbp", "platform": "macOS", "installed": false,
+             "installation": "0a1b2c3d"},          // T5.6; and "model" where the browser gives one
   "session": "3f1c…",                             // the session it belongs to, when it belongs to one
   "attempt": 17,                                  // the attempt it belongs to (its index), when it does
   "data": {"status": "solved", "timeMs": 14990, "clips": 2, "replayOk": true, "gyroRateHz": 49.8}
@@ -1047,7 +1067,10 @@ coordinator's round report reads as the evidence of the manual rounds and the QA
 ```
 
 `device` is the host label the account records (`host.label` of §6), the host's platform
-(`host.platform`) and whether the app ran installed (display mode `standalone`). `data` holds the
+(`host.platform`) and whether the app ran installed (display mode `standalone`), and since T5.6
+`installation`, the first eight characters of the device's installation id (8 lowercase hex digits;
+never the whole id), which tells two devices of one label apart, and `model`, the device's model
+where its browser gives it (at most 100 characters); absent from the events written before. `data` holds the
 event's facts, by name (`docs/DIAGNOSTICS.md` names each kind's): at most 32, each a text of at most
 500 characters, a number, a boolean or null, or a map of those (one level of nesting at most).
 Never a MAC address, an email, a file's contents, a user agent or another account's uid: the
@@ -1169,8 +1192,10 @@ session's document (`cloud-session.schema.json`) has `pairing`.
 - `users/{uid}/events/{eventId}` (T3.9): only the account `uid` creates and reads (lists) them;
   nothing updates or deletes one, not even the account. A new document must be whole and valid:
   `schema` 1, `tsMs` a number, `kind` a dotted lowercase name of at most 64 characters, `app` a map
-  of exactly `version` and `commit` (text), `device` a map of exactly `label` (non-empty text),
-  `platform` (text) and `installed` (a boolean), `session` (if there) a non-empty text, `attempt`
+  of exactly `version` and `commit` (text), `device` a map of `label` (non-empty text),
+  `platform` (text) and `installed` (a boolean), and since T5.6, if there, `installation` (8
+  lowercase hex digits) and `model` (1 to 100 characters), nothing else, `session` (if there) a
+  non-empty text, `attempt`
   (if there) an integer from 1, `data` a map of at most 32 fields, and no other field; its id the
   event's time as 13 digits and 8 hex digits.
 - Nothing else: no other collection, no other subcollection of a user's record, and nothing for

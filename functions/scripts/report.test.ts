@@ -531,10 +531,25 @@ describe('readEvent', () => {
       tsMs: 1_790_000_000_000,
       kind: 'app.start',
       app: APP,
-      device: LAPTOP,
+      // A device of a build before T5.6: no installation, no model.
+      device: { ...LAPTOP, installation: null, model: null },
       session: SESSION,
       attempt: 3,
       data: { installed: false },
+    });
+    // Since T5.6 a device says its installation and its model.
+    expect(
+      readEvent('owner-uid', '1790000000000-a1b2c3d5', {
+        tsMs: 1,
+        kind: 'app.start',
+        device: { ...PHONE, label: 'moto g60', installation: '9a8b7c6d', model: 'moto g60' },
+      })?.device,
+    ).toEqual({
+      label: 'moto g60',
+      platform: 'Android',
+      installed: true,
+      installation: '9a8b7c6d',
+      model: 'moto g60',
     });
     expect(readEvent('u', 'i', { tsMs: 1, kind: 'x.y' })).toMatchObject({
       app: { version: '?', commit: '?' },
@@ -772,6 +787,159 @@ describe('the checklist', () => {
     expect(results.get('2.5.3')?.status).toBe('failed');
     expect(results.get('1.5.8')?.status).toBe('failed');
     expect(results.get('1.5.8')?.facts).toContain('within a minute of a turn');
+  });
+});
+
+describe('two phones of one name (T5.6)', () => {
+  /** Two phones that both say "Android phone", told apart by their installations. */
+  const THINK = {
+    label: 'Android phone',
+    platform: 'Android',
+    installed: true,
+    installation: '1f2e3d4c',
+    model: 'ThinkPhone by motorola',
+  };
+  const MOTO = {
+    label: 'Android phone',
+    platform: 'Android',
+    installed: true,
+    installation: '9a8b7c6d',
+    model: 'moto g60',
+  };
+  /** The MacBook, of T5.6 too. */
+  const MAC = { ...LAPTOP, installation: '0a1b2c3d' };
+  const RIG_SESSION = '7c6b5a4f-3e2d-4c1b-9a0f-8e7d6c5b4a3f';
+
+  /** A session of the rig with the two phones: what the items after T5.6 read. */
+  function rig(): ReportEvent[] {
+    const t0 = NOW - 2 * HOUR;
+    const scope = (attempt?: number): { session: string; attempt?: number } =>
+      attempt === undefined ? { session: RIG_SESSION } : { session: RIG_SESSION, attempt };
+    const events: ReportEvent[] = [
+      at(t0, 'app.start', { installed: false }, MAC),
+      at(t0 + 100, 'app.start', { installed: true }, THINK),
+      at(t0 + 200, 'app.start', { installed: true }, MOTO),
+      at(t0 + 300, 'page.viewed', { page: 'camera' }, THINK),
+      at(t0 + 400, 'page.viewed', { page: 'camera' }, MOTO),
+      at(
+        t0 + 1000,
+        'rtc.paired',
+        {
+          peer: 'Android phone',
+          platform: 'Android',
+          peerInstallation: '1f2e3d4c',
+          peerModel: 'ThinkPhone by motorola',
+          camera: 'phone-rear',
+        },
+        MAC,
+        scope(),
+      ),
+      at(
+        t0 + 2000,
+        'rtc.paired',
+        {
+          peer: 'Android phone',
+          platform: 'Android',
+          peerInstallation: '9a8b7c6d',
+          peerModel: 'moto g60',
+          camera: 'phone-rear-2',
+        },
+        MAC,
+        scope(),
+      ),
+    ];
+    for (const attempt of [1, 2]) {
+      const t = t0 + attempt * 60_000;
+      for (const camera of ['phone-rear', 'phone-rear-2']) {
+        for (const segment of ['scramble', 'solve']) {
+          events.push(
+            at(
+              t + 2000,
+              'remote.clip',
+              { camera, peer: 'Android phone', segment },
+              MAC,
+              scope(attempt),
+            ),
+          );
+        }
+      }
+      events.push(
+        at(t + 5000, 'attempt.done', { status: 'solved', clips: 6 }, MAC, scope(attempt)),
+      );
+    }
+    events.push(
+      at(t0 + 200_000, 'clips.viewed', { clips: 6, local: 6, gyro: false }, MAC, scope(2)),
+    );
+    return events;
+  }
+
+  it('gives each phone a section of the Events table, with its installation and its model, and names them apart in the facts', () => {
+    const report = roundReport(rig(), { days: 7, nowMs: NOW });
+    expect(report).toMatch(/\d+ events of 1 account and 3 devices/u);
+    expect(report).toContain(
+      '### Android phone (Android, installed; installation 1f2e3d4c; model ThinkPhone by motorola; account owner-…)',
+    );
+    expect(report).toContain(
+      '### Android phone (Android, installed; installation 9a8b7c6d; model moto g60; account owner-…)',
+    );
+    expect(report).toContain('### office-mbp (macOS; installation 0a1b2c3d; account owner-…)');
+    // The same device: an event after another of the same installation, not of the other phone.
+    const q = new Query(rig(), NOW);
+    const motoStart = q.onPhone('app.start').find((e) => e.device.installation === '9a8b7c6d');
+    expect(q.next(motoStart as ReportEvent, 'page.viewed', HOUR)?.device.installation).toBe(
+      '9a8b7c6d',
+    );
+    const thinkStart = q.onPhone('app.start').find((e) => e.device.installation === '1f2e3d4c');
+    expect(q.next(thinkStart as ReportEvent, 'page.viewed', HOUR)?.device.installation).toBe(
+      '1f2e3d4c',
+    );
+  });
+
+  it('ticks the two phones at once, each under its label, their four clips per attempt, the six buttons and the report', () => {
+    const results = new Map(evaluate(rig(), NOW).map((item) => [item.id, item.result]));
+    expect(results.get('5.6.1')).toEqual({
+      status: 'ok',
+      facts:
+        '1 session with two phones or more: Android phone · ThinkPhone by motorola (1f2e3d4c) as phone-rear, Android phone · moto g60 (9a8b7c6d) as phone-rear-2',
+    });
+    expect(results.get('5.6.2')?.status).toBe('ok');
+    expect(results.get('5.6.2')?.facts).toMatch(
+      /^2 attempts with both clips of two phones; 2 real attempts on office-mbp with six clips or more; /u,
+    );
+    expect(results.get('5.6.3')).toEqual({ status: 'ok', facts: '1 view on office-mbp' });
+    expect(results.get('5.6.4')).toEqual({
+      status: 'ok',
+      facts:
+        '2 phones by installation: Android phone (installation 1f2e3d4c, model ThinkPhone by motorola), Android phone (installation 9a8b7c6d, model moto g60); of one name: Android phone',
+    });
+    // The counts name two devices of one label with their installations.
+    const views = rig().filter((e) => e.kind === 'app.start');
+    expect(roundReport(views, { days: 7, nowMs: NOW })).toMatch(/3 devices/u);
+  });
+
+  it('marks two phones under one label in a session, the failure T5.6 fixes, and leaves a build before T5.6', () => {
+    const merged = rig().map((event) =>
+      event.kind === 'rtc.paired'
+        ? { ...event, data: { ...event.data, camera: 'phone-rear' } }
+        : event,
+    );
+    expect(evaluate(merged, NOW).find((item) => item.id === '5.6.1')?.result.status).toBe('failed');
+    // Before T5.6: no installation said, nothing to read.
+    const before = rig().map((event) => ({
+      ...event,
+      device: {
+        label: event.device.label,
+        platform: event.device.platform,
+        installed: event.device.installed,
+      },
+      data: { ...event.data, peerInstallation: undefined },
+    }));
+    const results = new Map(evaluate(before, NOW).map((item) => [item.id, item.result]));
+    expect(results.get('5.6.1')?.status).toBe('none');
+    expect(results.get('5.6.4')).toEqual({
+      status: 'none',
+      facts: 'no phone with an installation (a build before T5.6)',
+    });
   });
 });
 

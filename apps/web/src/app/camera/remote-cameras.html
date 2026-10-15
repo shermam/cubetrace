@@ -131,7 +131,16 @@
               <span class="muted" data-testid="remote-camera-label">{{
                 camera.label ?? 'no camera yet'
               }}</span>
+              @if (camera.device.model; as model) {
+                <span class="muted" data-testid="remote-camera-model">· {{ model }}</span>
+              }
             </p>
+            @if (namedOnly(camera)) {
+              <p class="hint" data-testid="remote-camera-named-only">
+                Named only: this phone's build says no installation id, so another phone of the same
+                name would be the same camera to the session. Update cubetrace on the phone.
+              </p>
+            }
             <p class="state" data-testid="remote-camera-state">{{ stateText(camera) }}</p>
             <p class="sync" data-testid="remote-camera-sync">{{ syncText(camera) }}</p>
             <p class="report muted" data-testid="remote-camera-report">

@@ -326,14 +326,20 @@ service cloud.firestore {
       return ['schema', 'tsMs', 'kind', 'app', 'device', 'session', 'attempt', 'data'];
     }
 
+    // Since T5.6 the device may say its installation (the first eight hex digits of its installation
+    // id, never the whole id) and its model; the events of the builds before have neither.
     function validEventDevice(device) {
       return device is map
-        && device.keys().hasOnly(['label', 'platform', 'installed'])
+        && device.keys().hasOnly(['label', 'platform', 'installed', 'installation', 'model'])
         && device.keys().hasAll(['label', 'platform', 'installed'])
         && device.label is string
         && device.label.size() > 0
         && device.platform is string
-        && device.installed is bool;
+        && device.installed is bool
+        && (!('installation' in device)
+          || (device.installation is string && device.installation.matches('[0-9a-f]{8}')))
+        && (!('model' in device)
+          || (device.model is string && device.model.size() > 0 && device.model.size() <= 100));
     }
 
     function validEvent(event) {

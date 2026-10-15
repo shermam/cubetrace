@@ -55,12 +55,20 @@
     autocomplete="off"
     data-testid="host-label"
     [value]="settings.customHostLabel() ?? ''"
-    [placeholder]="settings.defaultHostLabel"
+    [placeholder]="settings.defaultHostLabel()"
     (change)="settings.setHostLabel(hostInput.value)"
   />
   <p class="hint">
     Sessions recorded here are labelled “{{ settings.hostLabel() }}”, to tell your devices apart.
-    Leave it empty for the default, “{{ settings.defaultHostLabel }}”.
+    Leave it empty for the default, “{{ settings.defaultHostLabel() }}”{{
+      settings.model() === null ? '' : ', the model the browser gives'
+    }}.
+  </p>
+  <p class="hint" data-testid="device-identity">
+    <span data-testid="device-installation">{{ identityText() }}</span> A host tells this device
+    from others of the same name by its installation when it films as a camera, and the diagnostics
+    name it so; this browser made it once and keeps it in its settings, never in a session's
+    records.
   </p>
 </section>
 

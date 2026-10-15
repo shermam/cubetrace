@@ -18,6 +18,7 @@ import {
   SHARPNESS_THRESHOLD_DEFAULT,
   SettingsService,
   VIDEO_QUALITIES,
+  shortInstallation,
 } from './settings-service';
 
 /** When the cube list was last merged with the account's (T3.4): a date and a time. */
@@ -85,6 +86,16 @@ export class SettingsPage {
     label: MICROPHONE_PROCESSING_TEXT[value],
   }));
   protected readonly microphoneHint = MICROPHONE_HINT;
+  /**
+   * This browser installation's id, its first eight characters (T5.6): what tells this device from
+   * another of the same name when it films for a host, and what the diagnostics name it by; never
+   * shown in full.
+   */
+  protected readonly identityText = computed(() => {
+    const model = this.settings.model();
+    const installation = shortInstallation(this.settings.installationId());
+    return `Installation ${installation}${model === null ? '' : ` · model ${model}`}.`;
+  });
   /**
    * Signed in, how the cube list stands with the account's (T3.4): synced, when it was last merged,
    * and what waits to be sent; null signed out, when the list is this device's alone.

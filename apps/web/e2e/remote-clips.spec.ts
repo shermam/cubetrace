@@ -8,7 +8,7 @@ import { type BrowserContext, type Locator, type Page, expect, test } from '@pla
 import { Ajv2020 } from 'ajv/dist/2020';
 
 import { ADA, type FakeBucket, fakeAccount, fakeAccountState, fakeBucket } from './helpers/account';
-import { RECORDING, bend, fileText, pill } from './helpers/remote';
+import { RECORDING, bend, fileText, installation, pill, syntheticCamera } from './helpers/remote';
 import { fakeSignaling } from './helpers/signaling';
 import { currentSessionId, demoPath, expectSolves, replayDemo, solveRows } from './helpers/timer';
 
@@ -407,6 +407,171 @@ test('a phone that never answers: the attempt waits for it, then goes without it
       .concat(`${prefix}/session.json`)
       .sort(),
   );
+});
+
+/** Two installations' ids (T5.6), as two phones' browsers would have made them. */
+const THINKPHONE_ID = '1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b';
+const MOTO_ID = '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d';
+
+/** The name both phones' browsers give their rear camera (T5.6). */
+const REAR = 'camera 0, facing back';
+
+test('two phones of one name and one camera name: two labels, two pictures, each told its label, four remote clips in the attempt under their labels (T5.6)', async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await fakeAccount(page);
+  await fakeSignaling(page);
+  await page.goto(demoPath(0, SPEED));
+  await expectSolves(page, 1);
+  await expect(page.getByTestId('timer-status')).toHaveAttribute('data-phase', 'scrambling', {
+    timeout: 30_000,
+  });
+  await page.getByTestId('delete-last').click();
+  await expect(solveRows(page)).toHaveCount(0);
+  const sessionId = (await currentSessionId(page)) ?? '';
+  expect(sessionId).not.toBe('');
+  await banner(page).getByRole('button', { name: 'Sign in' }).click();
+  await expect(banner(page).getByRole('button', { name: 'Account: Ada Lovelace' })).toBeVisible();
+  // The host's own camera stays off: the two phones' pictures are the grid.
+  await page.getByTestId('camera-section').locator('summary').click();
+
+  // Two phones, each a browser installation of its own (the pages of one browser share their storage:
+  // its id planted in its settings, its clips staged in a folder of its own, as on a phone of its
+  // own), of one name (the browser's default, the same on both: no model under Playwright) and one
+  // camera name: the owner's ThinkPhone and Moto g60 of 2026-10-15.
+  const phones: Page[] = [];
+  const since: number[] = [];
+  for (const id of [THINKPHONE_ID, MOTO_ID]) {
+    await page.getByTestId('add-camera').click();
+    await expect(page.getByTestId('pairing')).toBeVisible({ timeout: 15_000 });
+    const url = new URL((await page.getByTestId('pairing-url').textContent()) ?? '');
+    const phone = await context.newPage();
+    await installation(phone, id);
+    await bend(phone, { stagingFolder: `camera-clips-${id.slice(0, 8)}` });
+    await syntheticCamera(phone, { label: REAR });
+    await fakeAccount(phone);
+    await fakeSignaling(phone);
+    await phone.goto(`${url.pathname}${url.search}`);
+    await expect.poll(() => pill(phone), { timeout: 45_000 }).toBe('connected');
+    await expect(phone.getByTestId('device-picture-line')).toContainText(RECORDING, {
+      timeout: 15_000,
+    });
+    since.push(Date.now());
+    phones.push(phone);
+  }
+  const [thinkPhone, moto] = phones;
+
+  // Two cameras of the session, `laptop-rear` and `laptop-rear-2` (the phones' browsers say Windows
+  // under Playwright: a laptop's camera facing back), each phone told its own.
+  const rows = page.getByTestId('remote-camera');
+  await expect(rows).toHaveCount(2);
+  await expect
+    .poll(async () => rows.evaluateAll((all) => all.map((row) => row.getAttribute('data-label'))))
+    .toEqual(['laptop-rear', 'laptop-rear-2']);
+  const names = await rows.getByTestId('remote-camera-name').allTextContents();
+  expect(names.map((name) => name.trim())).toEqual([names[0].trim(), names[0].trim()]);
+  await expect(page.getByTestId('remote-camera-named-only')).toHaveCount(0);
+  await expect(thinkPhone.getByTestId('device-label')).toHaveText('· you are laptop-rear here');
+  await expect(moto.getByTestId('device-label')).toHaveText('· you are laptop-rear-2 here');
+
+  // Their two pictures in the grid, each with its status line.
+  const cells = page.getByTestId('remote-preview-cell');
+  await expect(cells).toHaveCount(2, { timeout: 15_000 });
+  expect(
+    await cells.evaluateAll((all) => all.map((cell) => cell.getAttribute('data-label'))),
+  ).toEqual(['laptop-rear', 'laptop-rear-2']);
+  await expect(page.getByTestId('remote-preview-name')).toHaveText([
+    'laptop-rear',
+    'laptop-rear-2',
+  ]);
+  await expect(page.getByTestId('remote-status')).toHaveCount(2);
+
+  // Both ready for an attempt (connected, synced once, recording for the next attempt's margins).
+  for (const [k, phone] of phones.entries()) {
+    const row = page.locator(
+      `[data-testid="remote-camera"][data-label="${k === 0 ? 'laptop-rear' : 'laptop-rear-2'}"]`,
+    );
+    await expect.poll(() => readiness(phone, row, since[k]), { timeout: 30_000 }).toBe('ready');
+  }
+
+  // An attempt: each phone sends its two clips, under its own label.
+  await replayDemo(page);
+  await expectSolves(page, 1);
+  await expect
+    .poll(async () => (await attemptRecord(page, sessionId)).video.length, { timeout: 90_000 })
+    .toBe(4);
+  const record = await attemptRecord(page, sessionId);
+  expect(record.video.map((clip) => `${clip.camera} ${clip.segment}`).sort()).toEqual([
+    'laptop-rear scramble',
+    'laptop-rear solve',
+    'laptop-rear-2 scramble',
+    'laptop-rear-2 solve',
+  ]);
+  const files = await attemptFiles(page, sessionId, 1);
+  for (const clip of record.video) {
+    expect(files[clip.file], clip.file).toBe(clip.bytes);
+    expect(files[clip.framesFile], clip.framesFile).toBeGreaterThan(0);
+  }
+
+  // The session's cameras: the two, one name and one camera name each, no installation id in it.
+  const text = await fileText(page, sessionId, ['session.json']);
+  const session = JSON.parse(text) as SessionRecord;
+  expect(session.cameras.map((camera) => [camera.label, camera.deviceLabel, camera.local])).toEqual(
+    [
+      ['laptop-rear', REAR, false],
+      ['laptop-rear-2', REAR, false],
+    ],
+  );
+  expect(session.cameras[0].remote).toEqual(session.cameras[1].remote);
+  expect(session.cameras[0].remote).toMatchObject({ model: null });
+  for (const id of [THINKPHONE_ID, MOTO_ID]) {
+    expect(text).not.toContain(id.slice(0, 8));
+  }
+
+  // The clip viewer's buttons: the four, each named after its phone's label (in the order the clips
+  // came).
+  const badge = solveRows(page).getByTestId('clip-badge');
+  await expect(badge).toHaveText(/^\s*4 clips, [\d.]+ [kM]B\s*$/, { timeout: 15_000 });
+  await badge.click();
+  const viewer = page.getByTestId('clip-viewer');
+  await expect(viewer.getByTestId('clip-segment')).toHaveCount(4);
+  const buttons = await viewer.getByTestId('clip-segment').allTextContents();
+  expect(buttons.map((button) => button.replace(/\s+/gu, ' ').trim()).sort()).toEqual([
+    'Scramble · laptop-rear',
+    'Scramble · laptop-rear-2',
+    'Solve · laptop-rear',
+    'Solve · laptop-rear-2',
+  ]);
+  await viewer.getByRole('button', { name: 'Close' }).click();
+
+  // The diagnostics tell the two phones apart: each phone's events say its installation, and the
+  // host's pairings which phone each label is.
+  await expect
+    .poll(async () => (await events(page)).filter((e) => e.kind === 'remote.clip').length, {
+      timeout: 20_000,
+    })
+    .toBe(4);
+  const all = (await fakeAccountState(page)).events.map(
+    (entry) =>
+      entry.event as {
+        kind: string;
+        device: Record<string, unknown>;
+        data: Record<string, unknown>;
+      },
+  );
+  const paired = all.filter((e) => e.kind === 'rtc.paired' && e.data['camera'] !== undefined);
+  expect(paired.map((e) => [e.data['camera'], e.data['peerInstallation']])).toEqual([
+    ['laptop-rear', THINKPHONE_ID.slice(0, 8)],
+    ['laptop-rear-2', MOTO_ID.slice(0, 8)],
+  ]);
+  const installations = new Set(all.map((e) => e.device['installation']));
+  expect(installations).toContain(THINKPHONE_ID.slice(0, 8));
+  expect(installations).toContain(MOTO_ID.slice(0, 8));
+  for (const phone of phones) {
+    await phone.close();
+  }
 });
 
 test("New session right after a solve: the host keeps the phone until its clips are in the ended session's attempt, four clips and no note, then lets it go", async ({

@@ -299,7 +299,8 @@ export class CameraDeviceClips {
         segment: cut.segment,
         fpsNominal: frameRateOf(info),
         app: APP_BUILD,
-        staging: STAGING_FOLDER,
+        // The end-to-end suite's phone pages each stage in a folder of their own (T5.6).
+        staging: this.hooks.stagingFolder ?? STAGING_FOLDER,
       });
     } catch (error: unknown) {
       this.cutting.delete(key);

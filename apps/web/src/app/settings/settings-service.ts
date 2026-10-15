@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal, untracked } from '@angular/core';
 // Types only: the camera code stays out of the chunks that load SettingsService on every page.
 import type {
   ControlValues,
@@ -10,6 +10,7 @@ import type {
 import {
   MAX_VIEWER_CHOICES,
   type MicrophoneProcessing,
+  UUID_V4,
   VIEWER_DEFAULT,
   type ViewerChoice,
   type ViewerChoices,
@@ -199,6 +200,16 @@ const SETTINGS_VERSION = 2;
 interface StoredSettings {
   /** Null: the default label of this device. */
   readonly hostLabel: string | null;
+  /**
+   * T5.6: this browser installation's id, a UUID v4 made the first time it is read
+   * (`SettingsService.installationId`); null until then.
+   */
+  readonly installationId: string | null;
+  /**
+   * T5.6: the device's model as its browser last gave it (Chrome on Android), so that the default
+   * label is the model from the page's start; null until known, and where the browser gives none.
+   */
+  readonly model: string | null;
   readonly cubeMacs: readonly CubeMac[];
   readonly demoSpeed: number;
   readonly inspection: boolean;
@@ -250,6 +261,8 @@ interface StoredSettings {
 
 const DEFAULTS: StoredSettings = {
   hostLabel: null,
+  installationId: null,
+  model: null,
   cubeMacs: [],
   demoSpeed: DEMO_SPEED_DEFAULT,
   inspection: false,
@@ -333,12 +346,23 @@ export class SettingsService {
    */
   readonly networkTypeKnown = networkConnection(this.globals.navigator)?.type !== undefined;
 
-  /** The label of this device when none is set: its platform, such as "macOS laptop". */
-  readonly defaultHostLabel = defaultHostLabel(this.globals.navigator);
+  /**
+   * This device's model where its browser gives it (T5.6: Chrome on Android, `moto g60`), as last
+   * read (`deviceModel`, at each page load; kept with the settings so that it is known from the
+   * page's start); null where the browser gives none.
+   */
+  readonly model = computed(() => this.stored().model);
+  /**
+   * The label of this device when none is set: its model where the browser gives it (T5.6: `moto
+   * g60`, "ThinkPhone by motorola"), else its platform, such as "macOS laptop" or "Android phone".
+   */
+  readonly defaultHostLabel = computed(() =>
+    defaultHostLabel(this.globals.navigator, this.stored().model),
+  );
   /** The label that the user typed; null while the default applies. */
   readonly customHostLabel = computed(() => this.stored().hostLabel);
   /** The label that sessions record: the typed one, else the default. */
-  readonly hostLabel = computed(() => this.stored().hostLabel ?? this.defaultHostLabel);
+  readonly hostLabel = computed(() => this.stored().hostLabel ?? this.defaultHostLabel());
   /** Sorted by name. */
   readonly cubeMacs = computed(() => this.stored().cubeMacs);
   /** The demo cube's replay speed (1 is real time). */
@@ -458,12 +482,45 @@ export class SettingsService {
   /** Why the last change could not be stored; null when it was. */
   readonly saveError = this.saveErrorSignal.asReadonly();
 
+  /** This installation's id once made or read (T5.6); see {@link installationId}. */
+  private installation: string | null = this.loaded.settings.installationId;
+  /**
+   * Settles once the browser said the device's model, or that it gives none (T5.6, at each page
+   * load, within milliseconds): a phone's first `hello` waits for it, so that every hello of the
+   * page names the model alike.
+   */
+  readonly modelRead: Promise<void>;
+
   constructor() {
     if (this.loaded.migrated) {
       // The cube entries stored before T3.4 keep the time they got now: read again later, they must
       // not look newer than the copies on the account's other devices.
       this.saveErrorSignal.set(writeSettings(this.storage, this.stored()));
     }
+    // The device's model (T5.6), which the browser gives in a moment: the default label follows it.
+    this.modelRead = deviceModel(this.globals.navigator).then((model) => {
+      if (model !== undefined) {
+        this.learnModel(model);
+      }
+    });
+  }
+
+  /**
+   * This browser installation's id (T5.6): a UUID v4 made the first time it is read and kept with
+   * the settings, the same for every page of the installation from then on. `hello` carries it, so
+   * that the host tells two phones of one name apart (`RemoteCamerasService`), and the diagnostics
+   * its first eight characters (`installation`); it is never in a record and never shown in full.
+   * Where the browser keeps no settings, it lasts until the page closes. Changes no signal: a first
+   * read may come from a template or a computed.
+   */
+  installationId(): string {
+    if (this.installation === null) {
+      const id = newInstallationId();
+      this.installation = id;
+      // Written beside the settings as they stand; `update` keeps it from then on.
+      writeSettings(this.storage, { ...untracked(this.stored), installationId: id });
+    }
+    return this.installation;
   }
 
   /** Sets the host label; an empty one restores the default. */
@@ -754,10 +811,107 @@ export class SettingsService {
     this.update({ cameraFramings: [...others, entry].slice(-MAX_FRAMINGS) });
   }
 
+  /**
+   * The browser gave the device's model (T5.6): kept, so that the default label is the model from
+   * the next page's start. While the default label applies, the cameras chosen under the label
+   * before (Settings keep a host's choice under its label: CameraService's `pickHost`, the camera
+   * device's with " (camera)" after it) move to the new one, so that no choice is lost with the name.
+   */
+  private learnModel(model: string | null): void {
+    const stored = this.stored();
+    if (model === stored.model) {
+      return;
+    }
+    const before = defaultHostLabel(this.globals.navigator, stored.model);
+    const after = defaultHostLabel(this.globals.navigator, model);
+    const cameraPicks =
+      stored.hostLabel !== null || before === after
+        ? stored.cameraPicks
+        : renamedPicks(stored.cameraPicks, before, after);
+    this.update({ model, cameraPicks });
+  }
+
   private update(change: Partial<StoredSettings>): void {
-    const next = { ...this.stored(), ...change };
+    const next = { ...this.stored(), ...change, installationId: this.installation };
     this.stored.set(next);
     this.saveErrorSignal.set(writeSettings(this.storage, next));
+  }
+}
+
+/**
+ * The cameras chosen on the host labelled `before` (and on its camera device, `<before> (camera)`),
+ * under `after` instead; a choice already kept under `after` stays (T5.6: the default label became
+ * the device's model).
+ */
+function renamedPicks(picks: readonly CameraPick[], before: string, after: string): CameraPick[] {
+  const renamed = picks.map((pick) =>
+    pick.host === before
+      ? { ...pick, host: after }
+      : pick.host.startsWith(`${before} (`)
+        ? { ...pick, host: `${after}${pick.host.slice(before.length)}` }
+        : pick,
+  );
+  // One per host: the newest, which the list keeps last.
+  return renamed.filter(
+    (pick, k) => !renamed.slice(k + 1).some((later) => later.host === pick.host),
+  );
+}
+
+/**
+ * A new installation id (T5.6): a UUID v4 from `crypto.randomUUID()`, or, where the page has no
+ * secure context and the browser none of it, made of `crypto.getRandomValues()` in the same shape.
+ */
+export function newInstallationId(): string {
+  const source = globalThis.crypto as Crypto | undefined;
+  if (typeof source?.randomUUID === 'function') {
+    return source.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (source === undefined) {
+    for (let k = 0; k < bytes.length; k++) {
+      bytes[k] = Math.floor(Math.random() * 256);
+    }
+  } else {
+    source.getRandomValues(bytes);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** The first eight characters of an installation id (T5.6): what the diagnostics and Settings show. */
+export function shortInstallation(id: string): string {
+  return id.slice(0, 8);
+}
+
+/** The most characters of a device's model kept (T5.6): Chrome's are a few words. */
+const MAX_MODEL = 100;
+
+/**
+ * This device's model where its browser gives it (T5.6): Chrome on Android answers
+ * `navigator.userAgentData.getHighEntropyValues(['model'])` with it (`moto g60`; a ThinkPhone its
+ * marketing name, "ThinkPhone by motorola"), feature-detected, the user agent string never read for
+ * it. Null where there is no such API or it gives an empty model (desktop Chrome, other browsers);
+ * undefined when it failed, which says nothing.
+ */
+export async function deviceModel(
+  navigator: Partial<Navigator> | undefined,
+): Promise<string | null | undefined> {
+  const hints = member(navigator, 'userAgentData');
+  const getHighEntropyValues = member(hints, 'getHighEntropyValues');
+  if (typeof getHighEntropyValues !== 'function') {
+    return null;
+  }
+  try {
+    const values: unknown = await (
+      getHighEntropyValues as (this: unknown, hints: string[]) => Promise<unknown>
+    ).call(hints, ['model']);
+    const model = member(values, 'model');
+    const trimmed = typeof model === 'string' ? model.trim() : '';
+    return trimmed === '' ? null : trimmed.slice(0, MAX_MODEL);
+  } catch {
+    return undefined;
   }
 }
 
@@ -790,6 +944,8 @@ function readSettings(
     return { settings: DEFAULTS, migrated: false };
   }
   const hostLabel = member(parsed, 'hostLabel');
+  const installationId = member(parsed, 'installationId');
+  const model = member(parsed, 'model');
   const demoSpeed = member(parsed, 'demoSpeed');
   const inspection = member(parsed, 'inspection');
   const autoAdvance = member(parsed, 'autoAdvance');
@@ -820,6 +976,15 @@ function readSettings(
       typeof hostLabel === 'string' && hostLabel.trim() !== ''
         ? hostLabel.trim()
         : DEFAULTS.hostLabel,
+    // Settings stored before T5.6 have neither: the id is made when first read, the model read again.
+    installationId:
+      typeof installationId === 'string' && UUID_V4.test(installationId)
+        ? installationId
+        : DEFAULTS.installationId,
+    model:
+      typeof model === 'string' && model.trim() !== '' && model.length <= MAX_MODEL
+        ? model.trim()
+        : DEFAULTS.model,
     cubeMacs: cubeMacs.entries,
     demoSpeed:
       typeof demoSpeed === 'number' && isDemoSpeed(demoSpeed) ? demoSpeed : DEFAULTS.demoSpeed,
@@ -1046,10 +1211,17 @@ export function hostPlatform(navigator: Partial<Navigator> | undefined): {
 }
 
 /**
- * A short name for this device from its platform, such as "macOS laptop" or "Android phone":
- * from the user-agent client hints (Chrome) or else the user-agent string.
+ * A short name for this device: its model where the browser gives it (T5.6, `deviceModel`: `moto
+ * g60`), else one from its platform, such as "macOS laptop" or "Android phone", from the user-agent
+ * client hints (Chrome) or else the user-agent string.
  */
-export function defaultHostLabel(navigator: Partial<Navigator> | undefined): string {
+export function defaultHostLabel(
+  navigator: Partial<Navigator> | undefined,
+  model: string | null = null,
+): string {
+  if (model !== null && model.trim() !== '') {
+    return model.trim();
+  }
   const { platform, mobile } = hostPlatform(navigator);
   const userAgent = typeof navigator?.userAgent === 'string' ? navigator.userAgent : '';
   switch (platform) {

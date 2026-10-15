@@ -205,7 +205,10 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   replaced); `TRANSPORT_CONNECTOR` (`WebRtcTransport.connect`, or the unit tests' memory pairs:
   `rtc-testing.ts`'s `MemoryConnector` plays the SDP dance over the signaling and joins
   `MemoryTransport` pairs); `RTC_TIMERS` (the host clock and the browser's timers, through
-  BROWSER_GLOBALS); `thisDevice` (the host label and the platform of `hello` and of `remote`).
+  BROWSER_GLOBALS); `thisDevice` (the host label and the platform of `hello` and of `remote`, and
+  since T5.6 the installation id and the model, from `SettingsService`: the host knows a phone by
+  its installation id, `remote:<id>`, so that two phones of one name are two cameras of the session,
+  and tells it its label with `label`; the id is never recorded).
 - The host: `RemoteCamerasService` (`apps/web/src/app/camera/`) owns the pairing, the peers (one
   `MessageLink`, `ClockPinger` and `RemoteClockFit` each, the fit kept across reconnections), the
   session's entries (`SessionService.putCamera` with `local: false` and `remote`, `putCameraClock`
@@ -256,7 +259,8 @@ end-to-end suite pairs two pages of one browser through a `BroadcastChannel` sig
   it sends say how many wait.
 - The end-to-end suite bends both sides in development builds through `window.cubetraceE2eRemote`
   (`e2e-remote.ts`): a camera device's clock moved by an offset (`RTC_TIMERS`), its connection cut
-  once in the middle of a file, its cuts ignored, the host's wait shortened.
+  once in the middle of a file, its cuts ignored, the host's wait shortened, and (T5.6) its clips
+  staged in a folder of its own (`stagingFolder`), so that two phone pages of one browser stage apart.
 
 **The sync check and the live preview (T4.3; `docs/RTC.md` §10 has them step by step).**
 

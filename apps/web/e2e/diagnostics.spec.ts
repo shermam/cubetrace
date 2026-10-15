@@ -36,6 +36,9 @@ interface Kept {
       readonly label: string;
       readonly platform: string;
       readonly installed: boolean;
+      /** T5.6: the first eight characters of the installation id; the model where the browser says one. */
+      readonly installation?: string;
+      readonly model?: string;
     };
     readonly data: Record<string, unknown>;
   };
@@ -132,12 +135,31 @@ test('signed in, a demo attempt with the camera on leaves its events in the acco
   const build = ((await page.getByTestId('app-version').textContent()) ?? '')
     .replace('cubetrace ', '')
     .split(' · ');
+  // T5.6: the settings keep this browser's installation id whole; every event names the installation
+  // by its first eight characters, and none carries the whole id. Chromium on a desktop says no model.
+  const installationId = await page.evaluate((key: string) => {
+    const stored: unknown = JSON.parse(localStorage.getItem(key) ?? '{}');
+    const id: unknown =
+      typeof stored === 'object' && stored !== null
+        ? Reflect.get(stored, 'installationId')
+        : undefined;
+    return typeof id === 'string' ? id : '';
+  }, 'cubetrace.settings');
+  expect(installationId).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
   for (const { uid, id, event } of events) {
     expect(uid).toBe(ADA.uid);
     expect(id).toMatch(/^\d{13}-[0-9a-f]{8}$/);
     expect(id.slice(0, 13)).toBe(String(Math.floor(event.tsMs)));
     expect(isEvent(event), `${event.kind}: ${JSON.stringify(isEvent.errors)}`).toBe(true);
-    expect(event.device).toEqual({ label: 'e2e-laptop', platform, installed: false });
+    expect(event.device).toEqual({
+      label: 'e2e-laptop',
+      platform,
+      installed: false,
+      installation: installationId.slice(0, 8),
+    });
+    expect(JSON.stringify(event)).not.toContain(installationId);
     expect(event.app).toEqual({ version: build[0], commit: build[1] });
   }
   const kinds = events.map((entry) => entry.event.kind);

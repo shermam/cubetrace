@@ -146,7 +146,7 @@ describe('CameraDevicePage', () => {
             type: 'hello',
             v: PROTOCOL_VERSION,
             role: 'host',
-            device: { label: 'office-mbp', platform: 'macOS' },
+            device: { label: 'office-mbp', platform: 'macOS', id: null, model: null },
             app: { version: '0.4.0', commit: 'abc1234' },
             camera: null,
           });
@@ -219,6 +219,14 @@ describe('CameraDevicePage', () => {
     await pump(10);
     expect(text('device-clock')).toBe('synced · round trip 9.6 ms · offset −2,500.4 ms');
     expect(element('device-clock')?.getAttribute('data-converged')).toBe('true');
+    // Its label in the host's session, once the host says it (T5.6).
+    expect(element('device-label')).toBeNull();
+    link()?.send({ type: 'label', camera: 'phone-rear-2' });
+    await pump(10);
+    expect(text('device-label')).toBe('· you are phone-rear-2 here');
+    expect(text('device-state')).toMatch(
+      /^Connected · office-mbp \(macOS\) · \d+ s · you are phone-rear-2 here$/,
+    );
 
     element('device-leave')?.click();
     await pump(0);

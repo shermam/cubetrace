@@ -75,7 +75,12 @@ const MESSAGES: Message[] = [
     type: 'hello',
     v: PROTOCOL_VERSION,
     role: 'camera',
-    device: { label: 'Android phone', platform: 'Android' },
+    device: {
+      label: 'moto g60',
+      platform: 'Android',
+      id: '6f1c2b3a-9d4e-4f5a-8b6c-7d8e9f0a1b2c',
+      model: 'moto g60',
+    },
     app: { version: '0.4.0', commit: 'abc1234' },
     camera: CAMERA,
   },
@@ -83,9 +88,22 @@ const MESSAGES: Message[] = [
     type: 'hello',
     v: PROTOCOL_VERSION,
     role: 'host',
-    device: { label: 'office-mbp', platform: 'macOS' },
+    device: {
+      label: 'office-mbp',
+      platform: 'macOS',
+      id: '0a1b2c3d-4e5f-4a6b-9c8d-7e6f5a4b3c2d',
+      model: null,
+    },
     app: { version: '0.4.0', commit: 'abc1234' },
     camera: null,
+  },
+  {
+    type: 'hello',
+    v: PROTOCOL_VERSION,
+    role: 'camera',
+    device: { label: 'Android phone', platform: 'Android', id: null, model: null },
+    app: { version: '0.4.0', commit: 'abc1234' },
+    camera: CAMERA,
   },
   { type: 'ping', t1: 1_790_000_000_123.5 },
   { type: 'pong', t1: 1_790_000_000_123.5, t2: 1_790_000_003_000.25, t3: 1_790_000_003_001 },
@@ -218,6 +236,7 @@ const MESSAGES: Message[] = [
     stored: false,
     reason: 'the attempt is gone',
   },
+  { type: 'label', camera: 'phone-rear-2' },
   {
     type: 'cut-failed',
     attempt: 17,
@@ -456,9 +475,22 @@ describe('the protocol', () => {
       type: 'hello',
       v: 1,
       role: 'host',
-      device: { label: 'x', platform: 'y' },
+      device: { label: 'x', platform: 'y', id: null, model: null },
       app: { version: '1', commit: 'c' },
       camera: null,
+    });
+    // A build before T5.6 names its device without an installation id or a model: both read as
+    // null (the host then knows the phone by its label alone); an empty model is none.
+    const named = JSON.stringify({
+      type: 'hello',
+      v: 1,
+      role: 'camera',
+      device: { label: 'Android phone', platform: 'Android', model: '' },
+      app: { version: '0.4.0', commit: 'c' },
+      camera: null,
+    });
+    expect(decode(named)).toMatchObject({
+      device: { label: 'Android phone', platform: 'Android', id: null, model: null },
     });
     // A field left out that may be null reads as null.
     const state = JSON.stringify({ type: 'state', remoteMs: 1, recording: true, pendingClips: 0 });
@@ -695,6 +727,60 @@ describe('the protocol', () => {
       "a cut-done whose clip's motion has a time that is text",
       cutDoneWith({ motion: { atMs: ['1'], changed: [0.5] } }),
       /motion.atMs must hold numbers ≥ 0/,
+    ],
+    [
+      'a hello whose installation id is too short',
+      JSON.stringify({
+        type: 'hello',
+        v: 1,
+        role: 'camera',
+        device: { label: 'x', platform: 'y', id: 'abc' },
+        app: { version: '1', commit: 'c' },
+        camera: null,
+      }),
+      /id must be an installation id \(8 to 64 letters, digits and hyphens\), got "abc"/,
+    ],
+    [
+      'a hello whose installation id is a path',
+      JSON.stringify({
+        type: 'hello',
+        v: 1,
+        role: 'camera',
+        device: { label: 'x', platform: 'y', id: '../../12345678' },
+        app: { version: '1', commit: 'c' },
+        camera: null,
+      }),
+      /id must be an installation id/,
+    ],
+    [
+      'a hello whose model is a number',
+      JSON.stringify({
+        type: 'hello',
+        v: 1,
+        role: 'camera',
+        device: { label: 'x', platform: 'y', id: null, model: 60 },
+        app: { version: '1', commit: 'c' },
+        camera: null,
+      }),
+      /model must be a string of at most 100 characters/,
+    ],
+    [
+      'a hello whose model is too long',
+      JSON.stringify({
+        type: 'hello',
+        v: 1,
+        role: 'camera',
+        device: { label: 'x', platform: 'y', id: null, model: 'm'.repeat(101) },
+        app: { version: '1', commit: 'c' },
+        camera: null,
+      }),
+      /model must be a string of at most 100 characters/,
+    ],
+    ['a label without a camera', '{"type": "label"}', /camera must be a camera label/],
+    [
+      'a label that is not a camera label',
+      '{"type": "label", "camera": "Phone Rear"}',
+      /camera must be a camera label/,
     ],
     [
       'a clip-ack whose stored is text',

@@ -99,6 +99,12 @@ export const RETRY_DELAY_MS = 3000;
 /** How long `leave` has to go out before the connection is closed (`RTCPeerConnection.close` drops what is queued). */
 export const LEAVE_GRACE_MS = 250;
 
+/**
+ * How long the first call waits, at most, for the browser to say the device's model (T5.6), which it
+ * does within milliseconds; the hello goes without it after that.
+ */
+export const MODEL_WAIT_MS = 2000;
+
 /** How many of the account's newest sessions are looked at for a code typed without its session. */
 const SESSIONS_SEARCHED = 20;
 
@@ -165,6 +171,7 @@ export class CameraDeviceService {
   private readonly inputSignal = signal<PairingInput | null>(null);
   private readonly joinedSignal = signal<Joined | null>(null);
   private readonly hostSignal = signal<Hello | null>(null);
+  private readonly labelSignal = signal<string | null>(null);
   private readonly clockSignal = signal<DeviceClock | null>(null);
   private readonly problemSignal = signal<string | null>(null);
   private readonly sinceSignal = signal(0);
@@ -183,6 +190,12 @@ export class CameraDeviceService {
   readonly host = this.hostSignal.asReadonly();
   /** The host's device, for the page. */
   readonly hostDevice = computed<DeviceInfo | null>(() => this.hostSignal()?.device ?? null);
+  /**
+   * The label the host's session gives this phone's camera (T5.6: `phone-rear-2`), as the host says
+   * it (`label`; from a host's build before T5.6, its last cut's camera); null until it says it, and
+   * from a new code on: "you are phone-rear-2 here".
+   */
+  readonly label = this.labelSignal.asReadonly();
   /** The clock sync as the host last reported it; null before the first report. */
   readonly clock = this.clockSignal.asReadonly();
   /**
@@ -296,6 +309,7 @@ export class CameraDeviceService {
     this.end('a new code', LEAVE_GRACE_MS);
     this.inputSignal.set(input);
     this.joinedSignal.set(null);
+    this.labelSignal.set(null);
     this.problemSignal.set(null);
     this.track(this.start());
   }
@@ -315,6 +329,7 @@ export class CameraDeviceService {
     this.inputSignal.set(null);
     this.joinedSignal.set(null);
     this.hostSignal.set(null);
+    this.labelSignal.set(null);
     this.clockSignal.set(null);
     this.setState('idle', null);
   }
@@ -405,7 +420,28 @@ export class CameraDeviceService {
     this.hold();
     this.setState('joining', null);
     this.joinUntilMs = this.timers.now() + PAIRING_TTL_MS;
+    // The phone's model first (T5.6), so that its first hello names it as every later one does: the
+    // host's session tells the cameras of phones apart by it too (`identityName`, for when the host's
+    // page reloaded). The browser says it within milliseconds of the page's start.
+    await this.modelKnown();
+    if (generation !== this.generation) {
+      return;
+    }
     await this.call(signaling, await hashToken(input.token), generation, false);
+  }
+
+  /**
+   * Resolves once the browser said the device's model (T5.6, `SettingsService.modelRead`), or after
+   * {@link MODEL_WAIT_MS} if it is slow to.
+   */
+  private modelKnown(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timer = this.timers.setTimeout(resolve, MODEL_WAIT_MS);
+      void this.settings.modelRead.then(() => {
+        this.timers.clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /**
@@ -514,6 +550,13 @@ export class CameraDeviceService {
       }),
       link.on('leave', (message) => {
         this.hostLeft(generation, message.reason);
+      }),
+      // This camera's label in the host's session (T5.6), and a cut's, which names it too.
+      link.on('label', (message) => {
+        this.labelSignal.set(message.camera);
+      }),
+      link.on('cut', (message) => {
+        this.labelSignal.set(message.camera);
       }),
       link.onError((error) => {
         console.warn(`cubetrace: camera device: a frame was not a message: ${error.message}`);

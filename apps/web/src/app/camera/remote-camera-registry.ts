@@ -22,6 +22,13 @@ export interface RemoteCameraEntry {
   readonly id: string;
   /** The phone's host label (`ThinkPhone`). */
   readonly name: string;
+  /**
+   * The first eight characters of the phone's installation id (T5.6), which tells two phones of one
+   * name apart; null for a phone of a build before T5.6.
+   */
+  readonly installation: string | null;
+  /** The phone's model where its browser gives it (T5.6: `moto g60`); null otherwise. */
+  readonly model: string | null;
   /** Its label in the session (`phone-rear`); null before the phone has a camera. */
   readonly label: string | null;
   /** The session it films: the one it was paired in. */

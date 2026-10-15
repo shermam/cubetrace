@@ -96,6 +96,13 @@ export interface RemoteDevice {
   label: string;
   /** Its platform, such as `Android` (`host.platform` of its own records). */
   platform: string;
+  /**
+   * Its model where its browser gives it (T5.6: `moto g60`, from the phone's `hello`), null where it
+   * does not. Absent from the files written before T5.6, and kept absent when read. The phone's
+   * installation id, which tells two phones of one name apart while the host's page is open, is
+   * never recorded.
+   */
+  model?: string | null;
 }
 
 /** A camera of the session: an entry of `cameras` in session.json (docs/DATA-MODEL.md §6). */

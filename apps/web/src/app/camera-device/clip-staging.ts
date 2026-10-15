@@ -10,6 +10,7 @@ import {
 } from '@cubetrace/storage';
 
 import { BROWSER_GLOBALS } from '../device/browser-globals';
+import { e2eRemote } from '../rtc/e2e-remote';
 
 /**
  * The folder at the root of the origin private file system where a camera device stages the clips
@@ -86,13 +87,17 @@ export function sameSlot(
 
 /**
  * The staged clips in the origin private file system: the files where the capture wrote them
- * ({@link STAGING_FOLDER}), and `index.json` beside them, written whole in one step as the records
- * are; an entry that is not well formed is left out. One operation at a time.
+ * ({@link STAGING_FOLDER}, or `folder`: the end-to-end suite gives each phone page its own, T5.6),
+ * and `index.json` beside them, written whole in one step as the records are; an entry that is not
+ * well formed is left out. One operation at a time.
  */
 export class OpfsClipStaging implements ClipStaging {
   #queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly root: () => Promise<OpfsDirectoryHandle>) {}
+  constructor(
+    private readonly root: () => Promise<OpfsDirectoryHandle>,
+    readonly folder: string = STAGING_FOLDER,
+  ) {}
 
   list(): Promise<StagedClip[]> {
     return this.#serially(() => this.#read());
@@ -211,7 +216,7 @@ export class OpfsClipStaging implements ClipStaging {
   }
 
   #staging(): Promise<OpfsDirectoryHandle> {
-    return this.root().then((root) => root.getDirectoryHandle(STAGING_FOLDER, { create: true }));
+    return this.root().then((root) => root.getDirectoryHandle(this.folder, { create: true }));
   }
 
   async #folder(name: string, create: boolean): Promise<OpfsDirectoryHandle | null> {
@@ -283,17 +288,25 @@ function isStagedClip(value: unknown): value is StagedClip {
   );
 }
 
-/** The staged clips in `navigator.storage.getDirectory()`; the unit tests give one over a fake. */
+/**
+ * The staged clips in `navigator.storage.getDirectory()`, in {@link STAGING_FOLDER} (or the end-to-end
+ * suite's folder, `e2eRemote`'s `stagingFolder`, which `CameraDeviceClips` gives the capture too); the
+ * unit tests give one over a fake.
+ */
 export const CLIP_STAGING = new InjectionToken<ClipStaging>('CLIP_STAGING', {
   providedIn: 'root',
   factory: () => {
-    const navigator = inject(BROWSER_GLOBALS).navigator;
-    return new OpfsClipStaging(() => {
-      const storage = navigator?.storage;
-      if (typeof storage?.getDirectory !== 'function') {
-        return Promise.reject(new Error('this browser has no origin private file system.'));
-      }
-      return storage.getDirectory();
-    });
+    const globals = inject(BROWSER_GLOBALS);
+    const navigator = globals.navigator;
+    return new OpfsClipStaging(
+      () => {
+        const storage = navigator?.storage;
+        if (typeof storage?.getDirectory !== 'function') {
+          return Promise.reject(new Error('this browser has no origin private file system.'));
+        }
+        return storage.getDirectory();
+      },
+      e2eRemote(globals).stagingFolder ?? STAGING_FOLDER,
+    );
   },
 });

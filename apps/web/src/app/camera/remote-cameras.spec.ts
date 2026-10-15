@@ -95,8 +95,14 @@ describe('RemoteCameras', () => {
     return element(testId)?.textContent.replace(/\s+/g, ' ').trim();
   }
 
-  /** A phone that joins with the token shown: the connection, its hello, the pings answered. */
-  async function joinPhone(label = 'ThinkPhone'): Promise<MessageLink> {
+  /**
+   * A phone that joins with the token shown: the connection, its hello (with `who`, its installation
+   * id and model since T5.6; none: a build before), the pings answered.
+   */
+  async function joinPhone(
+    label = 'ThinkPhone',
+    who: { id: string; model: string | null } | null = null,
+  ): Promise<MessageLink> {
     const token = TestBed.inject(RemoteCamerasService).pairing()?.token ?? '';
     const signaling = new FirestoreSignaling(backend, {
       sessionId: s.service.session()?.id ?? '',
@@ -111,7 +117,7 @@ describe('RemoteCameras', () => {
       type: 'hello',
       v: PROTOCOL_VERSION,
       role: 'camera',
-      device: { label, platform: 'Android' },
+      device: { label, platform: 'Android', id: who?.id ?? null, model: who?.model ?? null },
       app: { version: '0.4.0', commit: 'abc1234' },
       camera: PHONE_CAMERA,
     });
@@ -194,6 +200,11 @@ describe('RemoteCameras', () => {
     expect(row.getAttribute('data-label')).toBe('phone-rear');
     expect(text('remote-camera-name')).toBe('ThinkPhone');
     expect(text('remote-camera-label')).toBe('phone-rear');
+    // A phone of a build before T5.6: no model, and known by its name alone.
+    expect(element('remote-camera-model')).toBeNull();
+    expect(text('remote-camera-named-only')).toBe(
+      "Named only: this phone's build says no installation id, so another phone of the same name would be the same camera to the session. Update cubetrace on the phone.",
+    );
     expect(text('remote-camera-state')).toMatch(/^connected for \d+ s$/);
     expect(text('remote-camera-sync')).toMatch(/^syncing · \d sample/);
     expect(text('remote-camera-report')).toBe('no report yet');
@@ -254,6 +265,38 @@ describe('RemoteCameras', () => {
     await pump(0);
     expect(element('remote-camera')).toBeNull();
     expect(text('remote-cameras-none')).toBe('No phone is paired.');
+  });
+
+  it('names two phones of one name by their labels and models, each said by its installation (T5.6)', async () => {
+    await render();
+    element('add-camera')?.click();
+    await pump(0);
+    await joinPhone('Android phone', {
+      id: '1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b',
+      model: 'ThinkPhone by motorola',
+    });
+    element('add-camera')?.click();
+    await pump(0);
+    await joinPhone('Android phone', {
+      id: '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d',
+      model: 'moto g60',
+    });
+    const rows = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="remote-camera"]'),
+    );
+    expect(
+      rows.map((row) =>
+        ['remote-camera-name', 'remote-camera-label', 'remote-camera-model']
+          .map((id) =>
+            row.querySelector(`[data-testid="${id}"]`)?.textContent.replace(/\s+/g, ' ').trim(),
+          )
+          .join(' '),
+      ),
+    ).toEqual([
+      'Android phone phone-rear · ThinkPhone by motorola',
+      'Android phone phone-rear-2 · moto g60',
+    ]);
+    expect(element('remote-camera-named-only')).toBeNull();
   });
 
   it('Record remote cameras is on by default, and its box switches the setting (T4.2)', async () => {

@@ -35,7 +35,13 @@ import { CLOUD_UPLOAD_STATES } from './cloud';
 import type { CloudCube } from './cloud-cube';
 import { CUBE_NAME, MAC_ADDRESS } from './cloud-cube';
 import type { CloudEvent, EventData, EventDevice, EventValue } from './cloud-event';
-import { EVENT_DATA_MAX_KEYS, EVENT_TEXT_MAX_LENGTH, isEventKind } from './cloud-event';
+import {
+  EVENT_DATA_MAX_KEYS,
+  EVENT_INSTALLATION,
+  EVENT_MODEL_MAX_LENGTH,
+  EVENT_TEXT_MAX_LENGTH,
+  isEventKind,
+} from './cloud-event';
 import type { CloudCandidate, CloudPeer, SessionDescription, SessionPairing } from './cloud-peer';
 import { CANDIDATE_MAX_LENGTH, PEER_STATES, SDP_MAX_LENGTH, TOKEN_HASH } from './cloud-peer';
 import type { GyroJson, GyroSummary } from './gyro';
@@ -871,8 +877,12 @@ const microphone = nullable(
   }),
 );
 
-/** The device a remote camera runs on (T4.0). */
-const remoteDevice = object<RemoteDevice>({ label: text(), platform: text() });
+/** The device a remote camera runs on (T4.0), with its model since T5.6 (kept absent when absent). */
+const remoteDevice = object<RemoteDevice>({
+  label: text(),
+  platform: text(),
+  model: optional(nullable(text())),
+});
 
 const cameraFields = object<CameraInfo>({
   label,
@@ -1211,12 +1221,26 @@ const eventData: Reader<EventData> = {
   },
 };
 
+/** A device's model in an event (T5.6): a string of 1 to {@link EVENT_MODEL_MAX_LENGTH} characters. */
+const eventModel = leaf(
+  `a string of 1 to ${String(EVENT_MODEL_MAX_LENGTH)} characters`,
+  (value): value is string =>
+    typeof value === 'string' && value !== '' && value.length <= EVENT_MODEL_MAX_LENGTH,
+);
+
 const CLOUD_EVENT = object<CloudEvent>({
   schema: oneOf(1),
   tsMs: num(),
   kind: eventKind,
   app,
-  device: object<EventDevice>({ label: nonEmpty, platform: text(), installed: bool }),
+  device: object<EventDevice>({
+    label: nonEmpty,
+    platform: text(),
+    installed: bool,
+    // Since T5.6; the events written before have neither.
+    installation: optional(text('8 lowercase hex digits', EVENT_INSTALLATION)),
+    model: optional(eventModel),
+  }),
   session: optional(nonEmpty),
   attempt: optional(int(1)),
   data: eventData,

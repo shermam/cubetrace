@@ -452,6 +452,24 @@ describe('parseAttempt and parseSession', () => {
     expect(() => parseCameraInfo({ ...session.cameras[0], label: 'Laptop' })).toThrow(RecordError);
   });
 
+  it("read a remote camera's model since T5.6, null when its browser gives none, and keep it absent when absent", () => {
+    const session = sessionWithCamera();
+    // A record of T5.6: the phone's model, or null for a phone whose browser says none.
+    for (const model of ['moto g60', null]) {
+      const withModel = changed(session, ['cameras', 1, 'remote', 'model'], model);
+      expect(VALIDATE.session[2](withModel), JSON.stringify(VALIDATE.session[2].errors)).toBe(true);
+      expect(parseSession(withModel).cameras[1].remote).toEqual({ ...REMOTE_DEVICE, model });
+    }
+    // A record written before T5.6 has none, and reads back as it was (no new text to upload).
+    const read = parseSession(structuredClone(session));
+    expect(read.cameras[1].remote).toEqual(REMOTE_DEVICE);
+    expect('model' in (read.cameras[1].remote ?? {})).toBe(false);
+    expect(JSON.stringify(read)).toBe(JSON.stringify(session));
+    expect(() => parseSession(changed(session, ['cameras', 1, 'remote', 'model'], 60))).toThrow(
+      'session.json (schema 2): cameras[1].remote.model must be a string or null, got 60.',
+    );
+  });
+
   it('upgrade a record of version 1 in memory: no clock, no clip, no camera, none of T3.7', () => {
     for (const record of [solvedAttempt(), dnfAttempt(), untouchedAttempt()]) {
       const v1 = asVersion1Attempt(record);

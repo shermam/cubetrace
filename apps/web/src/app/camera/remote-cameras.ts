@@ -134,6 +134,14 @@ export class RemoteCameras {
   }
 
   /**
+   * The phone said hello without an installation id (T5.6): a build before it, known by its name
+   * alone ("named only; update the phone"). Not said before its first hello.
+   */
+  protected namedOnly(camera: RemoteCamera): boolean {
+    return camera.device.id === null && camera.app.version !== '';
+  }
+
+  /**
    * "connected for 2 min 05 s", "reconnecting for 12 s (removed after 5 min)", "connecting…",
    * "waiting for the phone's last clips (2)" (its session ended, T4.2b).
    */

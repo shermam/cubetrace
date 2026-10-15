@@ -49,6 +49,17 @@
         "installed": {
           "description": "The app runs installed (display mode standalone), not in a browser tab.",
           "type": "boolean"
+        },
+        "installation": {
+          "description": "The first eight characters of the device's installation id (T5.6: a UUID v4 made once per browser installation, kept in its Settings), which tells two devices of one label apart; never the whole id. Absent before T5.6.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}$"
+        },
+        "model": {
+          "description": "The device's model where its browser gives it (T5.6: Chrome on Android); absent where it does not, and before T5.6.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
         }
       }
     },

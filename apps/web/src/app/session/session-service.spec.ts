@@ -1277,6 +1277,124 @@ describe('SessionService', () => {
       ]);
     });
 
+    it('gives the phones of a resumed session their labels back by their models when their cameras have one name, in whatever order they pair (T5.6)', async () => {
+      const store = new MemorySessionStore();
+      /** A phone's rear camera, as the host keeps it: "camera 0, facing back" on both phones. */
+      const phone = (label: string, model: string | null): CameraInfo => ({
+        ...camera('camera 0, facing back'),
+        label,
+        local: false,
+        facing: 'environment',
+        remote: { label: 'Android phone', platform: 'Android', model },
+      });
+      await store.createSession({
+        ...testSession(),
+        cameras: [phone('phone-rear', 'ThinkPhone by motorola'), phone('phone-rear-2', 'moto g60')],
+      });
+      const localStorage = new FakeLocalStorage();
+      localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
+      const s = setup({ store, localStorage });
+      await ready(s);
+      expect(s.service.session()?.id).toBe(SESSION_A);
+
+      // A page load: no installation id is known; the Moto pairs first, as `phone-rear` by its own
+      // label, and gets its label back by its model; then the ThinkPhone.
+      expect(
+        s.service.putCamera(phone('phone-rear', 'moto g60'), true, 'remote:moto-id')?.label,
+      ).toBe('phone-rear-2');
+      expect(
+        s.service.putCamera(phone('phone-rear', 'ThinkPhone by motorola'), true, 'remote:think-id')
+          ?.label,
+      ).toBe('phone-rear');
+      // A third phone of one of those models: a camera of its own, by its id.
+      expect(
+        s.service.putCamera(phone('phone-rear', 'moto g60'), true, 'remote:other-moto')?.label,
+      ).toBe('phone-rear-3');
+      expect(s.service.session()?.cameras.map((entry) => entry.label)).toEqual([
+        'phone-rear',
+        'phone-rear-2',
+        'phone-rear-3',
+      ]);
+      expect(JSON.stringify(s.service.session())).not.toContain('moto-id');
+    });
+
+    it('gives a phone of a session recorded before T5.6, whose entry has no model, its label back by the name alone', async () => {
+      const store = new MemorySessionStore();
+      const rear: CameraInfo = {
+        ...camera('camera 0, facing back'),
+        label: 'phone-rear',
+        local: false,
+        facing: 'environment',
+        remote: { label: 'Android phone', platform: 'Android' },
+      };
+      await store.createSession({ ...testSession(), cameras: [rear] });
+      const localStorage = new FakeLocalStorage();
+      localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
+      const s = setup({ store, localStorage });
+      await ready(s);
+      expect(s.service.session()?.id).toBe(SESSION_A);
+
+      // The phone, updated: it names its model now.
+      const updated: CameraInfo = {
+        ...rear,
+        remote: { label: 'moto g60', platform: 'Android', model: 'moto g60' },
+      };
+      expect(s.service.putCamera(updated, true, 'remote:moto-id')?.label).toBe('phone-rear');
+      // Its entry has the model from then on: another phone of that name and another model is another.
+      expect(s.service.session()?.cameras).toEqual([updated]);
+      const other: CameraInfo = {
+        ...updated,
+        remote: { label: 'ThinkPhone', platform: 'Android', model: 'ThinkPhone by motorola' },
+      };
+      expect(s.service.putCamera(other, true, 'remote:think-id')?.label).toBe('phone-rear-2');
+    });
+
+    it("keeps a phone's label when its model comes after its first hello, its installation known on the page (T5.6)", async () => {
+      const s = setup();
+      await ready(s);
+      // The Moto's first hello went before its browser said its model; the ThinkPhone's with it.
+      expect(s.service.putCamera(rearOf(null), true, 'remote:moto-id')?.label).toBe('phone-rear');
+      expect(
+        s.service.putCamera(rearOf('ThinkPhone by motorola'), true, 'remote:think-id')?.label,
+      ).toBe('phone-rear-2');
+      // The Moto's hello again, with its model: the same camera.
+      expect(s.service.putCamera(rearOf('moto g60'), true, 'remote:moto-id')?.label).toBe(
+        'phone-rear',
+      );
+      expect(
+        s.service.session()?.cameras.map((entry) => [entry.label, entry.remote?.model]),
+      ).toEqual([
+        ['phone-rear', 'moto g60'],
+        ['phone-rear-2', 'ThinkPhone by motorola'],
+      ]);
+    });
+
+    it("after a reload, gives a phone its own entry's label before that of an entry without a model, and a camera of the host's own none of the phones' (T5.6)", async () => {
+      const store = new MemorySessionStore();
+      await store.createSession({
+        ...testSession(),
+        cameras: [rearOf(null), { ...rearOf('ThinkPhone by motorola'), label: 'phone-rear-2' }],
+      });
+      const localStorage = new FakeLocalStorage();
+      localStorage.setItem(CURRENT_SESSION_KEY, SESSION_A);
+      const s = setup({ store, localStorage });
+      await ready(s);
+      expect(s.service.session()?.id).toBe(SESSION_A);
+
+      // The ThinkPhone pairs first: its own entry, not the one without a model.
+      expect(
+        s.service.putCamera(rearOf('ThinkPhone by motorola'), true, 'remote:think-id')?.label,
+      ).toBe('phone-rear-2');
+      // The Moto, whose model its first hello did not say: the entry without a model, by the name.
+      expect(s.service.putCamera(rearOf('moto g60'), true, 'remote:moto-id')?.label).toBe(
+        'phone-rear',
+      );
+      // The host's own camera of that name: a camera of its own.
+      expect(s.service.putCamera(camera('camera 0, facing back'), true, 'own-camera')?.label).toBe(
+        'laptop',
+      );
+    });
+
     it("keeps a camera's sync check in clock.cameras, and gives the camera's later clips its lag", async () => {
       const s = setup();
       expect(s.service.putCameraClock('laptop', SYNC)).toBe(false);
@@ -1697,6 +1815,20 @@ function clip(segment: 'scramble' | 'solve', bytes: number): VideoClip {
 }
 
 /** A camera entry of session.json, named `deviceLabel`. */
+/**
+ * A phone's rear camera as the host keeps it (T5.6), "camera 0, facing back" on every phone, with its
+ * phone's model (null: its browser had not said one).
+ */
+function rearOf(model: string | null): CameraInfo {
+  return {
+    ...camera('camera 0, facing back'),
+    label: 'phone-rear',
+    local: false,
+    facing: 'environment',
+    remote: { label: model ?? 'Android phone', platform: 'Android', model },
+  };
+}
+
 function camera(deviceLabel: string): CameraInfo {
   return {
     label: 'laptop',

@@ -206,6 +206,14 @@ adds items; the owner ticks them when done (date and any detail that others need
   T5.2" still caught. Write down the two numbers beside the distance on the panels and what the
   phone said after the torch; the coordinator reads the rest from the events (`npm run
   round-report`).
+- [ ] **The "After T5.6" items (two phones of one name)**, once T5.6 is merged and the deployed
+  footer names a commit after it, on the MacBook and both phones: first clear any name typed in
+  Settings → This device on each phone (its default is now its model, which is what the round
+  tries), then pair the ThinkPhone and the Moto g60 at once as in "After T4" and go through "After
+  T5.6" in `docs/MANUAL-TESTS.md`: each phone's name and installation in its Settings, the two labels
+  and models in the Cameras list and under the pictures, ten solves with six clips each, the clip
+  viewer's six buttons, one phone paired again. Write down the two models and installations; the
+  coordinator reads the rest from the events (`npm run round-report`).
 
 ## Later
 

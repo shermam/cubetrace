@@ -50,7 +50,7 @@ import { RTC_TIMERS } from '../rtc/rtc-timers';
 import { SESSION_SIGNALING, type SessionSignaling } from '../rtc/session-signaling';
 import { TRANSPORT_CONNECTOR } from '../rtc/transport-connector';
 import { SessionService } from '../session/session-service';
-import { SettingsService } from '../settings/settings-service';
+import { SettingsService, shortInstallation } from '../settings/settings-service';
 import { errorMessage } from '../shared/error-message';
 import type { PairingBlock } from './pairing-block';
 import { RemoteCameraRegistry, type RemoteCameraEntry } from './remote-camera-registry';
@@ -101,7 +101,11 @@ export interface RemoteCamera {
   readonly peerId: string;
   /** The hash of the token it paired with, which it presents again when it calls back. */
   readonly tokenHash: string;
-  /** The phone, as its `hello` named it. */
+  /**
+   * The phone, as its `hello` named it: its host label, platform, and since T5.6 its installation id
+   * (which the session knows its camera by) and its model; a phone of a build before T5.6 has
+   * neither, and is known by its label alone ("named only" in the Cameras section).
+   */
   readonly device: DeviceInfo;
   readonly app: AppBuild;
   /** The phone's camera, as its `hello` described it; null until it has one open. */
@@ -200,6 +204,8 @@ interface Peer {
   offs: (() => void)[];
   /** Each connection of the peer has a number: an older one's end is not the newer one's. */
   generation: number;
+  /** The label the phone was told over its current connection (T5.6, `label`); null before. */
+  toldLabel: string | null;
   /** Whether the fit had converged at its last answer, for the convergence and withdrawal events. */
   converged: boolean;
   removalTimer: unknown;
@@ -525,7 +531,7 @@ export class RemoteCamerasService {
         id: offer.peerId,
         peerId: offer.peerId,
         tokenHash: offer.peer.tokenHash,
-        device: { label: 'phone', platform: '' },
+        device: { label: 'phone', platform: '', id: null, model: null },
         app: { version: '', commit: '' },
         camera: null,
         label: null,
@@ -550,6 +556,7 @@ export class RemoteCamerasService {
       pinger: null,
       offs: [],
       generation: 0,
+      toldLabel: null,
       converged: false,
       removalTimer: null,
       recordTimer: null,
@@ -561,6 +568,7 @@ export class RemoteCamerasService {
           this.diagnostics.record('remote.controls', {
             camera: peer.camera.label,
             peer: peer.camera.device.label,
+            peerInstallation: installationOf(peer.camera.device),
             set: outcome.set,
             outcome: outcome.outcome,
             message: outcome.message,
@@ -618,6 +626,7 @@ export class RemoteCamerasService {
     const link = new MessageLink(transport);
     peer.transport = transport;
     peer.link = link;
+    peer.toldLabel = null;
     // The host speaks second (T4.2b): its hello answers the phone's. The hello the host sent the
     // moment its channel opened now and then never reached the phone's page, while the frames after
     // it did (7 of about 115 hello exchanges in the end-to-end runs while T4.2b was tested, and most
@@ -748,6 +757,10 @@ export class RemoteCamerasService {
     const facts = {
       peer: hello.device.label,
       platform: hello.device.platform,
+      // T5.6: which phone, of two of one name (the first eight characters of its installation id;
+      // null from a build before T5.6), and its model.
+      peerInstallation: installationOf(hello.device),
+      peerModel: hello.device.model,
       camera: peer.camera.label,
       ms: Math.round(now - started),
     };
@@ -1096,6 +1109,8 @@ export class RemoteCamerasService {
     const window = peer.fit.window;
     this.diagnostics.record('rtc.clock', {
       peer: peer.camera.device.label,
+      // T5.6: which phone, of two of one name.
+      peerInstallation: installationOf(peer.camera.device),
       camera: peer.camera.label,
       why,
       converged: peer.converged,
@@ -1271,8 +1286,11 @@ export class RemoteCamerasService {
   // ---- The session's entry, the state and the thumbnails ----
 
   /**
-   * The phone's camera into the session's `cameras[]`, remote, under the label the session gives it
-   * (one per device: the phone's host label tells two phones apart).
+   * The phone's camera into the session's `cameras[]`, remote (its device's label, platform and,
+   * since T5.6, model), under the label the session gives it: one per camera of each phone, the phone
+   * known by its installation id (T5.6, {@link remoteIdentity}), so that two phones of one name and
+   * one camera name are `phone-rear` and `phone-rear-2`, and a phone paired again in the session gets
+   * its label back; the phone is told it (`label`).
    */
   private putEntry(peer: Peer): void {
     const camera = peer.camera.camera;
@@ -1280,17 +1298,30 @@ export class RemoteCamerasService {
     if (camera === null || session === null || session.id !== peer.sessionId) {
       return;
     }
+    const device = peer.camera.device;
     const entry: CameraInfo = {
       ...camera,
       local: false,
-      remote: { label: peer.camera.device.label, platform: peer.camera.device.platform },
+      remote: { label: device.label, platform: device.platform, model: device.model },
     };
-    const saved = this.session.putCamera(
-      entry,
-      session.audio,
-      `remote:${peer.camera.device.label}`,
-    );
+    const saved = this.session.putCamera(entry, session.audio, remoteIdentity(device));
     this.patch(peer, { label: saved?.label ?? null });
+    this.tellLabel(peer);
+  }
+
+  /**
+   * Tells the phone its label in the session (T5.6, `label`), once per connection and again when it
+   * changes (its camera changed), for its page to say.
+   */
+  private tellLabel(peer: Peer): void {
+    const label = peer.camera.label;
+    if (
+      label !== null &&
+      label !== peer.toldLabel &&
+      peer.link?.trySend({ type: 'label', camera: label }) === true
+    ) {
+      peer.toldLabel = label;
+    }
   }
 
   private thumbnail(peer: Peer, message: Thumbnail): void {
@@ -1344,11 +1375,31 @@ export class RemoteCamerasService {
   }
 }
 
+/**
+ * How the session knows a phone's camera beside its browser's name for it (T2.14's device id, which
+ * no record keeps): `remote:<installation id>` (T5.6), so that two phones of one name are two
+ * cameras, and a phone paired again is the same one; `remote:<host label>` for a phone of a build
+ * before T5.6, which sends no id and is known by its label alone, as before.
+ */
+export function remoteIdentity(device: Pick<DeviceInfo, 'label' | 'id'>): string {
+  return device.id === null ? `remote:${device.label}` : `remote:${device.id}`;
+}
+
+/**
+ * The first eight characters of a phone's installation id (T5.6), which the Timer page and the
+ * diagnostics name it by; null for a phone of a build before T5.6.
+ */
+function installationOf(device: Pick<DeviceInfo, 'id'>): string | null {
+  return device.id === null ? null : shortInstallation(device.id);
+}
+
 /** A camera of the list as the Timer page's preview area and the sync check see it (T4.3). */
 function entryOf(camera: RemoteCamera): RemoteCameraEntry {
   return {
     id: camera.id,
     name: camera.device.label,
+    installation: installationOf(camera.device),
+    model: camera.device.model,
     label: camera.label,
     session: camera.session,
     state: camera.state,

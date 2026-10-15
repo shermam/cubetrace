@@ -102,6 +102,7 @@ const OPTIONAL: Readonly<Record<string, Readonly<Record<string, readonly string[
     '#/$defs/cameraClock': ['samples', 'motionPeakAtCheckMs', 'captureLatencyAtCheckMs', 'remote'],
     '#/$defs/camera': ['microphone', 'remote'],
     '#/$defs/remoteClock': ['converged'],
+    '#/$defs/remoteDevice': ['model'],
   },
   'attempt.json version 2': {
     '#': ['app', 'gyro', 'resyncs'],
@@ -395,6 +396,8 @@ describe('version 2', () => {
     ['a remote device without its platform', ['cameras', 1, 'remote', 'platform'], undefined],
     ['a remote device whose label is a number', ['cameras', 1, 'remote', 'label'], 7],
     ['an unknown field in a remote device', ['cameras', 1, 'remote', 'isPhone'], true],
+    ['an installation id in a remote device (T5.6)', ['cameras', 1, 'remote', 'id'], 'a1b2c3d4'],
+    ['a remote device whose model is a number', ['cameras', 1, 'remote', 'model'], 60],
     ['a local that is text', ['cameras', 0, 'local'], 'true'],
     ['a camera facing sideways', ['cameras', 0, 'facing'], 'left'],
     ['a camera without its device label', ['cameras', 0, 'deviceLabel'], undefined],

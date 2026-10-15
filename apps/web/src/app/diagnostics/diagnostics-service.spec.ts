@@ -134,10 +134,19 @@ describe('DiagnosticsService', () => {
     expect(backend.eventBatches).toBe(1);
     expect(written()).toEqual(['app.start', 'cube.connected']);
     expect(diagnostics.counts()).toMatchObject({ queued: 0, written: 2 });
+    // Since T5.6 the device says its installation: the first eight characters of the id Settings
+    // keep (no model on a laptop, whose browser gives none).
+    const installation = TestBed.inject(SettingsService).installationId().slice(0, 8);
+    expect(installation).toMatch(/^[0-9a-f]{8}$/u);
     for (const event of events()) {
       expect(isCloudEvent(event), JSON.stringify(isCloudEvent.errors)).toBe(true);
       expect(event.app).toEqual(APP_BUILD);
-      expect(event.device).toEqual({ label: 'macOS laptop', platform: 'macOS', installed: false });
+      expect(event.device).toEqual({
+        label: 'macOS laptop',
+        platform: 'macOS',
+        installed: false,
+        installation,
+      });
     }
     expect(events()[0].data).toEqual({
       installed: false,
@@ -583,15 +592,21 @@ describe('DiagnosticsService', () => {
     }
   });
 
-  it('writes nothing to localStorage but its own key, and works without localStorage', async () => {
+  it("writes nothing to localStorage but its own key and the settings' installation id, and works without localStorage", async () => {
     const diagnostics = load();
     await settle();
     signIn(diagnostics);
     diagnostics.flush();
     await settle();
-    expect(Array.from({ length: storage.length }, (_, k) => storage.key(k))).toEqual([
-      DIAGNOSTICS_STORAGE_KEY,
-    ]);
+    // The settings keep the installation id the events name (T5.6), made at the first event.
+    expect(Array.from({ length: storage.length }, (_, k) => storage.key(k)).sort()).toEqual(
+      [DIAGNOSTICS_STORAGE_KEY, SETTINGS_STORAGE_KEY].sort(),
+    );
+    const kept = JSON.parse(storage.getItem(SETTINGS_STORAGE_KEY) ?? '{}') as Record<
+      string,
+      unknown
+    >;
+    expect(String(kept['installationId']).slice(0, 8)).toBe(events()[0].device.installation);
     storage.failWith = new Error('QuotaExceededError');
     diagnostics.record('page.viewed', { page: 'timer' });
     diagnostics.flush();

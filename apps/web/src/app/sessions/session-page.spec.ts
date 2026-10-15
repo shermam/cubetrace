@@ -424,6 +424,28 @@ describe('SessionPage', () => {
         cameras: [camera, { ...camera, label: 'laptop', deviceLabel: '' }],
       }),
     ).toBe('phone-front (camera 1, facing front), laptop');
+    // A phone names its model where its record keeps one (T5.6); a record before T5.6 has none.
+    expect(
+      camerasText({
+        ...session,
+        cameras: [
+          {
+            ...camera,
+            label: 'phone-rear-2',
+            local: false,
+            deviceLabel: 'camera 0, facing back',
+            remote: { label: 'Android phone', platform: 'Android', model: 'moto g60' },
+          },
+          {
+            ...camera,
+            label: 'phone-rear',
+            local: false,
+            deviceLabel: 'camera 0, facing back',
+            remote: { label: 'Android phone', platform: 'Android' },
+          },
+        ],
+      }),
+    ).toBe('phone-rear-2 · moto g60 (camera 0, facing back), phone-rear (camera 0, facing back)');
     expect(clipsText([])).toBe('none');
     expect(clipsText([{ ...testAttempt(1, 10_000), video: [clip('solve', 999)] }])).toBe(
       '1 clip, 999 B',

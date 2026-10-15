@@ -42,6 +42,8 @@ function camera(id: string, changes: Partial<RemoteCameraEntry> = {}): RemoteCam
   return {
     id,
     name: 'ThinkPhone',
+    installation: null,
+    model: null,
     label: `phone-rear${id === 'a' ? '' : `-${id}`}`,
     session: 'session',
     state: 'connected',
@@ -190,6 +192,26 @@ describe('RemotePreviews', () => {
     expect(soft?.getAttribute('data-tone')).toBe('warn');
   });
 
+  it("names each phone's picture by its label and its model, two phones of one name apart (T5.6)", async () => {
+    cameras.set([
+      camera('a', { name: 'Android phone', model: 'ThinkPhone by motorola' }),
+      camera('2', { name: 'Android phone', model: 'moto g60', installation: '9a8b7c6d' }),
+    ]);
+    const { element } = await render({} as MediaStream);
+    const captions = [...element.querySelectorAll('[data-testid="remote-caption"]')].map(
+      (caption) => caption.textContent.replace(/\s+/g, ' ').trim(),
+    );
+    expect(captions).toEqual(['phone-rear · ThinkPhone by motorola', 'phone-rear-2 · moto g60']);
+    expect(
+      [...element.querySelectorAll('[data-testid="remote-preview-tile"]')].map((tile) =>
+        tile.getAttribute('aria-label'),
+      ),
+    ).toEqual([
+      'Show phone-rear · ThinkPhone by motorola as the main picture',
+      'Show phone-rear-2 · moto g60 as the main picture',
+    ]);
+  });
+
   it("makes the first phone's picture the main one without a camera of this device's", async () => {
     cameras.set([camera('a'), camera('2')]);
     const { element, refresh } = await render(null);
@@ -272,6 +294,20 @@ describe('RemotePreviews', () => {
         whole?.style.width,
         whole?.style.height,
       ]).toEqual(['0%', '0%', '100%', '100%']);
+    });
+
+    it("names each cell's phone by its label and its model over the picture's corner (T5.6)", async () => {
+      cameras.set([
+        camera('a', { name: 'Android phone', model: 'ThinkPhone by motorola' }),
+        camera('2', { name: 'Android phone', model: 'moto g60' }),
+        camera('3', { name: 'Pixel', model: null }),
+      ]);
+      const { element } = await render(null, 'equal');
+      expect(
+        [...element.querySelectorAll('[data-testid="remote-preview-name"]')].map((name) =>
+          name.textContent.trim(),
+        ),
+      ).toEqual(['phone-rear · ThinkPhone by motorola', 'phone-rear-2 · moto g60', 'phone-rear-3']);
     });
 
     it('follows the reports: a soft picture, a hot phone, an unplugged one, the threshold of Settings', async () => {

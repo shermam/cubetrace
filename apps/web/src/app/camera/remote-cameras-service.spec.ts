@@ -9,6 +9,7 @@ import {
   hashToken,
   type Clock,
   type ControlsReport,
+  type DeviceInfo,
   type Message,
 } from '@cubetrace/rtc';
 
@@ -78,6 +79,12 @@ class Phone {
   /** The token it joined with, and the peer document of its call. */
   token = '';
   peerId = '';
+  /**
+   * Its installation id and model (T5.6), as its hello says them; null for both: a phone of a build
+   * before T5.6, known by its label alone.
+   */
+  id: string | null = null;
+  model: string | null = null;
   private readonly signaling: FirestoreSignaling;
 
   /** How many pings it answered. */
@@ -98,6 +105,11 @@ class Phone {
       uid: ADA.uid,
       now: () => r.s.perf.hostMs,
     });
+  }
+
+  /** The phone as its hello names it. */
+  device(): DeviceInfo {
+    return { label: this.label, platform: 'Android', id: this.id, model: this.model };
   }
 
   /** Whether the session takes `token` now. */
@@ -126,7 +138,7 @@ class Phone {
         type: 'hello',
         v: PROTOCOL_VERSION,
         role: 'camera',
-        device: { label: this.label, platform: 'Android' },
+        device: this.device(),
         app: { version: '0.4.0', commit: 'abc1234' },
         camera: PHONE_CAMERA,
       });
@@ -358,7 +370,13 @@ describe('RemoteCamerasService', () => {
     expect(cameras).toHaveLength(1);
     const camera = cameras[0];
     expect(camera.state).toBe('connected');
-    expect(camera.device).toEqual({ label: 'ThinkPhone', platform: 'Android' });
+    // A phone of a build before T5.6: no installation id, no model.
+    expect(camera.device).toEqual({
+      label: 'ThinkPhone',
+      platform: 'Android',
+      id: null,
+      model: null,
+    });
     expect(camera.app).toEqual({ version: '0.4.0', commit: 'abc1234' });
     expect(camera.camera).toEqual(PHONE_CAMERA);
     expect(camera.label).toBe('phone-rear');
@@ -374,8 +392,11 @@ describe('RemoteCamerasService', () => {
     expect(entry).toEqual({
       ...PHONE_CAMERA,
       local: false,
-      remote: { label: 'ThinkPhone', platform: 'Android' },
+      remote: { label: 'ThinkPhone', platform: 'Android', model: null },
     });
+    // The phone is told its label (T5.6), after the host's hello.
+    expect(phone.received.map((m) => m.type).slice(0, 2)).toEqual(['hello', 'label']);
+    expect(phone.of('label')).toEqual([{ type: 'label', camera: 'phone-rear' }]);
 
     const all = await events();
     expect(kinds(all)).toEqual(['rtc.paired', 'rtc.connected']);
@@ -389,6 +410,102 @@ describe('RemoteCamerasService', () => {
     expect(all.find((e) => e.kind === 'rtc.connected')?.data).toMatchObject({
       peer: 'ThinkPhone',
       reconnection: false,
+    });
+  });
+
+  it('tells two phones of one name and one camera name apart by their installation ids: phone-rear and phone-rear-2, each told its label; one paired again gets its label back; one without an id is known by its name (T5.6)', async () => {
+    const thinkPhone = new Phone(r, 'Android phone');
+    thinkPhone.id = '1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b';
+    thinkPhone.model = 'ThinkPhone by motorola';
+    await paired(thinkPhone);
+    const moto = new Phone(r, 'Android phone', 2345.6);
+    moto.id = '9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d';
+    moto.model = 'moto g60';
+    await paired(moto);
+    // The same name, the same camera's name: two cameras, each told its label.
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual([
+      'phone-rear',
+      'phone-rear-2',
+    ]);
+    expect(thinkPhone.of('label')).toEqual([{ type: 'label', camera: 'phone-rear' }]);
+    expect(moto.of('label')).toEqual([{ type: 'label', camera: 'phone-rear-2' }]);
+    // The session has both, each with its model, and no installation id anywhere in it.
+    const session = r.s.service.session();
+    expect(session?.cameras.map((camera) => [camera.label, camera.remote])).toEqual([
+      [
+        'phone-rear',
+        { label: 'Android phone', platform: 'Android', model: 'ThinkPhone by motorola' },
+      ],
+      ['phone-rear-2', { label: 'Android phone', platform: 'Android', model: 'moto g60' }],
+    ]);
+    expect(JSON.stringify(session)).not.toContain('1f2e3d4c');
+    expect(JSON.stringify(session)).not.toContain('9a8b7c6d');
+    // The Timer page's entries: the installation's first eight characters and the model.
+    const registry = TestBed.inject(RemoteCameraRegistry);
+    expect(
+      registry.cameras().map((camera) => [camera.label, camera.installation, camera.model]),
+    ).toEqual([
+      ['phone-rear', '1f2e3d4c', 'ThinkPhone by motorola'],
+      ['phone-rear-2', '9a8b7c6d', 'moto g60'],
+    ]);
+    // The events say which phone each pairing was.
+    let all = await events();
+    expect(
+      all
+        .filter((event) => event.kind === 'rtc.paired')
+        .map((event) => [
+          event.data['camera'],
+          event.data['peerInstallation'],
+          event.data['peerModel'],
+        ]),
+    ).toEqual([
+      ['phone-rear', '1f2e3d4c', 'ThinkPhone by motorola'],
+      ['phone-rear-2', '9a8b7c6d', 'moto g60'],
+    ]);
+
+    // The ThinkPhone leaves and pairs again with a new code: its label back, told again.
+    thinkPhone.leave();
+    await pump(r.s, 10);
+    thinkPhone.drop();
+    await pump(r.s, 10);
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual(['phone-rear-2']);
+    const again = new Phone(r, 'Android phone');
+    again.id = thinkPhone.id;
+    again.model = thinkPhone.model;
+    await paired(again);
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual([
+      'phone-rear-2',
+      'phone-rear',
+    ]);
+    expect(again.of('label')).toEqual([{ type: 'label', camera: 'phone-rear' }]);
+    expect(r.s.service.session()?.cameras.map((camera) => camera.label)).toEqual([
+      'phone-rear',
+      'phone-rear-2',
+    ]);
+
+    // Two phones of a build before T5.6, of that name too: known by their name alone, as before
+    // (one camera to the session, `phone-rear-3`), apart from those that say who they are.
+    const older = new Phone(r, 'Android phone');
+    await paired(older);
+    const twin = new Phone(r, 'Android phone');
+    await paired(twin);
+    expect(r.service.cameras().map((camera) => camera.label)).toEqual([
+      'phone-rear-2',
+      'phone-rear',
+      'phone-rear-3',
+      'phone-rear-3',
+    ]);
+    expect(r.service.cameras()[2].device).toEqual({
+      label: 'Android phone',
+      platform: 'Android',
+      id: null,
+      model: null,
+    });
+    all = await events();
+    expect(all.filter((event) => event.kind === 'rtc.paired').at(-1)?.data).toMatchObject({
+      camera: 'phone-rear-3',
+      peerInstallation: null,
+      peerModel: null,
     });
   });
 
@@ -751,9 +868,10 @@ describe('RemoteCamerasService', () => {
     await pump(r.s, 20);
     expect(r.service.cameras()).toEqual([]);
     expect(r.service.pairing()).toBeNull();
-    // The hello, the live preview asked for (T4.3), the leave.
+    // The hello, its label (T5.6), the live preview asked for (T4.3), the leave.
     expect(phone.received.map((m) => m.type).filter((t) => t !== 'ping' && t !== 'clock')).toEqual([
       'hello',
+      'label',
       'preview',
       'leave',
     ]);
@@ -853,7 +971,7 @@ describe('RemoteCamerasService', () => {
       type: 'hello',
       v: 2,
       role: 'camera',
-      device: { label: 'ThinkPhone', platform: 'Android' },
+      device: { label: 'ThinkPhone', platform: 'Android', id: null, model: null },
       app: { version: '0.5.0', commit: 'def5678' },
       camera: null,
     });
@@ -986,6 +1104,9 @@ describe('RemoteCamerasService', () => {
       {
         id: r.service.cameras()[0].id,
         name: 'ThinkPhone',
+        // A phone of a build before T5.6 (T5.6): neither.
+        installation: null,
+        model: null,
         label: 'phone-rear',
         session: r.s.service.session()?.id,
         state: 'connected',
@@ -1184,7 +1305,7 @@ describe('RemoteCamerasService', () => {
       type: 'hello',
       v: PROTOCOL_VERSION,
       role: 'camera',
-      device: { label: 'ThinkPhone', platform: 'Android' },
+      device: phone.device(),
       app: { version: '0.4.0', commit: 'abc1234' },
       camera: null,
     });
