@@ -624,7 +624,7 @@ describe('the checklist', () => {
     }
     for (const item of CHECKLIST) {
       expect(item.title.length, item.id).toBeGreaterThan(10);
-      expect(item.section, item.id).toMatch(/^(T\d\.\d+ — .+|the cube's whole record)$/u);
+      expect(item.section, item.id).toMatch(/^(T\d\.\d+[a-z]? — .+|the cube's whole record)$/u);
       for (const kind of item.kinds) {
         expect(named, `${item.id} names ${kind}`).toContain(kind);
       }
@@ -1598,6 +1598,157 @@ describe('the checklist after T5.2', () => {
     expect(resultOf(notReset, '5.2.3')?.status).toBe('none');
     const motoOnly = controlsEvening().filter((e) => e.device.label !== 'ThinkPhone');
     expect(resultOf(motoOnly, '5.2.4')?.status).toBe('none');
+  });
+});
+
+describe('the checklist after T5.2a', () => {
+  const MOTO = { label: 'Moto g60', platform: 'Android', installed: false };
+  const MIN = 60_000;
+  const t0 = NOW - 2 * HOUR;
+
+  /** A change of the Moto g60's controls from the MacBook, answered. */
+  const change = (tsMs: number, set: string) =>
+    at(tsMs, 'remote.controls', {
+      camera: 'phone-rear',
+      peer: 'Moto g60',
+      set,
+      outcome: 'ok',
+      message: null,
+      ms: 40,
+    });
+  /** The Moto g60's watchdog's drift, with its baseline (none from a build before T5.2a). */
+  const drift = (
+    tsMs: number,
+    changes: Record<string, string>,
+    outcome: { reapplied?: boolean; gaveUp?: boolean } = {},
+    baseline: string | null = 'reading',
+  ) =>
+    at(
+      tsMs,
+      'controls.drift',
+      {
+        camera: 'phone-rear',
+        role: 'camera-device',
+        deviceLabel: 'camera 0, facing back',
+        drift: changes,
+        controls: Object.keys(changes).join(', '),
+        reapplied: outcome.reapplied ?? true,
+        gaveUp: outcome.gaveUp ?? false,
+        keep: true,
+        ...(baseline === null ? {} : { baseline }),
+      },
+      MOTO,
+    );
+
+  /**
+   * An evening after T5.2a: the MacBook sets the Moto g60's focus and a distance, held; its exposure
+   * and a time, held; the torch on and off, the focus set back once by the watchdog; Reset to auto;
+   * the focus provoked to manual from the console, set back. The MacBook's minute records of the
+   * phone throughout.
+   */
+  function readingsEvening(): ReportEvent[] {
+    const events: ReportEvent[] = [];
+    for (let m = 0; m <= 10; m++) {
+      events.push(
+        at(t0 + m * MIN, 'rtc.clock', {
+          camera: 'phone-rear',
+          peer: 'Moto g60',
+          why: 'minute',
+          converged: true,
+        }),
+      );
+    }
+    events.push(
+      change(t0, 'focusMode'),
+      change(t0 + 10_000, 'focusDistance'),
+      change(t0 + 3 * MIN, 'exposureMode'),
+      change(t0 + 3 * MIN + 10_000, 'exposureTime'),
+      change(t0 + 6 * MIN, 'torch'),
+      drift(t0 + 6 * MIN + 5000, {
+        focusMode: 'manual → continuous',
+        focusDistance: '8.333333333333334 → 0.5',
+      }),
+      change(t0 + 7 * MIN, 'torch'),
+      change(t0 + 8 * MIN, 'reset'),
+      drift(t0 + 9 * MIN, { focusMode: 'continuous → manual' }, {}, 'applied'),
+    );
+    return events;
+  }
+
+  it('ticks a focus and an exposure held two minutes, the torch with the focus kept, and a real drift caught', () => {
+    const results = new Map(evaluate(readingsEvening(), NOW).map((item) => [item.id, item.result]));
+    expect(results.get('5.2a.1')).toEqual({
+      status: 'ok',
+      facts: 'Moto g60: 1 set, 1 held two minutes without a drift',
+    });
+    expect(results.get('5.2a.2')).toEqual({
+      status: 'ok',
+      facts: 'Moto g60: 2 set, 1 held two minutes without a drift',
+    });
+    expect(results.get('5.2a.3')).toEqual({
+      status: 'ok',
+      facts:
+        '2 torch changes on office-mbp with the focus set (Moto g60): the focus set back after 1 (focusMode, focusDistance), given up after 0',
+    });
+    expect(results.get('5.2a.4')).toEqual({
+      status: 'ok',
+      facts: '1 drift on Moto g60, 1 set back: focusMode continuous → manual (applied)',
+    });
+
+    // Nothing of it without the events.
+    const empty = new Map(evaluate([], NOW).map((item) => [item.id, item.result]));
+    for (const id of ['5.2a.1', '5.2a.2', '5.2a.3', '5.2a.4']) {
+      expect(empty.get(id)?.status, id).toBe('none');
+    }
+    expect(empty.get('5.2a.1')?.facts).toBe('no focus distance set on a phone from the MacBook');
+    expect(empty.get('5.2a.4')?.facts).toBe(
+      'no drift of an automatic mode on a phone of a build after T5.2a',
+    );
+  });
+
+  it('marks the false drifts of a build after T5.2a, and leaves those of a build before it', () => {
+    const resultOf = (events: ReportEvent[], id: string) =>
+      evaluate(events, NOW).find((item) => item.id === id)?.result;
+    // The distance called a drift four seconds after it was set, as the Moto g60 did on 2026-10-10.
+    const falseDrift = (baseline: string | null) => [
+      ...readingsEvening(),
+      drift(t0 + 14_000, { focusDistance: '0.12 → 8.333333333333334' }, {}, baseline),
+    ];
+    expect(resultOf(falseDrift('reading'), '5.2a.1')).toEqual({
+      status: 'failed',
+      facts:
+        'Moto g60: 1 set, 0 held two minutes without a drift; a drift within them after 1: focusDistance 0.12 → 8.333333333333334 (reading)',
+    });
+    expect(resultOf(falseDrift(null), '5.2a.1')).toEqual({
+      status: 'none',
+      facts:
+        'Moto g60: 1 set, 0 held two minutes without a drift; a drift within them after 1: focusDistance 0.12 → 8.333333333333334 (a build before T5.2a)',
+    });
+    // The phone gone before the two minutes were up: not held.
+    const gone = readingsEvening().filter(
+      (e) => !(e.kind === 'rtc.clock' && e.tsMs > t0 + MIN && e.tsMs <= t0 + 5 * MIN),
+    );
+    expect(resultOf(gone, '5.2a.1')?.status).toBe('none');
+    // The focus given up after the torch: a failure.
+    const givenUp = [
+      ...readingsEvening(),
+      drift(
+        t0 + 7 * MIN + 30_000,
+        { focusMode: 'manual → continuous' },
+        { reapplied: false, gaveUp: true },
+      ),
+    ];
+    expect(resultOf(givenUp, '5.2a.3')?.status).toBe('failed');
+    // The provoked drift from a build before T5.2a: not the evidence.
+    const before = readingsEvening().map((e) =>
+      e.kind === 'controls.drift'
+        ? {
+            ...e,
+            data: Object.fromEntries(Object.entries(e.data).filter(([key]) => key !== 'baseline')),
+          }
+        : e,
+    );
+    expect(resultOf(before, '5.2a.4')?.status).toBe('none');
   });
 });
 

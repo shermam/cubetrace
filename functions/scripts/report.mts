@@ -398,6 +398,8 @@ const T51 = 'After T5.1';
 const PICTURES = "T5.1 — the phone's picture and its status line";
 const T52 = 'After T5.2';
 const CONTROLS = 'T5.2 — remote camera controls and the watchdog';
+const T52A = 'After T5.2a';
+const READINGS = "T5.2a — the watchdog against the camera's own readings";
 const T53 = 'After T5.3';
 const LATENCY = 'T5.3 — the capture latency and the motion lag';
 
@@ -561,6 +563,112 @@ function driftNames(event: ReportEvent): string {
   return isRecord(drift) ? Object.keys(drift).join(', ') : '?';
 }
 
+/** The groups of controls T5.2a's items set and hold, as `remote.controls` and `controls.drift` name them. */
+const FOCUS_GROUP: readonly string[] = ['focusMode', 'focusDistance'];
+const EXPOSURE_GROUP: readonly string[] = ['exposureMode', 'exposureTime', 'iso'];
+
+/** Whether a `controls.drift` names a control of `group`. */
+function driftOf(event: ReportEvent, group: readonly string[]): boolean {
+  const drift = event.data['drift'];
+  return isRecord(drift) && Object.keys(drift).some((name) => group.includes(name));
+}
+
+/**
+ * `focusDistance 0.12 → 8.33 (reading)`: a `controls.drift` in words, with how its expected values
+ * were taken (T5.2a's `baseline`; a build before T5.2a has none).
+ */
+function driftText(event: ReportEvent): string {
+  const drift = event.data['drift'];
+  const what = isRecord(drift)
+    ? Object.entries(drift)
+        .map(([name, change]) => `${name} ${typeof change === 'string' ? change : '?'}`)
+        .join(', ')
+    : '?';
+  const baseline = text(event, 'baseline');
+  return `${what} (${baseline ?? 'a build before T5.2a'})`;
+}
+
+/** A mode the camera turned from automatic to not by itself, as the focus of 2026-10-09 did. */
+function automaticLost(event: ReportEvent): boolean {
+  const drift = event.data['drift'];
+  if (!isRecord(drift)) {
+    return false;
+  }
+  const automatic = (mode: string): boolean => mode === 'continuous' || mode === 'single-shot';
+  return Object.entries(drift).some(([name, change]) => {
+    if (!name.endsWith('Mode') || typeof change !== 'string') {
+      return false;
+    }
+    const modes = change.split(' → ');
+    return modes.length === 2 && automatic(modes[0]) && !automatic(modes[1]);
+  });
+}
+
+/**
+ * A change of a phone's controls from a laptop (T5.2a), and what the phone's watchdog made of it:
+ * its first `controls.drift` of the group within two minutes after it (before the laptop changed the
+ * group again, or reset it), and whether it was held: no such drift, the phone still paired two
+ * minutes after it (a laptop's minute `rtc.clock` of it), the group not changed again meanwhile.
+ */
+interface HeldChange {
+  readonly change: ReportEvent;
+  readonly drift: ReportEvent | null;
+  readonly held: boolean;
+}
+
+/** The laptops' changes of `values` answered by a phone, each with {@link HeldChange}'s facts. */
+function heldChanges(q: Query, values: readonly string[], group: readonly string[]): HeldChange[] {
+  const answered = q.onLaptop('remote.controls', (e) => text(e, 'outcome') === 'ok');
+  return answered
+    .filter((e) => controlsSet(e).some((name) => values.includes(name)))
+    .map((change) => {
+      const peer = text(change, 'peer');
+      const again = answered.find(
+        (e) =>
+          e.tsMs > change.tsMs &&
+          text(e, 'peer') === peer &&
+          controlsSet(e).some((name) => name === 'reset' || group.includes(name)),
+      );
+      const end = Math.min(change.tsMs + 2 * MINUTE, again?.tsMs ?? Number.POSITIVE_INFINITY);
+      const drift =
+        q
+          .onPhone(
+            'controls.drift',
+            (e) =>
+              e.device.label === peer && e.tsMs > change.tsMs && e.tsMs <= end && driftOf(e, group),
+          )
+          .at(0) ?? null;
+      const paired = q
+        .onLaptop('rtc.clock', (e) => text(e, 'peer') === peer)
+        .some((e) => e.tsMs >= change.tsMs + 2 * MINUTE && e.tsMs <= change.tsMs + 4 * MINUTE);
+      return { change, drift, held: drift === null && paired && end - change.tsMs >= 2 * MINUTE };
+    });
+}
+
+/**
+ * Item 5.2a.1's and 5.2a.2's verdict on a group set from a laptop: ✅ one change held two minutes
+ * without a drift; ❗ none held, and a build after T5.2a called one a drift (it has a `baseline`);
+ * ⬜ otherwise (nothing set, a build before T5.2a, the phone gone within two minutes).
+ */
+function heldResult(changes: readonly HeldChange[], what: string): ItemResult {
+  const peers = [...new Set(changes.map((c) => text(c.change, 'peer') ?? '?'))].sort();
+  const facts = peers
+    .map((peer) => {
+      const mine = changes.filter((c) => (text(c.change, 'peer') ?? '?') === peer);
+      const held = mine.filter((c) => c.held).length;
+      const drifts = mine.flatMap((c) => (c.drift === null ? [] : [driftText(c.drift)]));
+      return `${peer}: ${String(mine.length)} set, ${String(held)} held two minutes without a drift${drifts.length === 0 ? '' : `; a drift within them after ${String(drifts.length)}: ${drifts.join('; ')}`}`;
+    })
+    .join('; ');
+  if (changes.some((c) => c.held)) {
+    return ok(facts);
+  }
+  if (changes.some((c) => c.drift !== null && text(c.drift, 'baseline') !== null)) {
+    return failed(facts);
+  }
+  return none(facts || `no ${what} set on a phone from the MacBook`);
+}
+
 /** A number one level down an event's facts (T5.3: `captureLatencyMs.p50`), or null. */
 function nestedNum(event: ReportEvent, key: string, field: string): number | null {
   const value = event.data[key];
@@ -673,7 +781,7 @@ function driftFacts(event: ReportEvent): string {
 /**
  * The checklists of docs/MANUAL-TESTS.md, item by item, with the events that are their evidence
  * (docs/DIAGNOSTICS.md has the same table): rounds 1 to 3, the items after T3.7, T4.1, T4.2 and
- * T4.3, the desk rig's after T4, and the items after T5.1, T5.2 and T5.3.
+ * T4.3, the desk rig's after T4, and the items after T5.1, T5.2, T5.2a and T5.3.
  */
 export const CHECKLIST: readonly ChecklistItem[] = [
   // ---- T1.5 — cube connection ----
@@ -3696,6 +3804,90 @@ export const CHECKLIST: readonly ChecklistItem[] = [
         own,
         `${count(own, 'drift')}, ${String(own.filter((e) => flag(e, 'reapplied') === true).length)} set back`,
         "no drift of a host's own camera",
+      );
+    },
+  },
+  // ---- After T5.2a: the watchdog against the camera's own readings ----
+  {
+    id: '5.2a.1',
+    round: T52A,
+    section: READINGS,
+    title:
+      "From the MacBook, the Moto g60's focus set to manual and a distance chosen, held for two minutes: no drift on the phone (its camera reads the distance as its reciprocal), the distance set on both panels with the camera's reading beside it",
+    kinds: ['remote.controls', 'controls.drift', 'rtc.clock'],
+    eyes: 'the distance on the two panels, and "the camera reports …" beside it',
+    check: (q) => heldResult(heldChanges(q, ['focusDistance'], FOCUS_GROUP), 'focus distance'),
+  },
+  {
+    id: '5.2a.2',
+    round: T52A,
+    section: READINGS,
+    title:
+      'The same with a manual exposure (its camera calls it none): an exposure time set from the MacBook, held for two minutes without a drift; the panel says Manual',
+    kinds: ['remote.controls', 'controls.drift', 'rtc.clock'],
+    eyes: "the exposure's mode on the two panels",
+    check: (q) => heldResult(heldChanges(q, EXPOSURE_GROUP, EXPOSURE_GROUP), 'exposure'),
+  },
+  {
+    id: '5.2a.3',
+    round: T52A,
+    section: READINGS,
+    title:
+      'The torch on and off from the MacBook with the focus set: the focus kept (set back by the watchdog within 4 s where the torch reset it), never given up',
+    kinds: ['remote.controls', 'controls.drift'],
+    eyes: "the phone's picture in focus after each change of the torch",
+    check: (q) => {
+      const answered = q.onLaptop('remote.controls', (e) => text(e, 'outcome') === 'ok');
+      const torches = answered.filter((torch) => {
+        if (!controlsSet(torch).includes('torch')) {
+          return false;
+        }
+        const peer = text(torch, 'peer');
+        const before = answered
+          .filter(
+            (e) =>
+              e.tsMs < torch.tsMs &&
+              text(e, 'peer') === peer &&
+              controlsSet(e).some((name) => name === 'reset' || FOCUS_GROUP.includes(name)),
+          )
+          .at(-1);
+        return before !== undefined && controlsSet(before).includes('focusDistance');
+      });
+      const after = (torch: ReportEvent, pred: (e: ReportEvent) => boolean): ReportEvent[] =>
+        q.onPhone(
+          'controls.drift',
+          (e) =>
+            e.device.label === text(torch, 'peer') &&
+            e.tsMs > torch.tsMs &&
+            e.tsMs - torch.tsMs <= MINUTE &&
+            driftOf(e, FOCUS_GROUP) &&
+            pred(e),
+        );
+      const back = torches.flatMap((torch) => after(torch, (e) => flag(e, 'reapplied') === true));
+      const given = torches.flatMap((torch) => after(torch, (e) => flag(e, 'gaveUp') === true));
+      const facts = `${count(torches, 'torch change')} with the focus set${torches.length === 0 ? '' : ` (${[...new Set(torches.map((t) => text(t, 'peer') ?? '?'))].sort().join(', ')})`}: the focus set back after ${String(back.length)}${back.length === 0 ? '' : ` (${[...new Set(back.map(driftNames))].join('; ')})`}, given up after ${String(given.length)}`;
+      if (given.length > 0) {
+        return failed(facts);
+      }
+      return torches.length > 0 ? ok(facts) : none(facts);
+    },
+  },
+  {
+    id: '5.2a.4',
+    round: T52A,
+    section: READINGS,
+    title:
+      "The real drift provoked on the Moto g60 from its console (its focus set to manual behind the app's back) still caught: set back within 4 s with Keep the camera's modes on, said and left with it off",
+    kinds: ['controls.drift'],
+    eyes: "the words on the phone's Camera page and on the MacBook's line under its picture",
+    check: (q) => {
+      const caught = phoneDrifts(q, (e) => text(e, 'baseline') !== null && automaticLost(e));
+      const shown = caught.slice(0, 5).map(driftText);
+      const more = caught.length - shown.length;
+      return found(
+        caught,
+        `${count(caught, 'drift')}, ${String(caught.filter((e) => flag(e, 'reapplied') === true).length)} set back: ${shown.join('; ')}${more > 0 ? `; and ${String(more)} more` : ''}`,
+        'no drift of an automatic mode on a phone of a build after T5.2a',
       );
     },
   },
