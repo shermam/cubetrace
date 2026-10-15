@@ -101,7 +101,8 @@ measurements and the reasoning.
 
 ```
 camera ─▶ MediaStreamTrackProcessor (window) ─▶ capture worker: encoders ─▶ ring buffer (90 s, 160 MB) ─▶ cut
-                                                          └─ motion in the framing rectangle (sync check)
+                                                          ├─ motion in the framing rectangle (sync check; solves, T5.3)
+                                                          └─ latency meter: each frame's own time ─▶ arrival ─▶ chunk (T5.3)
 cut ─▶ MessageChannel ─▶ clip worker: mediabunny MP4 + frames.json ─▶ OPFS ─▶ attempt.json video[]
 ```
 
@@ -141,6 +142,26 @@ Idle time is never stored. Remote cameras (phase 4, below) cut the same way on t
 their clips over the WebRTC data channel into the attempt's folder (T4.2); the uploads take them
 with the rest. A remote camera's sync check (T4.3) is the same check: the phone's capture worker
 measures its frames' motion and sends it, and the host places it on its clock and matches it.
+
+**The capture latency and the motion lag (T5.3, issue #67).** One `offsetMs` per session could not
+say that the laptop's frames came 75 ms later from the 38th attempt of a session on. The capture
+worker now times every frame on its way (`latency.ts`): from the camera's own time for it (its
+`captureTime` where Chrome gives one; else its `timestamp`, beyond the least the track gave, carried
+across the pipeline's runs) to its arrival, and on to its encoded chunk, with where frames waited
+(already waiting when the worker asked for one, the encoder's queue); the counters of each second
+carry the percentiles, and each clip's record keeps its frames' (`captureLatencyMs`,
+`encodeLatencyMs`, `docs/DATA-MODEL.md` §7). `RecordingService` watches the running median against
+the camera's latency at its sync check (`LatencyDrift`: more than 30 ms for 5 s, said in amber on
+the line and as `recording.latency`) and, with the setting on, starts the pipeline again between
+attempts when it drifted through a whole one. During each solve, from the timer's `armed` until the
+solve clip is saved, the worker measures the motion inside the framing rectangle as the sync check
+does (about a millisecond a frame; off for the recording over 3); at the attempt's end
+`motion-lag.ts` averages it around the solve's moves (on the attempt's clock fit) into a profile
+whose peak, anchored to the same estimator's peak on the check's own frames, gives the clip's
+`motionLagMs`: the camera's lag from the solve's own turns, which shows a delay wherever it arose,
+before the frames were timed too. A phone measures both the same way, and sends its latency in its
+`state` and its solve clip's motion with the clip's `cut-done`; the host does the rest
+(`docs/RTC.md` §9).
 
 ## Remote cameras (phase 4)
 
@@ -541,6 +562,8 @@ the services ─▶ record(kind, data, scope?) ─▶ cloudEvent: the facts sani
     CameraDeviceClips: remote.cut (failed); CameraDevicePreview: preview.started / stopped
   the remote controls (T5.2): on the host, RemoteCamerasService: remote.controls; on either device,
     CameraService (its watchdog of the open camera's modes): controls.drift
+  the capture latency (T5.3): RecordingService: recording.latency / restarted (its own camera);
+    RemoteCamerasService: recording.latency (a phone's, from its state)
 the service itself: app.start (the build last seen on the device: the update evidence), page.viewed (the
   router), settings.changed (the settings the checklists name), wake.lock, storage.persistence, network.changed
 ```

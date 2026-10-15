@@ -401,11 +401,13 @@ as for a local one: a remote camera's entry before its sync check gives its clip
 Since T5.3 (issue #67: the MacBook's frames came 75 ms later from the 38th attempt of a session on,
 and one `offsetMs` per session could not say so) a check also keeps what anchors the lag measured
 later from the solves themselves (§7): `motionPeakAtCheckMs`, where the motion of the check's frames
-peaks around its turns, by the estimator of the clips' `motionPeakMs` run on the check's frames and
-turns (null when it finds no clear peak, as with fewer than ten turns among the frames), and
-`captureLatencyAtCheckMs`, the camera's capture latency when the check ended: the median of the
-capture pipeline's meter (§7's `captureLatencyMs`) over its last ten seconds, a phone's from its
-last reports (`docs/RTC.md` §1, `state`'s `latencyMs`), null when unknown; the baseline that the
+peaks around its turns, by the estimator of the clips' `motionPeakMs` run on the check's frames
+(placed on the host clock as the clapperboard places them) and its single turns (at their packets'
+arrivals, as the check takes them), null when it finds no clear peak or fewer than four single turns
+have their whole window among the frames; and `captureLatencyAtCheckMs`, the camera's capture
+latency when the check ended: the median of the capture pipeline's meter (§7's `captureLatencyMs`)
+over its last ten seconds (the medians of each second's frames), a phone's over its reports of the
+last ten seconds (`docs/RTC.md` §1, `state`'s `latencyMs`), null when unknown; the baseline that the
 app's warning of a drifting latency is measured from (`recording.latency`, `docs/DIAGNOSTICS.md`).
 Both are absent from the records written before T5.3, and from a remote camera's entry before its
 check; the clock sync's records of each minute keep them as they are.
@@ -569,19 +571,24 @@ frame's motion in the 10 ms bin of its time after each of the solve's moves, fro
 300 ms after (the moves on the attempt's `clock` fit, `a·cubeMs + b`, where it is within 200 ms of
 their arrival), averages each bin over the moves whose whole window lies among the frames, smooths
 the bins over three, and refines the top bin with a parabola through it and its neighbours;
-`motionSpreadMs` is the peak's width at half its rise above the bins' median. Both are null for a
-scramble clip, when the motion was not measured (Settings → Camera, "Measure the motion during
-solves", off; the meter over 3 ms a frame on the device, which turns it off; a phone's build before
-T5.3), with fewer than 10 such moves, or without a clear peak (a rise under three times the bins'
-spread, their median absolute deviation as a standard deviation, or under 0.1% of the pixels; a top
-bin at an end of the window). The peak sits a little after the camera's lag (the hands' motion around
-each turn, a constant of the camera and the hands), so `motionLagMs` anchors it to the camera's check:
-the check's `offsetMs` plus `motionPeakMs` less the check's `motionPeakAtCheckMs` (§6), the camera's
-lag from this clip's own moves, to set against its `syncResidualMs`; null without a peak, or without
-a check that kept its own. A remote camera's clip takes the latencies its phone's capture measured,
-and its motion when the phone sends the solve's with the clip (`docs/RTC.md` §9, `cut-done`); a
-phone's build before T5.3 sends neither, and they are null. The five fields are absent from the files
-written before T5.3.
+`motionSpreadMs` is the peak's width at half its rise above the bins' median. The meter runs from the
+attempt's scramble done (the timer's `armed`: the solve comes next) until its solve clip is saved,
+on the frames after the encoder has them (a phone's from the host's cut of the attempt's scramble,
+which comes then, until its solve clip is saved: `docs/RTC.md` §9); the estimate is the host's, at
+the attempt's end, a phone's clip's once its files came (its motion's times placed by its converted
+frames file). Both are null for a scramble clip, when the motion was not measured (Settings → Camera,
+"Measure the motion during solves", off; the meter over 3 ms a frame on the device, which turns it
+off for the recording and says so; a phone's build before T5.3), with fewer than 10 such moves, or
+without a clear peak (a rise under three times the bins' spread, their median absolute deviation as
+a standard deviation, or under 0.1% of the pixels; a top bin at an end of the window). The peak sits
+a little after the camera's lag (the hands' motion around each turn, a constant of the camera and
+the hands), so `motionLagMs` anchors it to the camera's check: the check's `offsetMs` plus
+`motionPeakMs` less the check's `motionPeakAtCheckMs` (§6), the camera's lag from this clip's own
+moves, to set against its `syncResidualMs`; null without a peak, or without a check that kept its
+own. A remote camera's clip takes the latencies its phone's capture measured, and its motion when
+the phone sends the solve's with the clip (`docs/RTC.md` §9, `cut-done`); a phone's build before
+T5.3 sends neither, and they are null. The five fields are absent from the files written before
+T5.3.
 
 A remote camera's clips (T4.2, `docs/RTC.md` §9) are entries like the others, named after its label,
 and cut by the phone over the same windows on its own clock, widened on each side by the margin of

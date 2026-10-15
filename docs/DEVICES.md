@@ -261,6 +261,28 @@ every 14 to 16 frames, so some of those jumps come after half a second of stilln
 check there cannot match, since the demo cube's turns come close together, not as single turns
 (`docs/TOOLCHAIN.md`). Its changed area (T2.8) is 0.7% of the pixels at the median and 11% at most.
 
+## Capture latency over a session
+
+How a camera's frames keep their time over a long session (T5.3, issue #67: on 2026-10-09 the
+MacBook's frames came about 75 ms later from the 38th attempt of both sessions, with nothing said).
+Two measures since T5.3 (`docs/DATA-MODEL.md` §6 and §7), from the diagnostics events
+(`docs/DIAGNOSTICS.md`, "After T5.3"): the **capture latency**, how late each frame reaches the
+capture worker after the camera's own time for it (`basis` `capture-time`: the frame's
+`captureTime`, where Chrome gives one; `timestamp`: its `timestamp`, beyond the least the track
+gave, which a delay before the frame was timed cannot show), per clip (`clip.saved`'s
+`captureLatencyMs`), at each check (`sync.check`'s `captureLatencyMs`) and as a drift
+(`recording.latency`); and the **motion lag**, the camera's lag from each solve's own turns
+(`clip.saved`'s `motionLagMs`, anchored to the check by `motionPeakMs`), which shows a delay
+wherever it arises. The coordinator fills a row from the owner's round (`docs/MANUAL-TESTS.md`,
+"After T5.3"): the medians with the range beside them, and what the pipeline's counters said when a
+drift came (`waiting` frames, the encoder's queue, the frame interval).
+
+| Camera | Date, measured by | At the check: lag / motion peak / capture latency (basis) | The capture latency over the session: the first attempts / the most / the last | Drifts and restarts | The solves' motion lag against the check | Where the frames waited during a drift |
+|---|---|---|---|---|---|---|
+| MacBook Pro 2021, FaceTime HD, 1080p30, before T5.3 | 2026-10-09, the coordinator from the recordings (issue #67; two sessions of 42 and 55 attempts, with the ThinkPhone and with the Moto g60) | 50.2 ms (afternoon) and 58.4 ms (evening) / not measured / not measured | not measured | nothing said: no event of the recording in either session | the motion 12 to 25 ms after each turn plus the check's lag in attempts 1 to 37, about 90 ms from attempt 38 on, in both sessions; back at attempt 54 of the evening, right after four sync checks of the phone; to the session's end in the afternoon | not measured; the frame interval from 32.9 ms to 34.0 to 34.6 ms with it (30.3 to 29.3 fps), no gap over 50 ms |
+| MacBook Pro 2021, FaceTime HD, 1080p30, forty solves or more on the rig | | | | | | |
+| Chrome's fake camera in the end-to-end suite (`capture-latency.spec.ts`: a synthetic square flipped with the demo cube's turns, 120 ms after each, then 75 ms more), for scale | 2026-10-15, T5.3's e2e | 141.4 ms / 136.4 ms / 0.3 ms (`timestamp`: the fake camera's frames have no capture time) | 0.3 to 0.4 ms throughout; the encoder 3 ms at the median | none: the latency held, the lag being planted in the picture itself, before the frames were timed | 147.6 ms with the planted lag as checked, 220.8 ms with 75 ms more: 73.2 ms apart | – |
+
 ## Manual round 2 (v0.2.0)
 
 What the owner's second round measures on each camera (`docs/MANUAL-TESTS.md`, "Round 2"), to fill
