@@ -15,6 +15,7 @@ import {
   mediaError,
   settle,
   type FakeCamera,
+  type FakeCameraQuirks,
 } from '../device/fake-browser';
 import { DiagnosticsService } from '../diagnostics/diagnostics-service';
 import { SETTINGS_STORAGE_KEY, SettingsService } from '../settings/settings-service';
@@ -480,14 +481,18 @@ describe('CameraService', () => {
     let perf: FakePerformance;
     let timers: FakeTimers;
 
-    /** The rear camera on, its readings on the test's clock, the diagnostics' events recorded. */
-    async function watched(): Promise<{
+    /**
+     * The rear camera on, its readings on the test's clock, the diagnostics' events recorded; its
+     * tracks reporting what they take with `quirks` (T5.2a).
+     */
+    async function watched(quirks: FakeCameraQuirks = {}): Promise<{
       camera: CameraService;
       events: [string, Record<string, unknown>][];
     }> {
       perf = new FakePerformance();
       timers = new FakeTimers(perf);
       media = new FakeMediaDevices([FAKE_PHONE_REAR]);
+      media.quirks = quirks;
       const camera = load({
         keepMedia: true,
         globals: {
@@ -564,6 +569,7 @@ describe('CameraService', () => {
             reapplied: true,
             gaveUp: false,
             keep: true,
+            baseline: 'applied',
           },
         ],
       ]);
@@ -603,6 +609,66 @@ describe('CameraService', () => {
       expect(camera.drift()).toEqual([]);
       await readings(1);
       expect(camera.drift()).toHaveLength(1);
+    });
+
+    it('holds the camera to what it reads of each change, and of the controls kept as it opens again (T5.2a)', async () => {
+      // The Moto g60's rear camera: a manual exposure read as none, a focus distance as its reciprocal.
+      const { camera, events } = await watched({ manualReadsNone: true, reciprocalFocus: true });
+      const drifts = (): [string, Record<string, unknown>][] =>
+        events.filter(([kind]) => kind === 'controls.drift');
+      await camera.setControl('exposureTime', 20.04);
+      await camera.setControl('focusDistance', 0.12);
+      expect(camera.applied()).toMatchObject({
+        exposureMode: 'manual',
+        exposureTime: 20.032,
+        focusMode: 'manual',
+        focusDistance: 0.12,
+      });
+      expect(camera.values()).toMatchObject({ exposureMode: 'none', focusDistance: 1 / 0.12 });
+      await readings(10);
+      expect(drifts()).toEqual([]);
+      expect(camera.drift()).toEqual([]);
+
+      // Opened again: the controls kept for it applied as it opens, and held to its reading of them.
+      camera.stop();
+      await camera.start();
+      const track = media.tracks[1];
+      expect(track.applied).toEqual([
+        {
+          advanced: [
+            { exposureMode: 'manual', exposureTime: 20.032 },
+            { focusMode: 'manual', focusDistance: 0.12 },
+          ],
+        },
+      ]);
+      await readings(10);
+      expect(drifts()).toEqual([]);
+
+      // Its focus moving by itself: a drift from its reading, set back with the distance applied.
+      track.drift({ focusDistance: 2 });
+      await readings(2);
+      expect(drifts()).toEqual([
+        [
+          'controls.drift',
+          {
+            camera: 'phone-rear',
+            role: 'host',
+            deviceLabel: 'camera 0, facing back',
+            drift: { focusDistance: `${String(1 / 0.12)} → 2` },
+            controls: ['focusDistance'],
+            reapplied: true,
+            gaveUp: false,
+            keep: true,
+            baseline: 'reading',
+          },
+        ],
+      ]);
+      expect(track.applied.at(-1)).toEqual({
+        advanced: [{ focusMode: 'manual', focusDistance: 0.12 }],
+      });
+      await readings(1);
+      expect(camera.values().focusDistance).toBeCloseTo(8.33, 2);
+      expect(camera.drift()).toEqual([]);
     });
 
     it('is the controls panel’s source: the camera’s controls, values, a change, Reset to auto', async () => {

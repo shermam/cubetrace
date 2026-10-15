@@ -990,6 +990,35 @@ describe('CameraDeviceService', () => {
       camera: 'phone-rear',
       role: 'camera-device',
       drift: { focusMode: 'continuous → manual' },
+      baseline: 'applied',
     });
+  });
+
+  it("holds its camera to what it reads of the host's changes: a focus distance read as its reciprocal and a manual exposure read as none are no drift (T5.2a)", async () => {
+    const host = await joined();
+    const track = r.media.tracks.at(-1);
+    if (track !== undefined) {
+      // The Moto g60's rear camera, as the events of 2026-10-10 to 10-12 show it.
+      track.quirks = { manualReadsNone: true, reciprocalFocus: true };
+    }
+    host.link?.send({ type: 'set-controls', values: { focusMode: 'manual', focusDistance: 0.12 } });
+    await pump(20);
+    host.link?.send({
+      type: 'set-controls',
+      values: { exposureMode: 'manual', exposureTime: 100 },
+    });
+    await pump(20);
+    const answer = host.of('controls').at(-1);
+    expect(answer?.applied).toMatchObject({
+      exposureMode: 'manual',
+      focusMode: 'manual',
+      focusDistance: 0.12,
+    });
+    expect(answer?.values).toMatchObject({ exposureMode: 'none', focusDistance: 1 / 0.12 });
+    await pass(12_000);
+    await pump(20);
+    expect(host.of('controls').every((message) => message.drift.length === 0)).toBe(true);
+    expect(r.camera.driftOutcome()).toBeNull();
+    expect((await events()).filter((e) => e.kind === 'controls.drift')).toEqual([]);
   });
 });

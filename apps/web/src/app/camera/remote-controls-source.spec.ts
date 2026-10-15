@@ -240,5 +240,12 @@ describe('driftReset', () => {
     expect(
       driftReset([{ name: 'focusMode', expected: 'continuous', actual: 'manual' }], null),
     ).toEqual({});
+    // The zoom as applied, not as the camera read it after (T5.2a: the expected value is a reading).
+    expect(
+      driftReset([{ name: 'zoom', expected: 2.4, actual: 1 }], rear, {
+        focusMode: 'manual',
+        zoom: 2.5,
+      }),
+    ).toEqual({ zoom: 2.5 });
   });
 });

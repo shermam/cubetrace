@@ -227,7 +227,7 @@ describe('remoteStatusLine', () => {
       'zoom 1.0×',
     ]);
     expect(parts.find((part) => part.key === 'drift-focusMode')?.title).toBe(
-      "The phone's camera set its focus to manual by itself (continuous was applied). Reset sets the automatic mode again; on the phone, Keep the camera's modes sets it back by itself.",
+      "The phone's camera set its focus to manual by itself (it held continuous). Reset sets the automatic mode again; on the phone, Keep the camera's modes sets it back by itself.",
     );
     // Nothing drifted: no such part.
     expect(line({}, { drift: [] }).some((part) => part.key.startsWith('drift'))).toBe(false);

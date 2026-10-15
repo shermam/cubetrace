@@ -335,7 +335,7 @@ function driftPart(drift: ControlDrift): StatusPart {
     driftWords(drift, 'on the phone'),
     'bad',
     `${word} ${actual}`,
-    `The phone's camera set its ${word} to ${actual} by itself (${controlValueText(drift.name, drift.expected)} was applied). Reset sets the automatic mode again; on the phone, Keep the camera's modes sets it back by itself.`,
+    `The phone's camera set its ${word} to ${actual} by itself (it held ${controlValueText(drift.name, drift.expected)}). Reset sets the automatic mode again; on the phone, Keep the camera's modes sets it back by itself.`,
   );
 }
 

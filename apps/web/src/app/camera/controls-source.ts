@@ -8,7 +8,7 @@ import type {
 } from '@cubetrace/capture';
 
 import { exposureText, focusText, isoText, temperatureText, zoomText } from './camera-format';
-import type { DriftEvent } from './controls-watch';
+import type { DriftSaid } from './controls-watch';
 
 /**
  * A camera's manual controls as the controls panel (`app-camera-controls`, T2.1) shows and changes
@@ -19,11 +19,16 @@ import type { DriftEvent } from './controls-watch';
 export interface ControlsSource {
   /** The controls the camera has (`@cubetrace/capture`'s `controlsOf`); null while there is none. */
   readonly controls: Signal<CameraControls | null>;
-  /** What the camera's settings say of them. */
+  /**
+   * What the camera's settings say of them: what the camera holds, as it names it (the Moto g60
+   * reports a manual exposure as `none` and a focus distance as its reciprocal, docs/DEVICES.md).
+   */
   readonly values: Signal<ControlValues>;
   /**
    * What the app applied (the controls kept for the camera and those set since; the mode each other
-   * group opened in), which the watchdog holds the camera to (`ControlsWatch`).
+   * group opened in): what the panel shows, with the camera's reading beside a value it reports
+   * otherwise (T5.2a), and what the watchdog applies again (`ControlsWatch`, which holds the camera to
+   * its own reading of them).
    */
   readonly applied: Signal<ControlValues>;
   /** The controls the camera changed by itself, as the watchdog saw them; empty when none. */
@@ -94,16 +99,19 @@ export function driftSentence(drift: ControlDrift): string {
   return `The camera set the ${CONTROL_WORD[drift.name]} to ${controlValueText(drift.name, drift.actual)} by itself.`;
 }
 
-/** "The camera keeps setting the focus to manual: set it by hand." */
+/**
+ * "The camera keeps setting the exposure to none: left as it is." (T5.2a): the watchdog gave the
+ * drift up after three re-applications within a minute, and names the control it leaves.
+ */
 export function gaveUpSentence(drift: ControlDrift): string {
-  return `The camera keeps setting the ${CONTROL_WORD[drift.name]} to ${controlValueText(drift.name, drift.actual)}: set it by hand.`;
+  return `The camera keeps setting the ${CONTROL_WORD[drift.name]} to ${controlValueText(drift.name, drift.actual)}: left as it is.`;
 }
 
 /**
  * What the device says of a drift its watchdog saw (T5.2), a sentence per control: set back ("Keep
  * the camera's modes"), given up after three re-applications in a minute, or left (the setting off).
  */
-export function outcomeSentences(event: DriftEvent): string[] {
+export function outcomeSentences(event: DriftSaid): string[] {
   return event.drift.map((drift) => {
     if (event.gaveUp) {
       return gaveUpSentence(drift);
