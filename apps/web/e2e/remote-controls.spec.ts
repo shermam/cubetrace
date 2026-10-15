@@ -22,8 +22,12 @@ import { demoPath, expectSolves } from './helpers/timer';
 // injected on the phone (its focus gone manual by itself): with "Keep the camera's modes" on, the
 // phone sets it back within two readings and says so; off, it says so and leaves it, the host's
 // Timer page says "focus went manual on the phone" in red under the phone's picture, and the Reset
-// beside it sets the automatic focus again. Launch options force a browser of their own for this
-// file (the encoding project, one at a time: the phone encodes).
+// beside it sets the automatic focus again. Since T5.2a the camera reads a focus distance as the
+// reciprocal of the one applied (the Moto g60's quirk, which the watchdog of T5.2 called a drift
+// after every change): both panels show the distance set with the camera's reading beside it, no
+// drift comes in 10 s, and the distance moving by itself is still caught and set back. Launch
+// options force a browser of their own for this file (the encoding project, one at a time: the
+// phone encodes).
 test.use({
   launchOptions: {
     args: ['--use-fake-device-for-media-stream=fps=30', '--use-fake-ui-for-media-stream'],
@@ -73,9 +77,9 @@ test("the phone's camera controls from the host: manual focus and a distance sho
   await expect(page.getByTestId('pairing')).toBeVisible({ timeout: 15_000 });
   const url = new URL((await page.getByTestId('pairing-url').textContent()) ?? '');
 
-  // The phone: the synthetic camera, with its focus.
+  // The phone: the synthetic camera, with its focus, which reads a distance as its reciprocal.
   const phone = await context.newPage();
-  await syntheticCamera(phone);
+  await syntheticCamera(phone, { reciprocalFocus: true });
   await fakeAccount(phone);
   await fakeSignaling(phone);
   await phone.goto(`${url.pathname}${url.search}`);
@@ -101,19 +105,45 @@ test("the phone's camera controls from the host: manual focus and a distance sho
   await hostFocus.selectOption('manual');
   await expect(phoneFocus).toHaveValue('manual', { timeout: 10_000 });
   await expect(hostFocus).toHaveValue('manual');
-  // A distance: the host's slider let go at 600 of 1000, 0.1 + 0.6 × 8 = 4.90 m.
+  // A distance: the host's slider let go at 600 of 1000, 0.1 + 0.6 × 8 = 4.90 m, which the camera
+  // reads as 1 / 4.9: both panels show the distance set, with the camera's reading beside it.
   await expect(controls.getByTestId('control-focusDistance')).toBeEnabled();
   await slide(controls.getByTestId('control-focusDistance'), 600);
   await expect(phone.getByTestId('control-focusDistance-value')).toHaveText('4.90', {
     timeout: 10_000,
   });
+  await expect(phone.getByTestId('control-focusDistance-reported')).toHaveText(
+    'the camera reports 0.20',
+  );
   await expect(controls.getByTestId('control-focusDistance-value')).toHaveText('4.90');
+  await expect(controls.getByTestId('control-focusDistance-reported')).toHaveText(
+    'the camera reports 0.20',
+    { timeout: 10_000 },
+  );
   const manual = await syntheticControls(phone);
-  expect(manual?.settings).toEqual({ focusMode: 'manual', focusDistance: 4.9 });
-  expect(manual?.applied).toEqual([
+  expect(manual?.settings).toEqual({ focusMode: 'manual', focusDistance: 1 / 4.9 });
+  const applied = [
     { advanced: [{ focusMode: 'manual' }] },
     { advanced: [{ focusMode: 'manual', focusDistance: 4.9 }] },
-  ]);
+  ];
+  expect(manual?.applied).toEqual(applied);
+
+  // Held for 10 s, five readings of the phone's watchdog: no drift, nothing applied again (T5.2's
+  // called it one after two readings and re-applied it three times before giving it up).
+  await phone.waitForTimeout(10_000);
+  await expect(phone.getByTestId('device-drift')).toHaveCount(0);
+  await expect(page.getByTestId('remote-status-drift-focusDistance')).toHaveCount(0);
+  expect((await syntheticControls(phone))?.applied).toEqual(applied);
+
+  // The camera's distance moving by itself is a drift from its reading: set back with the 4.90 set.
+  await driftCamera(phone, { focusDistance: 1 });
+  await expect(phone.getByTestId('device-drift')).toHaveText(
+    'The camera set the focus distance to 1.00 by itself: set back to 0.20.',
+    { timeout: 10_000 },
+  );
+  const back = await syntheticControls(phone);
+  expect(back?.settings).toEqual({ focusMode: 'manual', focusDistance: 1 / 4.9 });
+  expect(back?.applied).toEqual([...applied, applied[1]]);
 
   // Reset to auto from the host: the phone's camera opened again, its focus automatic.
   await controls.getByTestId('camera-reset').click();
@@ -168,22 +198,34 @@ test("the phone's camera controls from the host: manual focus and a distance sho
       ['reset', 'ok'],
       ['focusMode', 'ok'],
     ]);
+  // The distance's (held to the camera's reading of it), then the focus's twice (to the mode it
+  // opened in after Reset to auto); no other: the distance set from the host was none.
   await expect
     .poll(
       async () =>
         (await events(page))
           .filter((event) => event.kind === 'controls.drift')
-          .map((event) => [event.data['reapplied'], event.data['keep'], event.data['role']]),
+          .map((event) => [
+            event.data['reapplied'],
+            event.data['keep'],
+            event.data['role'],
+            event.data['baseline'],
+          ]),
       { timeout: 20_000 },
     )
     .toEqual([
-      [true, true, 'camera-device'],
-      [false, false, 'camera-device'],
+      [true, true, 'camera-device', 'reading'],
+      [true, true, 'camera-device', 'applied'],
+      [false, false, 'camera-device', 'applied'],
     ]);
   const all = await events(page);
-  expect(all.find((event) => event.kind === 'controls.drift')?.data['drift']).toEqual({
-    focusMode: 'continuous → manual',
-  });
+  expect(
+    all.filter((event) => event.kind === 'controls.drift').map((event) => event.data['drift']),
+  ).toEqual([
+    { focusDistance: `${String(1 / 4.9)} → 1` },
+    { focusMode: 'continuous → manual' },
+    { focusMode: 'continuous → manual' },
+  ]);
   expect(
     all.some(
       (event) =>
