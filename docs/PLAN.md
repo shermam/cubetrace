@@ -2568,7 +2568,7 @@ sign in the app (issue #67).
 | T5.2 | `rtc`, `capture`, `web`: remote camera controls from the host: the phone's capabilities and values reported, the host's panel per phone, apply and Reset to auto over the channel, a watchdog that reports and undoes a mode the camera changed on its own; events; docs | T5.1 | ✅ 2026-10-09 (#69) |
 | T5.2a | `web`, `capture`: the watchdog's baseline is what the camera reports after applying (the Moto g60 reports `none` for a manual exposure and `1/x` for a focus distance `x`: 37 false drifts and 4 give-ups on 2026-10-10 to 10-12); the panel shows what the app applied; the evidence in `docs/DEVICES.md` | T5.2 | ✅ 2026-10-15 (#71) |
 | T5.3 | `capture`, `core`, `web`: the host's capture latency (issue #67): a latency meter in the pipeline, a per-attempt lag estimate from the motion per camera, both recorded per clip; a warning on the preview; the cause found and fixed or mitigated | T5.1 | ✅ 2026-10-15 (#70) |
-| T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | 🔄 PR #72 |
+| T5.6 | `rtc`, `web`: every phone's clips: a phone is identified by an installation id, not by its name (two phones named "Android phone" with "camera 0, facing back" were one camera to the session: one label, one cut, one phone's clips); the phone's default name is its model; the round report tells the phones apart | T5.2a | ✅ 2026-10-15 (#72) |
 | T5.5 | `web`, `capture`, `functions`: the host's cameras, more than one: every camera of the laptop turned on (the built-in one and a USB webcam) records its own clips of every attempt, with its own framing, controls, sharpness, sync check, picture and status line; the upload's files per attempt and the daily cap | T5.6 | – |
 | T5.4 | docs, "After T5" items, the round report's checklist, `0.5.0`; the e2e:cloud flake | T5.2a, T5.5, T5.6 | – |
 
@@ -2936,6 +2936,35 @@ default name from the model. The e2e pair with two phone pages of the same defau
 signaling and the synthetic camera, `remote-clips.spec.ts`): an attempt with four remote clips, the
 two labels in the attempt's record and in the session's `cameras`, the two pictures in the grid.
 Lint, unit and e2e green.
+
+**Outcome (2026-10-15).** As contracted, PR #72, with these choices. `DeviceInfo` carries `id` (the
+installation's UUID, `SettingsService.installationId`, made once and never in a record) and `model`
+(`userAgentData.getHighEntropyValues(['model'])`; a phone's first call waits for it, 2 s at most, so
+that every `hello` carries it); the host identifies a phone's camera by `remote:<id>`, so that two
+phones named alike get `phone-rear` and `phone-rear-2` and each is cut and stored on its own.
+**Labels survive a reload of the host's page**, where the ids are gone from memory: `identityName`
+and `labelIn` in `session-service.ts` match, in order, the same installation known on the page and
+the same camera name; else the same camera name and model; else, for remote cameras only, the same
+name where one side has no model (sessions before T5.6); else a new label (`labelFor` in core is
+unchanged; two phones of one model with no typed name can still swap after a reload: a typed name
+on either avoids it). A camera's own label is a phone's by platform (`isPhone`), not by the word
+"phone" in its name (the "moto g60" default would have made `laptop-rear`). Settings keep the model,
+so the default name flips once per phone, from "Android phone" to its model, moving the camera picks
+saved under the old name. A host-to-phone `label` message lets the phone's page say "you are
+phone-rear-2 here". Events carry `installation` (the first eight characters) and `model`; the host's
+`rtc.paired`/`rtc.connected` add `peerInstallation` and `peerModel`, `rtc.clock` and `remote.controls`
+`peerInstallation`; the rules and the cloud-event schema allow them (an event from the new build
+written before the rules deploy is refused once and dropped); the round report keys devices by label
+and installation and prints the model. Found on the way: two phone pages in one e2e browser context
+wrote the same staging index at once ("A FileSystemHandle cannot be moved to a destination which is
+locked"), so one phone's clips were never staged: a development-only hook,
+`cubetraceE2eRemote.stagingFolder`, gives each page its own folder (production builds ignore it).
+Tests: 1,494 package tests (1,475 before) and 962 app tests (941); the e2e 84 in 10.1 min, the new
+two-phone pair three runs in a row. Bundle (raw): initial 265.22 kB (265.11), `camera-device-page`
+56.27 kB (55.57), `remote-cameras` 54.86 kB (53.79), `settings-page` 26.05 kB (25.43), core's
+records chunk 85.42 kB (83.09); all JS +6.7 kB. **Open**: the model string Chrome gives for the
+ThinkPhone (the docs guess "ThinkPhone by motorola"; the "After T5.6" round will say); the host's
+reload with two phones of one model.
 
 ### T5.5 — the host's cameras, more than one
 
