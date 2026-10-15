@@ -75,7 +75,7 @@ recorded without a scope of its own.
   on again, it records `settings.changed` (`diagnostics` true) and goes on. When the page is hidden
   or goes away, the switch's new value takes effect before what is queued is written, so its event
   goes with that batch even when the page is left right after the toggle.
-- **The daily cap.** A device writes at most 5,000 events a local day, counted in `localStorage`
+- **The daily cap.** A device writes at most 12,000 events a local day, counted in `localStorage`
   (`cubetrace.diagnostics`, with the build last seen, for `app.start`); past it, only the `error.*`
   kinds go until the next day. An attempt with the camera on costs 3 events (`attempt.done`, two
   `clip.saved`), 6 with uploads (three `upload.state`): the end-to-end flows measure it and annotate
@@ -90,8 +90,10 @@ recorded without a scope of its own.
   unless a cut fails, and `rtc.clock` once a minute while it is connected (60 an hour; while its
   clock sync is converged only, until T4.2b): about 2,100 a day with a phone. The cap was 2,000
   until T4.2a, which a day of more than about 155 attempts with a phone reached mid-session, and the
-  evidence stopped there; at 5,000 a day with a phone has room for about 390 attempts, and
-  Firestore's writes at that scale stay within a quarter of its free tier (the `error.*` kinds go on
+  evidence stopped there; 5,000 (T4.2a to 0.4.0) gave about 390 attempts with a phone and about 200
+  with the whole rig of four cameras (about 20 events per attempt); 12,000 since 0.5.0 gives about
+  600 with the rig, and Firestore's writes at that scale stay near its free tier of 20,000 a day,
+  past which a write costs about US$ 0.002 per thousand (the `error.*` kinds go on
   past the cap all the same). The whole rig of phase 5 (T5.4) costs the host about 20 events per
   attempt: `attempt.done`, two `clip.saved` per camera of its own (two cameras since T5.5), six per
   phone paired (two phones since T5.6) and three `upload.state`, with `rtc.clock` twice a minute for

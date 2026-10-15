@@ -28,12 +28,13 @@ export const FLUSH_AT = 20;
 export const RING_SIZE = 500;
 
 /**
- * The events a device writes in a local day, at most; past it, only the `error.*` kinds go. 5,000
- * since T4.2a (2,000 before): a phone paired as a camera adds about six events per attempt on the
- * host, and 2,000 was reached at about 155 attempts, mid-session at the owner's 130–170 a day;
- * Firestore's free tier is 20,000 writes a day.
+ * The events a device writes in a local day, at most; past it, only the `error.*` kinds go. 12,000
+ * since 0.5.0 (5,000 since T4.2a, 2,000 before): with the whole rig (two cameras of the laptop and
+ * two phones) the host writes about 20 events per attempt, and 5,000 was reached at about 200
+ * attempts, mid-session at the owner's 250–350 a day; Firestore's free tier is 20,000 writes a day,
+ * and past it a write costs about US$ 0.002 per thousand.
  */
-export const DAILY_CAP = 5000;
+export const DAILY_CAP = 12_000;
 
 /** The account the events go to: its uid and the backend that writes them. */
 export interface EventSink {
