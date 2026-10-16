@@ -777,6 +777,19 @@ T5.6, whose `cameraLabel` made a phone of a name with "phone" in it only; the re
 false` and `remote.label`, so the ML side must tell phones by `local`, never by the label (a note for
 cubetrace-ml's dataset tooling); nothing to change in the app since T5.6.
 
+(u) **The sync check's own motion peak is null in the field** (2026-10-16, from the first four-camera
+session's events): of the seven checks of 2026-10-15's second session only the two phones' at 19:46
+kept a `motionPeakMs` (19.6 and 13.9 ms, with spreads of 119 and 103 ms); the MacBook's three and
+the webcam's came out null, so `motionPeakAtCheckMs` has no value and every host clip's `motionLagMs`
+is null, although the solve clips' own `motionPeakMs` is there (208 of the host's solve clips; 92
+without a clear peak). The anchor should not depend on ten single turns: anchor on the median
+`motionPeakMs` of the session's first solves with a clear peak (each camera's), kept with the
+check's record, and widen the check estimator's acceptance; the capture latency is on the
+`timestamp` basis on every camera of the rig (Chrome gives no `captureTime` for the FaceTime camera,
+the C930e or the phones), 0.3–2 ms, so a delay inside a camera is seen by the motion lag alone, which
+makes (s) and this the instruments of issue #67. Offline, the raw `motionPeakMs` already gives the
+drift within a session (the coordinator's own method), so the recorded data is not lost.
+
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
 **Goal.** The records phase 2 writes, defined before anything writes them, and the clock fit
