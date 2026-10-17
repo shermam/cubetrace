@@ -790,6 +790,18 @@ the C930e or the phones), 0.3–2 ms, so a delay inside a camera is seen by the 
 makes (s) and this the instruments of issue #67. Offline, the raw `motionPeakMs` already gives the
 drift within a session (the coordinator's own method), so the recorded data is not lost.
 
+(v) **The webcam's sync check at 60 fps is unreliable, and an implausible lag is accepted** (2026-10-17,
+from the session of 10-16: the MacBook with the FaceTime camera, the C930e at 60 fps and the Moto g60,
+117 attempts): five of the C930e's six checks failed with "spread over 66 ms at 62 fps" (spreads 67–418
+ms over 6–14 turns kept) and the one that passed gave **−99 ms** (±56, 9 of 10 matched), which no camera
+can have against the cube's packets, so all 234 `laptop-2` clips of the day carry `syncResidualMs`
+−99; the FaceTime camera's own checks were poor too (99 ±69 ms with 5 of 13 kept, then 67 ±59 with 4 of
+11) and the Moto's gave −32 and 15 ms. The check should refuse a lag outside a plausible band (say
+−40 to +300 ms) with a word on the line, say when fewer than half the turns were kept, and at 60 fps
+the motion-centre estimator's spread wants a look (exposure and rolling shutter at 1/60 s; the frames
+in pairs?). The ML side must re-estimate each clip's lag from the video ((a), (u)) and never trust
+`laptop-2`'s `syncResidualMs` of 2026-10-16.
+
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
 **Goal.** The records phase 2 writes, defined before anything writes them, and the clock fit
