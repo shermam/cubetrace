@@ -800,7 +800,10 @@ can have against the cube's packets, so all 234 `laptop-2` clips of the day carr
 −40 to +300 ms) with a word on the line, say when fewer than half the turns were kept, and at 60 fps
 the motion-centre estimator's spread wants a look (exposure and rolling shutter at 1/60 s; the frames
 in pairs?). The ML side must re-estimate each clip's lag from the video ((a), (u)) and never trust
-`laptop-2`'s `syncResidualMs` of 2026-10-16.
+`laptop-2`'s `syncResidualMs` of 2026-10-16. On 2026-10-17 (163 attempts, the same three cameras)
+the webcam's three checks all failed (spreads 82–157 ms at 62 fps), so its clips carry no lag that
+day, and the FaceTime camera's two passes kept 5 of 10 and 5 of 14 turns with spreads of 79 and 82
+ms, at the limit: the check as it is gives the rig little.
 
 ### T2.0 — `core`: schema 2, per-attempt clock fit, readers for schemas 1 and 2
 
